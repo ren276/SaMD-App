@@ -1,0 +1,65 @@
+[
+  {
+    "id": "doc-gen-001",
+    "name": "Dr. Anjali Sharma",
+    "specialty": "General Physician",
+    "available": true,
+    "facilityName": "Community Health Centre, Bhainsa"
+  },
+  {
+    "id": "doc-gen-002",
+    "name": "Dr. Rakesh Verma",
+    "specialty": "General Physician",
+    "available": false,
+    "facilityName": "District Hospital, Sitapur"
+  },
+  {
+    "id": "doc-gyn-001",
+    "name": "Dr. Priya Nair",
+    "specialty": "Gynecology",
+    "available": true,
+    "facilityName": "District Hospital, Sitapur"
+  },
+  {
+    "id": "doc-ped-001",
+    "name": "Dr. Suresh Iyer",
+    "specialty": "Pediatrics",
+    "available": true,
+    "facilityName": "Community Health Centre, Bhainsa"
+  },
+  {
+    "id": "doc-ortho-001",
+    "name": "Dr. Manoj Kumar",
+    "specialty": "Orthopedics",
+    "available": false,
+    "facilityName": "PHC Rampur"
+  },
+  {
+    "id": "doc-derm-001",
+    "name": "Dr. Kavita Desai",
+    "specialty": "Dermatology",
+    "available": true,
+    "facilityName": "District Hospital, Sitapur"
+  },
+  {
+    "id": "doc-psych-001",
+    "name": "Dr. Arjun Reddy",
+    "specialty": "Psychiatry",
+    "available": true,
+    "facilityName": "Community Health Centre, Bhainsa"
+  },
+  {
+    "id": "doc-ent-001",
+    "name": "Dr. Neha Joshi",
+    "specialty": "ENT",
+    "available": false,
+    "facilityName": "PHC Rampur"
+  },
+  {
+    "id": "doc-oph-001",
+    "name": "Dr. Vikram Singh",
+    "specialty": "Ophthalmology",
+    "available": true,
+    "facilityName": "District Hospital, Sitapur"
+  }
+]

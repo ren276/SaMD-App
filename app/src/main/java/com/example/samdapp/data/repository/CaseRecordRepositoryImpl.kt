@@ -1,0 +1,53 @@
+package com.example.samdapp.data.repository
+
+import com.example.samdapp.data.local.dao.CaseRecordDao
+import com.example.samdapp.data.local.entity.CaseRecordEntity
+import com.example.samdapp.domain.model.CaseRecord
+import com.example.samdapp.domain.model.CaseStatus
+import com.example.samdapp.domain.repository.CaseRecordRepository
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+import java.time.Instant
+import java.util.UUID
+import javax.inject.Inject
+
+class CaseRecordRepositoryImpl @Inject constructor(
+    private val caseRecordDao: CaseRecordDao,
+) : CaseRecordRepository {
+
+    override suspend fun createDraft(patientId: String, encounterId: String): Result<CaseRecord> = asDataResult {
+        val now = Instant.now()
+        val caseRecord = CaseRecord(
+            id = UUID.randomUUID().toString(),
+            patientId = patientId,
+            encounterId = encounterId,
+            status = CaseStatus.DRAFT,
+            assignedDoctorId = null,
+            createdAt = now,
+            updatedAt = now,
+        )
+        caseRecordDao.insert(caseRecord.toEntity())
+        caseRecord
+    }
+
+    override suspend fun markSavedLocally(caseRecordId: String): Result<Unit> = asDataResult {
+        caseRecordDao.updateStatus(caseRecordId, CaseStatus.SAVED_LOCALLY, Instant.now())
+    }
+
+    override suspend fun assignDoctor(caseRecordId: String, doctorId: String): Result<Unit> = asDataResult {
+        caseRecordDao.assignDoctor(caseRecordId, doctorId, CaseStatus.SENT_TO_DOCTOR, Instant.now())
+    }
+
+    override fun observeCaseRecord(caseRecordId: String): Flow<CaseRecord?> =
+        caseRecordDao.observeById(caseRecordId).map { it?.toDomain() }
+}
+
+private fun CaseRecord.toEntity() = CaseRecordEntity(
+    id = id, patientId = patientId, encounterId = encounterId, status = status,
+    assignedDoctorId = assignedDoctorId, createdAt = createdAt, updatedAt = updatedAt,
+)
+
+private fun CaseRecordEntity.toDomain() = CaseRecord(
+    id = id, patientId = patientId, encounterId = encounterId, status = status,
+    assignedDoctorId = assignedDoctorId, createdAt = createdAt, updatedAt = updatedAt,
+)
