@@ -51,6 +51,7 @@ fun AppNavHost() {
                 HomeScreen(
                     onRegisterNewPatient = { backStack.add(Register) },
                     onOpenPatient = { patientId -> backStack.add(PatientSummary(patientId)) },
+                    isOnline = isOnline,
                 )
             }
             entry<Register> {
