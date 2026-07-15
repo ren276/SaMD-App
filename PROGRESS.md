@@ -18,7 +18,10 @@ Read this first, every session. Continue from the first unchecked item unless to
 ## Hardening (in progress)
 - [x] SQLCipher on Room DB (see agent_docs/hardening.md)
 - [x] `AuditLogEntity` + insert-only DAO
-- [ ] Wire audit logging into the 8 existing screens (one commit per screen, don't do all 8 in one pass)
+- [x] Wire audit logging into the 8 existing screens (one commit per screen, don't do all 8 in one pass)
+  — actual screens now differ from this list (MedicalBackground/PatientSummary/Compounder added since):
+  wired Register, MedicalBackground, Compounder, Consultation, Sending, Transcription, Acknowledgement,
+  DoctorList. Home and PatientSummary skipped — no clinical action, pure navigation/read-only.
 - [ ] Local cache scoped to current day's patients only
 
 ## Not started
