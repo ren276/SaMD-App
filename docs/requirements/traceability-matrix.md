@@ -7,9 +7,9 @@
 
 | REQ | Design / implementation | Risk link | Verification (current) | Automated test |
 |-----|-------------------------|-----------|------------------------|----------------|
-| REQ-REG-01 | `presentation/register/RegisterViewModel` (canSubmit) | — | Manual ✓ | TODO |
-| REQ-REG-02 | `RegisterViewModel` DIGIT_LENGTH_RULES + `NumericInputFilters` | H-01 | Manual ✓ | TODO |
-| REQ-REG-03 | `RegisterPatientUseCase` / `PatientRepository` | H-03 | Manual ✓ | TODO |
+| REQ-REG-01 | `presentation/register/RegisterViewModel` (canSubmit) | — | Manual ✓ | ✓ RegisterUiStateTest, RegisterViewModelTest |
+| REQ-REG-02 | `RegisterViewModel` DIGIT_LENGTH_RULES + `NumericInputFilters` | H-01 | Manual ✓ | ✓ RegisterUiStateTest |
+| REQ-REG-03 | `RegisterPatientUseCase` / `PatientRepository` | H-03 | Manual ✓ | ✓ RegisterPatientUseCaseTest |
 | REQ-MBG-01 | `presentation/medicalbackground/*`, `MedicalBackgroundUseCases` | — | Manual ✓ | TODO |
 | REQ-MBG-02 | `MedicalBackgroundScreen` review dialog | H-08 | Manual ✓ | TODO |
 | REQ-VIT-01 | `StartCaseUseCase`, `EncounterRepository` | — | Manual ✓ | TODO |
@@ -23,21 +23,24 @@
 | REQ-HAN-03 | `AcknowledgeCaseUseCase`, `CaseRecordRepository` | — | Manual ✓ | TODO |
 | REQ-HAN-04 | `AssignDoctorUseCase`, `DoctorListViewModel` | — | Manual ✓ | TODO |
 | REQ-HAN-05 | *(planned)* | H-02,H-09 | — | PLANNED |
-| REQ-ROS-01 | `HomeViewModel`, `GetTodaysPatientsUseCase` | — | Manual ✓ | TODO |
-| REQ-ROS-02 | `PatientDao.observePatientsWithEncounterBetween` (no all-query) | H-04 | Manual ✓ + throwaway DAO test (removed) | **TODO — restore as permanent test** |
+| REQ-ROS-01 | `HomeViewModel`, `GetTodaysPatientsUseCase` | — | Manual ✓ | ✓ HomeViewModelTest, TodaysPatientsDaoTest |
+| REQ-ROS-02 | `PatientDao.observePatientsWithEncounterBetween` (no all-query) | H-04 | Manual ✓ | ✓ TodaysPatientsDaoTest (instrumented, permanent) |
 | REQ-PID-01 | `presentation/common/PatientContextBar`, `currentPatientId` | H-03 | Manual ✓ | TODO |
 | REQ-SEC-01 | `DatabaseModule` + `DatabasePassphraseProvider` (SQLCipher/Keystore) | H-04 | Manual ✓ (DB header = ciphertext) | TODO (instrumented) |
-| REQ-SEC-02 | day-scoped query (see REQ-ROS-02) | H-04 | Manual ✓ | TODO |
+| REQ-SEC-02 | day-scoped query (see REQ-ROS-02) | H-04 | Manual ✓ | ✓ TodaysPatientsDaoTest |
 | REQ-SEC-03 | *(planned)* | H-06 | — | PLANNED |
-| REQ-AUD-01 | `AuditLogger`/`RoomAuditLogger`, wired in 8 screens | H-07 | Manual ✓ (logcat capture) | TODO |
+| REQ-AUD-01 | `AuditLogger`/`RoomAuditLogger`, wired in 8 screens | H-07 | Manual ✓ (logcat capture) | ✓ RoomAuditLoggerTest, AuditPayloadTest |
 | REQ-AUD-02 | `AuditLogDao` (insert + query only) | H-07 | Manual ✓ (interface review) | TODO — compile/lint guard |
 | REQ-NET-01 | `NetworkMonitor`/`AndroidNetworkMonitor`, `ConnectivityViewModel` | — | Manual ✓ | TODO |
-| REQ-SYN-01 | `SyncStatus`/`MockSyncStatus`, Home sync row | H-05 | Manual ✓ (online/offline) | TODO |
+| REQ-SYN-01 | `SyncStatus`/`MockSyncStatus`, Home sync row | H-05 | Manual ✓ (online/offline) | ✓ MockSyncStatusTest, HomeViewModelTest |
 | REQ-SYN-02 | *(planned)* `docs/sync-design.md` | H-05 | — | PLANNED |
 
 ## Summary
-- **Implemented + manually verified:** the DONE requirements above, exercised via emulator
-  walkthroughs this development cycle.
-- **Automated coverage:** effectively zero (one DAO test was written to verify REQ-ROS-02 then
-  removed). This is the central V&V gap — **blocker #4** turns the "TODO" column into real,
-  repeatable tests run in CI, which is what IEC 62304 verification records require.
+- **Automated coverage (blocker #4, first pass):** a JVM unit suite now covers registration
+  validation, audit payload/logger, sync mock, and Home roster/sync (see the ✓ rows), plus a
+  permanent instrumented DAO test for the day-scoped roster query. **32 tests, 0 failures.**
+  GitHub Actions (`.github/workflows/ci.yml`) runs the unit suite on every push/PR (unit-only;
+  instrumented tests run locally for now). This first pass also caught a real regression — the
+  cache-scoping interface change had silently broken a pre-existing use-case test that no CI ran.
+- **Still TODO:** Compose UI tests (Register form, review dialogs), instrumented SEC-01
+  (SQLCipher) and AUD-02 (insert-only guard) coverage, and the PLANNED forward requirements.

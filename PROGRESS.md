@@ -38,9 +38,15 @@ Read this first, every session. Continue from the first unchecked item unless to
 - [x] Regulatory/SDLC foundation docs → docs/regulatory-foundation.md, docs/sync-design.md
       (agent_docs/ is gitignored/local; docs/ is tracked = start of controlled documentation)
 
+## Verification & CI (blocker #4 — first pass done)
+- [x] JVM unit test suite (32 tests): RegisterUiState/ViewModel, AuditPayload/RoomAuditLogger,
+      MockSyncStatus, HomeViewModel + pre-existing use-case/repo tests (now actually run)
+- [x] Restored permanent instrumented DAO test for the day-scoped roster query
+- [x] GitHub Actions CI — build + unit tests on every push/PR (unit-only; see .github/workflows/ci.yml)
+- [ ] Compose UI tests (Register form, review dialogs); instrumented SEC-01/AUD-02 coverage
+- [ ] Add instrumented tests to CI once suite is larger (needs emulator action)
+
 ## Not started
-- [ ] JUnit + Compose UI tests for Register and Vitals
-- [ ] GitHub Actions CI (build + test on push)
 - [ ] Demo-theater additions from agent_docs/hardening.md (AI assessment panel, security shield sheet)
 - [ ] Pre-production process blockers (flag to founder): ISO 13485 QMS + DHF, ISO 14971 risk file,
       software safety classification — see docs/regulatory-foundation.md §3
