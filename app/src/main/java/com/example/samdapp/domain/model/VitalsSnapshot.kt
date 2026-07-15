@@ -64,3 +64,19 @@ fun VitalsReading.toSnapshot(encounterId: String, patientId: String, recordedAt:
         source = ObservationSource.DEVICE,
         recordedAt = recordedAt,
     )
+
+/** Strips patientId/encounterId and the manual-only fields (painScore, urinalysisResult, source,
+ * recordedAt) — the inverse of [toSnapshot], used at the [KernelPayload] boundary where only the
+ * device-pollable vitals fields are whitelisted through. */
+fun VitalsSnapshot.toVitalsReading(): VitalsReading = VitalsReading(
+    pulseBpm = pulseBpm,
+    bpSystolic = bpSystolic,
+    bpDiastolic = bpDiastolic,
+    spo2Percent = spo2Percent,
+    temperatureCelsius = temperatureCelsius,
+    respiratoryRate = respiratoryRate,
+    weightKg = weightKg,
+    heightCm = heightCm,
+    bloodGlucoseMgDl = bloodGlucoseMgDl,
+    deviceId = deviceId,
+)

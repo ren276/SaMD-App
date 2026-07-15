@@ -46,6 +46,18 @@ Read this first, every session. Continue from the first unchecked item unless to
 - [ ] Compose UI tests (Register form, review dialogs); instrumented SEC-01/AUD-02 coverage
 - [ ] Add instrumented tests to CI once suite is larger (needs emulator action)
 
+## Kernel payload boundary (done)
+- [x] `KernelPayload` domain model (domain/model/) — structurally excludes Patient: no field of
+      type Patient, `SendToKernelUseCase` signature only accepts VitalsReading + Consultation +
+      an opaque case token (reuses CaseRecord.id). Whitelisted fields only (chief complaint,
+      duration, severity, relevant history, transcription, unmodified attachments); excludes all
+      identity fields plus onset/aggravatingFactors/relievingFactors/impactOnDailyActivities
+      (not identifying, just not whitelisted). SendingViewModel now fetches vitals/consultation
+      by encounterId (threaded through SendingRoute) instead of the use case taking no args.
+      New risk H-10 + REQ-HAN-06 + traceability row. Verified on-device with an identity-laden
+      test patient — none of it appeared in the constructed payload. Unit test:
+      SendToKernelUseCaseTest.
+
 ## Not started
 - [ ] Demo-theater additions from agent_docs/hardening.md (AI assessment panel, security shield sheet)
 - [ ] Pre-production process blockers (flag to founder): ISO 13485 QMS + DHF, ISO 14971 risk file,

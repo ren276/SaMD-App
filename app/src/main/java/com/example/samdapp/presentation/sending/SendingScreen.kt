@@ -23,9 +23,10 @@ fun SendingScreen(
     caseRecordId: String,
     consultationId: String,
     audioUri: String?,
+    encounterId: String,
     onDone: (caseRecordId: String, consultationId: String, audioUri: String?) -> Unit,
     viewModel: SendingViewModel = hiltViewModel<SendingViewModel, SendingViewModel.Factory>(
-        creationCallback = { factory -> factory.create(caseRecordId, consultationId, audioUri) },
+        creationCallback = { factory -> factory.create(caseRecordId, consultationId, audioUri, encounterId) },
     ),
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle

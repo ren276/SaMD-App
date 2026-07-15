@@ -23,6 +23,7 @@
 | REQ-HAN-03 | `AcknowledgeCaseUseCase`, `CaseRecordRepository` | — | Manual ✓ | TODO |
 | REQ-HAN-04 | `AssignDoctorUseCase`, `DoctorListViewModel` | — | Manual ✓ | TODO |
 | REQ-HAN-05 | *(planned)* | H-02,H-09 | — | PLANNED |
+| REQ-HAN-06 | `domain/model/KernelPayload`, `SendToKernelUseCase` (no Patient param), `SendingViewModel` fetches by encounterId | H-10 | Manual ✓ (on-device: constructed payload for an identity-laden test patient contained none of it) | ✓ SendToKernelUseCaseTest |
 | REQ-ROS-01 | `HomeViewModel`, `GetTodaysPatientsUseCase` | — | Manual ✓ | ✓ HomeViewModelTest, TodaysPatientsDaoTest |
 | REQ-ROS-02 | `PatientDao.observePatientsWithEncounterBetween` (no all-query) | H-04 | Manual ✓ | ✓ TodaysPatientsDaoTest (instrumented, permanent) |
 | REQ-PID-01 | `presentation/common/PatientContextBar`, `currentPatientId` | H-03 | Manual ✓ | TODO |
@@ -37,11 +38,11 @@
 
 ## Summary
 - **Automated coverage (blocker #4, first pass):** a JVM unit suite now covers registration
-  validation, audit payload/logger, sync mock, and Home roster/sync (see the ✓ rows), plus a
-  permanent instrumented DAO test for the day-scoped roster query. **32 tests, 0 failures.**
-  GitHub Actions (`.github/workflows/android-ci.yml`) runs the unit suite + assembleDebug on
-  every push/PR (unit-only tests; instrumented tests run locally for now). This first pass also
-  caught a real regression — the
-  cache-scoping interface change had silently broken a pre-existing use-case test that no CI ran.
+  validation, audit payload/logger, sync mock, Home roster/sync, and the kernel-payload boundary
+  (see the ✓ rows), plus a permanent instrumented DAO test for the day-scoped roster query.
+  **34 tests, 0 failures.** GitHub Actions (`.github/workflows/android-ci.yml`) runs the unit
+  suite + assembleDebug on every push/PR (unit-only tests; instrumented tests run locally for
+  now). This first pass also caught a real regression — the cache-scoping interface change had
+  silently broken a pre-existing use-case test that no CI ran.
 - **Still TODO:** Compose UI tests (Register form, review dialogs), instrumented SEC-01
   (SQLCipher) and AUD-02 (insert-only guard) coverage, and the PLANNED forward requirements.

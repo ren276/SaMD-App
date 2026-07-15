@@ -40,6 +40,15 @@ Conventions: `REQ-<AREA>-NN`. Status: **DONE** (implemented + manually verified)
 - **REQ-HAN-04** (DONE) Assign a doctor and set status `sent_to_doctor`.
 - **REQ-HAN-05** (PLANNED) Kernel must be validated, versioned, and never presented as
   validated while mocked (risk H-02, H-09).
+- **REQ-HAN-06** (DONE) The clinical-kernel payload boundary must structurally exclude patient
+  identity — `KernelPayload` has no `Patient`-typed field, and `SendToKernelUseCase`'s signature
+  accepts only `VitalsReading` + `Consultation` + an opaque case token, so a `Patient` object
+  cannot reach the kernel even by mistake. Whitelisted fields only: vitals (device-pollable
+  fields), chief complaint, duration bucket, severity score, relevant history, transcription,
+  and unmodified attachments. Excludes fullName/aadhaarNumber/abhaNumber/mobileNumber/
+  guardianOrSpouseName/address and also excludes onset/aggravatingFactors/relievingFactors/
+  impactOnDailyActivities (not identifying, simply not in the whitelist — add deliberately if
+  ever needed) (risk H-10).
 
 ## Roster / home (ROS)
 - **REQ-ROS-01** (DONE) Show today's patients (those with an encounter today) on Home;

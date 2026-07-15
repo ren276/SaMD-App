@@ -11,7 +11,12 @@ data class ConsultationRoute(
     val caseRecordId: String,
     val chiefComplaint: String,
 )
-data class SendingRoute(val caseRecordId: String, val consultationId: String, val audioUri: String?)
+data class SendingRoute(
+    val caseRecordId: String,
+    val consultationId: String,
+    val audioUri: String?,
+    val encounterId: String,
+)
 data class TranscriptionRoute(val consultationId: String, val audioUri: String, val caseRecordId: String)
 data class AcknowledgementRoute(val caseRecordId: String)
 data class DoctorListRoute(val caseRecordId: String)

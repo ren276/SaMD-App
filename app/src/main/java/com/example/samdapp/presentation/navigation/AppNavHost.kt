@@ -88,8 +88,8 @@ fun AppNavHost() {
                     encounterId = key.encounterId,
                     caseRecordId = key.caseRecordId,
                     initialChiefComplaint = key.chiefComplaint,
-                    onSent = { _, _, caseRecordId, consultationId, audioUri ->
-                        backStack.add(SendingRoute(caseRecordId, consultationId, audioUri))
+                    onSent = { _, encounterId, caseRecordId, consultationId, audioUri ->
+                        backStack.add(SendingRoute(caseRecordId, consultationId, audioUri, encounterId))
                     },
                 )
             }
@@ -98,6 +98,7 @@ fun AppNavHost() {
                     caseRecordId = key.caseRecordId,
                     consultationId = key.consultationId,
                     audioUri = key.audioUri,
+                    encounterId = key.encounterId,
                     onDone = { caseRecordId, consultationId, audioUri ->
                         if (audioUri != null) {
                             backStack.add(TranscriptionRoute(consultationId, audioUri, caseRecordId))
