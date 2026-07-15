@@ -13,7 +13,10 @@ import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDe
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
+import com.example.samdapp.domain.auth.UserSession
 import com.example.samdapp.presentation.acknowledgement.AcknowledgementScreen
+import com.example.samdapp.presentation.auth.AuthUiState
+import com.example.samdapp.presentation.auth.AuthViewModel
 import com.example.samdapp.presentation.common.GlobalStatusBar
 import com.example.samdapp.presentation.common.PatientContextBar
 import com.example.samdapp.presentation.compounder.CompounderScreen
@@ -21,14 +24,34 @@ import com.example.samdapp.presentation.connectivity.ConnectivityViewModel
 import com.example.samdapp.presentation.consultation.ConsultationScreen
 import com.example.samdapp.presentation.doctorlist.DoctorListScreen
 import com.example.samdapp.presentation.home.HomeScreen
+import com.example.samdapp.presentation.login.LoginScreen
 import com.example.samdapp.presentation.medicalbackground.MedicalBackgroundScreen
 import com.example.samdapp.presentation.patientsummary.PatientSummaryScreen
 import com.example.samdapp.presentation.register.RegisterScreen
 import com.example.samdapp.presentation.sending.SendingScreen
 import com.example.samdapp.presentation.transcription.TranscriptionScreen
 
+/**
+ * Sign-in gate: Login is shown first on cold start whenever no session exists, and skipped on
+ * every subsequent launch until sign-out — [AuthViewModel.state] is the single source of truth
+ * for that decision. [MainNavHost] only mounts once signed in, and mounting it fresh (via a
+ * `remember` inside that composable) each time we transition SignedOut->SignedIn gives every
+ * new sign-in a clean back stack starting at Home, rather than carrying over a stale one.
+ */
 @Composable
 fun AppNavHost() {
+    val authViewModel: AuthViewModel = hiltViewModel()
+    val authState by authViewModel.state.collectAsStateWithLifecycle()
+
+    when (val state = authState) {
+        AuthUiState.Loading -> Unit
+        AuthUiState.SignedOut -> LoginScreen()
+        is AuthUiState.SignedIn -> MainNavHost(session = state.session, onSignOut = authViewModel::signOut)
+    }
+}
+
+@Composable
+private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
     val backStack = remember { mutableStateListOf<Any>(Home) }
 
     // Obtained here, outside any NavEntry — one shared instance for the whole app lifetime,
@@ -57,6 +80,8 @@ fun AppNavHost() {
                     onRegisterNewPatient = { backStack.add(Register) },
                     onOpenPatient = { patientId -> backStack.add(PatientSummary(patientId)) },
                     isOnline = isOnline,
+                    session = session,
+                    onSignOut = onSignOut,
                 )
             }
             entry<Register> {

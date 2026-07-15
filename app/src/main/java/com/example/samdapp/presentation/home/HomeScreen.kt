@@ -31,8 +31,10 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.samdapp.R
+import com.example.samdapp.domain.auth.UserSession
 import com.example.samdapp.domain.model.Patient
 import com.example.samdapp.domain.sync.SyncState
+import com.example.samdapp.presentation.common.displayLabel
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
@@ -41,12 +43,16 @@ fun HomeScreen(
     onRegisterNewPatient: () -> Unit,
     onOpenPatient: (String) -> Unit,
     isOnline: Boolean,
+    session: UserSession,
+    onSignOut: () -> Unit,
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     HomeContent(
         uiState = uiState,
         isOnline = isOnline,
+        session = session,
+        onSignOut = onSignOut,
         onRegisterNewPatient = onRegisterNewPatient,
         onOpenPatient = onOpenPatient,
         onSyncNow = viewModel::onSyncNow,
@@ -57,6 +63,8 @@ fun HomeScreen(
 private fun HomeContent(
     uiState: HomeUiState,
     isOnline: Boolean,
+    session: UserSession,
+    onSignOut: () -> Unit,
     onRegisterNewPatient: () -> Unit,
     onOpenPatient: (String) -> Unit,
     onSyncNow: () -> Unit,
@@ -72,6 +80,8 @@ private fun HomeContent(
                 modifier = Modifier.size(96.dp).padding(top = 16.dp, bottom = 8.dp),
             )
             Text(text = "PHC Patient Care", style = MaterialTheme.typography.headlineMedium)
+
+            SignedInRow(session = session, onSignOut = onSignOut, modifier = Modifier.fillMaxWidth().padding(top = 12.dp))
 
             SyncStatusRow(
                 sync = uiState.sync,
@@ -99,6 +109,24 @@ private fun HomeContent(
                 Text(text = "Register new patient", style = MaterialTheme.typography.titleMedium)
             }
         }
+    }
+}
+
+@Composable
+private fun SignedInRow(session: UserSession, onSignOut: () -> Unit, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "Signed in as ${session.name} (${session.role.displayLabel()})",
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        OutlinedButton(onClick = onSignOut) { Text("Sign out") }
     }
 }
 

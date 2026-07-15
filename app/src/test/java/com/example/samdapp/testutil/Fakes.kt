@@ -3,6 +3,9 @@ package com.example.samdapp.testutil
 import com.example.samdapp.data.local.dao.AuditLogDao
 import com.example.samdapp.data.local.entity.AuditLogEntity
 import com.example.samdapp.domain.audit.AuditLogger
+import com.example.samdapp.domain.auth.AuthSession
+import com.example.samdapp.domain.auth.UserRole
+import com.example.samdapp.domain.auth.UserSession
 import com.example.samdapp.domain.model.Patient
 import com.example.samdapp.domain.repository.PatientRepository
 import com.example.samdapp.domain.sync.SyncState
@@ -57,6 +60,20 @@ class FakeSyncStatus : SyncStatus {
         syncCalls++
         _state.value = SyncState(lastSyncedAt = Instant.EPOCH, pendingCount = 0, isSyncing = false)
         return Result.success(Unit)
+    }
+}
+
+class FakeAuthSession(initialSession: UserSession? = null) : AuthSession {
+    private val _session = MutableStateFlow(initialSession)
+
+    override fun currentUser(): Flow<UserSession?> = _session.asStateFlow()
+
+    override suspend fun signIn(name: String, role: UserRole) {
+        _session.value = UserSession(userId = "fake-user-id", name = name, role = role)
+    }
+
+    override suspend fun signOut() {
+        _session.value = null
     }
 }
 

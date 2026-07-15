@@ -64,7 +64,16 @@ Conventions: `REQ-<AREA>-NN`. Status: **DONE** (implemented + manually verified)
 - **REQ-SEC-01** (DONE) Encrypt the database at rest (SQLCipher) with a key held in the Android
   Keystore, never stored in plaintext (risk H-04).
 - **REQ-SEC-02** (DONE) Minimise on-device data to the current day's scope (risk H-04).
-- **REQ-SEC-03** (PLANNED) Authenticate users and enforce role-based access (risk H-06).
+- **REQ-SEC-03** (PLANNED) Authenticate users and enforce role-based access (risk H-06). **Not
+  satisfied by REQ-SEC-04 below** — the mock login has no credential verification and no access
+  enforcement; anyone can type any name and pick any role. REQ-SEC-03 stays PLANNED until real
+  auth exists.
+- **REQ-SEC-04** (DONE) Capture a real per-session user identity (name + PHC field role — ASHA
+  worker/Nurse/Compounder) via a local mock sign-in (`AuthSession`/`MockAuthSession`, Preferences
+  DataStore), shown first on cold start when no session exists and skipped thereafter until
+  sign-out. Exists solely to give the audit trail (REQ-AUD-01) a real per-session userId instead
+  of the "phc_field_worker" placeholder — explicitly not authentication or access control
+  (risk H-06).
 
 ## Audit (AUD)
 - **REQ-AUD-01** (DONE) Log every clinical action (registration, encounter start, vitals,

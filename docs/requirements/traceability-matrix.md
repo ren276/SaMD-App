@@ -29,8 +29,9 @@
 | REQ-PID-01 | `presentation/common/PatientContextBar`, `currentPatientId` | H-03 | Manual ✓ | TODO |
 | REQ-SEC-01 | `DatabaseModule` + `DatabasePassphraseProvider` (SQLCipher/Keystore) | H-04 | Manual ✓ (DB header = ciphertext) | TODO (instrumented) |
 | REQ-SEC-02 | day-scoped query (see REQ-ROS-02) | H-04 | Manual ✓ | ✓ TodaysPatientsDaoTest |
-| REQ-SEC-03 | *(planned)* | H-06 | — | PLANNED |
-| REQ-AUD-01 | `AuditLogger`/`RoomAuditLogger`, wired in 8 screens | H-07 | Manual ✓ (logcat capture) | ✓ RoomAuditLoggerTest, AuditPayloadTest |
+| REQ-SEC-03 | *(planned — real auth/RBAC, not the mock login below)* | H-06 | — | PLANNED |
+| REQ-SEC-04 | `domain/auth/AuthSession`, `data/local/auth/MockAuthSession` (Preferences DataStore), `presentation/login/*`, `presentation/auth/AuthViewModel` sign-in gate in AppNavHost | H-06 | Manual ✓ (on-device: cold start shows Login, sign-in persists across restart, sign-out returns to Login) | ✓ RoomAuditLoggerTest (session userId vs placeholder fallback) |
+| REQ-AUD-01 | `AuditLogger`/`RoomAuditLogger` (userId now sourced from `AuthSession`, not a hardcoded placeholder — REQ-SEC-04), wired in 8 screens | H-07 | Manual ✓ (logcat capture of the real session userId, not "phc_field_worker") | ✓ RoomAuditLoggerTest, AuditPayloadTest |
 | REQ-AUD-02 | `AuditLogDao` (insert + query only) | H-07 | Manual ✓ (interface review) | TODO — compile/lint guard |
 | REQ-NET-01 | `NetworkMonitor`/`AndroidNetworkMonitor`, `ConnectivityViewModel` | — | Manual ✓ | TODO |
 | REQ-SYN-01 | `SyncStatus`/`MockSyncStatus`, Home sync row | H-05 | Manual ✓ (online/offline) | ✓ MockSyncStatusTest, HomeViewModelTest |
@@ -38,11 +39,13 @@
 
 ## Summary
 - **Automated coverage (blocker #4, first pass):** a JVM unit suite now covers registration
-  validation, audit payload/logger, sync mock, Home roster/sync, and the kernel-payload boundary
-  (see the ✓ rows), plus a permanent instrumented DAO test for the day-scoped roster query.
-  **34 tests, 0 failures.** GitHub Actions (`.github/workflows/android-ci.yml`) runs the unit
-  suite + assembleDebug on every push/PR (unit-only tests; instrumented tests run locally for
-  now). This first pass also caught a real regression — the cache-scoping interface change had
-  silently broken a pre-existing use-case test that no CI ran.
-- **Still TODO:** Compose UI tests (Register form, review dialogs), instrumented SEC-01
-  (SQLCipher) and AUD-02 (insert-only guard) coverage, and the PLANNED forward requirements.
+  validation, audit payload/logger, sync mock, Home roster/sync, the kernel-payload boundary, and
+  the mock-login audit wiring (see the ✓ rows), plus a permanent instrumented DAO test for the
+  day-scoped roster query. **36 tests, 0 failures.** GitHub Actions
+  (`.github/workflows/android-ci.yml`) runs the unit suite + assembleDebug on every push/PR
+  (unit-only tests; instrumented tests run locally for now). This first pass also caught a real
+  regression — the cache-scoping interface change had silently broken a pre-existing use-case
+  test that no CI ran.
+- **Still TODO:** Compose UI tests (Register form, review dialogs, Login), instrumented SEC-01
+  (SQLCipher) and AUD-02 (insert-only guard) coverage, and the PLANNED forward requirements
+  (REQ-SEC-03 real auth/RBAC remains open — REQ-SEC-04's mock login does not satisfy it).

@@ -58,8 +58,27 @@ Read this first, every session. Continue from the first unchecked item unless to
       test patient — none of it appeared in the constructed payload. Unit test:
       SendToKernelUseCaseTest.
 
+## Mock login / AuthSession (done)
+- [x] `AuthSession` domain interface (currentUser/signIn/signOut) + `UserRole` (ASHA_WORKER, NURSE,
+      COMPOUNDER — PHC field roles only, matching existing terminology, not invented). PHC-worker
+      scope only; admin/CMO dashboard is a separate product, out of scope.
+- [x] `MockAuthSession` (data/local/auth/) — no credential check; Preferences DataStore (not Room:
+      one small key-value blob, no relational shape/queries); survives app restart. Fresh opaque
+      userId minted per sign-in (no account system to resolve "same person again" against yet).
+- [x] Login screen (name + role picker), styled to match Register/Home. First screen on cold start
+      when no session exists, skipped thereafter until sign-out — gated in AppNavHost via a new
+      AuthViewModel (mirrors ConnectivityViewModel's shape: one shared instance, drives both the
+      gate and Home's signed-in display). Sign-out entry point on Home.
+- [x] RoomAuditLogger now sources userId from the real session (placeholder kept only as a
+      should-never-happen fallback). New REQ-SEC-04 (explicitly NOT REQ-SEC-03 — no auth/RBAC
+      enforcement, still PLANNED) + traceability rows + H-06 refreshed.
+      Verified on-device: cold start → Login → sign in as "AshaDevi" (ASHA worker) → registered a
+      patient → captured via temporary debug log → audit row carried the real session userId, not
+      "phc_field_worker" → session survived app restart → sign-out returned to Login.
+
 ## Not started
 - [ ] Demo-theater additions from agent_docs/hardening.md (AI assessment panel, security shield sheet)
 - [ ] Pre-production process blockers (flag to founder): ISO 13485 QMS + DHF, ISO 14971 risk file,
       software safety classification — see docs/regulatory-foundation.md §3
 - [ ] Reconcile Patient.id spec gap (spec.md says 10–12 char UID; code generates 36-char UUID)
+- [ ] Real authentication + RBAC enforcement (REQ-SEC-03) — mock login above does not satisfy this
