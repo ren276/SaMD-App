@@ -5,6 +5,7 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import com.example.samdapp.data.local.dao.AllergyDao
 import com.example.samdapp.data.local.dao.AttachmentDao
+import com.example.samdapp.data.local.dao.AuditLogDao
 import com.example.samdapp.data.local.dao.CaseRecordDao
 import com.example.samdapp.data.local.dao.ConsultationDao
 import com.example.samdapp.data.local.dao.EncounterDao
@@ -17,6 +18,7 @@ import com.example.samdapp.data.local.dao.SocialHistoryDao
 import com.example.samdapp.data.local.dao.SymptomDao
 import com.example.samdapp.data.local.entity.AllergyEntity
 import com.example.samdapp.data.local.entity.AttachmentEntity
+import com.example.samdapp.data.local.entity.AuditLogEntity
 import com.example.samdapp.data.local.entity.CaseRecordEntity
 import com.example.samdapp.data.local.entity.ConsultationEntity
 import com.example.samdapp.data.local.entity.EncounterEntity
@@ -42,8 +44,9 @@ import com.example.samdapp.data.local.entity.SymptomEntity
         FamilyHistoryEntryEntity::class,
         SocialHistoryEntity::class,
         CaseRecordEntity::class,
+        AuditLogEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -60,6 +63,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun familyHistoryEntryDao(): FamilyHistoryEntryDao
     abstract fun socialHistoryDao(): SocialHistoryDao
     abstract fun caseRecordDao(): CaseRecordDao
+    abstract fun auditLogDao(): AuditLogDao
 
     companion object {
         const val DATABASE_NAME = "samd_app.db"

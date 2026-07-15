@@ -3,9 +3,11 @@ package com.example.samdapp.di
 import android.content.Context
 import androidx.room.Room
 import com.example.samdapp.data.local.AppDatabase
+import com.example.samdapp.data.local.MIGRATION_1_2
 import com.example.samdapp.data.local.security.DatabasePassphraseProvider
 import com.example.samdapp.data.local.dao.AllergyDao
 import com.example.samdapp.data.local.dao.AttachmentDao
+import com.example.samdapp.data.local.dao.AuditLogDao
 import com.example.samdapp.data.local.dao.CaseRecordDao
 import com.example.samdapp.data.local.dao.ConsultationDao
 import com.example.samdapp.data.local.dao.EncounterDao
@@ -36,6 +38,7 @@ object DatabaseModule {
         val factory = SupportOpenHelperFactory(passphrase)
         return Room.databaseBuilder(context, AppDatabase::class.java, AppDatabase.DATABASE_NAME)
             .openHelperFactory(factory)
+            .addMigrations(MIGRATION_1_2)
             .build()
     }
 
@@ -51,4 +54,5 @@ object DatabaseModule {
     @Provides fun provideFamilyHistoryEntryDao(db: AppDatabase): FamilyHistoryEntryDao = db.familyHistoryEntryDao()
     @Provides fun provideSocialHistoryDao(db: AppDatabase): SocialHistoryDao = db.socialHistoryDao()
     @Provides fun provideCaseRecordDao(db: AppDatabase): CaseRecordDao = db.caseRecordDao()
+    @Provides fun provideAuditLogDao(db: AppDatabase): AuditLogDao = db.auditLogDao()
 }

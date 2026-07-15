@@ -17,7 +17,7 @@ Read this first, every session. Continue from the first unchecked item unless to
 
 ## Hardening (in progress)
 - [x] SQLCipher on Room DB (see agent_docs/hardening.md)
-- [ ] `AuditLogEntity` + insert-only DAO
+- [x] `AuditLogEntity` + insert-only DAO
 - [ ] Wire audit logging into the 8 existing screens (one commit per screen, don't do all 8 in one pass)
 - [ ] Local cache scoped to current day's patients only
 
