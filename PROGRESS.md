@@ -42,7 +42,7 @@ Read this first, every session. Continue from the first unchecked item unless to
 - [x] JVM unit test suite (32 tests): RegisterUiState/ViewModel, AuditPayload/RoomAuditLogger,
       MockSyncStatus, HomeViewModel + pre-existing use-case/repo tests (now actually run)
 - [x] Restored permanent instrumented DAO test for the day-scoped roster query
-- [x] GitHub Actions CI — build + unit tests on every push/PR (unit-only; see .github/workflows/ci.yml)
+- [x] GitHub Actions CI — unit tests + assembleDebug on every push/PR (see .github/workflows/android-ci.yml; passing)
 - [ ] Compose UI tests (Register form, review dialogs); instrumented SEC-01/AUD-02 coverage
 - [ ] Add instrumented tests to CI once suite is larger (needs emulator action)
 

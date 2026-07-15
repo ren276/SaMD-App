@@ -39,8 +39,9 @@
 - **Automated coverage (blocker #4, first pass):** a JVM unit suite now covers registration
   validation, audit payload/logger, sync mock, and Home roster/sync (see the ✓ rows), plus a
   permanent instrumented DAO test for the day-scoped roster query. **32 tests, 0 failures.**
-  GitHub Actions (`.github/workflows/ci.yml`) runs the unit suite on every push/PR (unit-only;
-  instrumented tests run locally for now). This first pass also caught a real regression — the
+  GitHub Actions (`.github/workflows/android-ci.yml`) runs the unit suite + assembleDebug on
+  every push/PR (unit-only tests; instrumented tests run locally for now). This first pass also
+  caught a real regression — the
   cache-scoping interface change had silently broken a pre-existing use-case test that no CI ran.
 - **Still TODO:** Compose UI tests (Register form, review dialogs), instrumented SEC-01
   (SQLCipher) and AUD-02 (insert-only guard) coverage, and the PLANNED forward requirements.
