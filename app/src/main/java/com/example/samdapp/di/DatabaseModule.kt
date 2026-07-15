@@ -3,6 +3,7 @@ package com.example.samdapp.di
 import android.content.Context
 import androidx.room.Room
 import com.example.samdapp.data.local.AppDatabase
+import com.example.samdapp.data.local.security.DatabasePassphraseProvider
 import com.example.samdapp.data.local.dao.AllergyDao
 import com.example.samdapp.data.local.dao.AttachmentDao
 import com.example.samdapp.data.local.dao.CaseRecordDao
@@ -21,6 +22,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
+import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -28,8 +30,14 @@ object DatabaseModule {
 
     @Provides
     @Singleton
-    fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase =
-        Room.databaseBuilder(context, AppDatabase::class.java, AppDatabase.DATABASE_NAME).build()
+    fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase {
+        System.loadLibrary("sqlcipher")
+        val passphrase = DatabasePassphraseProvider(context).getOrCreatePassphrase()
+        val factory = SupportOpenHelperFactory(passphrase)
+        return Room.databaseBuilder(context, AppDatabase::class.java, AppDatabase.DATABASE_NAME)
+            .openHelperFactory(factory)
+            .build()
+    }
 
     @Provides fun providePatientDao(db: AppDatabase): PatientDao = db.patientDao()
     @Provides fun provideEncounterDao(db: AppDatabase): EncounterDao = db.encounterDao()
