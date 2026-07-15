@@ -3,6 +3,8 @@ package com.example.samdapp.presentation.consultation
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.samdapp.domain.audit.AuditLogger
+import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.model.AttachmentType
 import com.example.samdapp.domain.usecase.AddAttachmentUseCase
 import com.example.samdapp.domain.usecase.CaptureAudioAttachmentUseCase
@@ -76,6 +78,7 @@ class ConsultationViewModel @AssistedInject constructor(
     private val saveConsultationUseCase: SaveConsultationUseCase,
     private val addAttachmentUseCase: AddAttachmentUseCase,
     private val captureAudioAttachmentUseCase: CaptureAudioAttachmentUseCase,
+    private val auditLogger: AuditLogger,
 ) : ViewModel(), ConsultationActions {
 
     @AssistedFactory
@@ -114,6 +117,12 @@ class ConsultationViewModel @AssistedInject constructor(
             captureAudioAttachmentUseCase().fold(
                 onSuccess = { captured ->
                     _uiState.update { it.copy(isRecordingVoice = false, chiefComplaint = captured.transcript) }
+                    auditLogger.log(
+                        action = "audio_captured",
+                        patientId = patientId,
+                        caseRecordId = caseRecordId,
+                        payload = auditPayload("uri" to captured.uri, "purpose" to "chief_complaint"),
+                    )
                 },
                 onFailure = { error ->
                     _uiState.update { it.copy(isRecordingVoice = false, errorMessage = error.message ?: "Voice capture failed") }
@@ -133,6 +142,12 @@ class ConsultationViewModel @AssistedInject constructor(
                             pendingAttachments = it.pendingAttachments + PendingAttachment(AttachmentType.AUDIO, captured.uri),
                         )
                     }
+                    auditLogger.log(
+                        action = "audio_captured",
+                        patientId = patientId,
+                        caseRecordId = caseRecordId,
+                        payload = auditPayload("uri" to captured.uri, "purpose" to "attachment"),
+                    )
                 },
                 onFailure = { error ->
                     _uiState.update { it.copy(isRecordingVoice = false, errorMessage = error.message ?: "Audio capture failed") }
@@ -162,8 +177,21 @@ class ConsultationViewModel @AssistedInject constructor(
                 return@launch
             }
             current.pendingAttachments.forEach { pending ->
-                addAttachmentUseCase(consultation.id, pending.type, pending.uri)
+                addAttachmentUseCase(consultation.id, pending.type, pending.uri).onSuccess {
+                    auditLogger.log(
+                        action = "attachment_added",
+                        patientId = patientId,
+                        caseRecordId = caseRecordId,
+                        payload = auditPayload("type" to pending.type.name, "uri" to pending.uri),
+                    )
+                }
             }
+            auditLogger.log(
+                action = "consultation_saved",
+                patientId = patientId,
+                caseRecordId = caseRecordId,
+                payload = auditPayload("consultationId" to consultation.id, "chiefComplaint" to current.chiefComplaint),
+            )
             _uiState.update { it.copy(isSaving = false) }
             _effects.send(
                 ConsultationEffect.Sent(patientId, encounterId, caseRecordId, consultation.id, current.hasAudioAttachment),
