@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -18,6 +19,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -50,6 +52,19 @@ private fun MedicalBackgroundContent(
     actions: MedicalBackgroundActions,
     onContinue: () -> Unit,
 ) {
+    var showReview by remember { mutableStateOf(false) }
+
+    if (showReview) {
+        MedicalBackgroundReviewDialog(
+            uiState = uiState,
+            onConfirm = {
+                showReview = false
+                onContinue()
+            },
+            onDismiss = { showReview = false },
+        )
+    }
+
     Scaffold(topBar = { TopAppBar(title = { Text("Medical background") }) }) { padding: PaddingValues ->
         LazyColumn(
             modifier = Modifier.fillMaxWidth().padding(padding).padding(16.dp),
@@ -96,11 +111,54 @@ private fun MedicalBackgroundContent(
                 }
             }
             item {
-                Button(onClick = onContinue, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
-                    Text("Continue", style = MaterialTheme.typography.titleMedium)
+                Button(onClick = { showReview = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
+                    Text("Review & continue", style = MaterialTheme.typography.titleMedium)
                 }
             }
         }
+    }
+}
+
+/** Confirmation gate before leaving the medical evaluation — the worker re-reads what was
+ * captured (and notices empty sections) rather than advancing on a hurried tap. */
+@Composable
+private fun MedicalBackgroundReviewDialog(
+    uiState: MedicalBackgroundUiState,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Review medical background") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                ReviewCount("Medical & surgical history", uiState.medicalHistoryItems.size)
+                ReviewCount("Current medications & supplements", uiState.medications.size)
+                ReviewCount("Allergies", uiState.allergies.size)
+                ReviewCount("Family medical history", uiState.familyHistory.size)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Social history:", style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        text = if (uiState.socialHistory != null) "recorded" else "not recorded",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+        },
+        confirmButton = { Button(onClick = onConfirm) { Text("Confirm & continue") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Keep editing") } },
+    )
+}
+
+@Composable
+private fun ReviewCount(label: String, count: Int) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("$label:", style = MaterialTheme.typography.labelLarge)
+        Text(
+            text = if (count == 0) "none" else "$count recorded",
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (count == 0) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+        )
     }
 }
 
