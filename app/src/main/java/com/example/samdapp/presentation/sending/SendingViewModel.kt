@@ -2,6 +2,8 @@ package com.example.samdapp.presentation.sending
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.samdapp.domain.audit.AuditLogger
+import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.usecase.SendToKernelUseCase
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
@@ -21,6 +23,7 @@ class SendingViewModel @AssistedInject constructor(
     @Assisted("consultationId") private val consultationId: String,
     @Assisted("audioUri") private val audioUri: String?,
     private val sendToKernelUseCase: SendToKernelUseCase,
+    private val auditLogger: AuditLogger,
 ) : ViewModel() {
 
     @AssistedFactory
@@ -38,6 +41,11 @@ class SendingViewModel @AssistedInject constructor(
     init {
         viewModelScope.launch {
             sendToKernelUseCase()
+            auditLogger.log(
+                action = "kernel_response_received",
+                caseRecordId = caseRecordId,
+                payload = auditPayload("consultationId" to consultationId),
+            )
             _effects.send(SendingEffect.Done(caseRecordId, consultationId, audioUri))
         }
     }
