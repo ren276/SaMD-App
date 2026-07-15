@@ -3,6 +3,8 @@ package com.example.samdapp.presentation.register
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.samdapp.domain.audit.AuditLogger
+import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.usecase.RegisterPatientUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.channels.Channel
@@ -51,6 +53,7 @@ interface RegisterActions {
 @HiltViewModel
 class RegisterViewModel @Inject constructor(
     private val registerPatientUseCase: RegisterPatientUseCase,
+    private val auditLogger: AuditLogger,
 ) : ViewModel(), RegisterActions {
 
     private val _uiState = MutableStateFlow(RegisterUiState())
@@ -98,6 +101,11 @@ class RegisterViewModel @Inject constructor(
             result.fold(
                 onSuccess = { patient ->
                     _uiState.update { it.copy(isSubmitting = false) }
+                    auditLogger.log(
+                        action = "patient_registered",
+                        patientId = patient.id,
+                        payload = auditPayload("fullName" to patient.fullName, "biologicalSex" to current.biologicalSex),
+                    )
                     _effects.send(RegisterEffect.Registered(patient.id))
                 },
                 onFailure = { error ->
