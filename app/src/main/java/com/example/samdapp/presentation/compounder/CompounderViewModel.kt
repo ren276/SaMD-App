@@ -3,6 +3,8 @@ package com.example.samdapp.presentation.compounder
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.samdapp.domain.audit.AuditLogger
+import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.model.ObservationSource
 import com.example.samdapp.domain.model.VitalsSnapshot
 import com.example.samdapp.domain.model.toSnapshot
@@ -96,6 +98,7 @@ class CompounderViewModel @AssistedInject constructor(
     private val recordVitalsUseCase: RecordVitalsUseCase,
     private val addSymptomUseCase: AddSymptomUseCase,
     private val consultationRepository: ConsultationRepository,
+    private val auditLogger: AuditLogger,
 ) : ViewModel(), CompounderActions {
 
     @AssistedFactory
@@ -116,6 +119,12 @@ class CompounderViewModel @AssistedInject constructor(
                 return@launch
             }
             _uiState.update { it.copy(encounterId = started.encounter.id, caseRecordId = started.caseRecord.id) }
+            auditLogger.log(
+                action = "encounter_started",
+                patientId = patientId,
+                caseRecordId = started.caseRecord.id,
+                payload = auditPayload("encounterId" to started.encounter.id),
+            )
             launch {
                 consultationRepository.observeSymptoms(started.encounter.id).collect { symptoms ->
                     _uiState.update { it.copy(symptoms = symptoms.map(com.example.samdapp.domain.model.Symptom::description)) }
@@ -161,7 +170,14 @@ class CompounderViewModel @AssistedInject constructor(
         val encounterId = current.encounterId ?: return
         if (current.newSymptomText.isBlank()) return
         viewModelScope.launch {
-            addSymptomUseCase(patientId, encounterId, current.newSymptomText)
+            addSymptomUseCase(patientId, encounterId, current.newSymptomText).onSuccess {
+                auditLogger.log(
+                    action = "symptom_added",
+                    patientId = patientId,
+                    caseRecordId = current.caseRecordId,
+                    payload = auditPayload("description" to current.newSymptomText),
+                )
+            }
             _uiState.update { it.copy(newSymptomText = "") }
         }
     }
@@ -193,6 +209,12 @@ class CompounderViewModel @AssistedInject constructor(
             recordVitalsUseCase(snapshot).fold(
                 onSuccess = {
                     _uiState.update { it.copy(isSaving = false) }
+                    auditLogger.log(
+                        action = "vitals_recorded",
+                        patientId = patientId,
+                        caseRecordId = caseRecordId,
+                        payload = auditPayload("pulseBpm" to current.pulseBpm, "bpSystolic" to current.bpSystolic),
+                    )
                     _effects.send(CompounderEffect.Continue(patientId, encounterId, caseRecordId, current.chiefComplaint))
                 },
                 onFailure = { error ->
