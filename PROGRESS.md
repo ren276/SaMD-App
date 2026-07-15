@@ -29,7 +29,19 @@ Read this first, every session. Continue from the first unchecked item unless to
   PatientRepository.observeTodaysPatients() resolves today from device zone; GetTodaysPatientsUseCase
   wraps it. Next: a "Today's patients" roster screen on Home to consume it (its own UI task).
 
+## Field UX + foundation (done — added after hardening)
+- [x] Today's patients roster on Home (consumes GetTodaysPatientsUseCase; tap row → PatientSummary)
+- [x] Sync status + Sync now on Home (UI-only; mockable SyncStatus; real sync deferred, see docs/sync-design.md)
+- [x] Persistent patient name + ID banner (AppNavHost, derived from back stack; hidden on Home/Register)
+- [x] Review-before-submit dialog on Consultation (ISO 14971 human-in-the-loop)
+- [x] Review-before-continue dialog on Medical background
+- [x] Regulatory/SDLC foundation docs → docs/regulatory-foundation.md, docs/sync-design.md
+      (agent_docs/ is gitignored/local; docs/ is tracked = start of controlled documentation)
+
 ## Not started
 - [ ] JUnit + Compose UI tests for Register and Vitals
 - [ ] GitHub Actions CI (build + test on push)
-- [ ] Demo-theater additions from agent_docs/hardening.md (AI assessment panel, offline toggle, security shield sheet) — do after hardening, not before
+- [ ] Demo-theater additions from agent_docs/hardening.md (AI assessment panel, security shield sheet)
+- [ ] Pre-production process blockers (flag to founder): ISO 13485 QMS + DHF, ISO 14971 risk file,
+      software safety classification — see docs/regulatory-foundation.md §3
+- [ ] Reconcile Patient.id spec gap (spec.md says 10–12 char UID; code generates 36-char UUID)

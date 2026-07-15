@@ -12,7 +12,7 @@ data class SyncState(
 /**
  * Sync status surface for the roster/home screen. There is no backend yet — real
  * WorkManager-driven sync and the offline snapshot/restore + ACID reconciliation are
- * deferred (see agent_docs/hardening.md and agent_docs/sync-design.md). This interface is
+ * deferred (see agent_docs/hardening.md and docs/sync-design.md). This interface is
  * the seam the real sync engine implements later; the current implementation only reports
  * and simulates state, it does not move any data off the device.
  */
