@@ -2,6 +2,8 @@ package com.example.samdapp.presentation.acknowledgement
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.samdapp.domain.audit.AuditLogger
+import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.usecase.AcknowledgeCaseUseCase
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
@@ -19,6 +21,7 @@ data class AcknowledgementUiState(val isSaving: Boolean = true, val errorMessage
 class AcknowledgementViewModel @AssistedInject constructor(
     @Assisted val caseRecordId: String,
     private val acknowledgeCaseUseCase: AcknowledgeCaseUseCase,
+    private val auditLogger: AuditLogger,
 ) : ViewModel() {
 
     @AssistedFactory
@@ -32,7 +35,14 @@ class AcknowledgementViewModel @AssistedInject constructor(
     init {
         viewModelScope.launch {
             acknowledgeCaseUseCase(caseRecordId).fold(
-                onSuccess = { _uiState.update { it.copy(isSaving = false) } },
+                onSuccess = {
+                    _uiState.update { it.copy(isSaving = false) }
+                    auditLogger.log(
+                        action = "consultation_locked",
+                        caseRecordId = caseRecordId,
+                        payload = auditPayload("status" to "saved_locally"),
+                    )
+                },
                 onFailure = { error -> _uiState.update { it.copy(isSaving = false, errorMessage = error.message) } },
             )
         }
