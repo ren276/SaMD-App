@@ -15,6 +15,7 @@ import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
 import com.example.samdapp.presentation.acknowledgement.AcknowledgementScreen
 import com.example.samdapp.presentation.common.GlobalStatusBar
+import com.example.samdapp.presentation.common.PatientContextBar
 import com.example.samdapp.presentation.compounder.CompounderScreen
 import com.example.samdapp.presentation.connectivity.ConnectivityViewModel
 import com.example.samdapp.presentation.consultation.ConsultationScreen
@@ -37,6 +38,10 @@ fun AppNavHost() {
 
     Column(modifier = Modifier.fillMaxSize()) {
         GlobalStatusBar(isOnline = isOnline, onToggleOnline = connectivityViewModel::toggle)
+
+        currentPatientId(backStack)?.let { patientId ->
+            PatientContextBar(patientId = patientId)
+        }
 
         NavDisplay(
         modifier = Modifier.weight(1f),
