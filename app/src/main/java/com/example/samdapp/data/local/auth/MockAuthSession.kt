@@ -15,7 +15,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import java.io.IOException
-import java.util.UUID
+import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -33,9 +33,12 @@ private object Keys {
  * with no relational shape and no queries — Room would be relational overkill for a single row.
  * Survives app restart (DataStore persists to disk); cleared on [signOut].
  *
- * A fresh opaque userId is minted on every [signIn] — there's no real account system to resolve
- * "same person, signing in again" against, and that resolution is exactly what real auth
- * (REQ-SEC-03) will own later.
+ * userId is deterministically derived from the entered name + role (SHA-256 hash, truncated) —
+ * not a fresh random id per [signIn]. Same name+role typed again yields the same userId, so the
+ * audit trail (REQ-AUD-01, H-06/H-07) can tell repeated sign-ins by the same worker apart from
+ * different workers. This is NOT identity verification: there is still no credential check, so
+ * anyone typing "AshaDevi" gets AshaDevi's userId regardless of who they actually are. Real
+ * account resolution is still REQ-SEC-03, PLANNED.
  */
 @Singleton
 class MockAuthSession @Inject constructor(
@@ -43,6 +46,12 @@ class MockAuthSession @Inject constructor(
 ) : AuthSession {
 
     private val dataStore = context.authDataStore
+
+    private fun stableUserId(name: String, role: UserRole): String {
+        val normalized = "${name.trim().lowercase()}|${role.name}"
+        val digest = MessageDigest.getInstance("SHA-256").digest(normalized.toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { "%02x".format(it) }.take(16)
+    }
 
     override fun currentUser(): Flow<UserSession?> =
         dataStore.data
@@ -56,7 +65,7 @@ class MockAuthSession @Inject constructor(
 
     override suspend fun signIn(name: String, role: UserRole) {
         dataStore.edit { prefs ->
-            prefs[Keys.USER_ID] = UUID.randomUUID().toString()
+            prefs[Keys.USER_ID] = stableUserId(name, role)
             prefs[Keys.NAME] = name
             prefs[Keys.ROLE] = role.name
         }

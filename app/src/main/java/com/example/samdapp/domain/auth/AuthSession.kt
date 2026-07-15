@@ -14,6 +14,9 @@ enum class UserRole { ASHA_WORKER, NURSE, COMPOUNDER }
  * shape as [com.example.samdapp.domain.model.Patient.id]/[com.example.samdapp.domain.model.CaseRecord.id]:
  * an ID for correlation, not a display value copied into every audit row. [name]/[role] are kept
  * only in the session record itself (for greeting UI and the role picker), not written per-row.
+ * [userId] is deterministically derived from name+role (see [com.example.samdapp.data.local.auth.MockAuthSession]),
+ * so the same worker signing in again gets the same userId — this is a consistency mechanism,
+ * not identity verification.
  */
 data class UserSession(val userId: String, val name: String, val role: UserRole)
 
