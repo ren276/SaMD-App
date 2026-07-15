@@ -13,8 +13,13 @@ Conventions: `REQ-<AREA>-NN`. Status: **DONE** (implemented + manually verified)
   (mobile number or address).
 - **REQ-REG-02** (DONE) Enforce fixed-length digit-only fields: mobile 10, emergency contact
   10, pincode 6, Aadhaar 12, ABHA 14; block submission while invalid.
-- **REQ-REG-03** (DONE) Assign a locally-generated unique patient ID at creation (offline-first).
-  *Open: ID format deviates from spec (UUID vs 10–12 char) — see risk H-03.*
+- **REQ-REG-03** (DONE) Assign a locally-generated unique patient ID at creation (offline-first):
+  a 12-character alphanumeric UID (`RegisterPatientUseCase.generatePatientId`, `SecureRandom`
+  over a 62-char alphabet), matching `agent_docs/spec.md`'s 10–12 char format. No central
+  registry to check against offline; the 62^12 keyspace makes collisions negligible at PHC
+  patient volumes, and the Room primary-key constraint on `PatientEntity.id` is the backstop
+  (insert aborts on collision, `register()` surfaces `Result.failure`, caller retries with a
+  fresh id) (risk H-03).
 
 ## Medical background (MBG)
 - **REQ-MBG-01** (DONE) Record medical/surgical history, medications, allergies, family history,

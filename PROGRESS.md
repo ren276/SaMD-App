@@ -76,9 +76,21 @@ Read this first, every session. Continue from the first unchecked item unless to
       patient → captured via temporary debug log → audit row carried the real session userId, not
       "phc_field_worker" → session survived app restart → sign-out returned to Login.
 
+## Stable audit userId + Patient.id spec reconciliation (done)
+- [x] `MockAuthSession.signIn` now derives userId deterministically from name+role (SHA-256,
+      truncated) instead of `UUID.randomUUID()` per sign-in — same worker signing in on different
+      days now keeps the same audit-trail userId (H-06, H-07). Not identity verification, no
+      credential check added. Verified on-device: same userId across two independent sign-in
+      cycles for the same name+role.
+- [x] `Patient.id` reconciled to spec: `RegisterPatientUseCase.generatePatientId()` now generates
+      a 12-char alphanumeric UID (`SecureRandom`, 62-char alphabet) instead of a 36-char UUID,
+      matching `agent_docs/spec.md`'s 10–12 char format (risk H-03). No migration — no existing
+      real patient data, new patients get the new format going forward. Collision handling: no
+      central registry offline, so relies on the 62^12 keyspace (negligible collision odds at PHC
+      volumes) plus the existing Room primary-key constraint on `PatientEntity.id` as a backstop.
+
 ## Not started
 - [ ] Demo-theater additions from agent_docs/hardening.md (AI assessment panel, security shield sheet)
 - [ ] Pre-production process blockers (flag to founder): ISO 13485 QMS + DHF, ISO 14971 risk file,
       software safety classification — see docs/regulatory-foundation.md §3
-- [ ] Reconcile Patient.id spec gap (spec.md says 10–12 char UID; code generates 36-char UUID)
 - [ ] Real authentication + RBAC enforcement (REQ-SEC-03) — mock login above does not satisfy this
