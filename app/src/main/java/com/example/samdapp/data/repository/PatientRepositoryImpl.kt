@@ -6,6 +6,8 @@ import com.example.samdapp.domain.model.Patient
 import com.example.samdapp.domain.repository.PatientRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import java.time.LocalDate
+import java.time.ZoneId
 import javax.inject.Inject
 
 class PatientRepositoryImpl @Inject constructor(
@@ -18,6 +20,15 @@ class PatientRepositoryImpl @Inject constructor(
 
     override fun observePatient(patientId: String): Flow<Patient?> =
         patientDao.observeById(patientId).map { it?.toDomain() }
+
+    override fun observeTodaysPatients(): Flow<List<Patient>> {
+        val zone = ZoneId.systemDefault()
+        val today = LocalDate.now(zone)
+        val startMillis = today.atStartOfDay(zone).toInstant().toEpochMilli()
+        val endMillis = today.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        return patientDao.observePatientsWithEncounterBetween(startMillis, endMillis)
+            .map { entities -> entities.map(PatientEntity::toDomain) }
+    }
 }
 
 private fun Patient.toEntity() = PatientEntity(

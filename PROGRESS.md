@@ -22,7 +22,12 @@ Read this first, every session. Continue from the first unchecked item unless to
   — actual screens now differ from this list (MedicalBackground/PatientSummary/Compounder added since):
   wired Register, MedicalBackground, Compounder, Consultation, Sending, Transcription, Acknowledgement,
   DoctorList. Home and PatientSummary skipped — no clinical action, pure navigation/read-only.
-- [ ] Local cache scoped to current day's patients only
+- [x] Local cache scoped to current day's patients only
+  — data layer only (no UI yet). PatientDao.observePatientsWithEncounterBetween(start,end) is the
+  ONLY list query on the DAO — deliberately no "all patients" query, so no code path can pull the
+  full table (data-minimization). Scoped by Encounter.startedAt (visit day, not registration).
+  PatientRepository.observeTodaysPatients() resolves today from device zone; GetTodaysPatientsUseCase
+  wraps it. Next: a "Today's patients" roster screen on Home to consume it (its own UI task).
 
 ## Not started
 - [ ] JUnit + Compose UI tests for Register and Vitals
