@@ -3,6 +3,8 @@ package com.example.samdapp.presentation.doctorlist
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.samdapp.domain.audit.AuditLogger
+import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.model.Doctor
 import com.example.samdapp.domain.usecase.AssignDoctorUseCase
 import com.example.samdapp.domain.usecase.GetAvailableDoctorsUseCase
@@ -45,6 +47,7 @@ class DoctorListViewModel @AssistedInject constructor(
     @Assisted private val caseRecordId: String,
     private val getAvailableDoctorsUseCase: GetAvailableDoctorsUseCase,
     private val assignDoctorUseCase: AssignDoctorUseCase,
+    private val auditLogger: AuditLogger,
 ) : ViewModel(), DoctorListActions {
 
     @AssistedFactory
@@ -80,6 +83,11 @@ class DoctorListViewModel @AssistedInject constructor(
             assignDoctorUseCase(caseRecordId, doctorId).fold(
                 onSuccess = {
                     _uiState.update { it.copy(isSending = false, sentToDoctor = doctor) }
+                    auditLogger.log(
+                        action = "case_sent_to_doctor",
+                        caseRecordId = caseRecordId,
+                        payload = auditPayload("doctorId" to doctorId, "doctorName" to doctor.name),
+                    )
                 },
                 onFailure = { error ->
                     _uiState.update { it.copy(isSending = false, errorMessage = error.message ?: "Could not assign doctor") }
