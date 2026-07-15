@@ -27,3 +27,31 @@ Don't start these yet — noted here so they're not forgotten, not so they're st
 - AWS infra (Aurora/RDS Postgres, S3, Cognito, Lambda) — none of this until there's a reason to stand up real cloud infra. The Notion doc's stack recommendation (AWS Mumbai region for DPDP data localization, managed Postgres over NoSQL for relational medical data, S3 for attachments, Cognito for auth) is a reasonable target architecture to keep on file, but don't provision anything from it yet.
 - QMS (ISO 13485) and Design History File — these are organizational/process artifacts that need to exist *before* production code is written, not something Claude Code can build. Flag to the founder as a pre-production blocker, don't attempt to generate QMS documentation as a coding task.
 - `ai_kernel_version` field on `CaseRecord`/`AuditLogEntity` — add this when the kernel stops being mocked, not before; adding it now with no real versioned kernel behind it is a field with no meaning yet.
+
+## Evaluated and deferred: new Android skills (2026-07-16)
+
+Source: Philip Lackner's Android skills (Koin DI, `:core`/`:feature` multi-module layout,
+`Result<T,E>`/`DataError` typed error wrapper, strict MVI Action/Event naming) were added to
+`.claude/skills/` and evaluated against the current architecture (Hilt, single `:app` module,
+existing stdlib `Result<T>` + sealed `DataError`, existing Actions/Effects pattern that's already
+close to MVI).
+
+**Decision: no architecture changes now.** Priority is UI/UX polish, not architecture or
+code-quality changes — don't run two unrelated change-sets across the same screens at once. Three
+sub-decisions, not one bundled "adopt or don't":
+
+- **Multi-module split** — defer until real feature boundaries are stable. Module boundaries
+  chosen before the boundaries are known risk being wrong, and splitting twice is worse than
+  splitting once.
+- **Koin vs. Hilt** — leaning toward keeping Hilt even long-term, not just current inertia.
+  Dagger/Hilt resolves DI at compile time (wiring errors fail the build); Koin resolves at
+  runtime (wiring errors can crash in the field). For a SaMD-track app under IEC 62304,
+  compile-time-safe DI is likely the more appropriate choice regardless of project stage. Revisit
+  only if a concrete reason to reconsider comes up.
+- **`Result<T,E>`/`DataError` error-type migration** — the one piece worth reconsidering later.
+  More contained than the other two, doesn't conflict with the tracked regulatory docs the way a
+  DI/module change would, and could genuinely improve field-worker-facing error messages (ties
+  into usability/IEC 62366 work). Worth a dedicated session once UI/Hindi work is done, not
+  before.
+
+No code changes were made as part of this evaluation.
