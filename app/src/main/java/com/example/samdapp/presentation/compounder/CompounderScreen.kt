@@ -31,6 +31,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
+import com.example.samdapp.presentation.common.filterDecimal
+import com.example.samdapp.presentation.common.filterDigitsOnly
 
 @Composable
 fun CompounderScreen(
@@ -100,32 +102,32 @@ internal fun CompounderContent(uiState: CompounderUiState, actions: CompounderAc
             // Now the checks — vitals and, only when clinically required, point-of-care tests.
             item { Text("Vitals", style = MaterialTheme.typography.titleMedium) }
             item {
-                OutlinedTextField(uiState.pulseBpm, actions::onPulseChange, label = { Text("Pulse (bpm)") }, keyboardOptions = numberKeyboard, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(uiState.pulseBpm, { actions.onPulseChange(filterDigitsOnly(it, maxLength = 3)) }, label = { Text("Pulse (bpm)") }, keyboardOptions = numberKeyboard, modifier = Modifier.fillMaxWidth())
             }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(uiState.bpSystolic, actions::onBpSystolicChange, label = { Text("BP systolic") }, keyboardOptions = numberKeyboard, modifier = Modifier.fillMaxWidth(0.5f))
-                    OutlinedTextField(uiState.bpDiastolic, actions::onBpDiastolicChange, label = { Text("BP diastolic") }, keyboardOptions = numberKeyboard, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(uiState.bpSystolic, { actions.onBpSystolicChange(filterDigitsOnly(it, maxLength = 3)) }, label = { Text("BP systolic") }, keyboardOptions = numberKeyboard, modifier = Modifier.fillMaxWidth(0.5f))
+                    OutlinedTextField(uiState.bpDiastolic, { actions.onBpDiastolicChange(filterDigitsOnly(it, maxLength = 3)) }, label = { Text("BP diastolic") }, keyboardOptions = numberKeyboard, modifier = Modifier.fillMaxWidth())
                 }
             }
             item {
-                OutlinedTextField(uiState.spo2Percent, actions::onSpo2Change, label = { Text("SpO2 (%)") }, keyboardOptions = numberKeyboard, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(uiState.spo2Percent, { actions.onSpo2Change(filterDigitsOnly(it, maxLength = 3)) }, label = { Text("SpO2 (%)") }, keyboardOptions = numberKeyboard, modifier = Modifier.fillMaxWidth())
             }
             item {
-                OutlinedTextField(uiState.temperatureCelsius, actions::onTemperatureChange, label = { Text("Temperature (°C)") }, keyboardOptions = decimalKeyboard, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(uiState.temperatureCelsius, { actions.onTemperatureChange(filterDecimal(it)) }, label = { Text("Temperature (°C)") }, keyboardOptions = decimalKeyboard, modifier = Modifier.fillMaxWidth())
             }
             item {
-                OutlinedTextField(uiState.respiratoryRate, actions::onRespiratoryRateChange, label = { Text("Respiratory rate (breaths/min)") }, keyboardOptions = numberKeyboard, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(uiState.respiratoryRate, { actions.onRespiratoryRateChange(filterDigitsOnly(it, maxLength = 3)) }, label = { Text("Respiratory rate (breaths/min)") }, keyboardOptions = numberKeyboard, modifier = Modifier.fillMaxWidth())
             }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(uiState.weightKg, actions::onWeightChange, label = { Text("Weight (kg)") }, keyboardOptions = decimalKeyboard, modifier = Modifier.fillMaxWidth(0.5f))
-                    OutlinedTextField(uiState.heightCm, actions::onHeightChange, label = { Text("Height (cm)") }, keyboardOptions = decimalKeyboard, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(uiState.weightKg, { actions.onWeightChange(filterDecimal(it)) }, label = { Text("Weight (kg)") }, keyboardOptions = decimalKeyboard, modifier = Modifier.fillMaxWidth(0.5f))
+                    OutlinedTextField(uiState.heightCm, { actions.onHeightChange(filterDecimal(it)) }, label = { Text("Height (cm)") }, keyboardOptions = decimalKeyboard, modifier = Modifier.fillMaxWidth())
                 }
             }
             uiState.bmi?.let { bmi -> item { Text("BMI: $bmi kg/m²", style = MaterialTheme.typography.bodyMedium) } }
             item {
-                OutlinedTextField(uiState.painScore, actions::onPainScoreChange, label = { Text("Pain score (0-10)") }, keyboardOptions = numberKeyboard, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(uiState.painScore, { actions.onPainScoreChange(filterDigitsOnly(it, maxLength = 2)) }, label = { Text("Pain score (0-10)") }, keyboardOptions = numberKeyboard, modifier = Modifier.fillMaxWidth())
             }
 
             item { HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp)) }
@@ -142,7 +144,7 @@ internal fun CompounderContent(uiState: CompounderUiState, actions: CompounderAc
             }
             if (uiState.showPointOfCareTests) {
                 item {
-                    OutlinedTextField(uiState.bloodGlucoseMgDl, actions::onBloodGlucoseChange, label = { Text("Blood glucose (mg/dL)") }, keyboardOptions = numberKeyboard, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(uiState.bloodGlucoseMgDl, { actions.onBloodGlucoseChange(filterDigitsOnly(it, maxLength = 3)) }, label = { Text("Blood glucose (mg/dL)") }, keyboardOptions = numberKeyboard, modifier = Modifier.fillMaxWidth())
                 }
                 item {
                     OutlinedTextField(uiState.urinalysisResult, actions::onUrinalysisChange, label = { Text("Urinalysis result") }, modifier = Modifier.fillMaxWidth())

@@ -161,26 +161,27 @@ private fun ConsultationContent(uiState: ConsultationUiState, actions: Consultat
             item { Text("Attachments", style = MaterialTheme.typography.titleMedium) }
             uiState.pendingAttachments.forEach { attachment -> item { Text("• ${attachment.type}") } }
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(
                         onClick = {
                             pickVisualMediaLauncher.launch(
                                 PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo),
                             )
                         },
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                        modifier = Modifier.weight(1f).heightIn(min = 56.dp),
                     ) { Text("Image / video", style = MaterialTheme.typography.titleMedium) }
                     OutlinedButton(
                         onClick = requestCameraForAffectedArea,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                        modifier = Modifier.weight(1f).heightIn(min = 56.dp),
                     ) {
                         Text("Affected area photo", style = MaterialTheme.typography.titleMedium)
                     }
-                }
-            }
-            item {
-                OutlinedButton(onClick = requestVoiceForAttachment, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
-                    Text(if (uiState.isRecordingVoice) "Listening…" else "Record audio note", style = MaterialTheme.typography.titleMedium)
+                    OutlinedButton(
+                        onClick = requestVoiceForAttachment,
+                        modifier = Modifier.weight(1f).heightIn(min = 56.dp),
+                    ) {
+                        Text(if (uiState.isRecordingVoice) "Listening…" else "Record audio", style = MaterialTheme.typography.titleMedium)
+                    }
                 }
             }
 

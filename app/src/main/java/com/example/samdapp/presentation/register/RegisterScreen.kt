@@ -2,6 +2,7 @@
 
 package com.example.samdapp.presentation.register
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -13,24 +14,40 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.compose.material3.Button
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.example.samdapp.presentation.common.DropdownField
+import com.example.samdapp.presentation.common.filterDigitsOnly
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
 
 @Composable
 fun RegisterScreen(
@@ -51,27 +68,32 @@ fun RegisterScreen(
     RegisterContent(uiState = uiState, actions = viewModel)
 }
 
-private data class FieldSpec(val field: RegisterField, val label: String, val required: Boolean = false)
+private data class FieldSpec(
+    val field: RegisterField,
+    val label: String,
+    val required: Boolean = false,
+    val keyboardType: KeyboardType = KeyboardType.Text,
+    val maxLength: Int = Int.MAX_VALUE,
+)
 
 private val CORE_FIELDS = listOf(
     FieldSpec(RegisterField.FULL_NAME, "Full name", required = true),
-    FieldSpec(RegisterField.DATE_OF_BIRTH, "Date of birth (YYYY-MM-DD)"),
-    FieldSpec(RegisterField.AGE, "Age (if DOB unknown)"),
-    FieldSpec(RegisterField.MOBILE_NUMBER, "Mobile number"),
+    FieldSpec(RegisterField.AGE, "Age (if DOB unknown)", keyboardType = KeyboardType.Number, maxLength = 3),
+    FieldSpec(RegisterField.MOBILE_NUMBER, "Mobile number", keyboardType = KeyboardType.Phone, maxLength = 10),
     FieldSpec(RegisterField.GUARDIAN_OR_SPOUSE_NAME, "Guardian / spouse name"),
-    FieldSpec(RegisterField.EMERGENCY_CONTACT, "Emergency contact"),
+    FieldSpec(RegisterField.EMERGENCY_CONTACT, "Emergency contact", keyboardType = KeyboardType.Phone, maxLength = 10),
 )
 
 private val ADDRESS_FIELDS = listOf(
     FieldSpec(RegisterField.VILLAGE, "Village"),
     FieldSpec(RegisterField.BLOCK, "Block"),
     FieldSpec(RegisterField.DISTRICT, "District"),
-    FieldSpec(RegisterField.PINCODE, "Pincode"),
+    FieldSpec(RegisterField.PINCODE, "Pincode", keyboardType = KeyboardType.Number, maxLength = 6),
 )
 
 private val OTHER_FIELDS = listOf(
-    FieldSpec(RegisterField.AADHAAR_NUMBER, "Aadhaar number"),
-    FieldSpec(RegisterField.ABHA_NUMBER, "ABHA number"),
+    FieldSpec(RegisterField.AADHAAR_NUMBER, "Aadhaar number", keyboardType = KeyboardType.Number, maxLength = 12),
+    FieldSpec(RegisterField.ABHA_NUMBER, "ABHA number", keyboardType = KeyboardType.Number, maxLength = 14),
     FieldSpec(RegisterField.PRIMARY_CARE_CLINIC_NAME, "Primary care clinic"),
     FieldSpec(RegisterField.REFERRING_PHYSICIAN_NAME, "Referring physician"),
 )
@@ -96,7 +118,14 @@ internal fun RegisterContent(uiState: RegisterUiState, actions: RegisterActions)
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item { SectionLabel("Core details") }
-            items(CORE_FIELDS) { spec -> FieldRow(spec, uiState, actions) }
+            item { FieldRow(CORE_FIELDS[0], uiState, actions) }
+            item {
+                DateOfBirthField(
+                    value = uiState.fields[RegisterField.DATE_OF_BIRTH].orEmpty(),
+                    onValueChange = { actions.onFieldChange(RegisterField.DATE_OF_BIRTH, it) },
+                )
+            }
+            items(CORE_FIELDS.drop(1)) { spec -> FieldRow(spec, uiState, actions) }
             item { BiologicalSexRow(uiState.biologicalSex, actions::onBiologicalSexChange) }
 
             item { HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp)) }
@@ -165,11 +194,64 @@ private fun SectionLabel(text: String) {
 private fun FieldRow(spec: FieldSpec, uiState: RegisterUiState, actions: RegisterActions) {
     OutlinedTextField(
         value = uiState.fields[spec.field].orEmpty(),
-        onValueChange = { actions.onFieldChange(spec.field, it) },
+        onValueChange = { raw ->
+            val filtered = when (spec.keyboardType) {
+                KeyboardType.Number, KeyboardType.Phone -> filterDigitsOnly(raw, spec.maxLength)
+                else -> raw
+            }
+            actions.onFieldChange(spec.field, filtered)
+        },
         label = { Text(spec.label + if (spec.required) " *" else "") },
+        isError = uiState.fieldError(spec.field) != null,
+        supportingText = uiState.fieldError(spec.field)?.let { { Text(it) } },
         modifier = Modifier.fillMaxWidth(),
         singleLine = true,
+        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = spec.keyboardType),
     )
+}
+
+@Composable
+private fun DateOfBirthField(value: String, onValueChange: (String) -> Unit) {
+    var showPicker by rememberSaveable { mutableStateOf(false) }
+    val displayDate = value.takeIf { it.isNotBlank() }?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+
+    OutlinedTextField(
+        value = displayDate?.toString().orEmpty(),
+        onValueChange = {},
+        readOnly = true,
+        enabled = false,
+        label = { Text("Date of birth") },
+        trailingIcon = { Icon(Icons.Filled.DateRange, contentDescription = "Pick date of birth") },
+        colors = OutlinedTextFieldDefaults.colors(
+            disabledTextColor = MaterialTheme.colorScheme.onSurface,
+            disabledBorderColor = MaterialTheme.colorScheme.outline,
+            disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            disabledTrailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        ),
+        modifier = Modifier.fillMaxWidth().clickable { showPicker = true },
+    )
+
+    if (showPicker) {
+        val datePickerState = androidx.compose.material3.rememberDatePickerState(
+            initialSelectedDateMillis = (displayDate ?: LocalDate.now())
+                .atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
+        )
+        DatePickerDialog(
+            onDismissRequest = { showPicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let { millis ->
+                        val picked = Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate()
+                        onValueChange(picked.toString())
+                    }
+                    showPicker = false
+                }) { Text("OK") }
+            },
+            dismissButton = { TextButton(onClick = { showPicker = false }) { Text("Cancel") } },
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
 }
 
 @Composable

@@ -3,9 +3,9 @@ package com.example.samdapp.presentation.patientsummary
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -15,6 +15,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -36,6 +37,7 @@ fun PatientSummaryScreen(
         Column(
             modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
             verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             if (uiState.isLoading || uiState.patient == null) {
                 CircularProgressIndicator()
@@ -67,9 +69,10 @@ fun PatientSummaryScreen(
 
             Button(
                 onClick = { onStartConsultation(patientId) },
-                modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(top = 32.dp),
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier.fillMaxWidth(0.6f).aspectRatio(1f).padding(top = 32.dp),
             ) {
-                Text("Start consultation", style = MaterialTheme.typography.titleMedium)
+                Text("Consultation", style = MaterialTheme.typography.titleMedium)
             }
         }
     }

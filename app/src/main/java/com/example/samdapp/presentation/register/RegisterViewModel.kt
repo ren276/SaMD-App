@@ -23,19 +23,42 @@ enum class RegisterField {
     PRIMARY_CARE_CLINIC_NAME, REFERRING_PHYSICIAN_NAME,
 }
 
+/** Fields where the DB expects a fixed-length, digits-only value — enforced here so a
+ * malformed mobile/pincode/Aadhaar/ABHA number can never reach Room (and later, the cloud). */
+private val DIGIT_LENGTH_RULES: Map<RegisterField, Int> = mapOf(
+    RegisterField.MOBILE_NUMBER to 10,
+    RegisterField.EMERGENCY_CONTACT to 10,
+    RegisterField.PINCODE to 6,
+    RegisterField.AADHAAR_NUMBER to 12,
+    RegisterField.ABHA_NUMBER to 14,
+)
+
 data class RegisterUiState(
     val fields: Map<RegisterField, String> = emptyMap(),
     val biologicalSex: String = "Female",
     val isSubmitting: Boolean = false,
     val errorMessage: String? = null,
 ) {
+    fun fieldError(field: RegisterField): String? {
+        val expectedLength = DIGIT_LENGTH_RULES[field] ?: return null
+        val value = fields[field].orEmpty()
+        if (value.isBlank()) return null
+        if (value.length != expectedLength || !value.all(Char::isDigit)) {
+            return "Must be $expectedLength digits"
+        }
+        return null
+    }
+
+    private val hasValidationErrors: Boolean
+        get() = RegisterField.entries.any { fieldError(it) != null }
+
     val canSubmit: Boolean
         get() {
             val fullName = fields[RegisterField.FULL_NAME].orEmpty()
             val hasContact = fields[RegisterField.MOBILE_NUMBER].orEmpty().isNotBlank() ||
                 fields[RegisterField.VILLAGE].orEmpty().isNotBlank() ||
                 fields[RegisterField.DISTRICT].orEmpty().isNotBlank()
-            return fullName.isNotBlank() && hasContact && !isSubmitting
+            return fullName.isNotBlank() && hasContact && !isSubmitting && !hasValidationErrors
         }
 }
 

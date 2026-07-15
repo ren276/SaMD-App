@@ -1,14 +1,16 @@
 package com.example.samdapp.presentation.common
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -25,7 +27,8 @@ import java.time.format.DateTimeFormatter
  * online/offline status/toggle, so the compounder always knows which mode the app is in. */
 @Composable
 fun GlobalStatusBar(isOnline: Boolean, onToggleOnline: () -> Unit, modifier: Modifier = Modifier) {
-    val formatter = remember { DateTimeFormatter.ofPattern("EEE, d MMM yyyy  HH:mm:ss") }
+    val dateFormatter = remember { DateTimeFormatter.ofPattern("EEE, d MMM yyyy") }
+    val timeFormatter = remember { DateTimeFormatter.ofPattern("hh:mm:ss a") }
     val now by produceState(initialValue = LocalDateTime.now()) {
         while (true) {
             value = LocalDateTime.now()
@@ -33,21 +36,39 @@ fun GlobalStatusBar(isOnline: Boolean, onToggleOnline: () -> Unit, modifier: Mod
         }
     }
 
-    Surface(color = MaterialTheme.colorScheme.surfaceVariant, modifier = modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(text = now.format(formatter), style = MaterialTheme.typography.labelLarge)
-            FilterChip(
-                selected = isOnline,
-                onClick = onToggleOnline,
-                label = {
-                    Text(if (isOnline) "Online" else "Offline", style = MaterialTheme.typography.labelLarge)
-                },
-                modifier = Modifier.heightIn(min = 40.dp),
-            )
+    Surface(color = MaterialTheme.colorScheme.surface, modifier = modifier.fillMaxWidth()) {
+        Column {
+            Row(
+                modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column {
+                    Text(
+                        text = now.format(dateFormatter),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = now.format(timeFormatter),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = if (isOnline) "Online" else "Offline",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (isOnline) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Switch(
+                        checked = isOnline,
+                        onCheckedChange = { onToggleOnline() },
+                        colors = SwitchDefaults.colors(),
+                    )
+                }
+            }
+            HorizontalDivider()
         }
     }
 }
