@@ -2,6 +2,8 @@ package com.example.samdapp.presentation.transcription
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.samdapp.domain.audit.AuditLogger
+import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.usecase.TranscribeAudioUseCase
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
@@ -24,6 +26,7 @@ class TranscriptionViewModel @AssistedInject constructor(
     @Assisted("consultationId") private val consultationId: String,
     @Assisted("audioUri") private val audioUri: String,
     private val transcribeAudioUseCase: TranscribeAudioUseCase,
+    private val auditLogger: AuditLogger,
 ) : ViewModel() {
 
     @AssistedFactory
@@ -40,7 +43,13 @@ class TranscriptionViewModel @AssistedInject constructor(
     init {
         viewModelScope.launch {
             transcribeAudioUseCase(consultationId, audioUri).fold(
-                onSuccess = { text -> _uiState.update { it.copy(isLoading = false, transcription = text) } },
+                onSuccess = { text ->
+                    _uiState.update { it.copy(isLoading = false, transcription = text) }
+                    auditLogger.log(
+                        action = "transcription_completed",
+                        payload = auditPayload("consultationId" to consultationId, "audioUri" to audioUri),
+                    )
+                },
                 onFailure = { error ->
                     _uiState.update { it.copy(isLoading = false, errorMessage = error.message ?: "Transcription failed") }
                 },
