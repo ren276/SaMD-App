@@ -3,6 +3,8 @@ package com.example.samdapp.presentation.medicalbackground
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.samdapp.domain.audit.AuditLogger
+import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.model.Allergy
 import com.example.samdapp.domain.model.AllergyCategory
 import com.example.samdapp.domain.model.FamilyHistoryEntry
@@ -61,6 +63,7 @@ class MedicalBackgroundViewModel @AssistedInject constructor(
     private val addAllergyUseCase: AddAllergyUseCase,
     private val addFamilyHistoryEntryUseCase: AddFamilyHistoryEntryUseCase,
     private val saveSocialHistoryUseCase: SaveSocialHistoryUseCase,
+    private val auditLogger: AuditLogger,
 ) : ViewModel(), MedicalBackgroundActions {
 
     @AssistedFactory
@@ -86,19 +89,51 @@ class MedicalBackgroundViewModel @AssistedInject constructor(
     }
 
     override fun onAddMedicalHistoryItem(category: MedicalHistoryCategory, description: String, yearOrDate: String?) {
-        viewModelScope.launch { addMedicalHistoryItemUseCase(patientId, category, description, yearOrDate) }
+        viewModelScope.launch {
+            addMedicalHistoryItemUseCase(patientId, category, description, yearOrDate).onSuccess {
+                auditLogger.log(
+                    action = "medical_history_item_added",
+                    patientId = patientId,
+                    payload = auditPayload("category" to category.name, "description" to description),
+                )
+            }
+        }
     }
 
     override fun onAddMedication(kind: MedicationKind, name: String, dosage: String?, frequency: String?) {
-        viewModelScope.launch { addMedicationUseCase(patientId, encounterId = null, kind, name, dosage, frequency) }
+        viewModelScope.launch {
+            addMedicationUseCase(patientId, encounterId = null, kind, name, dosage, frequency).onSuccess {
+                auditLogger.log(
+                    action = "medication_added",
+                    patientId = patientId,
+                    payload = auditPayload("kind" to kind.name, "name" to name, "dosage" to dosage),
+                )
+            }
+        }
     }
 
     override fun onAddAllergy(category: AllergyCategory, allergen: String, reactionType: String?) {
-        viewModelScope.launch { addAllergyUseCase(patientId, category, allergen, reactionType) }
+        viewModelScope.launch {
+            addAllergyUseCase(patientId, category, allergen, reactionType).onSuccess {
+                auditLogger.log(
+                    action = "allergy_added",
+                    patientId = patientId,
+                    payload = auditPayload("category" to category.name, "allergen" to allergen),
+                )
+            }
+        }
     }
 
     override fun onAddFamilyHistoryEntry(condition: String, relation: String?) {
-        viewModelScope.launch { addFamilyHistoryEntryUseCase(patientId, condition, relation) }
+        viewModelScope.launch {
+            addFamilyHistoryEntryUseCase(patientId, condition, relation).onSuccess {
+                auditLogger.log(
+                    action = "family_history_added",
+                    patientId = patientId,
+                    payload = auditPayload("condition" to condition, "relation" to relation),
+                )
+            }
+        }
     }
 
     override fun onSaveSocialHistory(
@@ -112,7 +147,13 @@ class MedicalBackgroundViewModel @AssistedInject constructor(
         viewModelScope.launch {
             saveSocialHistoryUseCase(
                 patientId, occupation, tobaccoUse, alcoholUse, recreationalDrugUse, environmentalExposure, recentTravel,
-            )
+            ).onSuccess {
+                auditLogger.log(
+                    action = "social_history_saved",
+                    patientId = patientId,
+                    payload = auditPayload("occupation" to occupation, "tobaccoUse" to tobaccoUse),
+                )
+            }
         }
     }
 }
