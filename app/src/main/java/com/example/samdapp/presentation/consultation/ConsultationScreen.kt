@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -25,6 +26,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -77,6 +79,18 @@ private val DURATION_BUCKETS = listOf("today", "few_days", "week_plus", "chronic
 private fun ConsultationContent(uiState: ConsultationUiState, actions: ConsultationActions) {
     val context = LocalContext.current
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
+    var showReview by remember { mutableStateOf(false) }
+
+    if (showReview) {
+        ConsultationReviewDialog(
+            uiState = uiState,
+            onConfirm = {
+                showReview = false
+                actions.onSend()
+            },
+            onDismiss = { showReview = false },
+        )
+    }
 
     val pickVisualMediaLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
@@ -189,14 +203,55 @@ private fun ConsultationContent(uiState: ConsultationUiState, actions: Consultat
 
             item {
                 Button(
-                    onClick = actions::onSend,
+                    onClick = { showReview = true },
                     enabled = uiState.canSend,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(top = 8.dp),
                 ) {
-                    Text(if (uiState.isSaving) "Sending…" else "Send", style = MaterialTheme.typography.titleMedium)
+                    Text(if (uiState.isSaving) "Sending…" else "Review & send", style = MaterialTheme.typography.titleMedium)
                 }
             }
         }
+    }
+}
+
+/** Deliberate confirmation gate before a consultation is committed and handed off — the
+ * worker re-reads a summary rather than submitting on a single hurried tap (ISO 14971
+ * human-in-the-loop). */
+@Composable
+private fun ConsultationReviewDialog(
+    uiState: ConsultationUiState,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Review before sending") },
+        text = {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                item { ReviewLine("Chief complaint", uiState.chiefComplaint) }
+                item { ReviewLine("Symptom onset", uiState.onset) }
+                item { ReviewLine("Duration", uiState.durationBucket?.replace('_', ' ')) }
+                item { ReviewLine("Severity", "${uiState.severityScore} / 10") }
+                item { ReviewLine("Aggravating factors", uiState.aggravatingFactors) }
+                item { ReviewLine("Relieving factors", uiState.relievingFactors) }
+                item { ReviewLine("Impact on daily activities", uiState.impactOnDailyActivities) }
+                item { ReviewLine("Other relevant history", uiState.relevantHistory) }
+                item { ReviewLine("Attachments", uiState.pendingAttachments.size.toString()) }
+            }
+        },
+        confirmButton = { Button(onClick = onConfirm) { Text("Confirm & send") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Keep editing") } },
+    )
+}
+
+@Composable
+private fun ReviewLine(label: String, value: String?) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("$label:", style = MaterialTheme.typography.labelLarge)
+        Text(
+            text = value?.takeIf { it.isNotBlank() } ?: "—",
+            style = MaterialTheme.typography.bodyMedium,
+        )
     }
 }
 
