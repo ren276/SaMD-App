@@ -93,7 +93,7 @@ private fun HomeContent(
 
             Button(
                 onClick = onRegisterNewPatient,
-                shape = MaterialTheme.shapes.medium,
+                shape = MaterialTheme.shapes.large,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(vertical = 16.dp),
             ) {
                 Text(text = "Register new patient", style = MaterialTheme.typography.titleMedium)

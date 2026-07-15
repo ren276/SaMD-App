@@ -13,14 +13,4 @@
 .externalNativeBuild
 .cxx
 local.properties
-.claude/
-.agents/
-skills-lock.json
-agent_docs/
-CLAUDE.md
-**/CLAUDE.md
-.cursor/
-.cursorrules
-AGENTS.md
-**/AGENTS.md
 
