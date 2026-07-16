@@ -55,6 +55,27 @@ CDSCO aligns with the **IMDRF SaMD** framework. Production requires a **manufact
 license** (Class A/B via State Licensing Authority; C/D via CDSCO Central), an **ISO 13485**
 QMS, and conformity to the **Essential Principles** of safety & performance.
 
+**Live framework — CDSCO draft Medical Device Software guidance (October 2025):** supersedes the
+older MD-5/MD-9 shorthand. SaMD is classified A–D by (1) the significance of the information the
+software provides and (2) the severity of the healthcare situation. Class C/D get Central Licensing
+Authority review; A/B go through State Licensing Authorities, with Class A non-measuring/non-sterile
+software exempt from full licensing (self-registration via **SUGAM**). **Classification argument
+for this product:** a human-in-the-loop clinical decision-support tool — the doctor reviews and can
+**Agree / Modify / Reject** the AI output (Phase 5), never autonomous — plausibly targets **Class B
+or C rather than D**, precisely because of the mandatory physician-verification step. The liability
+checkbox and "Doctor Validation" flow are doing real classification work, not just UX; worth stating
+explicitly in investor conversations and in the report's legal footer.
+
+### 2.3a EU MDR — Rule 11 (for CE-marking / export framing)
+Under **EU MDR Annex VIII Rule 11**, software intended to provide information used to take
+diagnostic or therapeutic decisions is **Class IIa** at minimum, rising to **IIb** if it could
+*drive* (not merely *inform*) decisions in a serious condition without full clinical context. The
+report's legal language is kept consistent with **IIa** framing — *"AI-Assisted, Physician-Verified,
+not a final diagnosis until physician approval"* — since that phrasing is itself part of what keeps
+the product at IIa rather than IIb in a classification rationale. This is the exact
+`ReportFormatter.DISCLAIMER` / `CONSENT_STATEMENT` wording rendered in the Phase 3.5 report footer
+(`presentation/report/ReportCanvasRenderer`).
+
 ### 2.4 DPDP Act 2023 — data protection
 Patient health data is sensitive personal data. Obligations: lawful **consent**, **purpose
 limitation**, **data minimisation**, security safeguards, breach reporting, and **data

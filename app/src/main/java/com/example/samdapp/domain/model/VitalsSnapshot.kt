@@ -35,6 +35,7 @@ data class VitalsSnapshot(
     val urinalysisResult: String? = null,
     val deviceId: String? = null,
     val source: ObservationSource = ObservationSource.MANUAL,
+    val captureMethod: VitalsCaptureMethod? = null,
     val recordedAt: Instant,
 ) {
     val bmi: Double?

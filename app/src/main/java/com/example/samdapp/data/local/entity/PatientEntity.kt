@@ -13,6 +13,7 @@ data class PatientEntity(
     val age: Int?,
     val biologicalSex: String,
     val guardianOrSpouseName: String?,
+    val guardianRelation: String?,
     val mobileNumber: String?,
     val aadhaarNumber: String?,
     val abhaNumber: String?,

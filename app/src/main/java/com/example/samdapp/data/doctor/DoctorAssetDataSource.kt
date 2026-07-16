@@ -15,6 +15,7 @@ private data class DoctorDto(
     val specialty: String,
     val available: Boolean,
     val facilityName: String? = null,
+    val registrationNumber: String? = null,
 )
 
 /** Static/mock reference data for this phase, per the brief — loaded once from the bundled asset,
@@ -30,7 +31,7 @@ class DoctorAssetDataSource @Inject constructor(
         cached?.let { return it }
         val raw = context.assets.open("doctors.json").bufferedReader().use { it.readText() }
         val doctors = json.decodeFromString<List<DoctorDto>>(raw).map {
-            Doctor(id = it.id, name = it.name, specialty = it.specialty, available = it.available, facilityName = it.facilityName)
+            Doctor(id = it.id, name = it.name, specialty = it.specialty, available = it.available, facilityName = it.facilityName, registrationNumber = it.registrationNumber)
         }
         cached = doctors
         return doctors

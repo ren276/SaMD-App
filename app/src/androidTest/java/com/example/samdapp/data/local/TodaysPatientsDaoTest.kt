@@ -34,7 +34,7 @@ class TodaysPatientsDaoTest {
 
     private fun patient(id: String) = PatientEntity(
         id = id, fullName = "P-$id", dateOfBirth = null, age = 30, biologicalSex = "Female",
-        guardianOrSpouseName = null, mobileNumber = null, aadhaarNumber = null, abhaNumber = null,
+        guardianOrSpouseName = null, guardianRelation = null, mobileNumber = null, aadhaarNumber = null, abhaNumber = null,
         village = null, block = null, district = null, state = null, pincode = null, category = null,
         maritalStatus = null, bloodGroup = null, emergencyContact = null, primaryCareClinicName = null,
         referringPhysicianName = null, createdAt = Instant.EPOCH, updatedAt = Instant.EPOCH,

@@ -22,12 +22,3 @@ data class ConsultationEntity(
     val createdAt: Instant,
     val updatedAt: Instant,
 )
-
-@Entity(tableName = "symptoms", indices = [Index("encounterId"), Index("patientId")])
-data class SymptomEntity(
-    @PrimaryKey val id: String,
-    val encounterId: String,
-    val patientId: String,
-    val description: String,
-    val createdAt: Instant,
-)

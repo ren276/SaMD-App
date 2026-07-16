@@ -51,11 +51,15 @@ import java.time.ZoneOffset
 
 @Composable
 fun RegisterScreen(
+    abhaId: String? = null,
     onRegistered: (patientId: String) -> Unit,
     viewModel: RegisterViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(abhaId) {
+        abhaId?.let(viewModel::loadAbhaProfile)
+    }
     LaunchedEffect(Unit) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             viewModel.effects.collect { effect ->
@@ -123,10 +127,17 @@ internal fun RegisterContent(uiState: RegisterUiState, actions: RegisterActions)
                 DateOfBirthField(
                     value = uiState.fields[RegisterField.DATE_OF_BIRTH].orEmpty(),
                     onValueChange = { actions.onFieldChange(RegisterField.DATE_OF_BIRTH, it) },
+                    isFromAbha = RegisterField.DATE_OF_BIRTH in uiState.autofilledFields,
                 )
             }
             items(CORE_FIELDS.drop(1)) { spec -> FieldRow(spec, uiState, actions) }
-            item { BiologicalSexRow(uiState.biologicalSex, actions::onBiologicalSexChange) }
+            item {
+                BiologicalSexRow(
+                    selected = uiState.biologicalSex,
+                    isFromAbha = uiState.sexAutofilledFromAbha,
+                    onSelect = actions::onBiologicalSexChange,
+                )
+            }
 
             item { HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp)) }
             item { SectionLabel("Address (phone or address required)") }
@@ -192,6 +203,8 @@ private fun SectionLabel(text: String) {
 
 @Composable
 private fun FieldRow(spec: FieldSpec, uiState: RegisterUiState, actions: RegisterActions) {
+    val error = uiState.fieldError(spec.field)
+    val isFromAbha = spec.field in uiState.autofilledFields
     OutlinedTextField(
         value = uiState.fields[spec.field].orEmpty(),
         onValueChange = { raw ->
@@ -202,8 +215,13 @@ private fun FieldRow(spec: FieldSpec, uiState: RegisterUiState, actions: Registe
             actions.onFieldChange(spec.field, filtered)
         },
         label = { Text(spec.label + if (spec.required) " *" else "") },
-        isError = uiState.fieldError(spec.field) != null,
-        supportingText = uiState.fieldError(spec.field)?.let { { Text(it) } },
+        isError = error != null,
+        supportingText = {
+            when {
+                error != null -> Text(error)
+                isFromAbha -> Text("From ABHA", color = MaterialTheme.colorScheme.primary)
+            }
+        },
         modifier = Modifier.fillMaxWidth(),
         singleLine = true,
         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = spec.keyboardType),
@@ -211,7 +229,7 @@ private fun FieldRow(spec: FieldSpec, uiState: RegisterUiState, actions: Registe
 }
 
 @Composable
-private fun DateOfBirthField(value: String, onValueChange: (String) -> Unit) {
+private fun DateOfBirthField(value: String, onValueChange: (String) -> Unit, isFromAbha: Boolean = false) {
     var showPicker by rememberSaveable { mutableStateOf(false) }
     val displayDate = value.takeIf { it.isNotBlank() }?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
 
@@ -222,6 +240,7 @@ private fun DateOfBirthField(value: String, onValueChange: (String) -> Unit) {
         enabled = false,
         label = { Text("Date of birth") },
         trailingIcon = { Icon(Icons.Filled.DateRange, contentDescription = "Pick date of birth") },
+        supportingText = if (isFromAbha) { { Text("From ABHA", color = MaterialTheme.colorScheme.primary) } } else null,
         colors = OutlinedTextFieldDefaults.colors(
             disabledTextColor = MaterialTheme.colorScheme.onSurface,
             disabledBorderColor = MaterialTheme.colorScheme.outline,
@@ -255,9 +274,13 @@ private fun DateOfBirthField(value: String, onValueChange: (String) -> Unit) {
 }
 
 @Composable
-private fun BiologicalSexRow(selected: String, onSelect: (String) -> Unit) {
+private fun BiologicalSexRow(selected: String, onSelect: (String) -> Unit, isFromAbha: Boolean = false) {
     Column {
-        Text(text = "Biological sex", style = MaterialTheme.typography.labelLarge)
+        Text(
+            text = "Biological sex" + if (isFromAbha) " (from ABHA)" else "",
+            style = MaterialTheme.typography.labelLarge,
+            color = if (isFromAbha) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+        )
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.padding(top = 4.dp),

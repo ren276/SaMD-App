@@ -15,3 +15,109 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
         connection.execSQL("CREATE INDEX IF NOT EXISTS `index_audit_log_caseRecordId` ON `audit_log` (`caseRecordId`)")
     }
 }
+
+/**
+ * Phase 0 overhaul schema. Additive only: extends `patients`/`observations` with new nullable
+ * columns and creates six new tables (ABHA profile, ailments, prescriptions + medication lines,
+ * kernel reports, referrals). No data is dropped or rewritten, so existing rows survive intact.
+ */
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(connection: SQLiteConnection) {
+        // --- Extend existing tables (Phase 0 + pulled-forward Phase 2.5 schema) ---
+        connection.execSQL("ALTER TABLE `patients` ADD COLUMN `guardianRelation` TEXT")
+        connection.execSQL("ALTER TABLE `observations` ADD COLUMN `captureMethod` TEXT")
+        connection.execSQL("ALTER TABLE `observations` ADD COLUMN `syncedToCloudAt` INTEGER")
+
+        // --- abha_profiles ---
+        connection.execSQL(
+            "CREATE TABLE IF NOT EXISTS `abha_profiles` (`abhaId` TEXT NOT NULL, `abhaAddress` TEXT, " +
+                "`name` TEXT NOT NULL, `dateOfBirth` TEXT, `gender` TEXT NOT NULL, `address` TEXT, " +
+                "`district` TEXT, `state` TEXT, `pincode` TEXT, `mobileNumber` TEXT, `emailAddress` TEXT, " +
+                "`photoUrlMock` TEXT, `kycVerified` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`abhaId`))",
+        )
+
+        // --- ailments ---
+        connection.execSQL(
+            "CREATE TABLE IF NOT EXISTS `ailments` (`id` TEXT NOT NULL, `patientId` TEXT NOT NULL, " +
+                "`encounterId` TEXT NOT NULL, `description` TEXT NOT NULL, `measurementType` TEXT NOT NULL, " +
+                "`visibility` TEXT NOT NULL, `measuredValue` REAL, `measuredUnit` TEXT, `severity` INTEGER, " +
+                "`onset` TEXT, `duration` TEXT, `qualifiers` TEXT, `audioLocalUri` TEXT, " +
+                "`capturedAtOffline` INTEGER NOT NULL, `syncedToCloudAt` INTEGER, `deletedAt` INTEGER, " +
+                "`createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        )
+        connection.execSQL("CREATE INDEX IF NOT EXISTS `index_ailments_patientId` ON `ailments` (`patientId`)")
+        connection.execSQL("CREATE INDEX IF NOT EXISTS `index_ailments_encounterId` ON `ailments` (`encounterId`)")
+
+        // --- prescriptions ---
+        connection.execSQL(
+            "CREATE TABLE IF NOT EXISTS `prescriptions` (`id` TEXT NOT NULL, `patientId` TEXT NOT NULL, " +
+                "`encounterId` TEXT NOT NULL, `caseRecordId` TEXT NOT NULL, `doctorId` TEXT NOT NULL, " +
+                "`diagnosis` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        )
+        connection.execSQL("CREATE INDEX IF NOT EXISTS `index_prescriptions_caseRecordId` ON `prescriptions` (`caseRecordId`)")
+        connection.execSQL("CREATE INDEX IF NOT EXISTS `index_prescriptions_patientId` ON `prescriptions` (`patientId`)")
+
+        // --- medication_lines (child of prescriptions) ---
+        connection.execSQL(
+            "CREATE TABLE IF NOT EXISTS `medication_lines` (`id` TEXT NOT NULL, `prescriptionId` TEXT NOT NULL, " +
+                "`position` INTEGER NOT NULL, `genericName` TEXT NOT NULL, `brandName` TEXT, " +
+                "`strength` TEXT NOT NULL, `dosage` TEXT NOT NULL, `frequency` TEXT NOT NULL, " +
+                "`route` TEXT NOT NULL, `duration` TEXT NOT NULL, `quantity` TEXT NOT NULL, " +
+                "`foodRelation` TEXT, `instructions` TEXT, PRIMARY KEY(`id`))",
+        )
+        connection.execSQL("CREATE INDEX IF NOT EXISTS `index_medication_lines_prescriptionId` ON `medication_lines` (`prescriptionId`)")
+
+        // --- kernel_reports ---
+        connection.execSQL(
+            "CREATE TABLE IF NOT EXISTS `kernel_reports` (`id` TEXT NOT NULL, `caseRecordId` TEXT NOT NULL, " +
+                "`predictedCondition` TEXT NOT NULL, `confidenceScore` REAL NOT NULL, `differentials` TEXT NOT NULL, " +
+                "`reasoningSummary` TEXT NOT NULL, `evidenceFor` TEXT NOT NULL, `evidenceAgainst` TEXT NOT NULL, " +
+                "`modelVersion` TEXT NOT NULL, `inferenceTimestamp` INTEGER NOT NULL, " +
+                "`requiredHumanVerification` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        )
+        connection.execSQL("CREATE INDEX IF NOT EXISTS `index_kernel_reports_caseRecordId` ON `kernel_reports` (`caseRecordId`)")
+
+        // --- referrals ---
+        connection.execSQL(
+            "CREATE TABLE IF NOT EXISTS `referrals` (`id` TEXT NOT NULL, `patientUid` TEXT NOT NULL, " +
+                "`caseRecordId` TEXT NOT NULL, `urgencyLevel` TEXT NOT NULL, `reason` TEXT NOT NULL, " +
+                "`sendingPhcId` TEXT NOT NULL, `status` TEXT NOT NULL, `timestamp` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`id`))",
+        )
+        connection.execSQL("CREATE INDEX IF NOT EXISTS `index_referrals_patientUid` ON `referrals` (`patientUid`)")
+        connection.execSQL("CREATE INDEX IF NOT EXISTS `index_referrals_caseRecordId` ON `referrals` (`caseRecordId`)")
+    }
+}
+
+/**
+ * Phase 2 "Complaints" → "Ailments" rename (REQ-AIL-01/02/03). Copies every `symptoms` row into
+ * `ailments` — `measurementType = NON_MEASURABLE`, `visibility = PUBLIC` (a pre-existing symptom
+ * predates the private/public feature, so it can't have been anything but publicly visible), and
+ * `capturedAtOffline = createdAt` (the two dual timestamps start equal only for this one-time
+ * backfill of historical rows — new rows populate them independently, see [AilmentEntity][com.example.samdapp.data.local.entity.AilmentEntity]).
+ * Then drops `symptoms` — nothing in the app reads that table after this migration.
+ */
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL(
+            "INSERT INTO `ailments` (`id`, `patientId`, `encounterId`, `description`, `measurementType`, " +
+                "`visibility`, `measuredValue`, `measuredUnit`, `severity`, `onset`, `duration`, `qualifiers`, " +
+                "`audioLocalUri`, `capturedAtOffline`, `syncedToCloudAt`, `deletedAt`, `createdAt`) " +
+                "SELECT `id`, `patientId`, `encounterId`, `description`, 'NON_MEASURABLE', 'PUBLIC', " +
+                "NULL, NULL, NULL, NULL, NULL, NULL, NULL, `createdAt`, NULL, NULL, `createdAt` FROM `symptoms`",
+        )
+        connection.execSQL("DROP TABLE `symptoms`")
+    }
+}
+
+/**
+ * Phase 5 doctor-intake foundation: adds `prescriptions.kernelDecision` (REQ-RX-03 — the doctor's
+ * Agree/Modify/Reject on the kernel differential, reported back via the out-of-app doctor channel).
+ * Additive only — existing prescription rows get `NULL`.
+ */
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL("ALTER TABLE `prescriptions` ADD COLUMN `kernelDecision` TEXT")
+    }
+}

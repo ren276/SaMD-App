@@ -38,8 +38,15 @@ class CaseRecordRepositoryImpl @Inject constructor(
         caseRecordDao.assignDoctor(caseRecordId, doctorId, CaseStatus.SENT_TO_DOCTOR, Instant.now())
     }
 
+    override suspend fun markPrescriptionReceived(caseRecordId: String): Result<Unit> = asDataResult {
+        caseRecordDao.updateStatus(caseRecordId, CaseStatus.PRESCRIPTION_RECEIVED, Instant.now())
+    }
+
     override fun observeCaseRecord(caseRecordId: String): Flow<CaseRecord?> =
         caseRecordDao.observeById(caseRecordId).map { it?.toDomain() }
+
+    override fun observeLatestForPatient(patientId: String): Flow<CaseRecord?> =
+        caseRecordDao.observeLatestForPatient(patientId).map { it?.toDomain() }
 }
 
 private fun CaseRecord.toEntity() = CaseRecordEntity(

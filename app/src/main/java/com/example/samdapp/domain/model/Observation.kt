@@ -19,6 +19,12 @@ enum class ObservationType(val defaultUnit: String?) {
 
 enum class ObservationSource { MANUAL, DEVICE }
 
+/** How a vitals snapshot was captured — a data-quality signal for the kernel and regulatory
+ *  review (REQ-TRS-05). One value per [com.example.samdapp.domain.model.VitalsSnapshot], applied
+ *  to every [Observation] row it fans into — mirrors [ObservationSource]'s existing per-snapshot
+ *  (not per-vital-type) granularity, so this doesn't fragment into eight separate pickers. */
+enum class VitalsCaptureMethod { MANUAL_CUFF, DIGITAL_MONITOR, PULSE_OXIMETER, THERMOMETER, OTHER }
+
 data class Observation(
     val id: String,
     val patientId: String,
@@ -29,6 +35,10 @@ data class Observation(
     val unit: String?,
     val deviceId: String?,
     val source: ObservationSource,
+    val captureMethod: VitalsCaptureMethod? = null,
     val recordedAt: Instant,
+    /** Offline-first dual timestamp: [recordedAt]/[createdAt] are the on-device capture time;
+     *  this stays null until a (future, real) sync writes the reading upstream. */
+    val syncedToCloudAt: Instant? = null,
     val createdAt: Instant,
 )

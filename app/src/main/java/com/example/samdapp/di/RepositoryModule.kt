@@ -3,7 +3,12 @@ package com.example.samdapp.di
 import com.example.samdapp.data.local.audit.RoomAuditLogger
 import com.example.samdapp.data.local.auth.MockAuthSession
 import com.example.samdapp.data.sync.MockSyncStatus
+import com.example.samdapp.data.repository.AbhaProfileRepositoryImpl
+import com.example.samdapp.data.repository.AilmentRepositoryImpl
 import com.example.samdapp.data.repository.CaseRecordRepositoryImpl
+import com.example.samdapp.data.repository.KernelReportRepositoryImpl
+import com.example.samdapp.data.repository.PrescriptionRepositoryImpl
+import com.example.samdapp.data.repository.ReferralRepositoryImpl
 import com.example.samdapp.data.repository.ConsultationRepositoryImpl
 import com.example.samdapp.data.repository.DoctorRepositoryImpl
 import com.example.samdapp.data.repository.EncounterRepositoryImpl
@@ -13,7 +18,12 @@ import com.example.samdapp.data.repository.VitalsRepositoryImpl
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.auth.AuthSession
 import com.example.samdapp.domain.sync.SyncStatus
+import com.example.samdapp.domain.repository.AbhaProfileRepository
+import com.example.samdapp.domain.repository.AilmentRepository
 import com.example.samdapp.domain.repository.CaseRecordRepository
+import com.example.samdapp.domain.repository.KernelReportRepository
+import com.example.samdapp.domain.repository.PrescriptionRepository
+import com.example.samdapp.domain.repository.ReferralRepository
 import com.example.samdapp.domain.repository.ConsultationRepository
 import com.example.samdapp.domain.repository.DoctorRepository
 import com.example.samdapp.domain.repository.EncounterRepository
@@ -59,4 +69,19 @@ abstract class RepositoryModule {
 
     @Binds @Singleton
     abstract fun bindAuthSession(impl: MockAuthSession): AuthSession
+
+    @Binds @Singleton
+    abstract fun bindAbhaProfileRepository(impl: AbhaProfileRepositoryImpl): AbhaProfileRepository
+
+    @Binds @Singleton
+    abstract fun bindAilmentRepository(impl: AilmentRepositoryImpl): AilmentRepository
+
+    @Binds @Singleton
+    abstract fun bindPrescriptionRepository(impl: PrescriptionRepositoryImpl): PrescriptionRepository
+
+    @Binds @Singleton
+    abstract fun bindKernelReportRepository(impl: KernelReportRepositoryImpl): KernelReportRepository
+
+    @Binds @Singleton
+    abstract fun bindReferralRepository(impl: ReferralRepositoryImpl): ReferralRepository
 }

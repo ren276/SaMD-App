@@ -4,62 +4,71 @@
     "name": "Dr. Anjali Sharma",
     "specialty": "General Physician",
     "available": true,
-    "facilityName": "Community Health Centre, Bhainsa"
+    "facilityName": "Community Health Centre, Bhainsa",
+    "registrationNumber": "NMC/TS/2011/45231"
   },
   {
     "id": "doc-gen-002",
     "name": "Dr. Rakesh Verma",
     "specialty": "General Physician",
     "available": false,
-    "facilityName": "District Hospital, Sitapur"
+    "facilityName": "District Hospital, Sitapur",
+    "registrationNumber": "NMC/UP/2008/33127"
   },
   {
     "id": "doc-gyn-001",
     "name": "Dr. Priya Nair",
     "specialty": "Gynecology",
     "available": true,
-    "facilityName": "District Hospital, Sitapur"
+    "facilityName": "District Hospital, Sitapur",
+    "registrationNumber": "NMC/KL/2013/58902"
   },
   {
     "id": "doc-ped-001",
     "name": "Dr. Suresh Iyer",
     "specialty": "Pediatrics",
     "available": true,
-    "facilityName": "Community Health Centre, Bhainsa"
+    "facilityName": "Community Health Centre, Bhainsa",
+    "registrationNumber": "NMC/TN/2010/41765"
   },
   {
     "id": "doc-ortho-001",
     "name": "Dr. Manoj Kumar",
     "specialty": "Orthopedics",
     "available": false,
-    "facilityName": "PHC Rampur"
+    "facilityName": "PHC Rampur",
+    "registrationNumber": "NMC/UP/2015/61140"
   },
   {
     "id": "doc-derm-001",
     "name": "Dr. Kavita Desai",
     "specialty": "Dermatology",
     "available": true,
-    "facilityName": "District Hospital, Sitapur"
+    "facilityName": "District Hospital, Sitapur",
+    "registrationNumber": "NMC/MH/2012/50318"
   },
   {
     "id": "doc-psych-001",
     "name": "Dr. Arjun Reddy",
     "specialty": "Psychiatry",
     "available": true,
-    "facilityName": "Community Health Centre, Bhainsa"
+    "facilityName": "Community Health Centre, Bhainsa",
+    "registrationNumber": "NMC/TS/2014/59477"
   },
   {
     "id": "doc-ent-001",
     "name": "Dr. Neha Joshi",
     "specialty": "ENT",
     "available": false,
-    "facilityName": "PHC Rampur"
+    "facilityName": "PHC Rampur",
+    "registrationNumber": "NMC/MH/2009/37652"
   },
   {
     "id": "doc-oph-001",
     "name": "Dr. Vikram Singh",
     "specialty": "Ophthalmology",
     "available": true,
-    "facilityName": "District Hospital, Sitapur"
+    "facilityName": "District Hospital, Sitapur",
+    "registrationNumber": "NMC/UP/2011/46009"
   }
 ]

@@ -1,9 +1,13 @@
 package com.example.samdapp.presentation.patientsummary
 
+import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.samdapp.domain.model.CaseStatus
 import com.example.samdapp.domain.model.Patient
+import com.example.samdapp.domain.repository.CaseRecordRepository
 import com.example.samdapp.domain.repository.PatientRepository
+import com.example.samdapp.domain.usecase.ReceiveDoctorPrescriptionUseCase
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
@@ -11,16 +15,41 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-data class PatientSummaryUiState(val patient: Patient? = null, val isLoading: Boolean = true)
+/**
+ * [caseRecordId]/[caseStatus] back the async doctor-response follow-up (REQ-RX-01/03): the doctor's
+ * own review happens on a separate channel, out of scope here, so this screen is where the PHC
+ * worker checks whether that channel has produced a response yet — same day, same patient, reached
+ * only through the day-scoped roster (no new "all patients" query, REQ-ROS-02 stays intact).
+ */
+data class PatientSummaryUiState(
+    val patient: Patient? = null,
+    val isLoading: Boolean = true,
+    val caseRecordId: String? = null,
+    val encounterId: String? = null,
+    val caseStatus: CaseStatus? = null,
+    val isCheckingForResponse: Boolean = false,
+    val noResponseYet: Boolean = false,
+) {
+    val canCheckForDoctorResponse: Boolean get() = caseStatus == CaseStatus.SENT_TO_DOCTOR && !isCheckingForResponse
+    val canViewReport: Boolean get() = caseRecordId != null
+}
+
+@Stable
+interface PatientSummaryActions {
+    fun onCheckForDoctorResponse()
+}
 
 @HiltViewModel(assistedFactory = PatientSummaryViewModel.Factory::class)
 class PatientSummaryViewModel @AssistedInject constructor(
     @Assisted private val patientId: String,
     private val patientRepository: PatientRepository,
-) : ViewModel() {
+    private val caseRecordRepository: CaseRecordRepository,
+    private val receiveDoctorPrescriptionUseCase: ReceiveDoctorPrescriptionUseCase,
+) : ViewModel(), PatientSummaryActions {
 
     @AssistedFactory
     interface Factory {
@@ -32,9 +61,33 @@ class PatientSummaryViewModel @AssistedInject constructor(
 
     init {
         viewModelScope.launch {
-            patientRepository.observePatient(patientId).collect { patient ->
-                _uiState.update { it.copy(patient = patient, isLoading = false) }
-            }
+            combine(
+                patientRepository.observePatient(patientId),
+                caseRecordRepository.observeLatestForPatient(patientId),
+            ) { patient, caseRecord -> patient to caseRecord }
+                .collect { (patient, caseRecord) ->
+                    _uiState.update {
+                        it.copy(
+                            patient = patient,
+                            isLoading = false,
+                            caseRecordId = caseRecord?.id,
+                            encounterId = caseRecord?.encounterId,
+                            caseStatus = caseRecord?.status,
+                        )
+                    }
+                }
+        }
+    }
+
+    override fun onCheckForDoctorResponse() {
+        val current = _uiState.value
+        val caseRecordId = current.caseRecordId
+        val encounterId = current.encounterId
+        if (caseRecordId == null || encounterId == null || !current.canCheckForDoctorResponse) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isCheckingForResponse = true, noResponseYet = false) }
+            val prescription = receiveDoctorPrescriptionUseCase(caseRecordId, patientId, encounterId).getOrNull()
+            _uiState.update { it.copy(isCheckingForResponse = false, noResponseYet = prescription == null) }
         }
     }
 }

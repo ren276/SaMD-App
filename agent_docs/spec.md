@@ -42,6 +42,56 @@ Mock/static JSON asset. `id`, `name`, `specialty`, `available`, `facilityName?`.
 - `payload: String` — JSON blob of the relevant data at that moment
 - No `UPDATE` or `DELETE` DAO methods on this entity's DAO. Insert-only, enforced at the DAO interface level, not just by convention.
 
+### Overhaul models (added Phase 0 — SaMD demo overhaul)
+
+- `AbhaProfile` — mock ABHA identity, precedes registration. `abhaId` (14-digit `XX-XXXX-XXXX-XXXX`),
+  `abhaAddress?`, `name`, `dateOfBirth?`, `gender`, `address?/district?/state?/pincode?`,
+  `mobileNumber?`, `emailAddress?`, `photoUrlMock?`, `kycVerified`, `createdAt`. Links to `Patient`
+  via `Patient.abhaNumber` (no duplicate id). Autofill map: `docs/requirements/abha-field-mapping.md`.
+- `AilmentEntry` — supersedes free-text Symptom (Phase 2 rename). `id`, `patientId`, `encounterId`,
+  `description`, `measurementType` (MEASURABLE/NON_MEASURABLE), `visibility` (PUBLIC/PRIVATE, default
+  PUBLIC), `measuredValue?/measuredUnit?`, `severity?/onset?/duration?/qualifiers?` (guided capture),
+  `audioLocalUri?` (private, local-only), `capturedAtOffline`, `syncedToCloudAt?`, `deletedAt?`
+  (soft-delete), `createdAt`. PRIVATE hides from worker UI only — kernel gets all entries.
+- `KernelReportOutput` — kernel's assessment (net-new; no prior AiKernelResponse). `id`,
+  `caseRecordId`, `predictedCondition`, `confidenceScore` (0–1), `differentials: List<String>`,
+  `reasoningSummary`, `evidenceFor/evidenceAgainst: List<String>`, `modelVersion`,
+  `inferenceTimestamp`, `requiredHumanVerification` (< 0.90 → true). Distinct from `KernelPayload`
+  (outbound request).
+- `Prescription` + `MedicationLine` — doctor block (Phase 5). Prescription: `id`, `patientId`,
+  `encounterId`, `caseRecordId`, `doctorId`, `diagnosis`, `medications`, `kernelDecision?`,
+  `createdAt`. MedicationLine: `genericName`, `brandName?`, `strength`, `dosage`, `frequency`,
+  `route`, `duration`, `quantity`, `foodRelation?`, `instructions?`. **No OD/BD/SOS** — frequencies
+  spelled out (NMC/EU). Persists as `prescriptions` + child `medication_lines` (ordered by
+  `position`). `KernelDecision` = AGREE/MODIFY/REJECT (doctor's call on the kernel differential).
+  **The doctor's own review/authoring UI is a separate app/channel, out of scope here** — this app
+  only implements the receiving side: `domain/doctor/DoctorPrescriptionInbox` (mock impl
+  `MockDoctorPrescriptionInbox`) → `ReceiveDoctorPrescriptionUseCase` → `PrescriptionRepository`,
+  triggered from `PatientSummaryScreen`'s "Check for doctor's response" action. `CaseStatus` gained
+  `PRESCRIPTION_RECEIVED`.
+- `ReferralRequest` — higher-facility referral (Phase 6). `id`, `patientUid`, `caseRecordId`,
+  `urgencyLevel` (ROUTINE/URGENT/EMERGENCY), `reason`, `sendingPhcId`, `status`
+  (QUEUED/SENT/ACKNOWLEDGED/CANCELLED), `timestamp`. PHC-side only, no receiver.
+
+### Report contract (Phase 3 / 3.5)
+- `ClinicalReport` (domain/report) — one progressively-assembled report object; sub-models
+  `ReportHeader`/`ReportPatientBlock`/`ReportAilmentLine`/`ReportVitalLine`/`ReportMedicationLine`/
+  `ReportSignatureBlock` + `ReportAudience` (WORKER redacts private ailments, PHYSICIAN shows all).
+  Built by `ReportFormatter` (pure) via `AssembleReportUseCase`. Preliminary = kernel/prescription/
+  signature null; final = populated + `isFinal`. Field bindings: `docs/requirements/
+  report-field-mapping.md`.
+- Rendering: `ReportCanvasRenderer` (one `android.graphics.Canvas` layout, A5) → both Compose
+  preview and `ReportPdfExporter` (native `PdfDocument`, no external lib). `Code128` = dependency-
+  free barcode encoder for the Patient-UID header barcode.
+- `Doctor` +`registrationNumber` (mock NMC reg no in `doctors.json`) for the report's signature line.
+- New read repos: `PrescriptionRepository`/`KernelReportRepository` (write side used by Phases 5/4).
+
+### Extended existing models (Phase 0)
+- `Patient`/`PatientEntity` +`guardianRelation` (minors only).
+- `Observation`/`ObservationEntity` +`captureMethod` (data-quality), +`syncedToCloudAt` (dual
+  timestamp; `createdAt`/`recordedAt` = offline capture).
+- Room DB version **2 → 3** (`MIGRATION_2_3`, additive). New action strings in `AuditAction`.
+
 ## Screen flow (built — see PROGRESS.md for actual status)
 
 1. Home — big-button entry, "Register new patient"

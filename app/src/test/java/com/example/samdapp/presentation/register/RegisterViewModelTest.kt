@@ -1,9 +1,11 @@
 package com.example.samdapp.presentation.register
 
 import com.example.samdapp.domain.usecase.RegisterPatientUseCase
+import com.example.samdapp.testutil.FakeAbhaProfileRepository
 import com.example.samdapp.testutil.FakeAuditLogger
 import com.example.samdapp.testutil.FakePatientRepository
 import com.example.samdapp.testutil.MainDispatcherRule
+import com.example.samdapp.testutil.testAbhaProfile
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
@@ -26,7 +28,7 @@ class RegisterViewModelTest {
         runTest(mainDispatcherRule.dispatcher) {
             val repo = FakePatientRepository()
             val audit = FakeAuditLogger()
-            val viewModel = RegisterViewModel(RegisterPatientUseCase(repo), audit)
+            val viewModel = RegisterViewModel(RegisterPatientUseCase(repo), audit, FakeAbhaProfileRepository())
 
             val effects = mutableListOf<RegisterEffect>()
             val collectJob = launch { viewModel.effects.toList(effects) }
@@ -48,7 +50,7 @@ class RegisterViewModelTest {
         runTest(mainDispatcherRule.dispatcher) {
             val repo = FakePatientRepository()
             val audit = FakeAuditLogger()
-            val viewModel = RegisterViewModel(RegisterPatientUseCase(repo), audit)
+            val viewModel = RegisterViewModel(RegisterPatientUseCase(repo), audit, FakeAbhaProfileRepository())
 
             viewModel.onFieldChange(RegisterField.FULL_NAME, "Asha") // no contact method
             viewModel.onSubmit()
@@ -56,5 +58,43 @@ class RegisterViewModelTest {
 
             assertEquals(null, repo.registered)
             assertTrue(audit.logged.isEmpty())
+        }
+
+    /** REQ-ABH-02: loading a stored ABHA profile autofills fields and tags them. */
+    @Test
+    fun `loadAbhaProfile autofills fields and tags them, manual edit clears the tag`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val repo = FakePatientRepository()
+            val audit = FakeAuditLogger()
+            val profile = testAbhaProfile(abhaId = "43422151056749", name = "Anita Kumari")
+            val abhaRepo = FakeAbhaProfileRepository(listOf(profile))
+            val viewModel = RegisterViewModel(RegisterPatientUseCase(repo), audit, abhaRepo)
+
+            viewModel.loadAbhaProfile(profile.abhaId)
+            advanceUntilIdle()
+
+            var state = viewModel.uiState.value
+            assertEquals("Anita Kumari", state.fields[RegisterField.FULL_NAME])
+            assertTrue(RegisterField.FULL_NAME in state.autofilledFields)
+            assertTrue(RegisterField.MOBILE_NUMBER in state.autofilledFields)
+
+            viewModel.onFieldChange(RegisterField.FULL_NAME, "Anita K.")
+            state = viewModel.uiState.value
+            assertTrue(RegisterField.FULL_NAME !in state.autofilledFields)
+            assertTrue(RegisterField.MOBILE_NUMBER in state.autofilledFields)
+        }
+
+    @Test
+    fun `loadAbhaProfile with unknown abhaId leaves state unchanged`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val repo = FakePatientRepository()
+            val audit = FakeAuditLogger()
+            val viewModel = RegisterViewModel(RegisterPatientUseCase(repo), audit, FakeAbhaProfileRepository())
+
+            viewModel.loadAbhaProfile("00000000000000")
+            advanceUntilIdle()
+
+            assertTrue(viewModel.uiState.value.autofilledFields.isEmpty())
+            assertEquals(null, viewModel.uiState.value.abhaId)
         }
 }

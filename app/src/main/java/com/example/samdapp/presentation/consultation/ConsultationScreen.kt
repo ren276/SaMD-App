@@ -4,7 +4,6 @@ package com.example.samdapp.presentation.consultation
 
 import android.Manifest
 import android.content.Context
-import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -38,13 +37,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.example.samdapp.domain.model.AttachmentType
+import com.example.samdapp.presentation.common.rememberPermissionAction
 import java.io.File
 
 @Composable
@@ -252,23 +251,6 @@ private fun ReviewLine(label: String, value: String?) {
             text = value?.takeIf { it.isNotBlank() } ?: "—",
             style = MaterialTheme.typography.bodyMedium,
         )
-    }
-}
-
-/** Dangerous permissions need a runtime prompt, not just the manifest entry — without this,
- * [android.speech.SpeechRecognizer] and the camera capture silently fail. */
-@Composable
-private fun rememberPermissionAction(permission: String, onGranted: () -> Unit): () -> Unit {
-    val context = LocalContext.current
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) onGranted()
-    }
-    return {
-        if (ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED) {
-            onGranted()
-        } else {
-            launcher.launch(permission)
-        }
     }
 }
 

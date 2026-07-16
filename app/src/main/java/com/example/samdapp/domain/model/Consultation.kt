@@ -19,11 +19,3 @@ data class Consultation(
     val createdAt: Instant,
     val updatedAt: Instant,
 )
-
-data class Symptom(
-    val id: String,
-    val encounterId: String,
-    val patientId: String,
-    val description: String,
-    val createdAt: Instant,
-)

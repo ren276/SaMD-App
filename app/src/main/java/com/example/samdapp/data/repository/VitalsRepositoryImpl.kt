@@ -39,6 +39,7 @@ class VitalsRepositoryImpl @Inject constructor(
                 urinalysisResult = latestByType[ObservationType.URINALYSIS]?.valueText,
                 deviceId = latestByType.values.firstOrNull { it.deviceId != null }?.deviceId,
                 source = rows.maxBy { it.recordedAt }.source,
+                captureMethod = rows.maxBy { it.recordedAt }.captureMethod,
                 recordedAt = rows.maxOf { it.recordedAt },
             )
         }
@@ -69,6 +70,7 @@ private fun VitalsSnapshot.toObservationEntities(): List<ObservationEntity> {
             unit = type.defaultUnit,
             deviceId = deviceId,
             source = source,
+            captureMethod = captureMethod,
             recordedAt = recordedAt,
             createdAt = Instant.now(),
         )
@@ -84,6 +86,7 @@ private fun VitalsSnapshot.toObservationEntities(): List<ObservationEntity> {
             unit = null,
             deviceId = null,
             source = source,
+            captureMethod = captureMethod,
             recordedAt = recordedAt,
             createdAt = Instant.now(),
         )

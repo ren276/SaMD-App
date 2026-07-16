@@ -8,6 +8,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
+import com.example.samdapp.domain.model.MeasurementType
+import com.example.samdapp.domain.model.VitalsCaptureMethod
 import org.junit.Rule
 import org.junit.Test
 
@@ -24,14 +26,28 @@ private class FakeCompounderActions : CompounderActions {
     override fun onWeightChange(value: String) = Unit
     override fun onHeightChange(value: String) = Unit
     override fun onPainScoreChange(value: String) = Unit
+    override fun onCaptureMethodChange(method: VitalsCaptureMethod) = Unit
     override fun onTogglePointOfCareTests() = Unit
     override fun onBloodGlucoseChange(value: String) = Unit
     override fun onUrinalysisChange(value: String) = Unit
     override fun onChiefComplaintChange(value: String) {
         chiefComplaint = value
     }
-    override fun onNewSymptomTextChange(value: String) = Unit
-    override fun onAddSymptom() = Unit
+    override fun onAilmentDescriptionChange(value: String) = Unit
+    override fun onAilmentMeasurementTypeChange(type: MeasurementType) = Unit
+    override fun onAilmentMeasuredValueChange(value: String) = Unit
+    override fun onAilmentMeasuredUnitChange(value: String) = Unit
+    override fun onAilmentSeverityChange(value: String) = Unit
+    override fun onAilmentDurationChange(value: String) = Unit
+    override fun onAilmentOnsetChange(value: String) = Unit
+    override fun onAilmentQualifiersChange(value: String) = Unit
+    override fun onAilmentVisibilityToggle() = Unit
+    override fun onPrivateHandoffAcknowledged() = Unit
+    override fun onPrivateHandoffCancelled() = Unit
+    override fun onStartAilmentAudioRecording() = Unit
+    override fun onStopAilmentAudioRecording() = Unit
+    override fun onAddAilment() = Unit
+    override fun onDeleteAilment(id: String, audioUri: String?) = Unit
     override fun onContinue() {
         continued = true
     }

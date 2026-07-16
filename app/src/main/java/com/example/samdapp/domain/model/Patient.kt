@@ -10,6 +10,9 @@ data class Patient(
     val age: Int?,
     val biologicalSex: String,
     val guardianOrSpouseName: String?,
+    /** Guardian's relation to the patient (e.g. "Mother", "Father"). Populated only for minors
+     *  (age < 18) per the pediatric-registration requirement; null for adults. */
+    val guardianRelation: String?,
     val mobileNumber: String?,
     val aadhaarNumber: String?,
     val abhaNumber: String?,

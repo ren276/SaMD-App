@@ -14,6 +14,10 @@ import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
 import com.example.samdapp.domain.auth.UserSession
+import com.example.samdapp.presentation.abha.AbhaEntryScreen
+import com.example.samdapp.presentation.abha.AbhaLoginScreen
+import com.example.samdapp.presentation.abha.AbhaOtpScreen
+import com.example.samdapp.presentation.abha.AbhaSignUpScreen
 import com.example.samdapp.presentation.acknowledgement.AcknowledgementScreen
 import com.example.samdapp.presentation.auth.AuthUiState
 import com.example.samdapp.presentation.auth.AuthViewModel
@@ -21,13 +25,17 @@ import com.example.samdapp.presentation.common.GlobalStatusBar
 import com.example.samdapp.presentation.common.PatientContextBar
 import com.example.samdapp.presentation.compounder.CompounderScreen
 import com.example.samdapp.presentation.connectivity.ConnectivityViewModel
+import com.example.samdapp.presentation.consent.ConsentScreen
 import com.example.samdapp.presentation.consultation.ConsultationScreen
 import com.example.samdapp.presentation.doctorlist.DoctorListScreen
+import com.example.samdapp.presentation.emergency.EmergencyOverrideScreen
+import com.example.samdapp.presentation.kernelassessment.KernelAssessmentScreen
 import com.example.samdapp.presentation.home.HomeScreen
 import com.example.samdapp.presentation.login.LoginScreen
 import com.example.samdapp.presentation.medicalbackground.MedicalBackgroundScreen
 import com.example.samdapp.presentation.patientsummary.PatientSummaryScreen
 import com.example.samdapp.presentation.register.RegisterScreen
+import com.example.samdapp.presentation.report.ReportScreen
 import com.example.samdapp.presentation.sending.SendingScreen
 import com.example.samdapp.presentation.transcription.TranscriptionScreen
 
@@ -77,15 +85,38 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
         entryProvider = entryProvider {
             entry<Home> {
                 HomeScreen(
-                    onRegisterNewPatient = { backStack.add(Register) },
+                    onRegisterNewPatient = { backStack.add(AbhaEntry) },
                     onOpenPatient = { patientId -> backStack.add(PatientSummary(patientId)) },
                     isOnline = isOnline,
                     session = session,
                     onSignOut = onSignOut,
                 )
             }
-            entry<Register> {
-                RegisterScreen(onRegistered = { patientId -> backStack.add(MedicalBackground(patientId)) })
+            entry<AbhaEntry> {
+                AbhaEntryScreen(
+                    onCreateAbha = { backStack.add(AbhaSignUp) },
+                    onLoginWithAbha = { backStack.add(AbhaLogin) },
+                    onSkip = { backStack.add(Register()) },
+                )
+            }
+            entry<AbhaSignUp> {
+                AbhaSignUpScreen(onCreated = { abhaId -> backStack.add(Register(abhaId)) })
+            }
+            entry<AbhaLogin> {
+                AbhaLoginScreen(onContinue = { abhaId -> backStack.add(AbhaOtpRoute(abhaId)) })
+            }
+            entry<AbhaOtpRoute> { key ->
+                AbhaOtpScreen(
+                    abhaId = key.abhaId,
+                    onVerified = { abhaId -> backStack.add(Register(abhaId)) },
+                    onCreateInstead = { backStack.add(AbhaSignUp) },
+                )
+            }
+            entry<Register> { key ->
+                RegisterScreen(
+                    abhaId = key.abhaId,
+                    onRegistered = { patientId -> backStack.add(MedicalBackground(patientId)) },
+                )
             }
             entry<MedicalBackground> { key ->
                 MedicalBackgroundScreen(
@@ -96,7 +127,14 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
             entry<PatientSummary> { key ->
                 PatientSummaryScreen(
                     patientId = key.patientId,
-                    onStartConsultation = { patientId -> backStack.add(Compounder(patientId)) },
+                    onStartConsultation = { patientId -> backStack.add(ConsentRoute(patientId)) },
+                    onViewReport = { caseRecordId -> backStack.add(ReportRoute(caseRecordId)) },
+                )
+            }
+            entry<ConsentRoute> { key ->
+                ConsentScreen(
+                    patientId = key.patientId,
+                    onContinue = { backStack.add(Compounder(key.patientId)) },
                 )
             }
             entry<Compounder> { key ->
@@ -105,6 +143,13 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
                     onContinue = { patientId, encounterId, caseRecordId, chiefComplaint ->
                         backStack.add(ConsultationRoute(patientId, encounterId, caseRecordId, chiefComplaint))
                     },
+                    onEmergencyOverride = { reasons -> backStack.add(EmergencyOverrideRoute(reasons)) },
+                )
+            }
+            entry<EmergencyOverrideRoute> { key ->
+                EmergencyOverrideScreen(
+                    reasons = key.reasons,
+                    onAcknowledged = { backStack.clear(); backStack.add(Home) },
                 )
             }
             entry<ConsultationRoute> { key ->
@@ -125,10 +170,18 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
                     audioUri = key.audioUri,
                     encounterId = key.encounterId,
                     onDone = { caseRecordId, consultationId, audioUri ->
-                        if (audioUri != null) {
-                            backStack.add(TranscriptionRoute(consultationId, audioUri, caseRecordId))
+                        backStack.add(KernelAssessmentRoute(caseRecordId, consultationId, audioUri))
+                    },
+                )
+            }
+            entry<KernelAssessmentRoute> { key ->
+                KernelAssessmentScreen(
+                    caseRecordId = key.caseRecordId,
+                    onContinue = {
+                        if (key.audioUri != null) {
+                            backStack.add(TranscriptionRoute(key.consultationId, key.audioUri, key.caseRecordId))
                         } else {
-                            backStack.add(AcknowledgementRoute(caseRecordId))
+                            backStack.add(AcknowledgementRoute(key.caseRecordId))
                         }
                     },
                 )
@@ -144,7 +197,11 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
                 AcknowledgementScreen(
                     caseRecordId = key.caseRecordId,
                     onContinue = { caseRecordId -> backStack.add(DoctorListRoute(caseRecordId)) },
+                    onViewReport = { caseRecordId -> backStack.add(ReportRoute(caseRecordId)) },
                 )
+            }
+            entry<ReportRoute> { key ->
+                ReportScreen(caseRecordId = key.caseRecordId)
             }
             entry<DoctorListRoute> { key ->
                 DoctorListScreen(

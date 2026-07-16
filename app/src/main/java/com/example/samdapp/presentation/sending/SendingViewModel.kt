@@ -8,6 +8,7 @@ import com.example.samdapp.domain.model.VitalsReading
 import com.example.samdapp.domain.model.toVitalsReading
 import com.example.samdapp.domain.repository.ConsultationRepository
 import com.example.samdapp.domain.repository.VitalsRepository
+import com.example.samdapp.domain.usecase.GenerateKernelReportUseCase
 import com.example.samdapp.domain.usecase.SendToKernelUseCase
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
@@ -32,6 +33,7 @@ class SendingViewModel @AssistedInject constructor(
     private val vitalsRepository: VitalsRepository,
     private val consultationRepository: ConsultationRepository,
     private val sendToKernelUseCase: SendToKernelUseCase,
+    private val generateKernelReportUseCase: GenerateKernelReportUseCase,
     private val auditLogger: AuditLogger,
 ) : ViewModel() {
 
@@ -56,7 +58,12 @@ class SendingViewModel @AssistedInject constructor(
                 ?: VitalsReading()
             val consultation = consultationRepository.observeForEncounter(encounterId).filterNotNull().first()
 
-            sendToKernelUseCase(vitals = vitals, consultation = consultation, caseToken = caseRecordId)
+            val payload = sendToKernelUseCase(vitals = vitals, consultation = consultation, caseToken = caseRecordId)
+                .getOrNull()
+
+            if (payload != null) {
+                generateKernelReportUseCase(caseRecordId, payload)
+            }
 
             auditLogger.log(
                 action = "kernel_response_received",

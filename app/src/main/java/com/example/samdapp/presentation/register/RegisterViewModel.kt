@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
+import com.example.samdapp.domain.repository.AbhaProfileRepository
 import com.example.samdapp.domain.usecase.RegisterPatientUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.channels.Channel
@@ -38,6 +39,11 @@ data class RegisterUiState(
     val biologicalSex: String = "Female",
     val isSubmitting: Boolean = false,
     val errorMessage: String? = null,
+    /** Non-null once an ABHA profile has been loaded (REQ-ABH-02) — the fields it populated are
+     *  in [autofilledFields], shown visually tagged "from ABHA" so the provenance is legible. */
+    val abhaId: String? = null,
+    val autofilledFields: Set<RegisterField> = emptySet(),
+    val sexAutofilledFromAbha: Boolean = false,
 ) {
     fun fieldError(field: RegisterField): String? {
         val expectedLength = DIGIT_LENGTH_RULES[field] ?: return null
@@ -77,6 +83,7 @@ interface RegisterActions {
 class RegisterViewModel @Inject constructor(
     private val registerPatientUseCase: RegisterPatientUseCase,
     private val auditLogger: AuditLogger,
+    private val abhaProfileRepository: AbhaProfileRepository,
 ) : ViewModel(), RegisterActions {
 
     private val _uiState = MutableStateFlow(RegisterUiState())
@@ -85,12 +92,52 @@ class RegisterViewModel @Inject constructor(
     private val _effects = Channel<RegisterEffect>(Channel.BUFFERED)
     val effects = _effects.receiveAsFlow()
 
+    /**
+     * Loads the stored [com.example.samdapp.domain.model.AbhaProfile] and autofills registration
+     * fields from it (REQ-ABH-02) — called once from [com.example.samdapp.presentation.register.RegisterScreen]
+     * via `LaunchedEffect(abhaId)` rather than taken as a constructor param, since [abhaId] is
+     * optional (null on the manual/no-ABHA path) and not needed before the first frame.
+     */
+    fun loadAbhaProfile(abhaId: String) {
+        if (_uiState.value.abhaId == abhaId) return
+        viewModelScope.launch {
+            val profile = abhaProfileRepository.getProfile(abhaId) ?: return@launch
+            val autofilled = mutableSetOf<RegisterField>()
+            fun autofill(fields: Map<RegisterField, String>, field: RegisterField, value: String?): Map<RegisterField, String> {
+                if (value.isNullOrBlank()) return fields
+                autofilled += field
+                return fields + (field to value)
+            }
+            _uiState.update { state ->
+                var fields = state.fields
+                fields = autofill(fields, RegisterField.FULL_NAME, profile.name)
+                fields = autofill(fields, RegisterField.MOBILE_NUMBER, profile.mobileNumber)
+                fields = autofill(fields, RegisterField.VILLAGE, profile.address)
+                fields = autofill(fields, RegisterField.DISTRICT, profile.district)
+                fields = autofill(fields, RegisterField.STATE, profile.state)
+                fields = autofill(fields, RegisterField.PINCODE, profile.pincode)
+                fields = autofill(fields, RegisterField.ABHA_NUMBER, profile.abhaId)
+                fields = autofill(fields, RegisterField.DATE_OF_BIRTH, profile.dateOfBirth?.toString())
+                val sexAutofilled = profile.gender in listOf("Female", "Male", "Other")
+                state.copy(
+                    fields = fields,
+                    biologicalSex = if (sexAutofilled) profile.gender else state.biologicalSex,
+                    abhaId = abhaId,
+                    autofilledFields = autofilled,
+                    sexAutofilledFromAbha = sexAutofilled,
+                )
+            }
+        }
+    }
+
     override fun onFieldChange(field: RegisterField, value: String) {
-        _uiState.update { it.copy(fields = it.fields + (field to value)) }
+        // A manual edit overrides the ABHA-sourced value — drop the "from ABHA" tag so the UI
+        // never shows a stale provenance claim for text the worker just typed over.
+        _uiState.update { it.copy(fields = it.fields + (field to value), autofilledFields = it.autofilledFields - field) }
     }
 
     override fun onBiologicalSexChange(sex: String) {
-        _uiState.update { it.copy(biologicalSex = sex) }
+        _uiState.update { it.copy(biologicalSex = sex, sexAutofilledFromAbha = false) }
     }
 
     override fun onSubmit() {

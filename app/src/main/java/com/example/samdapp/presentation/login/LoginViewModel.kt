@@ -6,9 +6,11 @@ import androidx.lifecycle.viewModelScope
 import com.example.samdapp.domain.auth.AuthSession
 import com.example.samdapp.domain.auth.UserRole
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -17,8 +19,17 @@ data class LoginUiState(
     val name: String = "",
     val role: UserRole? = null,
     val isSubmitting: Boolean = false,
+    val errorMessage: String? = null,
 ) {
     val canSubmit: Boolean get() = name.isNotBlank() && role != null && !isSubmitting
+}
+
+/** [RequestBiometricAuth] — tapping Sign in doesn't create a session directly; it asks the screen
+ *  to run the system biometric/device-credential prompt first (REQ-SEC-03: verified, not just
+ *  typed). The screen calls [LoginViewModel.onBiometricSucceeded]/[onBiometricFailed] with the
+ *  result. */
+sealed interface LoginEffect {
+    data class RequestBiometricAuth(val subtitle: String) : LoginEffect
 }
 
 @Stable
@@ -36,16 +47,26 @@ class LoginViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(LoginUiState())
     val uiState: StateFlow<LoginUiState> = _uiState.asStateFlow()
 
-    override fun onNameChange(value: String) = _uiState.update { it.copy(name = value) }
+    private val _effects = Channel<LoginEffect>(Channel.BUFFERED)
+    val effects = _effects.receiveAsFlow()
 
-    override fun onRoleSelect(role: UserRole) = _uiState.update { it.copy(role = role) }
+    override fun onNameChange(value: String) = _uiState.update { it.copy(name = value, errorMessage = null) }
+
+    override fun onRoleSelect(role: UserRole) = _uiState.update { it.copy(role = role, errorMessage = null) }
 
     override fun onSubmit() {
         val current = _uiState.value
-        val role = current.role ?: return
         if (!current.canSubmit) return
         viewModelScope.launch {
-            _uiState.update { it.copy(isSubmitting = true) }
+            _uiState.update { it.copy(isSubmitting = true, errorMessage = null) }
+            _effects.send(LoginEffect.RequestBiometricAuth(subtitle = current.name.trim()))
+        }
+    }
+
+    fun onBiometricSucceeded() {
+        val current = _uiState.value
+        val role = current.role ?: return
+        viewModelScope.launch {
             authSession.signIn(current.name.trim(), role)
             // Reset for the next sign-in: this ViewModel is Activity-scoped (obtained outside
             // any NavEntry in AppNavHost), so it survives sign-out and would otherwise leave
@@ -53,5 +74,9 @@ class LoginViewModel @Inject constructor(
             // whoever signs in next.
             _uiState.value = LoginUiState()
         }
+    }
+
+    fun onBiometricFailed(message: String) {
+        _uiState.update { it.copy(isSubmitting = false, errorMessage = "Can't sign in — $message") }
     }
 }

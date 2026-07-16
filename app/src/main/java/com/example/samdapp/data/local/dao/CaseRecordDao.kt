@@ -24,4 +24,7 @@ interface CaseRecordDao {
 
     @Query("SELECT * FROM case_records WHERE id = :caseRecordId")
     fun observeById(caseRecordId: String): Flow<CaseRecordEntity?>
+
+    @Query("SELECT * FROM case_records WHERE patientId = :patientId ORDER BY updatedAt DESC LIMIT 1")
+    fun observeLatestForPatient(patientId: String): Flow<CaseRecordEntity?>
 }

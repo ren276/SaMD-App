@@ -11,6 +11,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -20,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.samdapp.domain.model.CaseStatus
 import com.example.samdapp.domain.model.Patient
 import java.time.LocalDate
 import java.time.Period
@@ -28,6 +30,7 @@ import java.time.Period
 fun PatientSummaryScreen(
     patientId: String,
     onStartConsultation: (patientId: String) -> Unit,
+    onViewReport: (caseRecordId: String) -> Unit,
     viewModel: PatientSummaryViewModel = hiltViewModel<PatientSummaryViewModel, PatientSummaryViewModel.Factory>(
         creationCallback = { factory -> factory.create(patientId) },
     ),
@@ -73,6 +76,44 @@ fun PatientSummaryScreen(
                 modifier = Modifier.fillMaxWidth(0.6f).aspectRatio(1f).padding(top = 32.dp),
             ) {
                 Text("Consultation", style = MaterialTheme.typography.titleMedium)
+            }
+
+            // Doctor's own review happens on a separate channel (out of scope here) — this is
+            // where the worker checks whether that channel has produced a response yet.
+            if (uiState.caseStatus == CaseStatus.SENT_TO_DOCTOR || uiState.caseStatus == CaseStatus.PRESCRIPTION_RECEIVED) {
+                Column(modifier = Modifier.padding(top = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = if (uiState.caseStatus == CaseStatus.PRESCRIPTION_RECEIVED) {
+                            "Doctor's response received"
+                        } else {
+                            "Awaiting doctor's response"
+                        },
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    if (uiState.caseStatus == CaseStatus.SENT_TO_DOCTOR) {
+                        OutlinedButton(
+                            onClick = viewModel::onCheckForDoctorResponse,
+                            enabled = uiState.canCheckForDoctorResponse,
+                            modifier = Modifier.padding(top = 8.dp),
+                        ) {
+                            Text(if (uiState.isCheckingForResponse) "Checking…" else "Check for doctor's response (mock)")
+                        }
+                        if (uiState.noResponseYet) {
+                            Text(
+                                "No response yet — check again later.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 4.dp),
+                            )
+                        }
+                    }
+                }
+            }
+            if (uiState.canViewReport) {
+                OutlinedButton(
+                    onClick = { onViewReport(uiState.caseRecordId!!) },
+                    modifier = Modifier.padding(top = 12.dp),
+                ) { Text("View report") }
             }
         }
     }

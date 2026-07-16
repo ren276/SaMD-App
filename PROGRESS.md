@@ -89,8 +89,351 @@ Read this first, every session. Continue from the first unchecked item unless to
       central registry offline, so relies on the 62^12 keyspace (negligible collision odds at PHC
       volumes) plus the existing Room primary-key constraint on `PatientEntity.id` as a backstop.
 
+## SaMD demo overhaul (started 2026-07-16)
+
+Multi-phase, schema-changing. Full brief in the 2026-07-16 build brief. Model-switch stops are
+explicit: Phase 0 + Phase 4 report data-contract on Opus; most phases on Sonnet high; Haiku for the
+repetitive Phase 1 autofill mapping and Phase 6 boilerplate. **Stop and ask the user to switch model
+at each boundary.** DI stays Hilt (not Koin) regardless of skill defaults.
+
+### Phase 0 — Domain & schema foundation (DONE, on Opus)
+- [x] New domain models (zero Android deps): `AbhaProfile`, `AilmentEntry` (+`MeasurementType`,
+      `Visibility`), `Prescription`+`MedicationLine`, `KernelReportOutput`, `ReferralRequest`
+      (+`UrgencyLevel`,`ReferralStatus`).
+- [x] Extended `Patient` (+`guardianRelation`) and `Observation` (+`captureMethod`,
+      +`syncedToCloudAt`) — dual-timestamp + capture-method schema pulled forward from Phase 2.5.
+- [x] Room: entities + insert-only-style DAOs for all; `abha_profiles`, `ailments`, `prescriptions`,
+      `medication_lines`, `kernel_reports`, `referrals` tables; `MIGRATION_2_3` (additive) wired in
+      `DatabaseModule`; DB version 2 → 3; registered in `AppDatabase`; converters for new enums +
+      `List<String>` (JSON).
+- [x] `AuditAction` constants for new events (ailment capture/visibility/delete, consent, emergency
+      override, referral) — DAO stays insert-only (REQ-AUD-02 untouched).
+- [x] Docs updated: `software-requirements.md` (PED/ABH/AIL/TRS/RPT/HAN-07/RX/REF REQ-IDs),
+      `traceability-matrix.md` (rows + Complaints→Ailments rename note), `spec.md` (models),
+      new `docs/requirements/abha-field-mapping.md`.
+- [x] **Verified:** `./gradlew testDebugUnitTest` green (31 tests, 0 failures); Room schema `3.json`
+      exported; `MIGRATION_2_3` DDL is character-identical to Room's generated `createSql` for all 6
+      new tables + indices, and the 3 added columns match affinity/nullability. (Instrumented
+      `MigrationTestHelper` run deferred — needs emulator; DDL identity is the guarantee.)
+- Decisions: (1) ABHA link key = existing `Patient.abhaNumber`, no duplicate id column, ABHA-first
+      flow. (2) `AilmentEntity` introduced additively now; `SymptomEntity` renamed/migrated in
+      Phase 2. (3) Phase 2.5 dual-timestamp + capture-method schema pulled into the single 2→3
+      migration. (4) `KernelReportOutput` is net-new — no prior `AiKernelResponse` existed in code
+      (memory was stale); Phase 4 builds the AI panel, does not "extend."
+
+### Phase 1 — ABHA mock auth (DONE, on Sonnet high)
+- [x] `AbhaProfileRepository`/`AbhaProfileRepositoryImpl` (wraps Phase 0's `AbhaProfileDao`),
+      bound in `RepositoryModule`.
+- [x] `CreateAbhaProfileUseCase` (mock sign-up: validates, delays like `SendToKernelUseCase`, mints
+      a canonical 14-digit id, persists `kycVerified=true`) and `VerifyAbhaLoginUseCase` (mock OTP:
+      any 6-digit code, resolves only a profile created on this device — no real ABDM directory).
+      `formatAbhaId()` added for display-only `XX-XXXX-XXXX-XXXX` formatting (storage stays raw
+      digits, matching `Patient.abhaNumber`'s existing shape — corrected from Phase 0's KDoc, which
+      had wrongly implied dashed storage).
+- [x] New screens/ViewModels: `AbhaEntryScreen` (Create / Login / Skip), `AbhaSignUpScreen`+VM
+      (form → `REDIRECTING` stage shown for the use case's simulated delay → done),
+      `AbhaLoginScreen`+VM (enter ABHA id), `AbhaOtpScreen`+VM (mock OTP, prefilled `123456`,
+      Assisted-injected like `ConsultationViewModel`).
+- [x] `Register` route is now `data class Register(val abhaId: String? = null)`; Home's "Register
+      new patient" now goes to `AbhaEntry` first, not straight to Register. `RegisterViewModel`
+      gained `loadAbhaProfile(abhaId)` (plain `@Inject`, not Assisted — abhaId is optional and not
+      needed before first frame, called once via `LaunchedEffect(abhaId)` from the screen).
+      Autofills full name/mobile/village/district/state/pincode/ABHA number/DOB/biological sex;
+      autofilled fields tagged "From ABHA" in the UI; a manual edit clears that field's tag.
+- [x] Worker mock login (`AuthSession`/`MockAuthSession`) untouched — confirmed no shared state
+      with the new ABHA (patient-identity) flow, per the brief's explicit separation requirement.
+- [x] `AuditAction.ABHA_PROFILE_CREATED`/`ABHA_LOGIN_VERIFIED` added; both new ViewModels log.
+- [x] Docs: REQ-ABH-01/02 flipped PLANNED → DONE in `software-requirements.md`; traceability rows
+      updated with real design components + new automated tests.
+- [x] **Verified:** `./gradlew testDebugUnitTest` green — **44 tests, 0 failures** (was 31 after
+      Phase 0; +13 covering ABHA sign-up/login use cases and Register autofill/tag-clear behavior).
+
+### Phase 2 — Ailments + Private/Public (DONE, on Sonnet high)
+- [x] Identified the actual "Complaints" feature: the Compounder screen's free-text symptom list
+      (`AddSymptomUseCase`/`Symptom`/`SymptomEntity`/`SymptomDao`), tied to `ConsultationRepository.
+      addSymptom/observeSymptoms`. "Chief complaint" (`Consultation.chiefComplaint`) is a distinct
+      clinical field and was deliberately NOT renamed.
+- [x] Renamed by removal + replacement, not a mechanical find/replace: deleted `Symptom` domain
+      model, `AddSymptomUseCase`, `SymptomEntity`, `SymptomDao`, and the `ConsultationRepository`/
+      `ConsultationRepositoryImpl` Symptom wiring. Added `AilmentRepository`+impl,
+      `AddAilmentUseCase`, `DeleteAilmentUseCase` (soft-delete via `AilmentDao.markDeleted`).
+- [x] `MIGRATION_3_4` (DB v3→v4): backfills every `symptoms` row into `ailments`
+      (`measurementType=NON_MEASURABLE`, `visibility=PUBLIC`, historical rows only — new rows don't
+      default this way) then drops `symptoms`. Schema `4.json` exported.
+- [x] Compounder screen's ailment section (`NewAilmentCard`): measurable/non-measurable toggle
+      (measured value+unit vs. severity/duration/onset/qualifiers — flat fields; the "dynamically
+      expand per ailment type" enhancement stays Phase 2.5, not built now), Public/Private switch
+      (default Public).
+- [x] Private handoff: toggling to Private shows `PrivateHandoffInterstitial`, a genuine full-screen
+      `Dialog` (Hindi + English, "Hand the device to the patient" / "उपकरण मरीज़ को दें"), Cancel
+      reverts to Public. This is a workflow/social cue, not a technical hiding mechanism — the real
+      technical guarantee is downstream (next bullet).
+- [x] **The core guarantee (REQ-AIL-02):** `CompounderViewModel.toListItem()` maps a PRIVATE
+      `AilmentEntry` to a worker-facing `AilmentListItem` with description/severity/duration/onset
+      all `null` — genuinely absent from the ViewModel's UI state, not a composable choosing not to
+      render a field that's still sitting in memory. `AilmentRow` renders a locked "🔒 Private
+      entry" card for these. Covered by `AilmentListItemMappingTest` (3 cases: public keeps detail,
+      private drops it, private-with-audio exposes only a delete handle).
+- [x] `AilmentRepository.observeForEncounter` is deliberately unfiltered (REQ-AIL-04) — the KDoc is
+      explicit that no visibility-filtered query should ever be added to this interface, since the
+      (future, Phase 4) kernel path reads from here directly and must never be starved of private
+      entries it's required to receive.
+- [x] Private-entry audio is real, not mocked: new `AilmentAudioRecorder` domain interface +
+      `AndroidAilmentAudioRecorder` (`MediaRecorder`, files in app-private `filesDir/ailment_audio/`,
+      never `FileProvider`-shared, no upload path). **No playback method exists anywhere in the
+      interface or implementation** — satisfies "never expose a play button to the worker role" by
+      construction, not by omitting a button from one screen. Delete-only, via `DeleteAilmentUseCase`.
+- [x] Extracted `rememberPermissionAction` (was private/duplicated-in-spirit inside
+      `ConsultationScreen`) to `presentation/common/PermissionAction.kt`; both screens now share it.
+- [x] Docs: REQ-AIL-01–04 flipped PLANNED → DONE, REQ-TRS-04 → PARTIAL (flat fields shipped, dynamic
+      per-ailment expansion deferred to 2.5), REQ-VIT-03's design column updated, rename note closed
+      out — all in `software-requirements.md`/`traceability-matrix.md`.
+- [x] **Verified:** `./gradlew testDebugUnitTest` green — **51 tests, 0 failures** (was 44; +7:
+      `AilmentUseCasesTest` ×4, `AilmentListItemMappingTest` ×3). `assembleDebug` and
+      `compileDebugAndroidTestKotlin` also clean; `CompounderScreenTest` (androidTest) updated for
+      the renamed `CompounderActions` interface.
+
+### Phase 2.5 — Trust & Safety features (DONE, on Sonnet high)
+- [x] **Consent checkpoint** (REQ-TRS-01): new `ConsentRoute(patientId)` inserted between
+      PatientSummary and Compounder (PatientSummary.onStartConsultation now goes to Consent, not
+      straight to Compounder). Checkbox-gated, Hindi + English, logs `AuditAction.CONSENT_RECORDED`
+      with `patientId` only (no `caseRecordId` — encounter doesn't exist yet at this point).
+- [x] **Emergency red-flag override** (REQ-TRS-02): `CheckEmergencyThresholdsUseCase`
+      (SpO2 < 90%, systolic BP outside 90–180 mmHg, diastolic ≥ 120 mmHg — hard-coded, conservative,
+      flagged as a starting point for clinical review not a finished decision rule). Runs in
+      `CompounderViewModel.onContinue()` right after vitals save; on trip, emits
+      `CompounderEffect.EmergencyOverride` instead of `Continue` — new `EmergencyOverrideRoute`
+      renders a full-screen high-contrast Hindi+English `EmergencyOverrideScreen` with **no path
+      onward into Consultation/Sending**, only "Acknowledged" → `backStack.clear(); add(Home)`
+      (same terminal pattern as DoctorList's `onDone`). Logs `AuditAction.EMERGENCY_OVERRIDE`
+      distinctly from a normal referral.
+- [x] **Expectation-management message** (REQ-TRS-03): added to the existing Acknowledgement screen
+      (non-emergency path only, by construction — emergency short-circuits before reaching it, no
+      extra guard needed). New `SyncWindowProvider`/`AndroidSyncWindowProvider` reads
+      `R.integer.sync_window_hours` (`res/values/integers.xml`, default 24) — override per PHC
+      deployment via a resource overlay; the composable never hardcodes the number.
+- [x] **Vitals capture-method logging** (REQ-TRS-05): `VitalsCaptureMethod` enum (MANUAL_CUFF/
+      DIGITAL_MONITOR/PULSE_OXIMETER/THERMOMETER/OTHER) replaces Phase 0's free-text placeholder on
+      `Observation`/`ObservationEntity.captureMethod` — same TEXT column affinity, **no new
+      migration** (verified: `4.json`'s captureMethod field is still `affinity: TEXT`, no `5.json`
+      generated). Threaded through `VitalsSnapshot` → `VitalsRepositoryImpl` → one dropdown in
+      `CompounderScreen`'s Vitals section.
+      **Scoping decision:** one dropdown for the whole vitals snapshot, not one per vital row —
+      mirrors the existing per-snapshot `ObservationSource` granularity already in the schema
+      (brief's own wording said "next to each vital," but the data model was never shaped that way).
+- [x] Dual timestamps (REQ-TRS-06) confirmed already correct from Phase 0/2: `recordedAt` (offline
+      capture) vs `syncedToCloudAt` (null until a real sync exists) are genuinely distinct, never
+      defaulted equal.
+- [x] **Not built** (explicitly deferred, tracked as PARTIAL on REQ-TRS-04): dynamically expanding
+      the guided-capture field set based on the selected ailment type. Phase 2 shipped the flat
+      severity/duration/onset/qualifiers fields; the "changes per ailment type" behavior needs a
+      curated ailment-type vocabulary that doesn't exist yet — flagging rather than inventing one.
+- [x] Docs: REQ-TRS-01/02/03/05/06 flipped PLANNED → DONE (04 stays PARTIAL) in
+      `software-requirements.md`/`traceability-matrix.md`.
+- [x] **Verified:** `./gradlew testDebugUnitTest` green — **60 tests, 0 failures** (was 51; +9:
+      `CheckEmergencyThresholdsUseCaseTest` ×7, `ConsentViewModelTest` ×2). `assembleDebug` and
+      `compileDebugAndroidTestKotlin` clean; `CompounderScreenTest` updated for the new
+      `onCaptureMethodChange` action.
+- **Known coverage gap (flagged, not silently skipped):** `AcknowledgementViewModel`'s
+  `hoursUntilReview` passthrough (REQ-TRS-03) has no dedicated unit test — `AcknowledgeCaseUseCase`
+  needs a `CaseRecordRepository` fake that doesn't exist yet in `testutil/Fakes.kt`, and building
+  one just for a one-line passthrough assertion wasn't worth the setup cost right now. Add
+  `FakeCaseRecordRepository` if/when a real `AcknowledgementViewModel` test suite is warranted.
+
+### Phase 3 + 3.5 — Report data contract + AIIMS-card template/PDF (DONE, on Opus)
+Built together on Opus since 3.5 is the "report-assembly data contract" the brief flagged as
+expensive-to-redo. Adopted the user's detailed AIIMS-OP-card layout constraints.
+- [x] **Data contract** (`domain/report`): `ClinicalReport` — one progressively-assembled object
+      (preliminary → +kernel Phase 4 → +prescription/signature Phase 5, `isFinal` flips). Sub-models
+      + `ReportAudience` (WORKER redacts private ailments in the model itself; PHYSICIAN shows all —
+      the privacy-flag propagation the brief called out). `ReportFormatter` is pure/no-Android;
+      `AssembleReportUseCase` fetches one snapshot from each repo (`.first()`).
+- [x] **Rendering** (`presentation/report`): `ReportCanvasRenderer` — ONE `android.graphics.Canvas`
+      layout (A5, 420×595 pt), block-based pagination at section boundaries, footer pinned to last
+      page. Same renderer drives the Compose preview (`ReportScreen` via `drawIntoCanvas`) AND the
+      PDF (`ReportPdfExporter`, native `PdfDocument`) — no bitmap capture, no external lib/iText.
+      `Code128` = self-written Code 128B barcode encoder (5 unit tests) for the UID header barcode;
+      human-readable UID printed beneath as the authoritative fallback.
+- [x] Layout matches the AIIMS-card spec: logo slot / centre title + PHC name + CR No / UID barcode
+      header; two-column demographic matrix with divider + "✓ Verified via ABHA" tag; "Chief
+      Complaints & Clinical Findings" with verbatim quoted complaint + measurable(◆)/non-measurable(•)
+      ailments; "Rx / Advice" numbered medication list; consent + double-underlined physician
+      signature ("Reg No: …") + "AI-Assisted, Physician-Verified" footer.
+- [x] Every field binds to a real Phase 0 entity — `docs/requirements/report-field-mapping.md` is the
+      per-element mapping (REQ-RPT-03). Only non-data elements: logo box + fixed labels.
+- [x] Supporting: `Doctor.registrationNumber` (mock NMC reg no in `doctors.json`);
+      `PrescriptionRepository`/`KernelReportRepository` read-side (write side feeds Phases 5/4);
+      `ReportFormatter.formatMedicationLine` enforces REQ-RX-02 (throws on OD/BD/SOS…).
+- [x] Entry point: "View preliminary report" on the Acknowledgement screen → `ReportRoute`
+      (WORKER audience). No new Room migration (DB stays v4 — prescription/kernel tables already
+      existed from Phase 0; `Doctor.registrationNumber` is asset-only, not a Room column).
+- [x] Regulatory: `docs/regulatory-foundation.md` updated with CDSCO Oct-2025 draft classification
+      argument (human-in-the-loop → Class B/C not D) + EU MDR Rule 11 (IIa framing = the footer
+      disclaimer wording). Per the brief, a docs/framing exercise, no phase code change.
+- [x] **Verified:** `./gradlew testDebugUnitTest` green — **76 tests, 0 failures** (was 60; +16:
+      `ReportFormatterTest` ×11, `Code128Test` ×5). `assembleDebug` + `compileDebugAndroidTestKotlin`
+      clean.
+- **Known coverage gap (flagged):** `ReportCanvasRenderer` uses `android.graphics.Canvas`/`Paint`,
+  which are stubbed in plain JVM unit tests — it's exercised only on-device (manual). The pure
+  pieces it depends on (`ReportFormatter`, `Code128`) ARE unit-tested. A Robolectric or instrumented
+  render/PDF smoke test is the right next coverage step; not added now (no Robolectric in the build).
+
+### Phase 4 — Kernel output integration (DONE, on Sonnet high)
+- [x] `GenerateKernelReportUseCase` — extends the mocked kernel handoff. Not pure random: matches
+      `KernelPayload.chiefComplaint` (already-whitelisted, pseudonymized field) against a small
+      curated scenario table (fever/respiratory/GI/headache, each with 3 differentials + a
+      reasoning paragraph + evidence for/against + a confidence band) with a lower-confidence
+      default fallback for anything unmatched — demo-credible mock data, not claimed real
+      inference. `requiredHumanVerification = confidenceScore < 0.90` (existing convention).
+      Persists via Phase 3's `KernelReportRepository` (write side was stubbed then, used now).
+- [x] Wired into `SendingViewModel`: `SendToKernelUseCase`'s previously-discarded return value is
+      now captured and fed into `GenerateKernelReportUseCase` right after the kernel handoff delay.
+- [x] **AI Assessment Panel** (`presentation/kernelassessment`) — net-new UI (confirmed: no
+      pre-existing panel/`AiKernelResponse` existed anywhere in code before this session; the brief's
+      "keep the existing pattern" referred to a stale memory). Confidence gauge (`LinearProgressIndicator`,
+      red when `requiredHumanVerification`), explainability card (reasoning + evidence for/against),
+      red warning banner when verification required, liability checkbox gating Continue. Logs
+      `AuditAction.KERNEL_ASSESSMENT_ACKNOWLEDGED`.
+- [x] Nav: new `KernelAssessmentRoute` inserted between Sending and Transcription/Acknowledgement —
+      Sending now always routes through the panel; the panel's Continue replicates the old
+      audioUri-based branch (Transcription if present, else Acknowledgement).
+- [x] Report integration confirmed free — `AssembleReportUseCase` (Phase 3) already reads
+      `KernelReportRepository.getForCase()`, so once this phase persists a `KernelReportOutput` the
+      preliminary report automatically gains its kernel section. Same object, no second document,
+      no code change needed on the report side.
+- [x] No Room schema change — `kernel_reports` table already existed from Phase 0 (DB stays v4,
+      confirmed no new schema JSON generated).
+- [x] Docs: REQ-HAN-07 flipped PLANNED → DONE with the "net-new, not extended" correction restated.
+- [x] **Verified:** `./gradlew testDebugUnitTest` green — **80 tests, 0 failures** (was 76; +4:
+      `GenerateKernelReportUseCaseTest` — scenario matching, fallback, confidence-bounds/threshold
+      loop over 20 runs, save-failure propagation). `assembleDebug` +
+      `compileDebugAndroidTestKotlin` clean.
+
+### Phase 5 — Doctor-response intake foundation (DONE, on Sonnet high)
+**Scope correction from the user, applied before building:** the brief's "Doctor Prescription
+Screen" assumed the doctor uses this app. They don't — the doctor's review/prescription-authoring
+UI runs on a **separate communication channel** (different app/system), out of scope for this
+PHC-worker codebase. What actually got built: the **receiving boundary** on our side — mocked now,
+architected so a real API/webhook client swaps in later without touching any call site.
+- [x] `domain/doctor/DoctorPrescriptionInbox` — the intake interface (`fetchPrescription(caseRecordId)
+      → IncomingPrescription?`), same "named mock boundary" pattern as `VitalsSource`/
+      `TranscriptionService`. Returns `null` (success, not failure) when the doctor simply hasn't
+      responded yet — that's the expected async state, not an error.
+- [x] `data/doctor/MockDoctorPrescriptionInbox` — stands in for the real channel. Not a fixed
+      canned response: reads the case's `KernelReportOutput` (if any) and picks a decision with a
+      realistic distribution (65% AGREE with the kernel's predicted condition, 25% MODIFY to a
+      listed differential, 10% REJECT) — demo-credible variety, explicitly still a mock. Returns
+      `null` if no doctor is assigned yet (`CaseRecord.assignedDoctorId`).
+- [x] `KernelDecision` enum (AGREE/MODIFY/REJECT) added to `Prescription.kernelDecision` —
+      **`MIGRATION_4_5`** (DB v4→v5, additive `ALTER TABLE prescriptions ADD COLUMN kernelDecision
+      TEXT`), verified schema `5.json`'s column affinity matches the migration exactly. New
+      `CaseStatus.PRESCRIPTION_RECEIVED`.
+- [x] `ReceiveDoctorPrescriptionUseCase` — fetches from the inbox, persists via Phase 3's
+      `PrescriptionRepository` (write side finally used), flips case status. Same free report
+      integration as Phase 4: `AssembleReportUseCase` already reads `PrescriptionRepository`, so the
+      final report gains diagnosis/medications/signature with zero report-side code change.
+      `ReportFormatter`/`ReportCanvasRenderer` extended to also show the doctor's decision line on
+      the Rx/Advice block.
+- [x] UI entry point: **`PatientSummaryScreen`**, not a new "doctor screen" — the PHC worker returns
+      to the patient (via the day-scoped roster, REQ-ROS-02 intact — no new all-patients query) and
+      taps "Check for doctor's response (mock)". `PatientSummaryViewModel` now also observes
+      `CaseRecordRepository.observeLatestForPatient` (new query) so status updates reactively;
+      "View report" appears once any case record exists.
+- [x] **Closed a flagged gap along the way:** Phase 2.5 noted `AcknowledgementViewModel`'s
+      sync-window test was skipped for lack of a `FakeCaseRecordRepository`. Built it now (needed
+      for this phase's own tests anyway) — `testutil/Fakes.kt` gained `FakeCaseRecordRepository` +
+      `FakePrescriptionRepository`. `AcknowledgementViewModel` still has no dedicated test (out of
+      this phase's scope), but the blocking fake now exists for whoever adds it.
+- [x] Docs: REQ-RX-01/03 flipped PLANNED → DONE with the scope-correction note; REQ-RX-02 unchanged
+      (already PARTIAL from Phase 3); field-mapping table gained the kernel-decision row.
+- [x] **Verified:** `./gradlew testDebugUnitTest` green — **87 tests, 0 failures** (was 80; +7:
+      `ReceiveDoctorPrescriptionUseCaseTest` ×3, `MockDoctorPrescriptionInboxTest` ×4).
+      `assembleDebug` + `compileDebugAndroidTestKotlin` clean.
+
+### Phase 6 — Referral / Transfer flow (DONE, on Sonnet high)
+- [x] **Visibility decision (brief required picking one, not leaving it ambiguous):** "Refer to
+      Higher Facility" is **always visible, enabled only when eligible** — chosen over hiding it
+      entirely, for discoverability. Eligibility = `ClinicalReport.suggestsReferral`: a
+      non-measurable ailment's severity ≥ 8/10 (`ReportFormatter.REFERRAL_SEVERITY_THRESHOLD`), OR
+      the doctor's `KernelDecision.REJECT` on the AI differential (Phase 5's mock intake feeds this
+      for free — no new plumbing needed to wire REJECT into the referral trigger).
+- [x] Button lives on **`ReportScreen`**, not a doctor screen — consistent with Phase 5's scope
+      correction; the PHC worker is the one deciding to refer, from the same report view they
+      already use for the preliminary/final report and PDF export.
+- [x] `domain/repository/ReferralRepository`+impl (DAO/entity already existed from Phase 0, unused
+      until now), `CreateReferralUseCase` (single PHC-side action — `ReferralStatus` never advances
+      past `QUEUED`, no receiving-side system, per brief).
+- [x] Confirm bottom sheet: urgency (`UrgencyLevel` `FilterChip`s: ROUTINE/URGENT/EMERGENCY, all
+      three already existed as an enum from Phase 0), reason auto-filled from
+      `ClinicalReport.referralReasonSuggestion` (diagnosis-based normally; severity- or
+      rejection-based wording when those are what triggered eligibility) and editable. Confirm →
+      logs `AuditAction.REFERRAL_CREATED` (constant already existed from Phase 0, unused until
+      now) → `AlertDialog` confirmation: "Referral sent — Patient UID {uid} queued for CHC/District
+      Hospital appointment."
+- [x] `sendingPhcId` reuses `Patient.primaryCareClinicName` (no separate PHC-id system exists in
+      this app) — a scoping decision, not an oversight.
+- [x] No Room schema change — `ReferralEntity`/`referrals` table already existed from Phase 0 (DB
+      stays v5).
+- [x] Docs: REQ-REF-01 flipped PLANNED → DONE with the visibility decision restated verbatim (per
+      the brief's explicit instruction not to leave it ambiguous); field-mapping doc gained a note
+      that the referral fields are UI-only (not printed on the canvas/PDF).
+- [x] **Verified:** `./gradlew testDebugUnitTest` green — **94 tests, 0 failures** (was 87; +7:
+      `CreateReferralUseCaseTest` ×3, `ReportFormatterTest` referral-eligibility ×4).
+      `assembleDebug` + `compileDebugAndroidTestKotlin` clean.
+
+**All six phases of the brief are now DONE.** Remaining brief items are explicitly out of this
+pass's scope (see "What NOT to build" in the original brief): real ABDM/ABHA API, real backend,
+receiving-hospital app, real digital signatures, UI polish.
+
+## Post-brief additions (2026-07-16, user follow-up request)
+
+Three asks after Phase 6 landed: report logo, attachments-in-report, and biometric sign-in.
+
+- [x] **Report logo:** header slot now renders the real institutional logo
+      (`res/drawable-nodpi/logo.png` — the same asset already on Home) instead of the "LOGO"
+      placeholder box. `ReportCanvasRenderer` gained a `logoBitmap: Bitmap?` constructor param
+      (falls back to the placeholder if null/decode-failed, never a blank gap); decoding happens
+      in the caller (`ReportScreen` via `produceState`+`Dispatchers.IO`, `ReportPdfExporter` via a
+      `by lazy` field) since the renderer deliberately holds no `Context`.
+- [x] **Attachments in report:** every consultation attachment (photo/affected-area photo/audio/
+      video) now appears in a new "Attachments" report section — same "pass through unmodified"
+      posture `KernelPayload.attachments` already has for the kernel (REQ-HAN-06), extended to the
+      report. `ClinicalReport.attachments: List<ReportAttachmentEntry>`; `ReportFormatter` labels
+      each one per-type-numbered ("Photo 1", "Affected area photo 1", "Audio 1", …); images render
+      inline via a caller-supplied `imageLoader: (String) -> Bitmap?` lambda (content-resolver
+      decode, "Image unavailable" placeholder on failure); audio/video get a labeled line only — a
+      static canvas/PDF page can't play either back.
+- [x] **Biometric sign-in (REQ-SEC-03, PARTIAL — up from PLANNED):** tapping "Sign in" on the
+      worker Login screen now requires `androidx.biometric.BiometricPrompt`
+      (`BIOMETRIC_STRONG or DEVICE_CREDENTIAL`) to succeed before `AuthSession.signIn` runs.
+      `MainActivity` changed `ComponentActivity` → `FragmentActivity` (BiometricPrompt's
+      requirement — verified this doesn't break app launch, see on-device check below).
+      **Scope, confirmed with the user:** worker login only, not the ABHA patient flow; gate fires
+      *after* name+role entry, on the Sign-in tap, not before the form.
+      **Known, documented limit:** this verifies "the device owner unlocked the device," not "the
+      typed name belongs to this person" — no per-account credential store exists, so it's a
+      device-authorization gate, not real per-worker identity binding. Full REQ-SEC-03 (real
+      accounts + RBAC) stays open.
+      **Deliberate strictness:** a device with no biometric enrolled AND no screen lock at all is
+      refused sign-in outright (clear error message), not silently waved through — flagging this
+      as an operational requirement (every field device needs a configured screen lock), not
+      hiding it.
+- [x] **On-device verification** (emulator-5554, no lock screen configured): installed, launched
+      cold — no crash from the `FragmentActivity` change, existing session restored normally.
+      Signed out → entered name/role → tapped Sign in → got the exact designed "Can't sign in — no
+      fingerprint/face/screen lock set up on this device" message, form stayed filled and usable,
+      no crash. The BIOMETRIC_SUCCESS path (an emulator with a PIN configured) wasn't exercised on
+      this pass.
+- [x] Docs: REQ-SEC-03 flipped PLANNED → PARTIAL with the exact scope/limit language above;
+      REQ-RPT-02/03 updated for the real logo + attachments; field-mapping table gained two rows.
+- [x] **Verified:** `./gradlew testDebugUnitTest` green — **99 tests, 0 failures** (was 94; +5:
+      `LoginViewModelTest` ×3, `ReportFormatterTest` attachment-mapping ×2). `assembleDebug` +
+      `compileDebugAndroidTestKotlin` clean.
+
 ## Not started
-- [ ] Demo-theater additions from agent_docs/hardening.md (AI assessment panel, security shield sheet)
+- [ ] Demo-theater additions from agent_docs/hardening.md — the AI assessment panel item is now
+      DONE (Phase 4); re-check hardening.md for what (if anything) remains (e.g. security shield
+      sheet) before treating this line as fully resolved.
 - [ ] Pre-production process blockers (flag to founder): ISO 13485 QMS + DHF, ISO 14971 risk file,
       software safety classification — see docs/regulatory-foundation.md §3
 - [ ] Real authentication + RBAC enforcement (REQ-SEC-03) — mock login above does not satisfy this
