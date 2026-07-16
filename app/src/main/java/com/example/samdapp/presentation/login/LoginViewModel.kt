@@ -47,8 +47,11 @@ class LoginViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isSubmitting = true) }
             authSession.signIn(current.name.trim(), role)
-            // No effect to emit — AppNavHost observes AuthSession.currentUser() directly and
-            // swaps to the main nav host reactively once this sign-in completes.
+            // Reset for the next sign-in: this ViewModel is Activity-scoped (obtained outside
+            // any NavEntry in AppNavHost), so it survives sign-out and would otherwise leave
+            // isSubmitting stuck true — and the previous user's name/role prefilled — for
+            // whoever signs in next.
+            _uiState.value = LoginUiState()
         }
     }
 }
