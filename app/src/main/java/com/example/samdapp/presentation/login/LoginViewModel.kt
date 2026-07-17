@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.samdapp.domain.auth.AuthSession
 import com.example.samdapp.domain.auth.UserRole
+import com.example.samdapp.presentation.common.isEmulator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,7 +45,11 @@ class LoginViewModel @Inject constructor(
     private val authSession: AuthSession,
 ) : ViewModel(), LoginActions {
 
-    private val _uiState = MutableStateFlow(LoginUiState())
+    // Emulators can't satisfy the biometric prompt (see BiometricAuth.isEmulator), so prefill a
+    // mock ASHA worker (Gayatri) here purely to save re-typing name+role on every emulator run.
+    private val _uiState = MutableStateFlow(
+        if (isEmulator()) LoginUiState(name = "Gayatri", role = UserRole.ASHA_WORKER) else LoginUiState(),
+    )
     val uiState: StateFlow<LoginUiState> = _uiState.asStateFlow()
 
     private val _effects = Channel<LoginEffect>(Channel.BUFFERED)

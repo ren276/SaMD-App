@@ -29,34 +29,41 @@ fun rememberBiometricAuthenticator(onResult: (BiometricResult) -> Unit): (subtit
     val activity = LocalContext.current as FragmentActivity
 
     return { subtitle ->
-        val manager = BiometricManager.from(activity)
-        if (manager.canAuthenticate(ALLOWED_AUTHENTICATORS) != BiometricManager.BIOMETRIC_SUCCESS) {
-            onResult(BiometricResult.Unavailable)
+        // Emulators have no virtual fingerprint/screen lock configured by default, so
+        // BiometricManager.canAuthenticate() always reports Unavailable and blocks sign-in
+        // during development. Real devices never hit this branch.
+        if (isEmulator()) {
+            onResult(BiometricResult.Success)
         } else {
-            val executor = ContextCompat.getMainExecutor(activity)
-            val prompt = BiometricPrompt(
-                activity,
-                executor,
-                object : BiometricPrompt.AuthenticationCallback() {
-                    override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                        onResult(BiometricResult.Success)
-                    }
+            val manager = BiometricManager.from(activity)
+            if (manager.canAuthenticate(ALLOWED_AUTHENTICATORS) != BiometricManager.BIOMETRIC_SUCCESS) {
+                onResult(BiometricResult.Unavailable)
+            } else {
+                val executor = ContextCompat.getMainExecutor(activity)
+                val prompt = BiometricPrompt(
+                    activity,
+                    executor,
+                    object : BiometricPrompt.AuthenticationCallback() {
+                        override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                            onResult(BiometricResult.Success)
+                        }
 
-                    override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                        onResult(BiometricResult.Failed(errString.toString()))
-                    }
+                        override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                            onResult(BiometricResult.Failed(errString.toString()))
+                        }
 
-                    override fun onAuthenticationFailed() {
-                        onResult(BiometricResult.Failed("Fingerprint/face did not match"))
-                    }
-                },
-            )
-            val promptInfo = BiometricPrompt.PromptInfo.Builder()
-                .setTitle("Verify to sign in")
-                .setSubtitle(subtitle)
-                .setAllowedAuthenticators(ALLOWED_AUTHENTICATORS)
-                .build()
-            prompt.authenticate(promptInfo)
+                        override fun onAuthenticationFailed() {
+                            onResult(BiometricResult.Failed("Fingerprint/face did not match"))
+                        }
+                    },
+                )
+                val promptInfo = BiometricPrompt.PromptInfo.Builder()
+                    .setTitle("Verify to sign in")
+                    .setSubtitle(subtitle)
+                    .setAllowedAuthenticators(ALLOWED_AUTHENTICATORS)
+                    .build()
+                prompt.authenticate(promptInfo)
+            }
         }
     }
 }
