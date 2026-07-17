@@ -5,15 +5,12 @@
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <!-- The passphrase ciphertext is useless without the non-exportable Keystore key,
+             which is never backed up, so keeping it in a restored backup only causes a
+             MAC-verification failure against the new key. Exclude it. -->
+        <exclude domain="sharedpref" path="samd_db_security_prefs.xml"/>
     </cloud-backup>
-    <!--
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <exclude domain="sharedpref" path="samd_db_security_prefs.xml"/>
     </device-transfer>
-    -->
 </data-extraction-rules>
