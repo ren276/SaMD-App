@@ -14,8 +14,8 @@ class StartCaseUseCase @Inject constructor(
     private val encounterRepository: EncounterRepository,
     private val caseRecordRepository: CaseRecordRepository,
 ) {
-    suspend operator fun invoke(patientId: String): Result<StartedCase> {
-        val encounter = encounterRepository.startEncounter(patientId).getOrElse {
+    suspend operator fun invoke(patientId: String, followUpOfEncounterId: String? = null): Result<StartedCase> {
+        val encounter = encounterRepository.startEncounter(patientId, followUpOfEncounterId).getOrElse {
             return Result.failure(it)
         }
         val caseRecord = caseRecordRepository.createDraft(patientId, encounter.id).getOrElse {

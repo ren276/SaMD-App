@@ -23,6 +23,20 @@ data class KernelReportOutput(
     val evidenceFor: List<String>,
     val evidenceAgainst: List<String>,
     val modelVersion: String,
-    val inferenceTimestamp: Instant,
+    /** Mock kernel's structured ICD-10 suggestion — null when the complaint didn't match a
+     *  well-characterized scenario (the default/unmatched fallback deliberately doesn't code
+     *  one; the doctor's own diagnosis, not this app, is the source of a real ICD code). */
+    val icdCode: String?,
+    val deviceId: String,
+    val softwareVersion: String,
+    /** Simple heuristic: proportion of the optional [KernelPayload] fields that were populated. */
+    val dataQualityScore: Double?,
+    /** Mock complement of [confidenceScore] (`1 - confidenceScore`) — a placeholder for a real
+     *  kernel's own uncertainty estimate, not a second independent signal in this mock. */
+    val uncertaintyScore: Double?,
+    val riskCategory: RiskCategory,
+    val urgencyLevel: UrgencyLevel,
+    val inferenceStartedAt: Instant,
+    val inferenceEndedAt: Instant,
     val requiredHumanVerification: Boolean,
 )

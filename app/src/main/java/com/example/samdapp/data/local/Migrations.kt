@@ -121,3 +121,54 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
         connection.execSQL("ALTER TABLE `prescriptions` ADD COLUMN `kernelDecision` TEXT")
     }
 }
+
+/**
+ * Report-capture schema addendum: fields captured for the exported report artifact even though
+ * this app never surfaces them in any doctor-facing UI (out of scope here — see Part A brief).
+ * `inferenceTimestamp` is renamed to `inferenceEndedAt` (it was always "when inference finished";
+ * the name just didn't say so) and `inferenceStartedAt` is added alongside it so the report can
+ * show actual inference duration. Existing rows backfill `inferenceStartedAt` from the same
+ * timestamp — the only value available for historical rows — new rows populate them independently.
+ */
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL("ALTER TABLE `kernel_reports` RENAME COLUMN `inferenceTimestamp` TO `inferenceEndedAt`")
+        connection.execSQL("ALTER TABLE `kernel_reports` ADD COLUMN `inferenceStartedAt` INTEGER NOT NULL DEFAULT 0")
+        connection.execSQL("UPDATE `kernel_reports` SET `inferenceStartedAt` = `inferenceEndedAt`")
+        connection.execSQL("ALTER TABLE `kernel_reports` ADD COLUMN `icdCode` TEXT")
+        connection.execSQL("ALTER TABLE `kernel_reports` ADD COLUMN `deviceId` TEXT NOT NULL DEFAULT ''")
+        connection.execSQL("ALTER TABLE `kernel_reports` ADD COLUMN `softwareVersion` TEXT NOT NULL DEFAULT ''")
+        connection.execSQL("ALTER TABLE `kernel_reports` ADD COLUMN `dataQualityScore` REAL")
+        connection.execSQL("ALTER TABLE `kernel_reports` ADD COLUMN `uncertaintyScore` REAL")
+        connection.execSQL("ALTER TABLE `kernel_reports` ADD COLUMN `riskCategory` TEXT NOT NULL DEFAULT 'MODERATE'")
+        connection.execSQL("ALTER TABLE `kernel_reports` ADD COLUMN `urgencyLevel` TEXT NOT NULL DEFAULT 'ROUTINE'")
+    }
+}
+
+/**
+ * Doctor-continuity + tracker foundation (Part B). `encounters.followUpOfEncounterId` lets a
+ * worker mark a new visit as a follow-up to a specific prior one (PatientSummary consultation
+ * history). `doctors` moves off the `doctors.json` asset into Room, seeded with the same 9 mock
+ * doctors, so specialty-scoped/least-busy assignment queries can run in SQL.
+ */
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL("ALTER TABLE `encounters` ADD COLUMN `followUpOfEncounterId` TEXT")
+
+        connection.execSQL(
+            "CREATE TABLE IF NOT EXISTS `doctors` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, " +
+                "`specialty` TEXT NOT NULL, `available` INTEGER NOT NULL, `facilityName` TEXT, " +
+                "`registrationNumber` TEXT, PRIMARY KEY(`id`))",
+        )
+        val insertPrefix = "INSERT INTO `doctors` (`id`, `name`, `specialty`, `available`, `facilityName`, `registrationNumber`) VALUES "
+        connection.execSQL(insertPrefix + "('doc-gen-001', 'Dr. Anjali Sharma', 'General Physician', 1, 'Community Health Centre, Bhainsa', 'NMC/TS/2011/45231')")
+        connection.execSQL(insertPrefix + "('doc-gen-002', 'Dr. Rakesh Verma', 'General Physician', 0, 'District Hospital, Sitapur', 'NMC/UP/2008/33127')")
+        connection.execSQL(insertPrefix + "('doc-gyn-001', 'Dr. Priya Nair', 'Gynecology', 1, 'District Hospital, Sitapur', 'NMC/KL/2013/58902')")
+        connection.execSQL(insertPrefix + "('doc-ped-001', 'Dr. Suresh Iyer', 'Pediatrics', 1, 'Community Health Centre, Bhainsa', 'NMC/TN/2010/41765')")
+        connection.execSQL(insertPrefix + "('doc-ortho-001', 'Dr. Manoj Kumar', 'Orthopedics', 0, 'PHC Rampur', 'NMC/UP/2015/61140')")
+        connection.execSQL(insertPrefix + "('doc-derm-001', 'Dr. Kavita Desai', 'Dermatology', 1, 'District Hospital, Sitapur', 'NMC/MH/2012/50318')")
+        connection.execSQL(insertPrefix + "('doc-psych-001', 'Dr. Arjun Reddy', 'Psychiatry', 1, 'Community Health Centre, Bhainsa', 'NMC/TS/2014/59477')")
+        connection.execSQL(insertPrefix + "('doc-ent-001', 'Dr. Neha Joshi', 'ENT', 0, 'PHC Rampur', 'NMC/MH/2009/37652')")
+        connection.execSQL(insertPrefix + "('doc-oph-001', 'Dr. Vikram Singh', 'Ophthalmology', 1, 'District Hospital, Sitapur', 'NMC/UP/2011/46009')")
+    }
+}

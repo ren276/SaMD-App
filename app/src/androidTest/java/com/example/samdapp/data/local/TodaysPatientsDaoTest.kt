@@ -46,6 +46,7 @@ class TodaysPatientsDaoTest {
         startedAt = Instant.ofEpochMilli(startedAtMillis),
         createdAt = Instant.ofEpochMilli(startedAtMillis),
         updatedAt = Instant.ofEpochMilli(startedAtMillis),
+        followUpOfEncounterId = null,
     )
 
     @Test

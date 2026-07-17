@@ -174,7 +174,8 @@ interface CompounderActions {
 
 @HiltViewModel(assistedFactory = CompounderViewModel.Factory::class)
 class CompounderViewModel @AssistedInject constructor(
-    @Assisted private val patientId: String,
+    @Assisted("patientId") private val patientId: String,
+    @Assisted("followUpOfEncounterId") private val followUpOfEncounterId: String?,
     private val startCaseUseCase: StartCaseUseCase,
     private val getVitalsPrefillUseCase: GetVitalsPrefillUseCase,
     private val recordVitalsUseCase: RecordVitalsUseCase,
@@ -188,7 +189,10 @@ class CompounderViewModel @AssistedInject constructor(
 
     @AssistedFactory
     interface Factory {
-        fun create(patientId: String): CompounderViewModel
+        fun create(
+            @Assisted("patientId") patientId: String,
+            @Assisted("followUpOfEncounterId") followUpOfEncounterId: String?,
+        ): CompounderViewModel
     }
 
     private val _uiState = MutableStateFlow(CompounderUiState())
@@ -199,7 +203,7 @@ class CompounderViewModel @AssistedInject constructor(
 
     init {
         viewModelScope.launch {
-            val started = startCaseUseCase(patientId).getOrElse {
+            val started = startCaseUseCase(patientId, followUpOfEncounterId).getOrElse {
                 _uiState.update { state -> state.copy(isLoadingPrefill = false, errorMessage = "Could not start visit") }
                 return@launch
             }

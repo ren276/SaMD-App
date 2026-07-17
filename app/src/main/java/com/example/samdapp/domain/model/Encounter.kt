@@ -8,4 +8,5 @@ data class Encounter(
     val startedAt: Instant,
     val createdAt: Instant,
     val updatedAt: Instant,
+    val followUpOfEncounterId: String?,
 )

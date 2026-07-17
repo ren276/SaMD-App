@@ -4,8 +4,12 @@ import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.samdapp.domain.model.CaseStatus
+import com.example.samdapp.domain.model.ConsultationChain
+import com.example.samdapp.domain.model.ConsultationHistoryEntry
 import com.example.samdapp.domain.model.Patient
+import com.example.samdapp.domain.model.groupIntoChains
 import com.example.samdapp.domain.repository.CaseRecordRepository
+import com.example.samdapp.domain.repository.EncounterRepository
 import com.example.samdapp.domain.repository.PatientRepository
 import com.example.samdapp.domain.usecase.ReceiveDoctorPrescriptionUseCase
 import dagger.assisted.Assisted
@@ -33,6 +37,14 @@ data class PatientSummaryUiState(
     val caseStatus: CaseStatus? = null,
     val isCheckingForResponse: Boolean = false,
     val noResponseYet: Boolean = false,
+    /** Flat visit history, newest first — the source for the "mark as follow-up" picker (you follow
+     *  up a specific prior visit, so this stays ungrouped). */
+    val history: List<ConsultationHistoryEntry> = emptyList(),
+    /** [history] grouped into follow-up chains — one entry per chain, represented by its latest
+     *  visit. This is what Consultation History renders, so the list stays clean (one row per
+     *  chain, not one per follow-up). */
+    val chains: List<ConsultationChain> = emptyList(),
+    val isLoadingHistory: Boolean = true,
 ) {
     val canCheckForDoctorResponse: Boolean get() = caseStatus == CaseStatus.SENT_TO_DOCTOR && !isCheckingForResponse
     val canViewReport: Boolean get() = caseRecordId != null
@@ -48,6 +60,7 @@ class PatientSummaryViewModel @AssistedInject constructor(
     @Assisted private val patientId: String,
     private val patientRepository: PatientRepository,
     private val caseRecordRepository: CaseRecordRepository,
+    private val encounterRepository: EncounterRepository,
     private val receiveDoctorPrescriptionUseCase: ReceiveDoctorPrescriptionUseCase,
 ) : ViewModel(), PatientSummaryActions {
 
@@ -76,6 +89,11 @@ class PatientSummaryViewModel @AssistedInject constructor(
                         )
                     }
                 }
+        }
+        viewModelScope.launch {
+            encounterRepository.observeHistoryForPatient(patientId).collect { history ->
+                _uiState.update { it.copy(history = history, chains = history.groupIntoChains(), isLoadingHistory = false) }
+            }
         }
     }
 
