@@ -161,6 +161,12 @@ class FakeCaseRecordRepository(
     override fun observeByEncounterId(encounterId: String): Flow<CaseRecord?> =
         flowOf(records.values.firstOrNull { it.encounterId == encounterId })
 
+    // No audit-log join in this fake (userId isn't modeled on CaseRecord) — approximates the real
+    // per-worker query with "the most recently updated DRAFT record", good enough for tests that
+    // don't exercise multi-worker draft isolation.
+    override fun observeResumableDraftForUser(userId: String): Flow<CaseRecord?> =
+        flowOf(records.values.filter { it.status == CaseStatus.DRAFT }.maxByOrNull { it.updatedAt })
+
     override fun observeOpenCaseCount(doctorId: String): Flow<Int> =
         flowOf(records.values.count { it.assignedDoctorId == doctorId && it.status == CaseStatus.SENT_TO_DOCTOR })
 
@@ -323,4 +329,7 @@ class FakeAuditLogRepository(
 ) : AuditLogRepository {
     override fun observeRecentForUser(userId: String, limit: Int): Flow<List<AuditLogEntry>> =
         flowOf(entries.take(limit))
+
+    override fun observeForPatient(patientId: String): Flow<List<AuditLogEntry>> =
+        flowOf(entries.filter { it.patientId == patientId })
 }

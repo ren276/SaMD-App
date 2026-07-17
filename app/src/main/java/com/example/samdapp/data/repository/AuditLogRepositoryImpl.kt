@@ -14,6 +14,9 @@ class AuditLogRepositoryImpl @Inject constructor(
 
     override fun observeRecentForUser(userId: String, limit: Int): Flow<List<AuditLogEntry>> =
         auditLogDao.observeByUserId(userId, limit).map { rows -> rows.map { it.toDomain() } }
+
+    override fun observeForPatient(patientId: String): Flow<List<AuditLogEntry>> =
+        auditLogDao.observeByPatientId(patientId).map { rows -> rows.map { it.toDomain() } }
 }
 
 private fun AuditLogEntity.toDomain() = AuditLogEntry(

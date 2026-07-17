@@ -22,6 +22,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.samdapp.presentation.common.StepProgressIndicator
 import com.example.samdapp.presentation.common.filterDigitsOnly
 
 @Composable
@@ -40,6 +41,7 @@ internal fun AbhaLoginContent(uiState: AbhaLoginUiState, actions: AbhaLoginActio
             modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            StepProgressIndicator(current = 1, total = 4, label = "ABHA ID")
             Text(text = "Enter the patient's 14-digit ABHA number.", style = MaterialTheme.typography.bodyMedium)
             OutlinedTextField(
                 value = uiState.abhaId,

@@ -176,6 +176,8 @@ interface CompounderActions {
 class CompounderViewModel @AssistedInject constructor(
     @Assisted("patientId") private val patientId: String,
     @Assisted("followUpOfEncounterId") private val followUpOfEncounterId: String?,
+    @Assisted("resumeEncounterId") private val resumeEncounterId: String?,
+    @Assisted("resumeCaseRecordId") private val resumeCaseRecordId: String?,
     private val startCaseUseCase: StartCaseUseCase,
     private val getVitalsPrefillUseCase: GetVitalsPrefillUseCase,
     private val recordVitalsUseCase: RecordVitalsUseCase,
@@ -192,6 +194,8 @@ class CompounderViewModel @AssistedInject constructor(
         fun create(
             @Assisted("patientId") patientId: String,
             @Assisted("followUpOfEncounterId") followUpOfEncounterId: String?,
+            @Assisted("resumeEncounterId") resumeEncounterId: String?,
+            @Assisted("resumeCaseRecordId") resumeCaseRecordId: String?,
         ): CompounderViewModel
     }
 
@@ -203,27 +207,38 @@ class CompounderViewModel @AssistedInject constructor(
 
     init {
         viewModelScope.launch {
-            val started = startCaseUseCase(patientId, followUpOfEncounterId).getOrElse {
-                _uiState.update { state -> state.copy(isLoadingPrefill = false, errorMessage = "Could not start visit") }
-                return@launch
+            val (encounterId, caseRecordId) = if (resumeEncounterId != null && resumeCaseRecordId != null) {
+                auditLogger.log(
+                    action = AuditAction.ENCOUNTER_RESUMED,
+                    patientId = patientId,
+                    caseRecordId = resumeCaseRecordId,
+                    payload = auditPayload("encounterId" to resumeEncounterId),
+                )
+                resumeEncounterId to resumeCaseRecordId
+            } else {
+                val started = startCaseUseCase(patientId, followUpOfEncounterId).getOrElse {
+                    _uiState.update { state -> state.copy(isLoadingPrefill = false, errorMessage = "Could not start visit") }
+                    return@launch
+                }
+                auditLogger.log(
+                    action = "encounter_started",
+                    patientId = patientId,
+                    caseRecordId = started.caseRecord.id,
+                    payload = auditPayload("encounterId" to started.encounter.id),
+                )
+                started.encounter.id to started.caseRecord.id
             }
-            _uiState.update { it.copy(encounterId = started.encounter.id, caseRecordId = started.caseRecord.id) }
-            auditLogger.log(
-                action = "encounter_started",
-                patientId = patientId,
-                caseRecordId = started.caseRecord.id,
-                payload = auditPayload("encounterId" to started.encounter.id),
-            )
+            _uiState.update { it.copy(encounterId = encounterId, caseRecordId = caseRecordId) }
             launch {
                 // Full AilmentEntry list, unfiltered — the visibility-aware drop to AilmentListItem
                 // happens right here, in the mapping into this UI state, and nowhere else. The
                 // kernel path (Phase 4) reads AilmentRepository directly, bypassing this projection.
-                ailmentRepository.observeForEncounter(started.encounter.id).collect { ailments ->
+                ailmentRepository.observeForEncounter(encounterId).collect { ailments ->
                     _uiState.update { it.copy(ailments = ailments.map { entry -> entry.toListItem() }) }
                 }
             }
             val prefill = getVitalsPrefillUseCase()
-            val snapshot = prefill.toSnapshot(started.encounter.id, patientId, Instant.now())
+            val snapshot = prefill.toSnapshot(encounterId, patientId, Instant.now())
             _uiState.update {
                 it.copy(
                     isLoadingPrefill = false,

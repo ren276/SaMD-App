@@ -22,6 +22,10 @@ interface CaseRecordRepository {
      *  a follow-up's prior encounter back to this to find who saw the patient last time. */
     fun observeByEncounterId(encounterId: String): Flow<CaseRecord?>
 
+    /** Crash-recovery resume: [userId]'s own in-progress (still `DRAFT`) visit, if any — see the
+     *  DAO KDoc for how "this worker's" is derived without a schema change. */
+    fun observeResumableDraftForUser(userId: String): Flow<CaseRecord?>
+
     /** [doctorId]'s currently-open (SENT_TO_DOCTOR) case count — the least-busy signal for
      *  auto-assigning a fresh/unrelated case. */
     fun observeOpenCaseCount(doctorId: String): Flow<Int>

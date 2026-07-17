@@ -24,6 +24,11 @@ object AuditAction {
     const val REFERRAL_CREATED = "referral_created"
     const val REFERRAL_STATUS_CHANGED = "referral_status_changed"
     const val KERNEL_ASSESSMENT_ACKNOWLEDGED = "kernel_assessment_acknowledged"
+
+    /** Crash-recovery resume: the worker was dropped back into an already-`DRAFT` case rather than
+     *  [com.example.samdapp.domain.usecase.StartCaseUseCase] minting a new encounter/case record —
+     *  distinct from the pre-existing `"encounter_started"` string literal. */
+    const val ENCOUNTER_RESUMED = "encounter_resumed"
 }
 
 /** Builds the JSON blob stored in AuditLogEntity.payload from a flat set of fields. */

@@ -32,6 +32,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
+import com.example.samdapp.presentation.common.StepProgressIndicator
 import com.example.samdapp.presentation.common.filterDigitsOnly
 
 @Composable
@@ -69,6 +70,7 @@ private fun RedirectingContent(padding: PaddingValues) {
         modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
     ) {
+        StepProgressIndicator(current = 1, total = 4, label = "ABHA ID")
         CircularProgressIndicator(modifier = Modifier.padding(bottom = 8.dp))
         Text(text = "Redirecting to ABHA Portal (simulated)…", style = MaterialTheme.typography.titleMedium)
         Text(
@@ -84,6 +86,7 @@ private fun SignUpFormContent(uiState: AbhaSignUpUiState, actions: AbhaSignUpAct
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(padding).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        StepProgressIndicator(current = 1, total = 4, label = "ABHA ID")
         Text(
             text = "Minimal Aadhaar-OTP KYC fields (mock — no real Aadhaar verification).",
             style = MaterialTheme.typography.bodyMedium,

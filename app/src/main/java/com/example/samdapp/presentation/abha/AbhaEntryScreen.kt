@@ -19,6 +19,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.example.samdapp.presentation.common.StepProgressIndicator
 
 /**
  * Entry point before registration (REQ-ABH-01/02): the ABHA step precedes and autofills
@@ -36,6 +37,7 @@ fun AbhaEntryScreen(
             modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            StepProgressIndicator(current = 1, total = 4, label = "ABHA ID")
             Text(
                 text = "Does the patient have an Ayushman Bharat Health Account (ABHA) ID?",
                 style = MaterialTheme.typography.titleMedium,
