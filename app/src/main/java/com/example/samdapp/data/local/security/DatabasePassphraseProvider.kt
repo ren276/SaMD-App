@@ -4,6 +4,8 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import com.example.samdapp.data.local.AppDatabase
+import java.security.GeneralSecurityException
 import java.security.KeyStore
 import java.security.SecureRandom
 import javax.crypto.Cipher
@@ -16,7 +18,7 @@ import javax.crypto.spec.GCMParameterSpec
  * non-exportable Android Keystore AES key. The passphrase itself never touches disk
  * in plaintext; the ciphertext is useless without the Keystore-resident key.
  */
-class DatabasePassphraseProvider(context: Context) {
+class DatabasePassphraseProvider(private val context: Context) {
 
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     private val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
@@ -25,7 +27,17 @@ class DatabasePassphraseProvider(context: Context) {
         val storedIv = prefs.getString(KEY_IV, null)
         val storedCiphertext = prefs.getString(KEY_CIPHERTEXT, null)
         if (storedIv != null && storedCiphertext != null) {
-            return decrypt(Base64.decode(storedIv, Base64.NO_WRAP), Base64.decode(storedCiphertext, Base64.NO_WRAP))
+            try {
+                return decrypt(Base64.decode(storedIv, Base64.NO_WRAP), Base64.decode(storedCiphertext, Base64.NO_WRAP))
+            } catch (e: GeneralSecurityException) {
+                // Stored ciphertext no longer matches the Keystore key — e.g. this
+                // SharedPreferences file was restored from a device-transfer/backup that
+                // doesn't carry the non-exportable Keystore key with it. The old database
+                // is unreadable without the lost passphrase, so drop both and start clean
+                // instead of crashing on every launch.
+                prefs.edit().clear().apply()
+                deleteDatabaseFiles()
+            }
         }
 
         val passphrase = ByteArray(PASSPHRASE_LENGTH_BYTES)
@@ -52,6 +64,12 @@ class DatabasePassphraseProvider(context: Context) {
             .build()
         keyGenerator.init(spec)
         return keyGenerator.generateKey()
+    }
+
+    private fun deleteDatabaseFiles() {
+        listOf("", "-wal", "-shm", "-journal").forEach { suffix ->
+            context.getDatabasePath(AppDatabase.DATABASE_NAME + suffix).delete()
+        }
     }
 
     private fun encrypt(plaintext: ByteArray): Pair<ByteArray, ByteArray> {
