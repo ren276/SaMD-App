@@ -29,6 +29,15 @@ class PatientRepositoryImpl @Inject constructor(
         return patientDao.observePatientsWithEncounterBetween(startMillis, endMillis)
             .map { entities -> entities.map(PatientEntity::toDomain) }
     }
+
+    override fun observeRecentPatients(days: Int): Flow<List<Patient>> {
+        val zone = ZoneId.systemDefault()
+        val today = LocalDate.now(zone)
+        val startMillis = today.minusDays(days.toLong() - 1).atStartOfDay(zone).toInstant().toEpochMilli()
+        val endMillis = today.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        return patientDao.observePatientsWithEncounterBetween(startMillis, endMillis)
+            .map { entities -> entities.map(PatientEntity::toDomain) }
+    }
 }
 
 private fun Patient.toEntity() = PatientEntity(

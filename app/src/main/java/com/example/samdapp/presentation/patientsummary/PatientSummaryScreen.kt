@@ -31,12 +31,13 @@ fun PatientSummaryScreen(
     patientId: String,
     onStartConsultation: (patientId: String) -> Unit,
     onViewReport: (caseRecordId: String) -> Unit,
+    bottomBar: @Composable () -> Unit = {},
     viewModel: PatientSummaryViewModel = hiltViewModel<PatientSummaryViewModel, PatientSummaryViewModel.Factory>(
         creationCallback = { factory -> factory.create(patientId) },
     ),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    Scaffold { padding: PaddingValues ->
+    Scaffold(bottomBar = bottomBar) { padding: PaddingValues ->
         Column(
             modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
             verticalArrangement = Arrangement.Center,

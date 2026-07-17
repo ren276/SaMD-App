@@ -1,7 +1,6 @@
 package com.example.samdapp.presentation.home
 
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -34,10 +33,15 @@ import com.example.samdapp.R
 import com.example.samdapp.domain.auth.UserSession
 import com.example.samdapp.domain.model.Patient
 import com.example.samdapp.domain.sync.SyncState
+import com.example.samdapp.presentation.common.PatientRosterRow
 import com.example.samdapp.presentation.common.displayLabel
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
+// TODO(nav-role-scoping): Home is one shared dashboard for every role right now. Whether
+// Compounder-role workers should see a role-specific landing (e.g. their ailment-capture queue
+// instead of this general dashboard) is an open product decision, not settled here — don't
+// silently branch this composable on session.role until that decision is made.
 @Composable
 fun HomeScreen(
     onRegisterNewPatient: () -> Unit,
@@ -45,6 +49,7 @@ fun HomeScreen(
     isOnline: Boolean,
     session: UserSession,
     onSignOut: () -> Unit,
+    bottomBar: @Composable () -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -56,6 +61,7 @@ fun HomeScreen(
         onRegisterNewPatient = onRegisterNewPatient,
         onOpenPatient = onOpenPatient,
         onSyncNow = viewModel::onSyncNow,
+        bottomBar = bottomBar,
     )
 }
 
@@ -68,8 +74,9 @@ private fun HomeContent(
     onRegisterNewPatient: () -> Unit,
     onOpenPatient: (String) -> Unit,
     onSyncNow: () -> Unit,
+    bottomBar: @Composable () -> Unit,
 ) {
-    Scaffold { padding: PaddingValues ->
+    Scaffold(bottomBar = bottomBar) { padding: PaddingValues ->
         Column(
             modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -182,30 +189,6 @@ private fun TodaysRoster(uiState: HomeUiState, onOpenPatient: (String) -> Unit, 
         else -> LazyColumn(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(uiState.todaysPatients, key = { it.id }) { patient ->
                 PatientRosterRow(patient = patient, onClick = { onOpenPatient(patient.id) })
-            }
-        }
-    }
-}
-
-@Composable
-private fun PatientRosterRow(patient: Patient, onClick: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
-        Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
-            Text(text = patient.fullName, style = MaterialTheme.typography.titleMedium)
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    text = "ID ${patient.id.take(8)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                val ageOrSex = patient.age?.let { "Age $it" } ?: patient.biologicalSex
-                Text(
-                    text = ageOrSex,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
         }
     }

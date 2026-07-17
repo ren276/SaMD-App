@@ -33,7 +33,10 @@ import com.example.samdapp.presentation.kernelassessment.KernelAssessmentScreen
 import com.example.samdapp.presentation.home.HomeScreen
 import com.example.samdapp.presentation.login.LoginScreen
 import com.example.samdapp.presentation.medicalbackground.MedicalBackgroundScreen
+import com.example.samdapp.presentation.patients.PatientsScreen
 import com.example.samdapp.presentation.patientsummary.PatientSummaryScreen
+import com.example.samdapp.presentation.profile.ProfileScreen
+import com.example.samdapp.presentation.referrals.ReferralsScreen
 import com.example.samdapp.presentation.register.RegisterScreen
 import com.example.samdapp.presentation.report.ReportScreen
 import com.example.samdapp.presentation.sending.SendingScreen
@@ -67,6 +70,22 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
     val connectivityViewModel: ConnectivityViewModel = hiltViewModel()
     val isOnline by connectivityViewModel.effectiveOnline.collectAsStateWithLifecycle()
 
+    // Tab switches always reset to a single-tab-root back stack (same clear+add idiom already
+    // used to return Home from EmergencyOverride/DoctorList) — no cross-tab history to get lost in.
+    fun switchTab(tab: BottomNavTab) {
+        backStack.clear()
+        backStack.add(
+            when (tab) {
+                BottomNavTab.HOME -> Home
+                BottomNavTab.PATIENTS -> Patients
+                BottomNavTab.REFERRALS -> Referrals
+                BottomNavTab.PROFILE -> Profile
+            },
+        )
+    }
+    fun bottomNavBar(current: BottomNavTab?): @Composable () -> Unit =
+        { BottomNavBar(current = current, onSelect = ::switchTab) }
+
     Column(modifier = Modifier.fillMaxSize()) {
         GlobalStatusBar(isOnline = isOnline, onToggleOnline = connectivityViewModel::toggle)
 
@@ -90,6 +109,25 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
                     isOnline = isOnline,
                     session = session,
                     onSignOut = onSignOut,
+                    bottomBar = bottomNavBar(BottomNavTab.HOME),
+                )
+            }
+            entry<Patients> {
+                PatientsScreen(
+                    onOpenPatient = { patientId -> backStack.add(PatientSummary(patientId)) },
+                    bottomBar = bottomNavBar(BottomNavTab.PATIENTS),
+                )
+            }
+            entry<Referrals> {
+                ReferralsScreen(bottomBar = bottomNavBar(BottomNavTab.REFERRALS))
+            }
+            entry<Profile> {
+                ProfileScreen(
+                    session = session,
+                    isOnline = isOnline,
+                    onToggleOnline = connectivityViewModel::toggle,
+                    onSignOut = onSignOut,
+                    bottomBar = bottomNavBar(BottomNavTab.PROFILE),
                 )
             }
             entry<AbhaEntry> {
@@ -129,6 +167,7 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
                     patientId = key.patientId,
                     onStartConsultation = { patientId -> backStack.add(ConsentRoute(patientId)) },
                     onViewReport = { caseRecordId -> backStack.add(ReportRoute(caseRecordId)) },
+                    bottomBar = bottomNavBar(current = null),
                 )
             }
             entry<ConsentRoute> { key ->

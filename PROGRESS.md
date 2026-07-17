@@ -430,6 +430,49 @@ Three asks after Phase 6 landed: report logo, attachments-in-report, and biometr
       `LoginViewModelTest` ×3, `ReportFormatterTest` attachment-mapping ×2). `assembleDebug` +
       `compileDebugAndroidTestKotlin` clean.
 
+## Bottom navigation for PHC worker roles (done, standalone pass after the SaMD demo overhaul)
+- [x] 4 bottom-nav tabs (`BottomNavBar.kt`, `BottomNavTab` enum): Home, Patients, Referrals,
+      Profile. `PatientSummary` also shows the bar (landing/review screen, not an in-progress
+      flow) but isn't itself a tab root, so no tab highlights there (`current = null`).
+- [x] **Hide-during-consultation, structurally:** the bar is rendered inside each visible screen's
+      own `Scaffold(bottomBar = ...)` slot — Register/ABHA/Consultation/Ailments/Compounder/
+      Sending/Transcription/Acknowledgement/KernelAssessment/Consent/EmergencyOverride/Report/
+      DoctorList screens were never given a `bottomBar` param, so the bar is absent there by
+      construction, not a disabled/greyed state. No global visibility flag anywhere.
+- [x] Tab switches reset to a single-tab-root back stack (`backStack.clear(); add(tabRoute)`) —
+      same clear+add idiom EmergencyOverride/DoctorList already used to return to Home.
+- [x] **Patients tab:** searchable/filterable list, but scoped to the last 7 days
+      (`PatientRepository.observeRecentPatients`), not the full patient table — the brief's
+      "today's + recent" wording collided with the existing hardening.md data-minimization
+      anti-pattern ("no all-patients query exists"); resolved by widening the existing day-scoped
+      DAO query's window rather than adding an unbounded one. No schema/DAO change needed — the
+      DAO already took arbitrary start/end bounds.
+- [x] **Referrals tab:** this device's own sent-referral outbox
+      (`ReferralDao.observeAll`/`ReferralRepository.observeAll`, new — DAO previously only had
+      `observeForCase`). Real data; status will read QUEUED for every row until a receiving-side
+      system exists (Phase 6 already established referrals never advance past QUEUED in this mock).
+- [x] **Profile tab:** session name/role, sign-out, offline/sync toggle (same shared
+      `ConnectivityViewModel` instance the top status bar uses, not a second source of truth), and
+      an audit-trail summary. New read-side `AuditLogRepository`/`AuditLogEntry` (the DAO's
+      `observeAll`/`observeByPatientId` existed but were never wired past the DAO — insert side
+      stays untouched, REQ-AUD-02 intact) + new `AuditLogDao.observeByUserId` query, filtered to
+      the signed-in worker, capped at 20 rows.
+      **Flagged, not fabricated:** no PHC identifier exists on the worker session (`UserSession`
+      has no PHC field, unlike `Patient.primaryCareClinicName`) — Profile shows name/role only.
+- [x] `TODO(nav-role-scoping)` left at `HomeScreen`'s entry point per the open decision flag —
+      Compounder-role-specific Home content stays undecided, not silently shipped either way.
+- [x] Extracted `PatientRosterRow` to `presentation/common/` (was private/duplicated-in-spirit
+      inside `HomeScreen`) so Home's roster and the new Patients tab share one row composable.
+- [x] Icons from `material-icons-core` only (already a dependency; no `material-icons-extended`
+      added) — Home/List/Send/Person all exist in the core set.
+- [x] **Verified:** `./gradlew testDebugUnitTest` green — **103 tests, 0 failures** (was 99; +4:
+      `PatientsViewModelTest` ×2, `ReferralsViewModelTest` ×1, `ProfileViewModelTest` ×1).
+      `assembleDebug` + `compileDebugAndroidTestKotlin` clean. **On-device walk** (emulator-5554):
+      bar shows on Home/Patients/Referrals/Profile/PatientSummary (unhighlighted on the latter),
+      absent on AbhaEntry; back from AbhaEntry returns to Patients (bar intact, correct tab still
+      lit); Patients tab search/roster and Referrals/Profile empty states render real (not mock)
+      data.
+
 ## Not started
 - [ ] Demo-theater additions from agent_docs/hardening.md — the AI assessment panel item is now
       DONE (Phase 4); re-check hardening.md for what (if anything) remains (e.g. security shield

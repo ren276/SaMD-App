@@ -18,6 +18,9 @@ class ReferralRepositoryImpl @Inject constructor(
 
     override fun observeForCase(caseRecordId: String): Flow<List<ReferralRequest>> =
         referralDao.observeForCase(caseRecordId).map { rows -> rows.map { it.toDomain() } }
+
+    override fun observeAll(): Flow<List<ReferralRequest>> =
+        referralDao.observeAll().map { rows -> rows.map { it.toDomain() } }
 }
 
 private fun ReferralRequest.toEntity() = ReferralEntity(
