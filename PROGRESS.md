@@ -650,6 +650,79 @@ Three asks after Phase 6 landed: report logo, attachments-in-report, and biometr
       `compileDebugAndroidTestKotlin` clean. On-device re-verify of the new row layout pending
       (build installs clean; the change is presentational + a read-only JOIN).
 
+## Privacy hardening + flow-UX pass (2026-07-17, user follow-up — shared/stolen-tablet + multi-screen worker flow)
+
+Six additive items, no schema/architecture change. Explicitly excluded ID masking (Aadhaar/ABHA) —
+considered and dropped by the user before this pass (ABHA isn't the secret, Aadhaar masking is an
+input-time concern, not a display rule).
+
+- [x] **FLAG_SECURE on patient-data screens (item 1).** Single-Activity app (Nav3, one backstack of
+      route objects) — the flag is window-wide, not per-screen, so it's toggled reactively off the
+      backstack's top route in a `LaunchedEffect(currentRoute)` in `AppNavHost`/`MainNavHost`,
+      rather than set once per Activity. `Routes.kt` gained `requiresScreenSecurity(route)` +
+      `SECURED_ROUTE_TYPES` — every screen with patient-identifying/clinical data (ABHA sign-up/
+      login/OTP, Register, MedicalBackground, PatientSummary, the new PatientAudit, Consent,
+      Compounder, EmergencyOverride, Consultation, Sending, KernelAssessment, Transcription,
+      Acknowledgement, DoctorAssignmentConfirm, ConsultationChain, Report, DoctorList, Referrals).
+      Excluded: Home/Login/Patients (names alone, lower sensitivity)/Profile/AbhaEntry (menu only,
+      no data yet).
+- [x] **Idle auto-lock with re-auth (item 2).** New `IdleLockViewModel` (Activity-scoped, same
+      "one shared instance obtained outside any NavEntry" pattern as `ConnectivityViewModel`) —
+      75s no-touch timeout flips `isLocked`. `MainActivity` now overrides `onUserInteraction()`
+      (the standard Android idiom: fired on the touch-down that begins any gesture dispatched to
+      the activity — no custom Compose pointer-input plumbing) and feeds the same instance via
+      `by viewModels()`. `IdleLockScreen` (reuses `rememberBiometricAuthenticator`, same as Login's
+      sign-in gate) is drawn **over** the still-mounted `NavDisplay` in a `Box`, never removing it
+      from composition — this matters: recomposing `NavDisplay` from scratch would tear down and
+      recreate every in-flight NavEntry ViewModel (e.g. `CompounderViewModel`), which would call
+      `StartCaseUseCase` again and mint a duplicate encounter. `reset()` is called once per fresh
+      sign-in so idling on Login before signing in never carries an already-tripped lock forward.
+- [x] **Patient-facing audit view (item 3).** DPDP right-to-access gesture, reuses the existing
+      audit trail — no new capture logic. `AuditLogRepository.observeForPatient` (new, backed by
+      the DAO's pre-existing but previously-unused `observeByPatientId`). New
+      `domain/audit/PatientFacingAudit.kt`: `toPatientFacingEntries()` maps every known action
+      string (including the pre-existing free-text ones like `"patient_registered"`,
+      `"vitals_recorded"`) to a plain sentence; anything unmapped falls back to a generic line,
+      never the raw action code. New `PatientAuditRoute(patientId)` +
+      `PatientAuditScreen`/`PatientAuditViewModel`, reached from a clearly labeled "Who has seen
+      your file" button on PatientSummary (not buried in Profile/settings).
+- [x] **Stepper across the worker flow (item 4).** New shared `StepProgressIndicator(current,
+      total, label)` in `presentation/common/`. Real flow is 4 steps, not 5 — ABHA (AbhaEntry/
+      SignUp/Login/Otp all "Step 1", since they're alternate paths to the same logical step) →
+      Registration → Medical background → Ailments & vitals (Compounder combines both into one
+      screen already, per the Phase 2.5 scoping decision — not re-split just to hit a step count).
+- [x] **Crash-recovery resume (item 5).** Encounter+CaseRecord already persist immediately at
+      Compounder's `StartCaseUseCase` call (not on final save), and ailments already persist as
+      added — the real gap was only "detect + offer resume on relaunch," not persistence itself.
+      New `CaseRecordDao.observeResumableDraftForUser(userId)`: joins `audit_log` (the
+      `encounter_started` row's `userId`) to `case_records` (`status = 'DRAFT'`) — no `workerId`
+      column exists on `case_records`/`encounters`, so "this worker's" is derived from the audit
+      trail rather than a schema change. `HomeViewModel` surfaces it as `resumableEncounter`;
+      Home shows a "Resume in-progress consultation?" dialog. `Compounder` route/ViewModel/Screen
+      gained `resumeEncounterId`/`resumeCaseRecordId` (both null on a normal fresh start) — when
+      set, the ViewModel skips `StartCaseUseCase` (which would mint a *second* encounter for the
+      same visit) and re-enters the existing one directly, skipping Consent (already recorded for
+      that encounter). New `AuditAction.ENCOUNTER_RESUMED`. Vitals fields, held only in ViewModel
+      state until Continue, are honestly NOT recovered on resume (never persisted before Continue,
+      unchanged by this pass) — only the encounter/case record and already-added ailments are.
+- [x] **Low battery/storage nudge (item 6).** New `presentation/common/DeviceResourceCheck.kt` —
+      plain functions reading `BatteryManager`/`StatFs` fresh each call (no new interface/DI
+      wiring needed for a leaf platform read; mirrors the existing `rememberBiometricAuthenticator`/
+      `isEmulator()` style already in this package). Non-blocking `LowResourceWarningDialog`
+      ("Continue anyway" always proceeds) gates the two "start a new consultation" entry points:
+      Home's "Register new patient" and PatientSummary's "Consultation" button — never mid-flow.
+- [x] **Unrelated pre-existing bug found and fixed in passing:** `DoctorListScreen.kt:67` had a
+      stray `Column(modifieris a = Modifier...)` typo (not caused by this pass — confirmed via
+      `git diff` that it predated any edit here) breaking compilation; corrected to `modifier =`.
+- [x] **Verified:** `./gradlew testDebugUnitTest` green — **125 tests, 0 failures** (was 112; +13:
+      `IdleLockViewModelTest` ×5, `RoutesSecurityTest` ×3, `PatientFacingAuditTest` ×3,
+      `HomeViewModelTest` resumable-encounter cases ×2). `assembleDebug` +
+      `compileDebugAndroidTestKotlin` clean. **Not yet walked on-device this pass** (compile +
+      unit-test verification only) — on-device checks still needed: screenshot attempt on a
+      secured vs. unsecured screen, the 75s idle-lock → biometric unlock → in-progress Compounder
+      state survives, resume prompt after a real process kill mid-consultation, and the stepper's
+      visual placement across all four flow screens.
+
 ## Not started
 - [ ] Demo-theater additions from agent_docs/hardening.md — the AI assessment panel item is now
       DONE (Phase 4); re-check hardening.md for what (if anything) remains (e.g. security shield

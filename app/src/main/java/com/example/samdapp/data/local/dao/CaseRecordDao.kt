@@ -34,6 +34,20 @@ interface CaseRecordDao {
     @Query("SELECT * FROM case_records WHERE encounterId = :encounterId LIMIT 1")
     fun observeByEncounterId(encounterId: String): Flow<CaseRecordEntity?>
 
+    /** Crash-recovery resume (item 5, privacy/UX hardening pass): the current worker's own
+     *  in-progress visit, if any — a case still `DRAFT` (never reached Acknowledgement/save) that
+     *  THIS worker started, identified via the audit trail's `encounter_started` row rather than a
+     *  new schema column (no `workerId` exists on `case_records`/`encounters`). One row max in
+     *  practice (a worker starts a new visit only after finishing or abandoning the last), but
+     *  `updatedAt DESC LIMIT 1` picks the most recent if more than one somehow exists. */
+    @Query(
+        "SELECT cr.* FROM case_records cr " +
+            "JOIN audit_log al ON al.caseRecordId = cr.id " +
+            "WHERE al.userId = :userId AND al.action = 'encounter_started' AND cr.status = 'DRAFT' " +
+            "ORDER BY cr.updatedAt DESC LIMIT 1",
+    )
+    fun observeResumableDraftForUser(userId: String): Flow<CaseRecordEntity?>
+
     /** Count of this doctor's currently-open (sent, not yet reviewed) cases — the least-busy
      *  signal for auto-assigning a fresh/unrelated case (Part B). */
     @Query("SELECT COUNT(*) FROM case_records WHERE assignedDoctorId = :doctorId AND status = 'SENT_TO_DOCTOR'")

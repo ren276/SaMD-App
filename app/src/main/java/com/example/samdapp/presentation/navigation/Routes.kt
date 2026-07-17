@@ -28,7 +28,18 @@ data class PatientSummary(val patientId: String)
  *  [Compounder]/[com.example.samdapp.domain.usecase.StartCaseUseCase], which stamps it onto the
  *  new [com.example.samdapp.domain.model.Encounter]. */
 data class ConsentRoute(val patientId: String, val followUpOfEncounterId: String? = null)
-data class Compounder(val patientId: String, val followUpOfEncounterId: String? = null)
+
+/** [resumeEncounterId]/[resumeCaseRecordId] are set only when reached via Home's crash-recovery
+ *  "resume in-progress consultation" prompt — non-null in both or null in both. Consent was already
+ *  recorded for that encounter, so resuming skips straight back into Compounder rather than
+ *  re-running [com.example.samdapp.domain.usecase.StartCaseUseCase], which would mint a second
+ *  encounter/case record for the same visit. */
+data class Compounder(
+    val patientId: String,
+    val followUpOfEncounterId: String? = null,
+    val resumeEncounterId: String? = null,
+    val resumeCaseRecordId: String? = null,
+)
 
 /** Terminal state reached from [Compounder] when [com.example.samdapp.domain.usecase.
  *  CheckEmergencyThresholdsUseCase] trips (REQ-TRS-02) — no patientId of its own; the persistent
@@ -79,6 +90,42 @@ data object DoctorListRoute
  *  never reaches this screen. */
 data class DoctorAssignmentConfirmRoute(val caseRecordId: String)
 
+/** DPDP right-to-access gesture: a patient-presentable, plain-language view of who has touched
+ *  their record, reached from PatientSummary's "Who has seen your file" action. */
+data class PatientAuditRoute(val patientId: String)
+
+/**
+ * Routes that show patient-identifying or clinical data — [FLAG_SECURE][android.view.WindowManager.LayoutParams.FLAG_SECURE]
+ * is applied for all of these (blocks screenshots/screen-recording, blanks the recent-apps
+ * thumbnail) since this is a single-Activity app and the flag is window-wide, not per-screen.
+ * Deliberately excludes [Home]/[Login]/[Patients] (names alone, lower sensitivity — the point
+ * isn't to block screenshots there)/[AbhaEntry] (no data yet, just a menu)/[Profile].
+ */
+private val SECURED_ROUTE_TYPES: Set<Class<out Any>> = setOf(
+    AbhaSignUp::class.java,
+    AbhaLogin::class.java,
+    AbhaOtpRoute::class.java,
+    Register::class.java,
+    MedicalBackground::class.java,
+    PatientSummary::class.java,
+    PatientAuditRoute::class.java,
+    ConsentRoute::class.java,
+    Compounder::class.java,
+    EmergencyOverrideRoute::class.java,
+    ConsultationRoute::class.java,
+    SendingRoute::class.java,
+    KernelAssessmentRoute::class.java,
+    TranscriptionRoute::class.java,
+    AcknowledgementRoute::class.java,
+    DoctorAssignmentConfirmRoute::class.java,
+    ConsultationChainRoute::class.java,
+    ReportRoute::class.java,
+    DoctorListRoute::class.java,
+    Referrals::class.java,
+)
+
+fun requiresScreenSecurity(route: Any?): Boolean = route != null && route.javaClass in SECURED_ROUTE_TYPES
+
 /**
  * The patient the current back-stack entry is about, or null if none (Home, Register).
  * Scans from the top down so routes that don't carry a patientId (Sending, Transcription,
@@ -94,6 +141,7 @@ fun currentPatientId(backStack: List<Any>): String? {
             is Compounder -> return route.patientId
             is ConsultationRoute -> return route.patientId
             is ConsultationChainRoute -> return route.patientId
+            is PatientAuditRoute -> return route.patientId
         }
     }
     return null

@@ -27,6 +27,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.example.samdapp.domain.model.formatAbhaId
+import com.example.samdapp.presentation.common.StepProgressIndicator
 import com.example.samdapp.presentation.common.filterDigitsOnly
 
 @Composable
@@ -59,6 +60,7 @@ internal fun AbhaOtpContent(uiState: AbhaOtpUiState, actions: AbhaOtpActions, on
             modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            StepProgressIndicator(current = 1, total = 4, label = "ABHA ID")
             Text(text = "ABHA ID: ${formatAbhaId(uiState.abhaId)}", style = MaterialTheme.typography.titleMedium)
             OutlinedTextField(
                 value = uiState.otp,

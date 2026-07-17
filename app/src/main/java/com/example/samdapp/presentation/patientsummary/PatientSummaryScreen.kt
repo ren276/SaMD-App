@@ -30,6 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -37,6 +38,8 @@ import com.example.samdapp.domain.model.CaseStatus
 import com.example.samdapp.domain.model.ConsultationChain
 import com.example.samdapp.domain.model.ConsultationHistoryEntry
 import com.example.samdapp.domain.model.Patient
+import com.example.samdapp.presentation.common.LowResourceWarningDialog
+import com.example.samdapp.presentation.common.deviceResourceWarnings
 import com.example.samdapp.presentation.common.historyLabel
 import java.time.LocalDate
 import java.time.Period
@@ -50,13 +53,31 @@ fun PatientSummaryScreen(
     onStartConsultation: (patientId: String, followUpOfEncounterId: String?) -> Unit,
     onViewReport: (caseRecordId: String) -> Unit,
     onOpenChain: (patientId: String, rootEncounterId: String) -> Unit,
+    onOpenAuditTrail: (patientId: String) -> Unit,
     bottomBar: @Composable () -> Unit = {},
     viewModel: PatientSummaryViewModel = hiltViewModel<PatientSummaryViewModel, PatientSummaryViewModel.Factory>(
         creationCallback = { factory -> factory.create(patientId) },
     ),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     var showFollowUpDialog by remember { mutableStateOf(false) }
+    var resourceWarnings by remember { mutableStateOf<List<String>>(emptyList()) }
+
+    fun beginConsultationFlow() {
+        if (uiState.history.isNotEmpty()) showFollowUpDialog = true else onStartConsultation(patientId, null)
+    }
+
+    if (resourceWarnings.isNotEmpty()) {
+        LowResourceWarningDialog(
+            warnings = resourceWarnings,
+            onDismiss = { resourceWarnings = emptyList() },
+            onContinueAnyway = {
+                resourceWarnings = emptyList()
+                beginConsultationFlow()
+            },
+        )
+    }
 
     if (showFollowUpDialog) {
         FollowUpPickerDialog(
@@ -102,9 +123,15 @@ fun PatientSummaryScreen(
                 }
             }
 
+            OutlinedButton(
+                onClick = { onOpenAuditTrail(patientId) },
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            ) { Text("Who has seen your file") }
+
             Button(
                 onClick = {
-                    if (uiState.history.isNotEmpty()) showFollowUpDialog = true else onStartConsultation(patientId, null)
+                    val warnings = deviceResourceWarnings(context)
+                    if (warnings.isEmpty()) beginConsultationFlow() else resourceWarnings = warnings
                 },
                 shape = MaterialTheme.shapes.medium,
                 modifier = Modifier.fillMaxWidth(0.6f).aspectRatio(1f).padding(top = 32.dp),

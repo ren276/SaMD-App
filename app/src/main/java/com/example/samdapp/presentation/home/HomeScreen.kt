@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -19,11 +20,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -37,7 +42,9 @@ import com.example.samdapp.R
 import com.example.samdapp.domain.auth.UserSession
 import com.example.samdapp.domain.model.Patient
 import com.example.samdapp.domain.sync.SyncState
+import com.example.samdapp.presentation.common.LowResourceWarningDialog
 import com.example.samdapp.presentation.common.PatientRosterRow
+import com.example.samdapp.presentation.common.deviceResourceWarnings
 import com.example.samdapp.presentation.common.displayLabel
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -51,6 +58,7 @@ fun HomeScreen(
     onRegisterNewPatient: () -> Unit,
     onOpenPatient: (String) -> Unit,
     onOpenDoctorList: () -> Unit,
+    onResumeEncounter: (patientId: String, encounterId: String, caseRecordId: String) -> Unit,
     isOnline: Boolean,
     session: UserSession,
     onSignOut: () -> Unit,
@@ -66,6 +74,7 @@ fun HomeScreen(
         onRegisterNewPatient = onRegisterNewPatient,
         onOpenPatient = onOpenPatient,
         onOpenDoctorList = onOpenDoctorList,
+        onResumeEncounter = onResumeEncounter,
         onSyncNow = viewModel::onSyncNow,
         bottomBar = bottomBar,
     )
@@ -80,9 +89,35 @@ private fun HomeContent(
     onRegisterNewPatient: () -> Unit,
     onOpenPatient: (String) -> Unit,
     onOpenDoctorList: () -> Unit,
+    onResumeEncounter: (patientId: String, encounterId: String, caseRecordId: String) -> Unit,
     onSyncNow: () -> Unit,
     bottomBar: @Composable () -> Unit,
 ) {
+    val context = LocalContext.current
+    var resourceWarnings by remember { mutableStateOf<List<String>>(emptyList()) }
+    var dismissedResumeId by remember { mutableStateOf<String?>(null) }
+
+    uiState.resumableEncounter?.let { resumable ->
+        if (resumable.caseRecordId != dismissedResumeId) {
+            ResumeEncounterDialog(
+                resumable = resumable,
+                onDismiss = { dismissedResumeId = resumable.caseRecordId },
+                onResume = { onResumeEncounter(resumable.patientId, resumable.encounterId, resumable.caseRecordId) },
+            )
+        }
+    }
+
+    if (resourceWarnings.isNotEmpty()) {
+        LowResourceWarningDialog(
+            warnings = resourceWarnings,
+            onDismiss = { resourceWarnings = emptyList() },
+            onContinueAnyway = {
+                resourceWarnings = emptyList()
+                onRegisterNewPatient()
+            },
+        )
+    }
+
     Scaffold(bottomBar = bottomBar) { padding: PaddingValues ->
         Column(
             modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 24.dp),
@@ -116,7 +151,10 @@ private fun HomeContent(
             )
 
             Button(
-                onClick = onRegisterNewPatient,
+                onClick = {
+                    val warnings = deviceResourceWarnings(context)
+                    if (warnings.isEmpty()) onRegisterNewPatient() else resourceWarnings = warnings
+                },
                 shape = MaterialTheme.shapes.large,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(top = 16.dp),
             ) {
@@ -193,6 +231,26 @@ private fun SyncStatusRow(
             }
         }
     }
+}
+
+/** Crash-recovery resume prompt — offered on Home whenever this worker has a `DRAFT` case that
+ *  never reached save (app killed, device power loss, etc. mid-consultation). "Not now" only
+ *  hides the prompt for this Home session; it reappears next launch until the case is finished. */
+@Composable
+private fun ResumeEncounterDialog(resumable: ResumableEncounter, onDismiss: () -> Unit, onResume: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Resume in-progress consultation?") },
+        text = {
+            Text(
+                "You have an unfinished consultation" +
+                    (resumable.patientName?.let { " for $it" } ?: "") +
+                    " that wasn't saved — pick up where you left off?",
+            )
+        },
+        confirmButton = { TextButton(onClick = onResume) { Text("Resume") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Not now") } },
+    )
 }
 
 @Composable

@@ -33,6 +33,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.samdapp.domain.model.AllergyCategory
 import com.example.samdapp.domain.model.MedicalHistoryCategory
 import com.example.samdapp.domain.model.MedicationKind
+import com.example.samdapp.presentation.common.StepProgressIndicator
 
 @Composable
 fun MedicalBackgroundScreen(
@@ -70,6 +71,7 @@ private fun MedicalBackgroundContent(
             modifier = Modifier.fillMaxWidth().padding(padding).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            item { StepProgressIndicator(current = 3, total = 4, label = "Medical background") }
             item {
                 MedicalHistorySection(
                     items = uiState.medicalHistoryItems.map { "${it.category}: ${it.description}" },

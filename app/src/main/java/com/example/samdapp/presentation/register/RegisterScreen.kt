@@ -44,6 +44,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.example.samdapp.presentation.common.DropdownField
+import com.example.samdapp.presentation.common.StepProgressIndicator
 import com.example.samdapp.presentation.common.filterDigitsOnly
 import java.time.Instant
 import java.time.LocalDate
@@ -121,6 +122,7 @@ internal fun RegisterContent(uiState: RegisterUiState, actions: RegisterActions)
             modifier = Modifier.fillMaxWidth().padding(padding).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            item { StepProgressIndicator(current = 2, total = 4, label = "Registration") }
             item { SectionLabel("Core details") }
             item { FieldRow(CORE_FIELDS[0], uiState, actions) }
             item {

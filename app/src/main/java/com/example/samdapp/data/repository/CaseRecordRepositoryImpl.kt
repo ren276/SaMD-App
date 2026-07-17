@@ -53,6 +53,9 @@ class CaseRecordRepositoryImpl @Inject constructor(
     override fun observeByEncounterId(encounterId: String): Flow<CaseRecord?> =
         caseRecordDao.observeByEncounterId(encounterId).map { it?.toDomain() }
 
+    override fun observeResumableDraftForUser(userId: String): Flow<CaseRecord?> =
+        caseRecordDao.observeResumableDraftForUser(userId).map { it?.toDomain() }
+
     override fun observeOpenCaseCount(doctorId: String): Flow<Int> =
         caseRecordDao.observeOpenCaseCount(doctorId)
 

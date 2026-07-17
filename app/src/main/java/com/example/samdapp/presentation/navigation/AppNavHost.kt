@@ -1,12 +1,17 @@
 package com.example.samdapp.presentation.navigation
 
+import android.app.Activity
+import android.view.WindowManager
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalView
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
@@ -22,6 +27,8 @@ import com.example.samdapp.presentation.acknowledgement.AcknowledgementScreen
 import com.example.samdapp.presentation.auth.AuthUiState
 import com.example.samdapp.presentation.auth.AuthViewModel
 import com.example.samdapp.presentation.common.GlobalStatusBar
+import com.example.samdapp.presentation.common.IdleLockScreen
+import com.example.samdapp.presentation.common.IdleLockViewModel
 import com.example.samdapp.presentation.common.PatientContextBar
 import com.example.samdapp.presentation.compounder.CompounderScreen
 import com.example.samdapp.presentation.connectivity.ConnectivityViewModel
@@ -36,6 +43,7 @@ import com.example.samdapp.presentation.home.HomeScreen
 import com.example.samdapp.presentation.login.LoginScreen
 import com.example.samdapp.presentation.medicalbackground.MedicalBackgroundScreen
 import com.example.samdapp.presentation.patients.PatientsScreen
+import com.example.samdapp.presentation.patientsummary.PatientAuditScreen
 import com.example.samdapp.presentation.patientsummary.PatientSummaryScreen
 import com.example.samdapp.presentation.profile.ProfileScreen
 import com.example.samdapp.presentation.referrals.ReferralsScreen
@@ -72,6 +80,14 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
     val connectivityViewModel: ConnectivityViewModel = hiltViewModel()
     val isOnline by connectivityViewModel.effectiveOnline.collectAsStateWithLifecycle()
 
+    // Idle auto-lock (item 2, privacy hardening): same Activity-scoped instance MainActivity
+    // feeds from onUserInteraction(). Reset once per fresh sign-in (this composable's own
+    // mount, matching the KDoc above) so idling on Login before signing in never carries an
+    // already-tripped lock into the new session.
+    val idleLockViewModel: IdleLockViewModel = hiltViewModel()
+    val isLocked by idleLockViewModel.isLocked.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { idleLockViewModel.reset() }
+
     // Tab switches always reset to a single-tab-root back stack (same clear+add idiom already
     // used to return Home from EmergencyOverride/DoctorList) — no cross-tab history to get lost in.
     fun switchTab(tab: BottomNavTab) {
@@ -88,6 +104,22 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
     fun bottomNavBar(current: BottomNavTab?): @Composable () -> Unit =
         { BottomNavBar(current = current, onSelect = ::switchTab) }
 
+    // Single-Activity app: FLAG_SECURE is a window-wide flag, so it's toggled reactively as the
+    // back stack's top route changes rather than being set once per-screen (REQ: privacy hardening
+    // for shared/stolen-tablet scenario — blocks screenshots/screen-recording and blanks the
+    // recent-apps thumbnail on any screen carrying patient data).
+    val view = LocalView.current
+    val currentRoute = backStack.lastOrNull()
+    LaunchedEffect(currentRoute) {
+        val window = (view.context as? Activity)?.window ?: return@LaunchedEffect
+        if (requiresScreenSecurity(currentRoute)) {
+            window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
     Column(modifier = Modifier.fillMaxSize()) {
         GlobalStatusBar(isOnline = isOnline, onToggleOnline = connectivityViewModel::toggle)
 
@@ -109,6 +141,9 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
                     onRegisterNewPatient = { backStack.add(AbhaEntry) },
                     onOpenPatient = { patientId -> backStack.add(PatientSummary(patientId)) },
                     onOpenDoctorList = { backStack.add(DoctorListRoute) },
+                    onResumeEncounter = { patientId, encounterId, caseRecordId ->
+                        backStack.add(Compounder(patientId, resumeEncounterId = encounterId, resumeCaseRecordId = caseRecordId))
+                    },
                     isOnline = isOnline,
                     session = session,
                     onSignOut = onSignOut,
@@ -175,8 +210,12 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
                     onOpenChain = { patientId, rootEncounterId ->
                         backStack.add(ConsultationChainRoute(patientId, rootEncounterId))
                     },
+                    onOpenAuditTrail = { patientId -> backStack.add(PatientAuditRoute(patientId)) },
                     bottomBar = bottomNavBar(current = null),
                 )
+            }
+            entry<PatientAuditRoute> { key ->
+                PatientAuditScreen(patientId = key.patientId)
             }
             entry<ConsentRoute> { key ->
                 ConsentScreen(
@@ -188,6 +227,8 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
                 CompounderScreen(
                     patientId = key.patientId,
                     followUpOfEncounterId = key.followUpOfEncounterId,
+                    resumeEncounterId = key.resumeEncounterId,
+                    resumeCaseRecordId = key.resumeCaseRecordId,
                     onContinue = { patientId, encounterId, caseRecordId, chiefComplaint ->
                         backStack.add(ConsultationRoute(patientId, encounterId, caseRecordId, chiefComplaint))
                     },
@@ -269,5 +310,14 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
             }
         },
         )
+    }
+
+    if (isLocked) {
+        IdleLockScreen(
+            workerName = session.name,
+            onUnlocked = idleLockViewModel::onUnlocked,
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
     }
 }

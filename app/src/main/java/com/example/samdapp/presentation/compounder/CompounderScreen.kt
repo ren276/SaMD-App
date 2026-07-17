@@ -46,6 +46,7 @@ import com.example.samdapp.domain.model.MeasurementType
 import com.example.samdapp.domain.model.Visibility
 import com.example.samdapp.domain.model.VitalsCaptureMethod
 import com.example.samdapp.presentation.common.DropdownField
+import com.example.samdapp.presentation.common.StepProgressIndicator
 import com.example.samdapp.presentation.common.filterDecimal
 import com.example.samdapp.presentation.common.filterDigitsOnly
 import com.example.samdapp.presentation.common.rememberPermissionAction
@@ -54,10 +55,12 @@ import com.example.samdapp.presentation.common.rememberPermissionAction
 fun CompounderScreen(
     patientId: String,
     followUpOfEncounterId: String? = null,
+    resumeEncounterId: String? = null,
+    resumeCaseRecordId: String? = null,
     onContinue: (patientId: String, encounterId: String, caseRecordId: String, chiefComplaint: String) -> Unit,
     onEmergencyOverride: (reasons: List<String>) -> Unit,
     viewModel: CompounderViewModel = hiltViewModel<CompounderViewModel, CompounderViewModel.Factory>(
-        creationCallback = { factory -> factory.create(patientId, followUpOfEncounterId) },
+        creationCallback = { factory -> factory.create(patientId, followUpOfEncounterId, resumeEncounterId, resumeCaseRecordId) },
     ),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -104,6 +107,7 @@ internal fun CompounderContent(uiState: CompounderUiState, actions: CompounderAc
             modifier = Modifier.fillMaxWidth().padding(padding).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            item { StepProgressIndicator(current = 4, total = 4, label = "Ailments & vitals") }
             // Ask the patient what's wrong first — this is a triage conversation, not a form.
             item { Text("What's happening with the patient?", style = MaterialTheme.typography.titleMedium) }
             item {
