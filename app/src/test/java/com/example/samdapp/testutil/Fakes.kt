@@ -4,13 +4,20 @@ import com.example.samdapp.data.local.dao.AuditLogDao
 import com.example.samdapp.data.local.entity.AuditLogEntity
 import com.example.samdapp.domain.audit.AuditLogEntry
 import com.example.samdapp.domain.audit.AuditLogger
+import com.example.samdapp.domain.config.DeviceInfoProvider
 import com.example.samdapp.domain.auth.AuthSession
 import com.example.samdapp.domain.auth.UserRole
 import com.example.samdapp.domain.auth.UserSession
 import com.example.samdapp.domain.model.AbhaProfile
 import com.example.samdapp.domain.model.AilmentEntry
+import com.example.samdapp.domain.doctor.DoctorPrescriptionInbox
+import com.example.samdapp.domain.doctor.IncomingPrescription
 import com.example.samdapp.domain.model.CaseRecord
+import com.example.samdapp.domain.model.ConsultationHistoryEntry
+import com.example.samdapp.domain.model.DoctorTrackerEntry
 import com.example.samdapp.domain.model.CaseStatus
+import com.example.samdapp.domain.model.Doctor
+import com.example.samdapp.domain.model.Encounter
 import com.example.samdapp.domain.model.KernelReportOutput
 import com.example.samdapp.domain.model.Patient
 import com.example.samdapp.domain.model.Prescription
@@ -19,6 +26,8 @@ import com.example.samdapp.domain.repository.AbhaProfileRepository
 import com.example.samdapp.domain.repository.AilmentRepository
 import com.example.samdapp.domain.repository.AuditLogRepository
 import com.example.samdapp.domain.repository.CaseRecordRepository
+import com.example.samdapp.domain.repository.DoctorRepository
+import com.example.samdapp.domain.repository.EncounterRepository
 import com.example.samdapp.domain.repository.KernelReportRepository
 import com.example.samdapp.domain.repository.PatientRepository
 import com.example.samdapp.domain.repository.PrescriptionRepository
@@ -148,6 +157,24 @@ class FakeCaseRecordRepository(
 
     override fun observeLatestForPatient(patientId: String): Flow<CaseRecord?> =
         flowOf(records.values.filter { it.patientId == patientId }.maxByOrNull { it.updatedAt })
+
+    override fun observeByEncounterId(encounterId: String): Flow<CaseRecord?> =
+        flowOf(records.values.firstOrNull { it.encounterId == encounterId })
+
+    override fun observeOpenCaseCount(doctorId: String): Flow<Int> =
+        flowOf(records.values.count { it.assignedDoctorId == doctorId && it.status == CaseStatus.SENT_TO_DOCTOR })
+
+    override fun observeDoctorTrackerRows(): Flow<List<DoctorTrackerEntry>> = flowOf(
+        records.values
+            .filter { it.status == CaseStatus.SENT_TO_DOCTOR || it.status == CaseStatus.PRESCRIPTION_RECEIVED }
+            .map {
+                DoctorTrackerEntry(
+                    caseRecordId = it.id, patientId = it.patientId, patientFullName = "Patient ${it.patientId}",
+                    chiefComplaint = null, status = it.status, updatedAt = it.updatedAt,
+                    doctorName = it.assignedDoctorId?.let { d -> "Dr. $d" }, doctorSpecialty = "General Physician",
+                )
+            },
+    )
 }
 
 class FakePrescriptionRepository : PrescriptionRepository {
@@ -208,6 +235,45 @@ class FakeAilmentRepository : AilmentRepository {
         stream.value = added.filter { it.id !in deletedIds }
         return Result.success(Unit)
     }
+}
+
+class FakeDeviceInfoProvider(
+    private val deviceId: String = "test-device",
+    private val softwareVersion: String = "test-version",
+) : DeviceInfoProvider {
+    override fun deviceId(): String = deviceId
+    override fun softwareVersion(): String = softwareVersion
+}
+
+class FakeEncounterRepository(
+    private val history: List<ConsultationHistoryEntry> = emptyList(),
+    initialEncounters: List<Encounter> = emptyList(),
+) : EncounterRepository {
+    val started = mutableListOf<Pair<String, String?>>()
+    private val encountersById = initialEncounters.associateBy { it.id }.toMutableMap()
+
+    override suspend fun startEncounter(patientId: String, followUpOfEncounterId: String?): Result<Encounter> {
+        started += patientId to followUpOfEncounterId
+        val encounter = Encounter(
+            id = "enc-${started.size}", patientId = patientId, startedAt = Instant.EPOCH,
+            createdAt = Instant.EPOCH, updatedAt = Instant.EPOCH, followUpOfEncounterId = followUpOfEncounterId,
+        )
+        encountersById[encounter.id] = encounter
+        return Result.success(encounter)
+    }
+
+    override fun observeEncounter(encounterId: String): Flow<Encounter?> = flowOf(encountersById[encounterId])
+
+    override fun observeHistoryForPatient(patientId: String): Flow<List<ConsultationHistoryEntry>> = flowOf(history)
+}
+
+class FakeDoctorRepository(private val doctors: List<Doctor> = emptyList()) : DoctorRepository {
+    override suspend fun getDoctors(): Result<List<Doctor>> = Result.success(doctors)
+}
+
+class FakeDoctorPrescriptionInbox : DoctorPrescriptionInbox {
+    var response: IncomingPrescription? = null
+    override suspend fun fetchPrescription(caseRecordId: String): Result<IncomingPrescription?> = Result.success(response)
 }
 
 class FakeSyncStatus : SyncStatus {

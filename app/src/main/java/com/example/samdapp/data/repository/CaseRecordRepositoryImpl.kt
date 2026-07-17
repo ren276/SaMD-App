@@ -1,9 +1,11 @@
 package com.example.samdapp.data.repository
 
 import com.example.samdapp.data.local.dao.CaseRecordDao
+import com.example.samdapp.data.local.dao.DoctorTrackerRow
 import com.example.samdapp.data.local.entity.CaseRecordEntity
 import com.example.samdapp.domain.model.CaseRecord
 import com.example.samdapp.domain.model.CaseStatus
+import com.example.samdapp.domain.model.DoctorTrackerEntry
 import com.example.samdapp.domain.repository.CaseRecordRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -47,7 +49,27 @@ class CaseRecordRepositoryImpl @Inject constructor(
 
     override fun observeLatestForPatient(patientId: String): Flow<CaseRecord?> =
         caseRecordDao.observeLatestForPatient(patientId).map { it?.toDomain() }
+
+    override fun observeByEncounterId(encounterId: String): Flow<CaseRecord?> =
+        caseRecordDao.observeByEncounterId(encounterId).map { it?.toDomain() }
+
+    override fun observeOpenCaseCount(doctorId: String): Flow<Int> =
+        caseRecordDao.observeOpenCaseCount(doctorId)
+
+    override fun observeDoctorTrackerRows(): Flow<List<DoctorTrackerEntry>> =
+        caseRecordDao.observeDoctorTrackerRows().map { rows -> rows.map { it.toDomain() } }
 }
+
+private fun DoctorTrackerRow.toDomain() = DoctorTrackerEntry(
+    caseRecordId = caseRecordId,
+    patientId = patientId,
+    patientFullName = patientFullName,
+    chiefComplaint = chiefComplaint,
+    status = status,
+    updatedAt = updatedAt,
+    doctorName = doctorName,
+    doctorSpecialty = doctorSpecialty,
+)
 
 private fun CaseRecord.toEntity() = CaseRecordEntity(
     id = id, patientId = patientId, encounterId = encounterId, status = status,

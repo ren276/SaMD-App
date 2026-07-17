@@ -10,6 +10,7 @@ import com.example.samdapp.data.local.dao.AttachmentDao
 import com.example.samdapp.data.local.dao.AuditLogDao
 import com.example.samdapp.data.local.dao.CaseRecordDao
 import com.example.samdapp.data.local.dao.ConsultationDao
+import com.example.samdapp.data.local.dao.DoctorDao
 import com.example.samdapp.data.local.dao.EncounterDao
 import com.example.samdapp.data.local.dao.FamilyHistoryEntryDao
 import com.example.samdapp.data.local.dao.KernelReportDao
@@ -27,6 +28,7 @@ import com.example.samdapp.data.local.entity.AttachmentEntity
 import com.example.samdapp.data.local.entity.AuditLogEntity
 import com.example.samdapp.data.local.entity.CaseRecordEntity
 import com.example.samdapp.data.local.entity.ConsultationEntity
+import com.example.samdapp.data.local.entity.DoctorEntity
 import com.example.samdapp.data.local.entity.EncounterEntity
 import com.example.samdapp.data.local.entity.FamilyHistoryEntryEntity
 import com.example.samdapp.data.local.entity.KernelReportEntity
@@ -59,8 +61,9 @@ import com.example.samdapp.data.local.entity.SocialHistoryEntity
         MedicationLineEntity::class,
         KernelReportEntity::class,
         ReferralEntity::class,
+        DoctorEntity::class,
     ],
-    version = 5,
+    version = 7,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -82,6 +85,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun prescriptionDao(): PrescriptionDao
     abstract fun kernelReportDao(): KernelReportDao
     abstract fun referralDao(): ReferralDao
+    abstract fun doctorDao(): DoctorDao
 
     companion object {
         const val DATABASE_NAME = "samd_app.db"

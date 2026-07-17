@@ -473,6 +473,183 @@ Three asks after Phase 6 landed: report logo, attachments-in-report, and biometr
       lit); Patients tab search/roster and Referrals/Profile empty states render real (not mock)
       data.
 
+## Report-capture schema + doctor continuity + consultation history (done, three-part follow-up pass)
+
+### Part A — kernel_reports report-capture addendum
+- [x] `kernel_reports` gains `icdCode` (nullable — the mock kernel's structured suggestion, only
+      genuinely null on the unmatched/default scenario), `deviceId`/`softwareVersion` (both
+      `NOT NULL`, new `DeviceInfoProvider`/`AndroidDeviceInfoProvider` — `Settings.Secure.ANDROID_ID`
+      + `BuildConfig.VERSION_NAME`, `buildFeatures.buildConfig = true` newly enabled), `dataQualityScore`
+      (proportion of optional `KernelPayload` fields populated), `uncertaintyScore` (mock
+      `1 - confidenceScore`), `riskCategory` (new enum, distinct from `UrgencyLevel` — risk vs.
+      urgency are different axes), `urgencyLevel` (reuses the existing referral `UrgencyLevel`
+      enum — same concept, no duplicate enum). `inferenceTimestamp` renamed to `inferenceEndedAt`
+      (`ALTER TABLE ... RENAME COLUMN`) with a new `inferenceStartedAt` alongside it.
+      `MIGRATION_5_6`, DB v5→v6. Explicitly out of scope, per the brief: no doctor-facing UI reads
+      any of this — report-artifact-only.
+- [x] `GenerateKernelReportUseCase` populates every new field per-scenario (plausible ICD-10 codes,
+      risk/urgency bands) — not randomized, not left null by laziness.
+- [x] `ReportCanvasRenderer`: risk category + urgency level + inference duration + ICD code added
+      near the top of the kernel/AI section; device id + app version added as two more rows in the
+      existing demographic block's right column (no separate "Encounter Information" section
+      existed to put them in — extended the closest existing one instead of inventing a new block).
+
+### Part B — doctor assignment: continuity-of-care, not a worker-driven picker
+- [x] **Scope correction, confirmed with the user before building:** the brief described DoctorList
+      as a flat, read-only, cross-patient status tracker — a different screen shape than the
+      existing single-case doctor-*picker* (`DoctorListScreen` titled "Choose a doctor",
+      radio-select + Send, the only call site of `AssignDoctorUseCase`, load-bearing for
+      `CaseRecord.assignedDoctorId`/`CaseStatus.SENT_TO_DOCTOR` → Phase 5's doctor-response flow).
+      Resolved as: auto-assign fresh/unrelated cases silently (no worker interaction at all);
+      default to the same doctor on a worker-flagged follow-up visit (continuity), with a narrow
+      same-specialty "switch" override; DoctorList itself becomes the read-only tracker.
+- [x] **Grounded in real precedent, per the user's explicit ask** — researched EHR/telemedicine
+      provider-continuity patterns before building. "Empanelment/attribution" (AHRQ, HealthTeamWorks,
+      Safety Net Medical Home Initiative) is the named pattern matching "default to the same
+      provider on a follow-up" — a patient is attributed to whoever coordinated their care last
+      time. "Soonest available"/least-busy is AHRQ's documented default for new/unattributed
+      patients. eSanjeevani (India's national telemedicine service) confirmed the domestic
+      hub-and-spoke precedent for PHC-worker-initiated escalation. The same-specialty scoping on
+      the override is this app's own reasonable extension, not a directly-cited industry rule —
+      flagged as such rather than overclaiming a source for it.
+- [x] `doctors` moved off the `doctors.json` asset into Room (`DoctorEntity`/`DoctorDao`,
+      `MIGRATION_6_7` seeds the same 9 mock doctors) — needed for specialty/least-busy queries
+      that were awkward against a cached in-memory list. `DoctorAssetDataSource` deleted.
+      `encounters.followUpOfEncounterId` (nullable, self-referential, no FK constraint — matches
+      the rest of this schema's posture) added in the same migration.
+- [x] `ResolveDoctorAssignmentUseCase`: if the new encounter's `followUpOfEncounterId` resolves to
+      a prior case whose `assignedDoctorId` is still active → continuity proposal. Otherwise →
+      least-busy active doctor (fewest open `SENT_TO_DOCTOR` cases, `CaseRecordDao.observeOpenCaseCount`).
+      `sameSpecialtyAlternatives()` backs the narrow override list.
+- [x] `AcknowledgementViewModel.onContinue()` (was a bare nav callback with no ViewModel action at
+      all) now resolves the assignment itself: continuity → `DoctorAssignmentConfirmRoute` (new
+      screen — "Continue with Dr. X?", switch scoped to same specialty, Confirm calls the existing
+      `AssignDoctorUseCase` unchanged); auto-assign → calls `AssignDoctorUseCase` directly and
+      returns straight to Home, no screen at all, matching case 1 exactly.
+- [x] `DoctorListRoute` is now a no-arg, cross-patient tracker (`CaseRecordDao.observeDoctorTrackerRows`
+      — case_records × patients × consultations join), reachable from a new "Sent to doctor" button
+      on Home (bottom nav is a fixed 4 tabs; this isn't one of them). Read-only: patient name/ID,
+      chief complaint, status (`SENT_TO_DOCTOR`→"Awaiting Review", `PRESCRIPTION_RECEIVED`→"Reviewed"
+      — collapsed from the brief's 3-word vocabulary since the schema only has 2 real states past
+      DRAFT/SAVED_LOCALLY, and inventing a 3rd status value with no behavioral difference would be
+      schema bloat, not signal). Tapping a Reviewed row reuses `ReportRoute` read-only — confirmed
+      by reading `ReportScreen` that its only edit affordance is the separate referral sheet, not
+      the report content itself. No `riskCategory`/`urgencyLevel` reference anywhere in
+      `DoctorListScreen`/`DoctorListViewModel` (verified by grep, per the brief's success criterion).
+      `GetAvailableDoctorsUseCase` deleted (only call site was the old picker).
+
+### Part C — consultation history on PatientSummary
+- [x] `EncounterDao.observeHistoryForPatient` (encounters × consultations × case_records join,
+      scoped to one patientId — bounded by that patient's own visit count, not a cross-patient
+      pull, so this doesn't reopen the data-minimization boundary the roster queries protect) backs
+      a new "Consultation History" section: date, chief complaint, status, most recent first.
+      Empty state ("No prior visits.") for a new patient — not a blank section.
+      `ConsultationHistoryEntry` domain model.
+- [x] Tapping a history row reuses `ReportRoute` (same read-only view Part B's tracker reuses) —
+      only when a `caseRecordId` exists for that encounter; an abandoned encounter's row shows
+      "Incomplete visit" and isn't clickable.
+- [x] The same history list is the source for the new "mark as follow-up" picker: tapping
+      "Consultation" on a patient with ≥1 prior visit shows a dialog (pick a prior visit, or "Not a
+      follow-up") before proceeding — a new patient skips straight through, no dialog. The pick
+      threads through as `followUpOfEncounterId`: `ConsentRoute`/`Compounder` routes →
+      `CompounderViewModel` (new 2nd `@Assisted` param, needed a named `@Assisted("...")` identifier
+      since both params are `String`) → `StartCaseUseCase` → `EncounterRepository.startEncounter`
+      → stamped onto the new `EncounterEntity` row.
+- [x] Past encounters stay non-editable by construction — there's no update path on any of the
+      entities involved, same immutability posture as the audit log.
+
+### Home
+- [x] "Signed in as X (role)" → "Welcome, **X (role)**" (bold via `AnnotatedString`/`SpanStyle`).
+
+### Verification
+- [x] New Room migrations exercised for real via `androidx.room:room-testing`'s
+      `MigrationTestHelper` (newly wired: dependency + `androidTest.assets.srcDirs` pointing at
+      `app/schemas` — this project had no instrumented migration tests before now; earlier phases
+      relied on eyeballing DDL-vs-schema-JSON identity). 3 tests, run on-device
+      (emulator-5554): full 1→7 chain, `MIGRATION_5_6`'s rename+backfill, `MIGRATION_6_7`'s 9-doctor
+      seed — all green.
+- [x] **Verified:** `./gradlew testDebugUnitTest` green — **109 tests, 0 failures** (was 103; +6:
+      `PatientSummaryViewModelTest` ×2 — including Part C's required empty-state case —
+      `ResolveDoctorAssignmentUseCaseTest` ×4). `assembleDebug` + `compileDebugAndroidTestKotlin`
+      clean. **On-device walk** (emulator-5554, real migration from an existing installed DB, not
+      just a fresh schema): Home's "Welcome" text and "Sent to doctor" button confirmed; DoctorList
+      tracker opens with the correct empty state. Full encounter→history round trip (register a
+      patient, complete a visit, see it appear in Consultation History, mark a second visit as its
+      follow-up) not manually walked this pass — no patients existed in the test device's roster at
+      verification time; the ViewModel logic for both the empty and populated cases is covered by
+      `PatientSummaryViewModelTest` instead. Flagged, not claimed.
+
+## Post-verification fixes (2026-07-17, user found while manually testing)
+
+- [x] **Bug: doctor auto-assignment silently did nothing on a fresh install.** Root cause:
+      `MIGRATION_6_7`'s doctor-seed `INSERT`s only run on an *upgrade* — a fresh install creates
+      every table straight from the entity schema at the current version and never executes
+      migration bodies, so `doctors` was empty. `ResolveDoctorAssignmentUseCase` then failed ("no
+      active doctors"), and the old code swallowed that failure and routed Home anyway — every
+      case stayed stuck at `SAVED_LOCALLY` forever, with no error surfaced. Fixed with a
+      `RoomDatabase.Callback.onCreate` in `DatabaseModule` that seeds the same 9 mock doctors on a
+      fresh database, covering the path the migration can't. (Verifying this on an emulator is
+      tricky: Android's Auto Backup restores the old app-private DB right after a plain
+      uninstall/reinstall, masking the bug — `adb shell pm clear <pkg>` is the way to force a
+      genuinely empty database without a restore.)
+- [x] **Auto-assignment made visible, not silent.** Every "Send to doctor" tap now routes through
+      `DoctorAssignmentConfirmScreen` (continuity or fresh case alike) so the mock-assigned doctor
+      is always shown and always switchable (same-specialty scoped) — there's no more silent
+      background path, and a resolution failure now shows an error with a way back instead of a
+      dead end. `AcknowledgementViewModel` simplified accordingly (it no longer resolves/assigns
+      itself — that's the confirm screen's job now).
+- [x] ~~**Report "stapling" for returning patients.**~~ **Superseded — scrapped, see next entry.**
+      A first attempt stapled every follow-up visit's full report into one scrolling
+      preview/PDF (`AssembleReportChainUseCase`). It rendered wrong: stacking multiple full-size
+      `Canvas` composables at the same call site inside nested `forEach`/`repeat` loops made
+      Compose reuse composition slots, so one report drew as a blank "white gap" while the other
+      rendered. The user then decided merged reports were the wrong model entirely.
+- [x] **Follow-up visits are grouped, not merged (redesign, replaces the stapling above).**
+      Decision (all confirmed with the user): (1) Consultation History collapses each follow-up
+      chain to ONE row, represented by the chain's **latest** visit + a "N visits" badge;
+      standalone consults stay as a normal single row. (2) Tapping a multi-visit row opens a new
+      `ConsultationChainScreen` ("Follow-up history") listing every visit in that chain
+      (newest-first, "Latest"/"Follow-up" labels), each opening its **own single-consult report**.
+      (3) Reports are never merged; PDF export is per-consult only — the combined multi-visit PDF
+      was dropped. `ReportScreen`/`ReportViewModel`/`ReportPdfExporter` reverted to single-report;
+      `AssembleReportChainUseCase` deleted.
+      - Grouping is a pure domain function `List<ConsultationHistoryEntry>.groupIntoChains()`
+        (walks `followUpOfEncounterId` to a root, cycle-guarded), reused by both PatientSummary
+        and the chain screen so they can't disagree. `ConsultationHistoryEntry`/`EncounterHistoryRow`
+        + the history DAO query gained `followUpOfEncounterId` to make grouping possible.
+      - New `ConsultationChainRoute(patientId, rootEncounterId)`; carries the patient banner.
+      - **Verified on-device** (emulator-5554): 2-visit chain shows one "2 visits" row on
+        PatientSummary → chain screen lists Latest + Follow-up → each opens its own full report,
+        no white gap, no merge.
+- [x] **Verified:** `./gradlew testDebugUnitTest` green — **113 tests, 0 failures** (+4 vs the
+      109 after the doctor-continuity pass: `ConsultationChainTest` ×4 covering standalone chains,
+      multi-visit collapse ordering, cross-chain sort, and the circular-link termination guard).
+      `assembleDebug` + `compileDebugAndroidTestKotlin` clean.
+
+## UX polish + Profile de-clutter + retention docs (2026-07-17, user follow-up)
+
+- [x] **"Which doctor / which dept is in the loop" on every case row.** Consultation-history rows
+      (PatientSummary + chain screen) and the doctor-tracker rows (DoctorList) now lead with the
+      chief complaint, show the assigned doctor + specialty ("Dr. X · General Physician", or
+      "Doctor not yet assigned" before send), and demote the date to a small `labelSmall` line.
+      Plumbed via a `LEFT JOIN doctors` in the history + tracker DAO queries (doctors are a Room
+      table since Part B), surfaced on `ConsultationHistoryEntry`/`DoctorTrackerEntry` as
+      `doctorName`/`doctorSpecialty`.
+- [x] **Removed the "Recent activity" audit list from Profile** — it was clutter. The audit log
+      still records every clinical action and persists in `audit_log` (insert-only, never deleted);
+      only the on-screen section went. `ProfileViewModel` (its sole job was loading that list) was
+      deleted; `ProfileScreen` is now stateless. `AuditLogRepository` read-side is retained
+      (documented) for a future audit-export surface rather than deleted.
+- [x] **`docs/data-retention.md`** — per-table deletion posture (insert-only-locked / soft-delete /
+      mutable-no-delete / reference-seed). Records that **no table hard-deletes** today, flags the
+      ones that are append-only *by design* (`audit_log`, `ailments` soft-delete), so a future
+      change to any of that is a deliberate decision. Referenced from `AuditLogDao`/`ProfileScreen`
+      KDoc.
+- [x] **Verified:** `./gradlew testDebugUnitTest` green — **113 tests, 0 failures** (fakes/history
+      fixtures updated for the new doctor columns; no behavioral test change). `assembleDebug` +
+      `compileDebugAndroidTestKotlin` clean. On-device re-verify of the new row layout pending
+      (build installs clean; the change is presentational + a read-only JOIN).
+
 ## Not started
 - [ ] Demo-theater additions from agent_docs/hardening.md — the AI assessment panel item is now
       DONE (Phase 4); re-check hardening.md for what (if anything) remains (e.g. security shield

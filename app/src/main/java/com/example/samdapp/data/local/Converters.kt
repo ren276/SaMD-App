@@ -11,6 +11,7 @@ import com.example.samdapp.domain.model.ObservationSource
 import com.example.samdapp.domain.model.ObservationType
 import com.example.samdapp.domain.model.KernelDecision
 import com.example.samdapp.domain.model.ReferralStatus
+import com.example.samdapp.domain.model.RiskCategory
 import com.example.samdapp.domain.model.UrgencyLevel
 import com.example.samdapp.domain.model.Visibility
 import com.example.samdapp.domain.model.VitalsCaptureMethod
@@ -57,6 +58,9 @@ class Converters {
 
     @TypeConverter fun urgencyLevelToString(value: UrgencyLevel): String = value.name
     @TypeConverter fun stringToUrgencyLevel(value: String): UrgencyLevel = UrgencyLevel.valueOf(value)
+
+    @TypeConverter fun riskCategoryToString(value: RiskCategory): String = value.name
+    @TypeConverter fun stringToRiskCategory(value: String): RiskCategory = RiskCategory.valueOf(value)
 
     @TypeConverter fun referralStatusToString(value: ReferralStatus): String = value.name
     @TypeConverter fun stringToReferralStatus(value: String): ReferralStatus = ReferralStatus.valueOf(value)

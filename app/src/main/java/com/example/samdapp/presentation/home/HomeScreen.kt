@@ -25,7 +25,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -46,6 +50,7 @@ import java.time.format.DateTimeFormatter
 fun HomeScreen(
     onRegisterNewPatient: () -> Unit,
     onOpenPatient: (String) -> Unit,
+    onOpenDoctorList: () -> Unit,
     isOnline: Boolean,
     session: UserSession,
     onSignOut: () -> Unit,
@@ -60,6 +65,7 @@ fun HomeScreen(
         onSignOut = onSignOut,
         onRegisterNewPatient = onRegisterNewPatient,
         onOpenPatient = onOpenPatient,
+        onOpenDoctorList = onOpenDoctorList,
         onSyncNow = viewModel::onSyncNow,
         bottomBar = bottomBar,
     )
@@ -73,6 +79,7 @@ private fun HomeContent(
     onSignOut: () -> Unit,
     onRegisterNewPatient: () -> Unit,
     onOpenPatient: (String) -> Unit,
+    onOpenDoctorList: () -> Unit,
     onSyncNow: () -> Unit,
     bottomBar: @Composable () -> Unit,
 ) {
@@ -111,9 +118,16 @@ private fun HomeContent(
             Button(
                 onClick = onRegisterNewPatient,
                 shape = MaterialTheme.shapes.large,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(vertical = 16.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(top = 16.dp),
             ) {
                 Text(text = "Register new patient", style = MaterialTheme.typography.titleMedium)
+            }
+            OutlinedButton(
+                onClick = onOpenDoctorList,
+                shape = MaterialTheme.shapes.large,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(top = 8.dp, bottom = 16.dp),
+            ) {
+                Text(text = "Sent to doctor", style = MaterialTheme.typography.titleMedium)
             }
         }
     }
@@ -127,13 +141,18 @@ private fun SignedInRow(session: UserSession, onSignOut: () -> Unit, modifier: M
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = "Signed in as ${session.name} (${session.role.displayLabel()})",
+            text = buildAnnotatedString {
+                append("Welcome, ")
+                withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                    append("${session.name} (${session.role.displayLabel()})")
+                }
+            },
             style = MaterialTheme.typography.bodyMedium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
-        OutlinedButton(onClick = onSignOut) { Text("Sign out") }
+
     }
 }
 

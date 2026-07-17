@@ -27,6 +27,8 @@ import com.example.samdapp.presentation.compounder.CompounderScreen
 import com.example.samdapp.presentation.connectivity.ConnectivityViewModel
 import com.example.samdapp.presentation.consent.ConsentScreen
 import com.example.samdapp.presentation.consultation.ConsultationScreen
+import com.example.samdapp.presentation.consultationchain.ConsultationChainScreen
+import com.example.samdapp.presentation.doctorassignment.DoctorAssignmentConfirmScreen
 import com.example.samdapp.presentation.doctorlist.DoctorListScreen
 import com.example.samdapp.presentation.emergency.EmergencyOverrideScreen
 import com.example.samdapp.presentation.kernelassessment.KernelAssessmentScreen
@@ -106,6 +108,7 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
                 HomeScreen(
                     onRegisterNewPatient = { backStack.add(AbhaEntry) },
                     onOpenPatient = { patientId -> backStack.add(PatientSummary(patientId)) },
+                    onOpenDoctorList = { backStack.add(DoctorListRoute) },
                     isOnline = isOnline,
                     session = session,
                     onSignOut = onSignOut,
@@ -165,20 +168,26 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
             entry<PatientSummary> { key ->
                 PatientSummaryScreen(
                     patientId = key.patientId,
-                    onStartConsultation = { patientId -> backStack.add(ConsentRoute(patientId)) },
+                    onStartConsultation = { patientId, followUpOfEncounterId ->
+                        backStack.add(ConsentRoute(patientId, followUpOfEncounterId))
+                    },
                     onViewReport = { caseRecordId -> backStack.add(ReportRoute(caseRecordId)) },
+                    onOpenChain = { patientId, rootEncounterId ->
+                        backStack.add(ConsultationChainRoute(patientId, rootEncounterId))
+                    },
                     bottomBar = bottomNavBar(current = null),
                 )
             }
             entry<ConsentRoute> { key ->
                 ConsentScreen(
                     patientId = key.patientId,
-                    onContinue = { backStack.add(Compounder(key.patientId)) },
+                    onContinue = { backStack.add(Compounder(key.patientId, key.followUpOfEncounterId)) },
                 )
             }
             entry<Compounder> { key ->
                 CompounderScreen(
                     patientId = key.patientId,
+                    followUpOfEncounterId = key.followUpOfEncounterId,
                     onContinue = { patientId, encounterId, caseRecordId, chiefComplaint ->
                         backStack.add(ConsultationRoute(patientId, encounterId, caseRecordId, chiefComplaint))
                     },
@@ -235,18 +244,28 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
             entry<AcknowledgementRoute> { key ->
                 AcknowledgementScreen(
                     caseRecordId = key.caseRecordId,
-                    onContinue = { caseRecordId -> backStack.add(DoctorListRoute(caseRecordId)) },
+                    onSendToDoctor = { caseRecordId -> backStack.add(DoctorAssignmentConfirmRoute(caseRecordId)) },
                     onViewReport = { caseRecordId -> backStack.add(ReportRoute(caseRecordId)) },
+                )
+            }
+            entry<DoctorAssignmentConfirmRoute> { key ->
+                DoctorAssignmentConfirmScreen(
+                    caseRecordId = key.caseRecordId,
+                    onDone = { backStack.clear(); backStack.add(Home) },
+                )
+            }
+            entry<ConsultationChainRoute> { key ->
+                ConsultationChainScreen(
+                    patientId = key.patientId,
+                    rootEncounterId = key.rootEncounterId,
+                    onOpenReport = { caseRecordId -> backStack.add(ReportRoute(caseRecordId)) },
                 )
             }
             entry<ReportRoute> { key ->
                 ReportScreen(caseRecordId = key.caseRecordId)
             }
-            entry<DoctorListRoute> { key ->
-                DoctorListScreen(
-                    caseRecordId = key.caseRecordId,
-                    onDone = { backStack.clear(); backStack.add(Home) },
-                )
+            entry<DoctorListRoute> {
+                DoctorListScreen(onOpenReport = { caseRecordId -> backStack.add(ReportRoute(caseRecordId)) })
             }
         },
         )

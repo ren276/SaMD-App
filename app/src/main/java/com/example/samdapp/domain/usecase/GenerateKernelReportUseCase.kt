@@ -1,7 +1,10 @@
 package com.example.samdapp.domain.usecase
 
+import com.example.samdapp.domain.config.DeviceInfoProvider
 import com.example.samdapp.domain.model.KernelPayload
 import com.example.samdapp.domain.model.KernelReportOutput
+import com.example.samdapp.domain.model.RiskCategory
+import com.example.samdapp.domain.model.UrgencyLevel
 import com.example.samdapp.domain.repository.KernelReportRepository
 import kotlinx.coroutines.delay
 import java.time.Instant
@@ -11,21 +14,28 @@ import kotlin.random.Random
 
 /** One curated (predictedCondition, differentials, reasoning, evidenceFor, evidenceAgainst)
  *  scenario, matched against [KernelPayload.chiefComplaint] by keyword — not real inference, but
- *  gives the mock demo-credible variety instead of static/random text (REQ-HAN-07). */
+ *  gives the mock demo-credible variety instead of static/random text (REQ-HAN-07).
+ *  [icdCode]/[riskCategory]/[urgencyLevel] are the Part A report-capture addendum: plausible,
+ *  per-scenario values, not randomized — these feed the exported report only, never a
+ *  doctor-facing UI in this app. */
 private data class MockScenario(
     val keywords: List<String>,
     val predictedCondition: String,
+    val icdCode: String?,
     val differentials: List<String>,
     val reasoningSummary: String,
     val evidenceFor: List<String>,
     val evidenceAgainst: List<String>,
     val confidenceRange: ClosedFloatingPointRange<Double>,
+    val riskCategory: RiskCategory,
+    val urgencyLevel: UrgencyLevel,
 )
 
 private val SCENARIOS = listOf(
     MockScenario(
         keywords = listOf("fever", "chills", "temperature"),
         predictedCondition = "Viral fever",
+        icdCode = "R50.9",
         differentials = listOf("Dengue", "Typhoid", "Malaria"),
         reasoningSummary = "Elevated temperature with reported chills and no localized findings is " +
             "most consistent with a self-limiting viral illness; vector-borne and enteric causes " +
@@ -33,20 +43,26 @@ private val SCENARIOS = listOf(
         evidenceFor = listOf("Documented fever/chills in chief complaint", "No focal infection reported"),
         evidenceAgainst = listOf("No rash or bleeding tendency reported", "No sustained high-grade pattern documented"),
         confidenceRange = 0.72..0.94,
+        riskCategory = RiskCategory.MODERATE,
+        urgencyLevel = UrgencyLevel.ROUTINE,
     ),
     MockScenario(
         keywords = listOf("cough", "cold", "throat", "breath"),
         predictedCondition = "Upper respiratory tract infection",
+        icdCode = "J06.9",
         differentials = listOf("Bronchitis", "Pneumonia", "Allergic rhinitis"),
         reasoningSummary = "Cough with upper-airway symptoms and no reported respiratory distress " +
             "points to a common URTI; lower-respiratory and allergic causes are kept as differentials.",
         evidenceFor = listOf("Cough/throat symptoms in chief complaint"),
         evidenceAgainst = listOf("No reported breathlessness or chest pain"),
         confidenceRange = 0.68..0.90,
+        riskCategory = RiskCategory.LOW,
+        urgencyLevel = UrgencyLevel.ROUTINE,
     ),
     MockScenario(
         keywords = listOf("stomach", "abdomen", "vomit", "diarrh"),
         predictedCondition = "Acute gastroenteritis",
+        icdCode = "A09",
         differentials = listOf("Food poisoning", "Peptic ulcer disease", "Appendicitis"),
         reasoningSummary = "Abdominal symptoms without a documented localized/rebound pattern favor " +
             "a self-limiting gastroenteritis; a surgical abdomen is kept as a differential given the " +
@@ -54,28 +70,38 @@ private val SCENARIOS = listOf(
         evidenceFor = listOf("Abdominal/GI symptoms in chief complaint"),
         evidenceAgainst = listOf("No documented localized rigidity or rebound tenderness"),
         confidenceRange = 0.60..0.88,
+        riskCategory = RiskCategory.MODERATE,
+        urgencyLevel = UrgencyLevel.URGENT,
     ),
     MockScenario(
         keywords = listOf("head", "migraine", "dizz"),
         predictedCondition = "Tension-type headache",
+        icdCode = "G44.2",
         differentials = listOf("Migraine", "Sinusitis", "Hypertension-related headache"),
         reasoningSummary = "Headache without reported neurological deficit or photophobia is most " +
             "consistent with a tension-type pattern; vascular and sinus causes remain differentials.",
         evidenceFor = listOf("Headache reported as chief complaint"),
         evidenceAgainst = listOf("No neurological deficit or visual disturbance reported"),
         confidenceRange = 0.65..0.91,
+        riskCategory = RiskCategory.LOW,
+        urgencyLevel = UrgencyLevel.ROUTINE,
     ),
 )
 
 private val DEFAULT_SCENARIO = MockScenario(
     keywords = emptyList(),
     predictedCondition = "Non-specific presentation",
+    // No ICD code: the kernel isn't confident enough in a specific presentation to code one —
+    // this is the one path where [KernelReportOutput.icdCode] is genuinely null, not lazy.
+    icdCode = null,
     differentials = listOf("Viral syndrome", "Early localized infection", "Stress/somatic presentation"),
     reasoningSummary = "The chief complaint does not match a well-characterized presentation pattern " +
         "available to this mock kernel; a broader, lower-confidence differential is returned.",
     evidenceFor = listOf("Chief complaint recorded", "Vitals within the payload considered"),
     evidenceAgainst = listOf("Insufficient distinguishing detail in the whitelisted payload"),
     confidenceRange = 0.45..0.75,
+    riskCategory = RiskCategory.MODERATE,
+    urgencyLevel = UrgencyLevel.ROUTINE,
 )
 
 /**
@@ -86,14 +112,31 @@ private val DEFAULT_SCENARIO = MockScenario(
  */
 class GenerateKernelReportUseCase @Inject constructor(
     private val kernelReportRepository: KernelReportRepository,
+    private val deviceInfoProvider: DeviceInfoProvider,
 ) {
     companion object {
         const val HUMAN_VERIFICATION_CONFIDENCE_THRESHOLD = 0.90
         const val MODEL_VERSION = "mock-kernel-v0.1"
+
+        /** Optional [KernelPayload] signals considered for [dataQualityScore] — the whitelisted
+         *  fields that may or may not be present, not the always-required ones (chiefComplaint,
+         *  vitals, caseToken). */
+        private fun dataQualityScore(payload: KernelPayload): Double {
+            val signals = listOf(
+                payload.durationBucket != null,
+                payload.severityScore != null,
+                !payload.relevantHistory.isNullOrBlank(),
+                !payload.transcription.isNullOrBlank(),
+                payload.attachments.isNotEmpty(),
+            )
+            return signals.count { it }.toDouble() / signals.size
+        }
     }
 
     suspend operator fun invoke(caseRecordId: String, payload: KernelPayload): Result<KernelReportOutput> {
+        val inferenceStartedAt = Instant.now()
         delay(Random.nextLong(800L, 1600L))
+        val inferenceEndedAt = Instant.now()
 
         val complaint = payload.chiefComplaint.lowercase()
         val scenario = SCENARIOS.firstOrNull { s -> s.keywords.any { complaint.contains(it) } } ?: DEFAULT_SCENARIO
@@ -109,7 +152,15 @@ class GenerateKernelReportUseCase @Inject constructor(
             evidenceFor = scenario.evidenceFor,
             evidenceAgainst = scenario.evidenceAgainst,
             modelVersion = MODEL_VERSION,
-            inferenceTimestamp = Instant.now(),
+            icdCode = scenario.icdCode,
+            deviceId = deviceInfoProvider.deviceId(),
+            softwareVersion = deviceInfoProvider.softwareVersion(),
+            dataQualityScore = dataQualityScore(payload),
+            uncertaintyScore = 1.0 - confidence,
+            riskCategory = scenario.riskCategory,
+            urgencyLevel = scenario.urgencyLevel,
+            inferenceStartedAt = inferenceStartedAt,
+            inferenceEndedAt = inferenceEndedAt,
             requiredHumanVerification = confidence < HUMAN_VERIFICATION_CONFIDENCE_THRESHOLD,
         )
         return kernelReportRepository.save(output).map { output }

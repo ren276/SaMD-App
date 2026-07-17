@@ -207,6 +207,12 @@ class ReportCanvasRenderer(
             add("Visit" to report.header.visitDateTime.atZone(ZoneId.systemDefault()).format(DATE_FMT))
             if (p.abhaNumberFormatted != null) add("ABHA No." to p.abhaNumberFormatted)
             if (p.abhaAddress != null) add("ABHA Address" to p.abhaAddress)
+            // Encounter Information (Part A addendum): device/app identity that produced the AI
+            // section below — captured for the report artifact, never shown in any in-app UI.
+            report.kernelOutput?.let { k ->
+                add("Device" to k.deviceId)
+                add("App version" to k.softwareVersion)
+            }
         }
         val rowH = lineHeight(bodyPaint) + 3f
         val abhaTagRows = if (p.abhaVerified) 1 else 0
@@ -305,8 +311,15 @@ class ReportCanvasRenderer(
 
     private fun kernelBlock(report: ClinicalReport): Block {
         val k = report.kernelOutput!!
+        val inferenceMillis = java.time.Duration.between(k.inferenceStartedAt, k.inferenceEndedAt).toMillis()
         val paras = buildList {
-            add("Predicted: ${k.predictedCondition}  (confidence ${(k.confidenceScore * 100).toInt()}%)")
+            // Risk/urgency near the top, most visible — Part A addendum.
+            add("Risk: ${k.riskCategory}   Urgency: ${k.urgencyLevel}")
+            add(
+                "Predicted: ${k.predictedCondition}${k.icdCode?.let { " (ICD-10: $it)" } ?: ""}  " +
+                    "(confidence ${(k.confidenceScore * 100).toInt()}%)",
+            )
+            add("Inference time: ${inferenceMillis} ms")
             if (k.differentials.isNotEmpty()) add("Differentials: ${k.differentials.joinToString(", ")}")
             add("Reasoning: ${k.reasoningSummary}")
             if (k.requiredHumanVerification) add("⚠ Requires physician verification before any diagnosis is final.")

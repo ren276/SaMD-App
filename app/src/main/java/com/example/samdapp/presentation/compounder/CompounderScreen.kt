@@ -53,10 +53,11 @@ import com.example.samdapp.presentation.common.rememberPermissionAction
 @Composable
 fun CompounderScreen(
     patientId: String,
+    followUpOfEncounterId: String? = null,
     onContinue: (patientId: String, encounterId: String, caseRecordId: String, chiefComplaint: String) -> Unit,
     onEmergencyOverride: (reasons: List<String>) -> Unit,
     viewModel: CompounderViewModel = hiltViewModel<CompounderViewModel, CompounderViewModel.Factory>(
-        creationCallback = { factory -> factory.create(patientId) },
+        creationCallback = { factory -> factory.create(patientId, followUpOfEncounterId) },
     ),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()

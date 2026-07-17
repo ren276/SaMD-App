@@ -3,6 +3,8 @@ package com.example.samdapp.data.doctor
 import com.example.samdapp.domain.model.CaseRecord
 import com.example.samdapp.domain.model.CaseStatus
 import com.example.samdapp.domain.model.KernelReportOutput
+import com.example.samdapp.domain.model.RiskCategory
+import com.example.samdapp.domain.model.UrgencyLevel
 import com.example.samdapp.testutil.FakeCaseRecordRepository
 import com.example.samdapp.testutil.FakeKernelReportRepository
 import kotlinx.coroutines.test.runTest
@@ -23,7 +25,10 @@ class MockDoctorPrescriptionInboxTest {
         id = "k1", caseRecordId = "case-1", predictedCondition = "Viral fever",
         confidenceScore = 0.85, differentials = listOf("Dengue", "Typhoid"),
         reasoningSummary = "reasoning", evidenceFor = listOf("fever"), evidenceAgainst = emptyList(),
-        modelVersion = "mock-kernel-v0.1", inferenceTimestamp = Instant.EPOCH, requiredHumanVerification = true,
+        modelVersion = "mock-kernel-v0.1", icdCode = "R50.9", deviceId = "test-device",
+        softwareVersion = "test-version", dataQualityScore = 0.8, uncertaintyScore = 0.15,
+        riskCategory = RiskCategory.MODERATE, urgencyLevel = UrgencyLevel.ROUTINE,
+        inferenceStartedAt = Instant.EPOCH, inferenceEndedAt = Instant.EPOCH, requiredHumanVerification = true,
     )
 
     @Test

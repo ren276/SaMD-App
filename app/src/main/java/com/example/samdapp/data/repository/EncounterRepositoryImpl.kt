@@ -1,7 +1,9 @@
 package com.example.samdapp.data.repository
 
 import com.example.samdapp.data.local.dao.EncounterDao
+import com.example.samdapp.data.local.dao.EncounterHistoryRow
 import com.example.samdapp.data.local.entity.EncounterEntity
+import com.example.samdapp.domain.model.ConsultationHistoryEntry
 import com.example.samdapp.domain.model.Encounter
 import com.example.samdapp.domain.repository.EncounterRepository
 import kotlinx.coroutines.flow.Flow
@@ -14,7 +16,7 @@ class EncounterRepositoryImpl @Inject constructor(
     private val encounterDao: EncounterDao,
 ) : EncounterRepository {
 
-    override suspend fun startEncounter(patientId: String): Result<Encounter> = asDataResult {
+    override suspend fun startEncounter(patientId: String, followUpOfEncounterId: String?): Result<Encounter> = asDataResult {
         val now = Instant.now()
         val encounter = Encounter(
             id = UUID.randomUUID().toString(),
@@ -22,6 +24,7 @@ class EncounterRepositoryImpl @Inject constructor(
             startedAt = now,
             createdAt = now,
             updatedAt = now,
+            followUpOfEncounterId = followUpOfEncounterId,
         )
         encounterDao.insert(encounter.toEntity())
         encounter
@@ -29,7 +32,21 @@ class EncounterRepositoryImpl @Inject constructor(
 
     override fun observeEncounter(encounterId: String): Flow<Encounter?> =
         encounterDao.observeById(encounterId).map { it?.toDomain() }
+
+    override fun observeHistoryForPatient(patientId: String): Flow<List<ConsultationHistoryEntry>> =
+        encounterDao.observeHistoryForPatient(patientId).map { rows -> rows.map { it.toDomain() } }
 }
+
+private fun EncounterHistoryRow.toDomain() = ConsultationHistoryEntry(
+    encounterId = encounterId,
+    visitDate = startedAt,
+    chiefComplaint = chiefComplaint,
+    caseRecordId = caseRecordId,
+    caseStatus = status,
+    followUpOfEncounterId = followUpOfEncounterId,
+    doctorName = doctorName,
+    doctorSpecialty = doctorSpecialty,
+)
 
 private fun Encounter.toEntity() = EncounterEntity(
     id = id,
@@ -37,6 +54,7 @@ private fun Encounter.toEntity() = EncounterEntity(
     startedAt = startedAt,
     createdAt = createdAt,
     updatedAt = updatedAt,
+    followUpOfEncounterId = followUpOfEncounterId,
 )
 
 private fun EncounterEntity.toDomain() = Encounter(
@@ -45,4 +63,5 @@ private fun EncounterEntity.toDomain() = Encounter(
     startedAt = startedAt,
     createdAt = createdAt,
     updatedAt = updatedAt,
+    followUpOfEncounterId = followUpOfEncounterId,
 )
