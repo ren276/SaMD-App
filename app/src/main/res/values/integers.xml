@@ -1,0 +1,5 @@
+<resources>
+    <!-- REQ-TRS-03: promised doctor-review turnaround quoted to the patient after a case is
+         saved. Override per deployment via a resource overlay — do not hardcode this in code. -->
+    <integer name="sync_window_hours">24</integer>
+</resources>
