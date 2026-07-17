@@ -22,6 +22,8 @@ class FakePatientRepository : PatientRepository {
         flowOf(registered.firstOrNull { it.id == patientId })
 
     override fun observeTodaysPatients(): Flow<List<Patient>> = flowOf(registered.toList())
+
+    override fun observeRecentPatients(days: Int): Flow<List<Patient>> = flowOf(registered.toList())
 }
 
 class RegisterPatientUseCaseTest {

@@ -12,4 +12,13 @@ interface PatientRepository {
      * The date window is resolved from the device clock/zone when collection begins.
      */
     fun observeTodaysPatients(): Flow<List<Patient>>
+
+    /**
+     * Today + the [days] before it (inclusive), by encounter start — a bounded window, not the
+     * full patient table. Same data-minimization constraint as [observeTodaysPatients]
+     * (agent_docs/hardening.md): this just widens the day-scoped query the DAO already exposes,
+     * it does not add an "all patients" query. Backs the Patients tab's "today's + recent"
+     * roster.
+     */
+    fun observeRecentPatients(days: Int = 7): Flow<List<Patient>>
 }

@@ -2,6 +2,7 @@ package com.example.samdapp.testutil
 
 import com.example.samdapp.data.local.dao.AuditLogDao
 import com.example.samdapp.data.local.entity.AuditLogEntity
+import com.example.samdapp.domain.audit.AuditLogEntry
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.auth.AuthSession
 import com.example.samdapp.domain.auth.UserRole
@@ -16,6 +17,7 @@ import com.example.samdapp.domain.model.Prescription
 import com.example.samdapp.domain.model.ReferralRequest
 import com.example.samdapp.domain.repository.AbhaProfileRepository
 import com.example.samdapp.domain.repository.AilmentRepository
+import com.example.samdapp.domain.repository.AuditLogRepository
 import com.example.samdapp.domain.repository.CaseRecordRepository
 import com.example.samdapp.domain.repository.KernelReportRepository
 import com.example.samdapp.domain.repository.PatientRepository
@@ -62,6 +64,8 @@ class FakePatientRepository(
         flowOf(registered?.takeIf { it.id == patientId })
 
     override fun observeTodaysPatients(): Flow<List<Patient>> = flowOf(today)
+
+    override fun observeRecentPatients(days: Int): Flow<List<Patient>> = flowOf(today)
 }
 
 class FakeAbhaProfileRepository(
@@ -169,6 +173,8 @@ class FakeReferralRepository : ReferralRepository {
 
     override fun observeForCase(caseRecordId: String): Flow<List<ReferralRequest>> =
         flowOf(created.filter { it.caseRecordId == caseRecordId })
+
+    override fun observeAll(): Flow<List<ReferralRequest>> = flowOf(created)
 }
 
 class FakeKernelReportRepository : KernelReportRepository {
@@ -241,4 +247,14 @@ class FakeAuditLogDao : AuditLogDao {
 
     override fun observeByPatientId(patientId: String): Flow<List<AuditLogEntity>> =
         flowOf(inserted.filter { it.patientId == patientId })
+
+    override fun observeByUserId(userId: String, limit: Int): Flow<List<AuditLogEntity>> =
+        flowOf(inserted.filter { it.userId == userId }.take(limit))
+}
+
+class FakeAuditLogRepository(
+    private val entries: List<AuditLogEntry> = emptyList(),
+) : AuditLogRepository {
+    override fun observeRecentForUser(userId: String, limit: Int): Flow<List<AuditLogEntry>> =
+        flowOf(entries.take(limit))
 }

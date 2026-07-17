@@ -20,4 +20,9 @@ interface AuditLogDao {
 
     @Query("SELECT * FROM audit_log WHERE patientId = :patientId ORDER BY timestamp DESC")
     fun observeByPatientId(patientId: String): Flow<List<AuditLogEntity>>
+
+    /** Recent actions by one worker (Profile tab's audit summary) — bounded by [limit], not the
+     *  full log. */
+    @Query("SELECT * FROM audit_log WHERE userId = :userId ORDER BY timestamp DESC LIMIT :limit")
+    fun observeByUserId(userId: String, limit: Int): Flow<List<AuditLogEntity>>
 }

@@ -1,6 +1,16 @@
 package com.example.samdapp.presentation.navigation
 
 data object Home
+
+/** Bottom-nav tab: searchable roster beyond just today (see [Patients] entry in AppNavHost). */
+data object Patients
+
+/** Bottom-nav tab: this device's own sent-referral outbox. */
+data object Referrals
+
+/** Bottom-nav tab: signed-in worker's session info, audit summary, sync toggle, sign-out. */
+data object Profile
+
 data object AbhaEntry
 data object AbhaSignUp
 data object AbhaLogin

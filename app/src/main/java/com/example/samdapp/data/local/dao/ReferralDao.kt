@@ -15,6 +15,11 @@ interface ReferralDao {
     @Query("SELECT * FROM referrals WHERE caseRecordId = :caseRecordId ORDER BY timestamp DESC")
     fun observeForCase(caseRecordId: String): Flow<List<ReferralEntity>>
 
+    /** This device's own sent-referral outbox (Referrals tab) — small, PHC-worker-generated, not
+     *  a full-table pull of anyone else's data. */
+    @Query("SELECT * FROM referrals ORDER BY timestamp DESC")
+    fun observeAll(): Flow<List<ReferralEntity>>
+
     @Query("UPDATE referrals SET status = :status WHERE id = :id")
     suspend fun updateStatus(id: String, status: ReferralStatus)
 }
