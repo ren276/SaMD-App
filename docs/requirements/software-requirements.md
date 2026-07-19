@@ -99,9 +99,14 @@ Conventions: `REQ-<AREA>-NN`. Status: **DONE** (implemented + manually verified)
 ## Connectivity & sync (SYN / NET)
 - **REQ-NET-01** (DONE) Detect and display real online/offline status.
 - **REQ-SYN-01** (DONE) Show last-sync status and a manual Sync action on Home; indicate
-  offline that data is saved locally and will sync later (UI-only for now).
-- **REQ-SYN-02** (PLANNED) Real background sync with per-record state, conflict resolution, and
-  purge-on-sync minimisation (`docs/sync-design.md`; risk H-05).
+  offline that data is saved locally and will sync later. Real for the one place data crosses a
+  boundary today (doctor assignment): offline confirm queues `CaseStatus.PENDING_SYNC` instead of
+  sending, `MockSyncStatus` refuses to run offline, and auto-syncs every queued case the moment
+  connectivity returns (real network or the manual toggle) without waiting for the button.
+- **REQ-SYN-02** (PARTIAL) Per-record pending/synced state now exists for the doctor-assignment
+  leg (`CaseStatus.PENDING_SYNC`/`SENT_TO_DOCTOR`); still open: a generic `syncState` convention
+  across other syncable entities, real background sync (WorkManager) against a real backend,
+  conflict resolution, and purge-on-sync minimisation (`docs/sync-design.md`; risk H-05).
 
 ---
 

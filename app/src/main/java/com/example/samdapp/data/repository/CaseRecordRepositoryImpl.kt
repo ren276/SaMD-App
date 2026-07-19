@@ -36,9 +36,16 @@ class CaseRecordRepositoryImpl @Inject constructor(
         caseRecordDao.updateStatus(caseRecordId, CaseStatus.SAVED_LOCALLY, Instant.now())
     }
 
-    override suspend fun assignDoctor(caseRecordId: String, doctorId: String): Result<Unit> = asDataResult {
-        caseRecordDao.assignDoctor(caseRecordId, doctorId, CaseStatus.SENT_TO_DOCTOR, Instant.now())
+    override suspend fun assignDoctor(caseRecordId: String, doctorId: String, isOnline: Boolean): Result<Unit> = asDataResult {
+        val status = if (isOnline) CaseStatus.SENT_TO_DOCTOR else CaseStatus.PENDING_SYNC
+        caseRecordDao.assignDoctor(caseRecordId, doctorId, status, Instant.now())
     }
+
+    override suspend fun sendAllPendingCases(): Result<Unit> = asDataResult {
+        caseRecordDao.sendAllPendingSync(Instant.now())
+    }
+
+    override fun observePendingSyncCount(): Flow<Int> = caseRecordDao.observePendingSyncCount()
 
     override suspend fun markPrescriptionReceived(caseRecordId: String): Result<Unit> = asDataResult {
         caseRecordDao.updateStatus(caseRecordId, CaseStatus.PRESCRIPTION_RECEIVED, Instant.now())

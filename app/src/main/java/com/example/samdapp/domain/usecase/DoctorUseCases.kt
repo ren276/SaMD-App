@@ -6,6 +6,6 @@ import javax.inject.Inject
 class AssignDoctorUseCase @Inject constructor(
     private val caseRecordRepository: CaseRecordRepository,
 ) {
-    suspend operator fun invoke(caseRecordId: String, doctorId: String): Result<Unit> =
-        caseRecordRepository.assignDoctor(caseRecordId, doctorId)
+    suspend operator fun invoke(caseRecordId: String, doctorId: String, isOnline: Boolean): Result<Unit> =
+        caseRecordRepository.assignDoctor(caseRecordId, doctorId, isOnline)
 }

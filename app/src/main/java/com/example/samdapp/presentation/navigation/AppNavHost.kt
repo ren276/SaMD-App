@@ -18,6 +18,7 @@ import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDe
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
+import com.example.samdapp.config.FeatureFlags
 import com.example.samdapp.domain.auth.UserSession
 import com.example.samdapp.presentation.abha.AbhaEntryScreen
 import com.example.samdapp.presentation.abha.AbhaLoginScreen
@@ -207,6 +208,9 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
                         backStack.add(ConsentRoute(patientId, followUpOfEncounterId))
                     },
                     onViewReport = { caseRecordId -> backStack.add(ReportRoute(caseRecordId)) },
+                    onContinueToDoctorAssignment = { caseRecordId ->
+                        backStack.add(DoctorAssignmentConfirmRoute(caseRecordId))
+                    },
                     onOpenChain = { patientId, rootEncounterId ->
                         backStack.add(ConsultationChainRoute(patientId, rootEncounterId))
                     },
@@ -312,7 +316,7 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
         )
     }
 
-    if (isLocked) {
+    if (FeatureFlags.IDLE_LOCK_ENABLED && isLocked) {
         IdleLockScreen(
             workerName = session.name,
             onUnlocked = idleLockViewModel::onUnlocked,

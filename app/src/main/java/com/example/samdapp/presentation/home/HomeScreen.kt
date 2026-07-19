@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.samdapp.R
+import com.example.samdapp.config.FeatureFlags
 import com.example.samdapp.domain.auth.UserSession
 import com.example.samdapp.domain.model.Patient
 import com.example.samdapp.domain.sync.SyncState
@@ -97,13 +98,15 @@ private fun HomeContent(
     var resourceWarnings by remember { mutableStateOf<List<String>>(emptyList()) }
     var dismissedResumeId by remember { mutableStateOf<String?>(null) }
 
-    uiState.resumableEncounter?.let { resumable ->
-        if (resumable.caseRecordId != dismissedResumeId) {
-            ResumeEncounterDialog(
-                resumable = resumable,
-                onDismiss = { dismissedResumeId = resumable.caseRecordId },
-                onResume = { onResumeEncounter(resumable.patientId, resumable.encounterId, resumable.caseRecordId) },
-            )
+    if (FeatureFlags.RESUME_DRAFT_ENABLED) {
+        uiState.resumableEncounter?.let { resumable ->
+            if (resumable.caseRecordId != dismissedResumeId) {
+                ResumeEncounterDialog(
+                    resumable = resumable,
+                    onDismiss = { dismissedResumeId = resumable.caseRecordId },
+                    onResume = { onResumeEncounter(resumable.patientId, resumable.encounterId, resumable.caseRecordId) },
+                )
+            }
         }
     }
 
@@ -152,7 +155,7 @@ private fun HomeContent(
 
             Button(
                 onClick = {
-                    val warnings = deviceResourceWarnings(context)
+                    val warnings = if (FeatureFlags.DEVICE_RESOURCE_CHECK_ENABLED) deviceResourceWarnings(context) else emptyList()
                     if (warnings.isEmpty()) onRegisterNewPatient() else resourceWarnings = warnings
                 },
                 shape = MaterialTheme.shapes.large,

@@ -13,7 +13,7 @@ Source: founder's Notion research page on hardening the mockup toward a real SaM
 These make the mockup *look* like it understands production concerns without requiring you to actually build the concern yet:
 
 - **"AI Assessment Panel" placeholder** — when `SendToKernelUseCase` returns, show a confidence score + an explainability expandable + a "I have reviewed and verified this" checkbox before allowing "Complete Consultation." The kernel itself is still mocked; this UI just proves you've thought about automation bias (ISO 14971 human-in-the-loop). Build this as part of the existing Sending/Acknowledgement screens, not as new architecture.
-- **Offline simulation toggle** — a debug menu item that fakes a network drop, so you can demo "saved locally, 1 pending sync" live. This is UI-only; it doesn't need `NetworkMonitor` to be wired to anything real yet.
+- **Offline simulation toggle** — a debug menu item that fakes a network drop, so you can demo "saved locally, 1 pending sync" live. **Update 2026-07-19: this is no longer UI-only.** The manual toggle and real `NetworkMonitor` now combine into one `ConnectivityController.isOnline` signal that the doctor-assignment send path actually checks — flipping offline (either way) genuinely queues instead of sending. See `docs/sync-design.md`.
 - **Security shield icon** — a bottom sheet showing "Encrypted via SQLCipher" / "TLS 1.3" as status text. Once SQLCipher is actually in (see above), this can show real status instead of a simulated one — sequence it after the real work, not before.
 
 Do not build these before the "doing now" list above — they're presentation, not substance, and should never be the reason the real hardening slips.

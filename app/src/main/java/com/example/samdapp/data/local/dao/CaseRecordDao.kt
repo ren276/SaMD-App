@@ -22,6 +22,14 @@ interface CaseRecordDao {
     )
     suspend fun assignDoctor(caseRecordId: String, doctorId: String, status: CaseStatus, updatedAt: Instant)
 
+    /** "Sync Up": every locally-queued case (doctor already assigned, just waiting for network)
+     *  moves to `SENT_TO_DOCTOR` in one round. */
+    @Query("UPDATE case_records SET status = 'SENT_TO_DOCTOR', updatedAt = :updatedAt WHERE status = 'PENDING_SYNC'")
+    suspend fun sendAllPendingSync(updatedAt: Instant)
+
+    @Query("SELECT COUNT(*) FROM case_records WHERE status = 'PENDING_SYNC'")
+    fun observePendingSyncCount(): Flow<Int>
+
     @Query("SELECT * FROM case_records WHERE id = :caseRecordId")
     fun observeById(caseRecordId: String): Flow<CaseRecordEntity?>
 
