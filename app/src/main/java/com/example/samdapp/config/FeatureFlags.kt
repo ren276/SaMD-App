@@ -7,9 +7,11 @@ package com.example.samdapp.config
  */
 object FeatureFlags {
     /** FLAG_SECURE on patient-data screens (blocks screenshots/screen-recording, blanks the
-     *  recent-apps thumbnail). Off right now for on-device debugging via `adb screencap`/`uiautomator` —
-     *  set back to true before shipping. See [com.example.samdapp.presentation.navigation.requiresScreenSecurity]. */
-    const val SCREEN_SECURITY_ENABLED = false
+     *  recent-apps thumbnail). Flip to false locally for on-device debugging via
+     *  `adb screencap`/`uiautomator` — must stay true in anything committed/shipped (CI's
+     *  RoutesSecurityTest enforces this). See
+     *  [com.example.samdapp.presentation.navigation.requiresScreenSecurity]. */
+    const val SCREEN_SECURITY_ENABLED = true
 
     /** Idle auto-lock (75s) with biometric re-auth, drawn over the nav host.
      *  Off = app never locks on idle. See [com.example.samdapp.presentation.navigation.AppNavHost]. */
