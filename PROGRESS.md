@@ -723,6 +723,54 @@ input-time concern, not a display rule).
       state survives, resume prompt after a real process kill mid-consultation, and the stepper's
       visual placement across all four flow screens.
 
+## Offline-first doctor-send fix + auto-sync (2026-07-19, user follow-up)
+
+Bug report: toggling offline, registering a patient, and confirming a doctor still sent the case
+immediately — the offline toggle was cosmetic (only gated the "Sync now" button's `enabled`), never
+checked by the actual send path. Also covers the user's second stated scenario (manually toggling
+offline to pre-empt a chaotic government-protocol-push window) with the same fix, and confirms
+against `docs/data-retention.md`/`docs/sync-design.md` that no separate "DB snapshot" mechanism is
+needed — Room/SQLite's existing durability + this app's no-hard-delete posture already satisfy the
+"view a patient's full history no matter how long offline" requirement.
+
+- [x] **`ConnectivityController`** (new `domain/connectivity` singleton) — single source of truth
+      for online state (manual toggle && real `NetworkMonitor`), replacing duplicated logic that
+      previously lived only in `ConnectivityViewModel` (now a thin wrapper delegating to it, so
+      non-UI callers like use cases/other singletons can read the same state).
+- [x] **`CaseStatus.PENDING_SYNC`** (new, between `SAVED_LOCALLY` and `SENT_TO_DOCTOR`) — the
+      per-record queued state `docs/sync-design.md` recommends, scoped to the one place data
+      crosses a boundary today (doctor assignment). `CaseRecordRepository.assignDoctor(caseRecordId,
+      doctorId, isOnline)` now takes the connectivity signal and sets `PENDING_SYNC` instead of
+      `SENT_TO_DOCTOR` when offline; `sendAllPendingCases()`/`observePendingSyncCount()` added
+      (single conditional `UPDATE ... WHERE status='PENDING_SYNC'` — idempotent, no duplicate sends).
+- [x] **`DoctorAssignmentConfirmViewModel.onConfirm()`** checks real connectivity before confirming.
+      Offline → doctor assigned locally (`PENDING_SYNC`), screen shows "No network — case saved
+      locally, will send when you Sync Up" instead of silently sending and auto-navigating away.
+      `PatientSummaryScreen` shows the same queued state for a `PENDING_SYNC` case.
+- [x] **Auto-sync on reconnect** — `MockSyncStatus` now also watches `ConnectivityController.isOnline`
+      for the offline→online transition (real network back, or the worker flipping the manual
+      toggle) and fires `syncNow()` automatically when anything is queued, instead of requiring the
+      worker to remember to tap the button. The button still works for "send right now." `syncNow()`
+      itself now refuses to run while offline (was previously always-succeeds UI theater); its
+      `pendingCount` now reads the real queue instead of being hardcoded to 0.
+- [x] Checked against the user's "database snapshot" question: no whole-DB snapshot exists or is
+      needed. `docs/data-retention.md` confirms every clinical table is insert-only/soft-delete/
+      mutable-no-delete — full patient history stays on-device indefinitely regardless of how long
+      offline, satisfying that requirement already. `docs/sync-design.md` explicitly recommends
+      against a whole-DB-image approach in favor of the per-record pattern above. The only real
+      limit is the deliberate 7-day/today-only roster *list* window (REQ-ROS-02/H-04, privacy
+      data-minimization, identical online or offline) — confirmed with the user to leave as-is.
+- [x] Docs updated: `docs/sync-design.md` status block, `docs/requirements/software-requirements.md`
+      REQ-SYN-01/02, `docs/requirements/traceability-matrix.md` REQ-SYN-01/02 rows,
+      `agent_docs/hardening.md`'s offline-toggle line (was "doesn't need `NetworkMonitor` wired to
+      anything real yet" — no longer true).
+- [x] **Verified:** `./gradlew testDebugUnitTest` — **129 tests, 1 pre-existing unrelated failure**
+      (`RoutesSecurityTest`, caused by this session's separately-uncommitted
+      `FeatureFlags.SCREEN_SECURITY_ENABLED = false` dev toggle, not touched here). +6 vs the 125
+      before this pass, all in `MockSyncStatusTest`: offline-refusal, sends-every-queued-case,
+      auto-syncs-on-reconnect, does-not-auto-sync-from-cold-start-already-online (plus the 2
+      pre-existing). `assembleDebug` clean.
+
 ## Not started
 - [ ] Demo-theater additions from agent_docs/hardening.md — the AI assessment panel item is now
       DONE (Phase 4); re-check hardening.md for what (if anything) remains (e.g. security shield

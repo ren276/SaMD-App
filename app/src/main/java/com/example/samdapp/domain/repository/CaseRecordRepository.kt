@@ -7,7 +7,17 @@ import kotlinx.coroutines.flow.Flow
 interface CaseRecordRepository {
     suspend fun createDraft(patientId: String, encounterId: String): Result<CaseRecord>
     suspend fun markSavedLocally(caseRecordId: String): Result<Unit>
-    suspend fun assignDoctor(caseRecordId: String, doctorId: String): Result<Unit>
+    /** [isOnline] decides whether this lands as `SENT_TO_DOCTOR` right away or queues as
+     *  `PENDING_SYNC` until [sendAllPendingCases] runs — the offline-first send path. */
+    suspend fun assignDoctor(caseRecordId: String, doctorId: String, isOnline: Boolean): Result<Unit>
+
+    /** "Sync Up": flips every `PENDING_SYNC` case to `SENT_TO_DOCTOR`. Caller is responsible for
+     *  only invoking this while online. */
+    suspend fun sendAllPendingCases(): Result<Unit>
+
+    /** Count of cases queued locally, assigned a doctor but not yet sent — drives the "N pending"
+     *  caption and the Sync Up button's badge. */
+    fun observePendingSyncCount(): Flow<Int>
 
     /** REQ-RX-01/03: flips status once the (mocked) doctor intake has written a prescription. */
     suspend fun markPrescriptionReceived(caseRecordId: String): Result<Unit>

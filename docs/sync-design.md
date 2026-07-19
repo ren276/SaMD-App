@@ -1,10 +1,18 @@
-# Offline sync design (deferred — no backend yet)
+# Offline sync design (real backend deferred — the queuing pattern is now built)
 
-> **Status: not built.** `agent_docs/hardening.md` places real sync (WorkManager) and the
-> backend in "explicitly later — no backend to sync to yet." The app currently ships
-> `MockSyncStatus` (UI-only: last-synced time + a Sync-now button, no data transport). This
-> document captures the intended behaviour and the recommended production architecture so it
-> is ready to build when the backend exists. The seam is the `SyncStatus` domain interface.
+> **Status: PARTIAL (2026-07-19).** `agent_docs/hardening.md` places real sync (WorkManager) and
+> the backend in "explicitly later — no backend to sync to yet" — still true, no change there.
+> What's now real: the recommended pattern below (§2, per-record pending/synced state) is built
+> for the one place data crosses a boundary today, doctor assignment. Confirming a doctor while
+> offline (real network down, or the worker's manual toggle) sets `CaseStatus.PENDING_SYNC`
+> instead of `SENT_TO_DOCTOR` — see `CaseRecordRepository.assignDoctor(isOnline)`. `MockSyncStatus`
+> refuses to run while offline, and auto-syncs every `PENDING_SYNC` case the instant connectivity
+> returns (real network or the manual toggle flipping back on) via a background watcher on
+> `ConnectivityController.isOnline` — the worker doesn't have to remember to tap Sync Up, though
+> the button still works for "send right now." Still not built: a generic `syncState` convention
+> for other entities (there's nothing else in the app that "leaves" the device yet, so nothing
+> else needs one), `WorkManager`/a real backend, conflict resolution, and purge-on-sync
+> minimisation (§2 items 2–5 below). The seam is still the `SyncStatus` domain interface.
 
 ## 1. Requirement (as described)
 

@@ -1,5 +1,7 @@
 package com.example.samdapp.presentation.navigation
 
+import com.example.samdapp.config.FeatureFlags
+
 data object Home
 
 /** Bottom-nav tab: searchable roster beyond just today (see [Patients] entry in AppNavHost). */
@@ -124,7 +126,8 @@ private val SECURED_ROUTE_TYPES: Set<Class<out Any>> = setOf(
     Referrals::class.java,
 )
 
-fun requiresScreenSecurity(route: Any?): Boolean = route != null && route.javaClass in SECURED_ROUTE_TYPES
+fun requiresScreenSecurity(route: Any?): Boolean =
+    FeatureFlags.SCREEN_SECURITY_ENABLED && route != null && route.javaClass in SECURED_ROUTE_TYPES
 
 /**
  * The patient the current back-stack entry is about, or null if none (Home, Register).

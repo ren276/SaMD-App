@@ -34,8 +34,8 @@
 | REQ-AUD-01 | `AuditLogger`/`RoomAuditLogger` (userId now sourced from `AuthSession`, not a hardcoded placeholder — REQ-SEC-04), wired in 8 screens | H-07 | Manual ✓ (logcat capture of the real session userId, not "phc_field_worker") | ✓ RoomAuditLoggerTest, AuditPayloadTest |
 | REQ-AUD-02 | `AuditLogDao` (insert + query only) | H-07 | Manual ✓ (interface review) | TODO — compile/lint guard |
 | REQ-NET-01 | `NetworkMonitor`/`AndroidNetworkMonitor`, `ConnectivityViewModel` | — | Manual ✓ | TODO |
-| REQ-SYN-01 | `SyncStatus`/`MockSyncStatus`, Home sync row | H-05 | Manual ✓ (online/offline) | ✓ MockSyncStatusTest, HomeViewModelTest |
-| REQ-SYN-02 | *(planned)* `docs/sync-design.md` | H-05 | — | PLANNED |
+| REQ-SYN-01 | `SyncStatus`/`MockSyncStatus`, `ConnectivityController`, `CaseStatus.PENDING_SYNC`, `DoctorAssignmentConfirmViewModel` (offline confirm queues instead of sending), Home sync row | H-05 | Manual ✓ (online/offline, manual toggle + real network) | ✓ MockSyncStatusTest (6, incl. offline-refusal + auto-sync-on-reconnect), HomeViewModelTest |
+| REQ-SYN-02 | `CaseRecordRepository.assignDoctor(isOnline)`/`sendAllPendingCases`/`observePendingSyncCount` (case-record leg only); rest per `docs/sync-design.md` | H-05 | Manual ✓ | ✓ MockSyncStatusTest — PARTIAL: no generic per-entity syncState, no WorkManager/real backend, no conflict resolution, no purge-on-sync |
 | REQ-PED-01 | `domain/model/Patient.guardianRelation`, `PatientEntity`, migration 2→3 | — | Schema compiles (v3) | TODO |
 | REQ-ABH-01 | `presentation/abha/AbhaSignUpScreen`+`AbhaSignUpViewModel`, `domain/usecase/CreateAbhaProfileUseCase`, `domain/model/AbhaProfile`/`formatAbhaId` | — | Manual (nav flow reviewed) | ✓ CreateAbhaProfileUseCaseTest |
 | REQ-ABH-02 | `presentation/abha/AbhaLoginScreen`+`AbhaOtpScreen`, `domain/usecase/VerifyAbhaLoginUseCase`, `RegisterViewModel.loadAbhaProfile`, `abha-field-mapping.md` | H-06 | Manual (nav flow reviewed) | ✓ VerifyAbhaLoginUseCaseTest, RegisterViewModelTest (autofill) |

@@ -34,6 +34,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.samdapp.config.FeatureFlags
 import com.example.samdapp.domain.model.CaseStatus
 import com.example.samdapp.domain.model.ConsultationChain
 import com.example.samdapp.domain.model.ConsultationHistoryEntry
@@ -52,6 +53,7 @@ fun PatientSummaryScreen(
     patientId: String,
     onStartConsultation: (patientId: String, followUpOfEncounterId: String?) -> Unit,
     onViewReport: (caseRecordId: String) -> Unit,
+    onContinueToDoctorAssignment: (caseRecordId: String) -> Unit,
     onOpenChain: (patientId: String, rootEncounterId: String) -> Unit,
     onOpenAuditTrail: (patientId: String) -> Unit,
     bottomBar: @Composable () -> Unit = {},
@@ -123,20 +125,54 @@ fun PatientSummaryScreen(
                 }
             }
 
-            OutlinedButton(
-                onClick = { onOpenAuditTrail(patientId) },
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            ) { Text("Who has seen your file") }
+            if (FeatureFlags.PATIENT_AUDIT_ENABLED) {
+                OutlinedButton(
+                    onClick = { onOpenAuditTrail(patientId) },
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                ) { Text("Who has seen your file") }
+            }
 
             Button(
                 onClick = {
-                    val warnings = deviceResourceWarnings(context)
+                    val warnings = if (FeatureFlags.DEVICE_RESOURCE_CHECK_ENABLED) deviceResourceWarnings(context) else emptyList()
                     if (warnings.isEmpty()) beginConsultationFlow() else resourceWarnings = warnings
                 },
                 shape = MaterialTheme.shapes.medium,
                 modifier = Modifier.fillMaxWidth(0.6f).aspectRatio(1f).padding(top = 32.dp),
             ) {
                 Text("Consultation", style = MaterialTheme.typography.titleMedium)
+            }
+
+            // Case is saved on-device only, no doctor assigned yet — this is the one action that
+            // moves it out of local-only storage and into the doctor's queue.
+            if (uiState.caseStatus == CaseStatus.SAVED_LOCALLY && uiState.caseRecordId != null) {
+                Column(modifier = Modifier.padding(top = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "Case saved locally — doctor not yet assigned",
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    Button(
+                        onClick = { onContinueToDoctorAssignment(uiState.caseRecordId!!) },
+                        modifier = Modifier.padding(top = 8.dp),
+                    ) { Text("Continue — choose doctor") }
+                }
+            }
+
+            // Doctor assigned but no network at the time — queued locally, sent automatically the
+            // next time the worker taps Sync Up on Home while online (offline-first send path).
+            if (uiState.caseStatus == CaseStatus.PENDING_SYNC) {
+                Column(modifier = Modifier.padding(top = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "Case queued — will send when back online",
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    Text(
+                        text = "Tap Sync Up on Home once you have network.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
             }
 
             // Doctor's own review happens on a separate channel (out of scope here) — this is

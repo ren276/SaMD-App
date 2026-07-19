@@ -3,7 +3,7 @@
 package com.example.samdapp.presentation.report
 
 import android.content.Intent
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -32,10 +32,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
@@ -128,29 +126,40 @@ private fun ReportContent(
             report.attachments.associate { it.uri to decodeAttachmentBitmap(context, it.uri) }
         }
     }
-    val renderer = remember(logoBitmap, attachmentBitmaps) {
-        ReportCanvasRenderer(logoBitmap = logoBitmap, imageLoader = { uri -> attachmentBitmaps[uri] })
+    // Rendered to plain software bitmaps (same path as ReportPdfExporter) rather than drawn
+    // straight into Compose's hardware-accelerated Canvas: on some OEM skins the hardware
+    // RenderNode path corrupts/misplaces content across stacked Canvas composables, while a
+    // software Bitmap+Canvas always renders correctly regardless of GPU driver quirks.
+    val pageBitmaps by produceState(initialValue = emptyList<androidx.compose.ui.graphics.ImageBitmap>(), report, logoBitmap, attachmentBitmaps) {
+        value = withContext(Dispatchers.Default) {
+            val renderer = ReportCanvasRenderer(logoBitmap = logoBitmap, imageLoader = { uri -> attachmentBitmaps[uri] })
+            val bitmapWidth = 1000
+            val scale = bitmapWidth / ReportCanvasRenderer.PAGE_WIDTH
+            val bitmapHeight = (ReportCanvasRenderer.PAGE_HEIGHT * scale).toInt()
+            List(renderer.pageCount(report)) { pageIndex ->
+                val bitmap = android.graphics.Bitmap.createBitmap(bitmapWidth, bitmapHeight, android.graphics.Bitmap.Config.ARGB_8888)
+                val canvas = android.graphics.Canvas(bitmap)
+                canvas.scale(scale, scale)
+                renderer.drawPage(canvas, report, pageIndex)
+                bitmap.asImageBitmap()
+            }
+        }
     }
-    val pageCount = remember(report) { renderer.pageCount(report) }
     Column(
         modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        repeat(pageCount) { pageIndex ->
-            Canvas(
+        if (pageBitmaps.isEmpty()) {
+            CircularProgressIndicator(modifier = Modifier.padding(32.dp))
+        }
+        pageBitmaps.forEach { pageBitmap ->
+            Image(
+                bitmap = pageBitmap,
+                contentDescription = "Report page",
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(ReportCanvasRenderer.PAGE_WIDTH / ReportCanvasRenderer.PAGE_HEIGHT),
-            ) {
-                drawIntoCanvas { canvas ->
-                    val scale = size.width / ReportCanvasRenderer.PAGE_WIDTH
-                    val native = canvas.nativeCanvas
-                    val save = native.save()
-                    native.scale(scale, scale)
-                    renderer.drawPage(native, report, pageIndex)
-                    native.restoreToCount(save)
-                }
-            }
+            )
         }
         Button(
             onClick = onExport,

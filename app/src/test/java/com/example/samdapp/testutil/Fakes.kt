@@ -5,6 +5,7 @@ import com.example.samdapp.data.local.entity.AuditLogEntity
 import com.example.samdapp.domain.audit.AuditLogEntry
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.config.DeviceInfoProvider
+import com.example.samdapp.domain.connectivity.NetworkMonitor
 import com.example.samdapp.domain.auth.AuthSession
 import com.example.samdapp.domain.auth.UserRole
 import com.example.samdapp.domain.auth.UserSession
@@ -37,6 +38,7 @@ import com.example.samdapp.domain.sync.SyncStatus
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import java.time.Instant
 
@@ -137,12 +139,26 @@ class FakeCaseRecordRepository(
 
     override suspend fun markSavedLocally(caseRecordId: String): Result<Unit> = updateStatus(caseRecordId, CaseStatus.SAVED_LOCALLY)
 
-    override suspend fun assignDoctor(caseRecordId: String, doctorId: String): Result<Unit> {
-        val updated = records[caseRecordId]?.copy(status = CaseStatus.SENT_TO_DOCTOR, assignedDoctorId = doctorId) ?: return Result.failure(NoSuchElementException())
+    override suspend fun assignDoctor(caseRecordId: String, doctorId: String, isOnline: Boolean): Result<Unit> {
+        val status = if (isOnline) CaseStatus.SENT_TO_DOCTOR else CaseStatus.PENDING_SYNC
+        val updated = records[caseRecordId]?.copy(status = status, assignedDoctorId = doctorId) ?: return Result.failure(NoSuchElementException())
         records[caseRecordId] = updated
         streamFor(caseRecordId).value = updated
         return Result.success(Unit)
     }
+
+    override suspend fun sendAllPendingCases(): Result<Unit> {
+        records.values.filter { it.status == CaseStatus.PENDING_SYNC }.forEach { record ->
+            val updated = record.copy(status = CaseStatus.SENT_TO_DOCTOR)
+            records[record.id] = updated
+            streamFor(record.id).value = updated
+        }
+        return Result.success(Unit)
+    }
+
+    // A real per-collection recompute (unlike the flowOf snapshots elsewhere in this fake) — tests
+    // rely on this reflecting sendAllPendingCases() mutating `records` after `state` was built.
+    override fun observePendingSyncCount(): Flow<Int> = flow { emit(records.values.count { it.status == CaseStatus.PENDING_SYNC }) }
 
     override suspend fun markPrescriptionReceived(caseRecordId: String): Result<Unit> = updateStatus(caseRecordId, CaseStatus.PRESCRIPTION_RECEIVED)
 
@@ -291,6 +307,15 @@ class FakeSyncStatus : SyncStatus {
         syncCalls++
         _state.value = SyncState(lastSyncedAt = Instant.EPOCH, pendingCount = 0, isSyncing = false)
         return Result.success(Unit)
+    }
+}
+
+class FakeNetworkMonitor(initial: Boolean = true) : NetworkMonitor {
+    private val _isNetworkAvailable = MutableStateFlow(initial)
+    override val isNetworkAvailable: Flow<Boolean> = _isNetworkAvailable.asStateFlow()
+
+    fun setAvailable(value: Boolean) {
+        _isNetworkAvailable.value = value
     }
 }
 

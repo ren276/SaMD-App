@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
+import com.example.samdapp.domain.connectivity.ConnectivityController
 import com.example.samdapp.domain.model.Doctor
 import com.example.samdapp.domain.repository.CaseRecordRepository
 import com.example.samdapp.domain.usecase.AssignDoctorUseCase
@@ -33,6 +34,10 @@ data class DoctorAssignmentConfirmUiState(
     val alternatives: List<Doctor> = emptyList(),
     val isConfirming: Boolean = false,
     val errorMessage: String? = null,
+    /** Set instead of sending [DoctorAssignmentConfirmEffect.Done] when there's no network: the
+     *  case is saved locally with the doctor already picked, but nothing has actually been sent
+     *  yet, so the screen stays put and says so rather than auto-navigating away as if it had. */
+    val queuedOffline: Boolean = false,
 )
 
 sealed interface DoctorAssignmentConfirmEffect {
@@ -53,6 +58,7 @@ class DoctorAssignmentConfirmViewModel @AssistedInject constructor(
     private val resolveDoctorAssignmentUseCase: ResolveDoctorAssignmentUseCase,
     private val assignDoctorUseCase: AssignDoctorUseCase,
     private val auditLogger: AuditLogger,
+    private val connectivityController: ConnectivityController,
 ) : ViewModel(), DoctorAssignmentConfirmActions {
 
     @AssistedFactory
@@ -97,14 +103,19 @@ class DoctorAssignmentConfirmViewModel @AssistedInject constructor(
         val doctor = state.selectedDoctor ?: return
         viewModelScope.launch {
             _uiState.update { it.copy(isConfirming = true) }
-            assignDoctorUseCase(caseRecordId, doctor.id).fold(
+            val isOnline = connectivityController.isOnline.first()
+            assignDoctorUseCase(caseRecordId, doctor.id, isOnline = isOnline).fold(
                 onSuccess = {
                     auditLogger.log(
-                        action = "case_sent_to_doctor",
+                        action = if (isOnline) "case_sent_to_doctor" else "case_queued_for_sync",
                         caseRecordId = caseRecordId,
                         payload = auditPayload("doctorId" to doctor.id, "doctorName" to doctor.name, "continuity" to state.isContinuity.toString()),
                     )
-                    _effects.send(DoctorAssignmentConfirmEffect.Done)
+                    if (isOnline) {
+                        _effects.send(DoctorAssignmentConfirmEffect.Done)
+                    } else {
+                        _uiState.update { it.copy(isConfirming = false, queuedOffline = true) }
+                    }
                 },
                 onFailure = { error -> _uiState.update { it.copy(isConfirming = false, errorMessage = error.message ?: "Could not assign doctor") } },
             )

@@ -6,7 +6,7 @@ import com.example.samdapp.domain.model.CaseStatus
  *  queries SENT_TO_DOCTOR/PRESCRIPTION_RECEIVED), but the `when` stays exhaustive rather than
  *  defaulting, so a future status addition can't silently fall through. */
 fun CaseStatus.doctorTrackerLabel(): String = when (this) {
-    CaseStatus.DRAFT, CaseStatus.SAVED_LOCALLY -> "Sent"
+    CaseStatus.DRAFT, CaseStatus.SAVED_LOCALLY, CaseStatus.PENDING_SYNC -> "Sent"
     CaseStatus.SENT_TO_DOCTOR -> "Awaiting Review"
     CaseStatus.PRESCRIPTION_RECEIVED -> "Reviewed"
 }
@@ -17,6 +17,7 @@ fun CaseStatus.doctorTrackerLabel(): String = when (this) {
 fun CaseStatus.historyLabel(): String = when (this) {
     CaseStatus.DRAFT -> "In progress"
     CaseStatus.SAVED_LOCALLY -> "Saved locally"
+    CaseStatus.PENDING_SYNC -> "Queued — will send when online"
     CaseStatus.SENT_TO_DOCTOR -> "Awaiting doctor's review"
     CaseStatus.PRESCRIPTION_RECEIVED -> "Doctor's response received"
 }

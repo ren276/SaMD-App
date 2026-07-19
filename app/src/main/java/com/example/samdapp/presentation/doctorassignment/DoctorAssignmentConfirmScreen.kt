@@ -71,6 +71,21 @@ fun DoctorAssignmentConfirmScreen(
                         Text("Back to home")
                     }
                 }
+                uiState.queuedOffline -> {
+                    Text(
+                        text = "No network — case saved locally",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        text = "Dr. ${uiState.selectedDoctor!!.name} is assigned, but nothing has been sent yet. " +
+                            "It will go out automatically the next time you tap Sync Up on Home once you're back online.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                    Button(onClick = onDone, modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) {
+                        Text("Back to home")
+                    }
+                }
                 else -> {
                     val doctor = uiState.selectedDoctor!!
                     Text(

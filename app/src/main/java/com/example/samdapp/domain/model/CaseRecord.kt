@@ -4,7 +4,7 @@ import java.time.Instant
 
 /** Persisted as its [name] string in Room, so adding a status later is additive — same
  * forward-compatibility the brief asked for, plus compile-time exhaustiveness in `when` blocks. */
-enum class CaseStatus { DRAFT, SAVED_LOCALLY, SENT_TO_DOCTOR, PRESCRIPTION_RECEIVED }
+enum class CaseStatus { DRAFT, SAVED_LOCALLY, PENDING_SYNC, SENT_TO_DOCTOR, PRESCRIPTION_RECEIVED }
 
 data class CaseRecord(
     val id: String,
