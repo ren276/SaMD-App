@@ -15,7 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
+import com.example.samdapp.presentation.common.SamdLoadingIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -61,7 +61,7 @@ fun KernelAssessmentScreen(
 internal fun KernelAssessmentContent(uiState: KernelAssessmentUiState, actions: KernelAssessmentActions) {
     Scaffold(topBar = { TopAppBar(title = { Text("AI Assessment") }) }) { padding: PaddingValues ->
         if (uiState.isLoading) {
-            CircularProgressIndicator(modifier = Modifier.padding(padding).padding(32.dp))
+            SamdLoadingIndicator(modifier = Modifier.padding(padding).padding(32.dp))
             return@Scaffold
         }
         val output = uiState.output
@@ -164,3 +164,4 @@ private fun LiabilityRow(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
         )
     }
 }
+

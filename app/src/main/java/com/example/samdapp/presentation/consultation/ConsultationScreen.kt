@@ -43,6 +43,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.example.samdapp.domain.model.AttachmentType
+import com.example.samdapp.presentation.common.StepProgressIndicator
 import com.example.samdapp.presentation.common.rememberPermissionAction
 import java.io.File
 
@@ -119,7 +120,17 @@ private fun ConsultationContent(uiState: ConsultationUiState, actions: Consultat
             modifier = Modifier.fillMaxWidth().padding(padding).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item { Text("Chief complaint", style = MaterialTheme.typography.titleMedium) }
+            item { StepProgressIndicator(current = 4, total = 4, label = "Consultation") }
+            // ── Demo shortcut — investor-demo only ──────────────────────────────────
+            item {
+                OutlinedButton(
+                    onClick = actions::fillDemoData,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("👤 Fill demo patient data", style = MaterialTheme.typography.labelLarge)
+                }
+            }
+            item { Text("Main concern", style = MaterialTheme.typography.titleMedium) }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(selected = !uiState.isVoiceMode, onClick = { if (uiState.isVoiceMode) actions.onToggleVoiceMode() }, label = { Text("Text") })
@@ -129,7 +140,7 @@ private fun ConsultationContent(uiState: ConsultationUiState, actions: Consultat
             if (uiState.isVoiceMode) {
                 item {
                     OutlinedButton(onClick = requestVoiceForChiefComplaint, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
-                        Text(if (uiState.isRecordingVoice) "Listening…" else "Record chief complaint", style = MaterialTheme.typography.titleMedium)
+                        Text(if (uiState.isRecordingVoice) "Listening…" else "Record main concern", style = MaterialTheme.typography.titleMedium)
                     }
                 }
             }
@@ -137,7 +148,7 @@ private fun ConsultationContent(uiState: ConsultationUiState, actions: Consultat
                 OutlinedTextField(
                     value = uiState.chiefComplaint,
                     onValueChange = actions::onChiefComplaintChange,
-                    label = { Text("Chief complaint *") },
+                    label = { Text("Main concern *") },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -227,7 +238,7 @@ private fun ConsultationReviewDialog(
         title = { Text("Review before sending") },
         text = {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                item { ReviewLine("Chief complaint", uiState.chiefComplaint) }
+                item { ReviewLine("Main concern", uiState.chiefComplaint) }
                 item { ReviewLine("Symptom onset", uiState.onset) }
                 item { ReviewLine("Duration", uiState.durationBucket?.replace('_', ' ')) }
                 item { ReviewLine("Severity", "${uiState.severityScore} / 10") }

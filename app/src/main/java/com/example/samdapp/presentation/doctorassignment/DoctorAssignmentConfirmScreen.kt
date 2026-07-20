@@ -14,7 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
+import com.example.samdapp.presentation.common.SamdLoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -61,7 +61,7 @@ fun DoctorAssignmentConfirmScreen(
     Scaffold(topBar = { TopAppBar(title = { Text("Send to doctor") }) }) { padding: PaddingValues ->
         Column(modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp)) {
             when {
-                uiState.isLoading -> CircularProgressIndicator()
+                uiState.isLoading -> SamdLoadingIndicator()
                 uiState.selectedDoctor == null -> {
                     Text(
                         text = uiState.errorMessage ?: "Could not resolve a doctor for this case",
@@ -153,3 +153,4 @@ private fun AlternativeRow(doctor: Doctor, onClick: () -> Unit) {
         }
     }
 }
+

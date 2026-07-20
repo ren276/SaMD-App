@@ -41,8 +41,8 @@ object once Phases 4/5 populate those sections.
 
 | Rendered element | Source |
 |---|---|
-| Section header "Chief Complaints & Clinical Findings" | Fixed label |
-| Chief complaint (verbatim, quoted) | `Consultation.chiefComplaint` |
+| Section header "Primary Ailments & Clinical Findings" | Fixed label |
+| Main concern (verbatim, quoted) | `Consultation.chiefComplaint` (DB/code field name unchanged; UI label is "Main concern") |
 | Measurable ailment lines (◆) | `AilmentEntry` where `measurementType == MEASURABLE`: `description` + `measuredValue`/`measuredUnit` |
 | Non-measurable ailment lines (•) | `AilmentEntry` where `NON_MEASURABLE`: `description` + `severity`/`duration`/`onset`/`qualifiers` |
 | Redacted private line ("🔒 Private entry") | `AilmentEntry.visibility == PRIVATE` under `ReportAudience.WORKER` — text intentionally absent |

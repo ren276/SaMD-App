@@ -11,7 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
+import com.example.samdapp.presentation.common.SamdLoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -54,7 +54,7 @@ internal fun PatientAuditContent(uiState: PatientAuditUiState) {
                 modifier = Modifier.padding(bottom = 16.dp),
             )
             when {
-                uiState.isLoading -> CircularProgressIndicator(modifier = Modifier.padding(24.dp))
+                uiState.isLoading -> SamdLoadingIndicator(modifier = Modifier.padding(24.dp))
                 uiState.entries.isEmpty() -> Text(
                     text = "No activity recorded on your file yet.",
                     style = MaterialTheme.typography.bodyMedium,
@@ -82,3 +82,4 @@ private fun AuditEntryRow(entry: PatientFacingAuditEntry) {
         }
     }
 }
+

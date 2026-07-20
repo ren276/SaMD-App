@@ -16,7 +16,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
+import com.example.samdapp.presentation.common.SamdLoadingIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -100,7 +100,7 @@ internal fun CompounderContent(uiState: CompounderUiState, actions: CompounderAc
     }
     Scaffold(topBar = { TopAppBar(title = { Text("Compounder / Initial assessment") }) }) { padding: PaddingValues ->
         if (uiState.isLoadingPrefill) {
-            CircularProgressIndicator(modifier = Modifier.padding(padding).padding(32.dp))
+            SamdLoadingIndicator(modifier = Modifier.padding(padding).padding(32.dp))
             return@Scaffold
         }
         LazyColumn(
@@ -108,13 +108,22 @@ internal fun CompounderContent(uiState: CompounderUiState, actions: CompounderAc
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item { StepProgressIndicator(current = 4, total = 4, label = "Ailments & vitals") }
+            // ── Demo shortcut — investor-demo only ──────────────────────────────────
+            item {
+                OutlinedButton(
+                    onClick = actions::fillDemoData,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("👤 Fill demo patient data", style = MaterialTheme.typography.labelLarge)
+                }
+            }
             // Ask the patient what's wrong first — this is a triage conversation, not a form.
             item { Text("What's happening with the patient?", style = MaterialTheme.typography.titleMedium) }
             item {
                 OutlinedTextField(
                     uiState.chiefComplaint,
                     actions::onChiefComplaintChange,
-                    label = { Text("Chief complaint *") },
+                    label = { Text("Main concern *") },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -399,3 +408,4 @@ private fun PrivateHandoffInterstitial(onAcknowledged: () -> Unit, onCancelled: 
         }
     }
 }
+

@@ -13,7 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
+import com.example.samdapp.presentation.common.SamdLoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -47,7 +47,7 @@ fun ConsultationChainScreen(
     Scaffold(topBar = { TopAppBar(title = { Text("Follow-up history") }) }) { padding: PaddingValues ->
         Column(modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp, vertical = 8.dp)) {
             when {
-                uiState.isLoading -> CircularProgressIndicator(modifier = Modifier.padding(24.dp))
+                uiState.isLoading -> SamdLoadingIndicator(modifier = Modifier.padding(24.dp))
                 uiState.visits.isEmpty() -> Text(
                     text = "No visits in this chain.",
                     style = MaterialTheme.typography.bodyMedium,
@@ -80,7 +80,7 @@ private fun ChainVisitRow(
         Column(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = visit.chiefComplaint ?: "Incomplete visit — no consultation recorded",
+                    text = visit.chiefComplaint ?: "Incomplete visit — no concern recorded",
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.weight(1f),
                 )
@@ -116,3 +116,4 @@ private fun ChainVisitRow(
         }
     }
 }
+

@@ -3,6 +3,7 @@ package com.example.samdapp.presentation.register
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.samdapp.data.mock.DemoPatientProfile
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.repository.AbhaProfileRepository
@@ -77,6 +78,8 @@ interface RegisterActions {
     fun onFieldChange(field: RegisterField, value: String)
     fun onBiologicalSexChange(sex: String)
     fun onSubmit()
+    /** Pre-fills every field from [DemoPatientProfile] — investor-demo shortcut only. */
+    fun fillDemoData()
 }
 
 @HiltViewModel
@@ -138,6 +141,34 @@ class RegisterViewModel @Inject constructor(
 
     override fun onBiologicalSexChange(sex: String) {
         _uiState.update { it.copy(biologicalSex = sex, sexAutofilledFromAbha = false) }
+    }
+
+    /** Investor-demo shortcut: fills every field from [DemoPatientProfile] in one tap. */
+    override fun fillDemoData() {
+        _uiState.update { state ->
+            state.copy(
+                biologicalSex = DemoPatientProfile.BIOLOGICAL_SEX,
+                fields = state.fields + mapOf(
+                    RegisterField.FULL_NAME to DemoPatientProfile.FULL_NAME,
+                    RegisterField.DATE_OF_BIRTH to DemoPatientProfile.DATE_OF_BIRTH,
+                    RegisterField.MOBILE_NUMBER to DemoPatientProfile.MOBILE_NUMBER,
+                    RegisterField.EMERGENCY_CONTACT to DemoPatientProfile.EMERGENCY_CONTACT,
+                    RegisterField.GUARDIAN_OR_SPOUSE_NAME to DemoPatientProfile.GUARDIAN_OR_SPOUSE_NAME,
+                    RegisterField.VILLAGE to DemoPatientProfile.VILLAGE,
+                    RegisterField.BLOCK to DemoPatientProfile.BLOCK,
+                    RegisterField.DISTRICT to DemoPatientProfile.DISTRICT,
+                    RegisterField.STATE to DemoPatientProfile.STATE,
+                    RegisterField.PINCODE to DemoPatientProfile.PINCODE,
+                    RegisterField.CATEGORY to DemoPatientProfile.CATEGORY,
+                    RegisterField.MARITAL_STATUS to DemoPatientProfile.MARITAL_STATUS,
+                    RegisterField.BLOOD_GROUP to DemoPatientProfile.BLOOD_GROUP,
+                    RegisterField.AADHAAR_NUMBER to DemoPatientProfile.AADHAAR_NUMBER,
+                    RegisterField.ABHA_NUMBER to DemoPatientProfile.ABHA_NUMBER,
+                    RegisterField.PRIMARY_CARE_CLINIC_NAME to DemoPatientProfile.PRIMARY_CARE_CLINIC_NAME,
+                    RegisterField.REFERRING_PHYSICIAN_NAME to DemoPatientProfile.REFERRING_PHYSICIAN_NAME,
+                ),
+            )
+        }
     }
 
     override fun onSubmit() {

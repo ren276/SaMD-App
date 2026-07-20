@@ -25,3 +25,10 @@
   configuration baseline today (git history + `libs.versions.toml`).
 - The biggest open DHF gaps are **V&V records** (blocker #4) and the **formal safety
   classification** (blocker #2) — both gate a credible submission.
+
+## Change log
+
+| Date | Change | Files affected | Rationale |
+|---|---|---|---|
+| 2026-07-20 | **UI terminology: "Chief complaint" → "Main concern"** across all presentation-layer screens and report narrative strings. Internal code/DB field names (`chiefComplaint`) intentionally unchanged — no schema migration required. | `ConsultationScreen`, `CompounderScreen`, `DoctorListScreen`, `ConsultationChainScreen`, `PatientSummaryScreen`, `ReportFormatter`, `report-field-mapping.md` | Patient-facing language should be warm and accessible. "Chief complaint" is medical jargon; "Main concern" is plain English and more humane. |
+| 2026-07-20 | **Investor demo auto-fill** — new `data/mock/DemoPatientProfile.kt` holds a clinically consistent patient persona (Priya Sharma, 34F, Shivpuri MP). Each screen gains a `fillDemoData()` action wired to a "👤 Fill demo patient data" button that pre-populates every field in one tap. Data is isolated to the demo path and never touches production storage. | `DemoPatientProfile.kt` (new), `RegisterViewModel`, `RegisterScreen`, `MedicalBackgroundViewModel`, `MedicalBackgroundScreen`, `CompounderViewModel`, `CompounderScreen`, `ConsultationViewModel`, `ConsultationScreen` | Eliminate manual data entry during investor presentations; all fields populated with realistic rural-India clinical data. |

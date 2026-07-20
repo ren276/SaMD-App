@@ -13,7 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
+import com.example.samdapp.presentation.common.SamdLoadingIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -71,7 +71,7 @@ private fun RedirectingContent(padding: PaddingValues) {
         verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
     ) {
         StepProgressIndicator(current = 1, total = 4, label = "ABHA ID")
-        CircularProgressIndicator(modifier = Modifier.padding(bottom = 8.dp))
+        SamdLoadingIndicator(modifier = Modifier.padding(bottom = 8.dp))
         Text(text = "Redirecting to ABHA Portal (simulated)…", style = MaterialTheme.typography.titleMedium)
         Text(
             text = "This is a mock flow — no real ABDM gateway is contacted.",
@@ -141,3 +141,4 @@ private fun GenderRow(selected: String, onSelect: (String) -> Unit) {
         }
     }
 }
+

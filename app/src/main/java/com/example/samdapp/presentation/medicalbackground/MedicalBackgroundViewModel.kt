@@ -3,6 +3,7 @@ package com.example.samdapp.presentation.medicalbackground
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.samdapp.data.mock.DemoPatientProfile
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.model.Allergy
@@ -52,6 +53,8 @@ interface MedicalBackgroundActions {
         environmentalExposure: String?,
         recentTravel: String?,
     )
+    /** Bulk-loads all demo data for investor presentation — calls the individual add* functions. */
+    fun fillDemoData()
 }
 
 @HiltViewModel(assistedFactory = MedicalBackgroundViewModel.Factory::class)
@@ -155,5 +158,23 @@ class MedicalBackgroundViewModel @AssistedInject constructor(
                 )
             }
         }
+    }
+
+    /** Investor-demo shortcut: bulk-inserts all mock clinical background data for [patientId]. */
+    override fun fillDemoData() {
+        DemoPatientProfile.MEDICAL_HISTORY.forEach { item ->
+            onAddMedicalHistoryItem(item.category, item.description, item.yearOrDate)
+        }
+        DemoPatientProfile.MEDICATIONS.forEach { med ->
+            onAddMedication(med.kind, med.name, med.dosage, med.frequency)
+        }
+        DemoPatientProfile.ALLERGIES.forEach { allergy ->
+            onAddAllergy(allergy.category, allergy.allergen, allergy.reactionType)
+        }
+        DemoPatientProfile.FAMILY_HISTORY.forEach { entry ->
+            onAddFamilyHistoryEntry(entry.condition, entry.relation)
+        }
+        val sh = DemoPatientProfile.SOCIAL_HISTORY
+        onSaveSocialHistory(sh.occupation, sh.tobaccoUse, sh.alcoholUse, sh.recreationalDrugUse, sh.environmentalExposure, sh.recentTravel)
     }
 }

@@ -20,6 +20,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
@@ -123,6 +124,15 @@ internal fun RegisterContent(uiState: RegisterUiState, actions: RegisterActions)
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item { StepProgressIndicator(current = 2, total = 4, label = "Registration") }
+            // ── Demo shortcut — investor-demo only ──────────────────────────────────
+            item {
+                OutlinedButton(
+                    onClick = actions::fillDemoData,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("👤 Fill demo patient data", style = MaterialTheme.typography.labelLarge)
+                }
+            }
             item { SectionLabel("Core details") }
             item { FieldRow(CORE_FIELDS[0], uiState, actions) }
             item {

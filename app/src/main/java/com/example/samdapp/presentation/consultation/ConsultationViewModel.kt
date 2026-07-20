@@ -3,6 +3,7 @@ package com.example.samdapp.presentation.consultation
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.samdapp.data.mock.DemoPatientProfile
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.model.AttachmentType
@@ -67,6 +68,8 @@ interface ConsultationActions {
     fun onAddAttachment(type: AttachmentType, uri: String)
     fun onRecordAudioAttachment()
     fun onSend()
+    /** Pre-fills the main concern + history-of-present-illness from [DemoPatientProfile] — demo only. */
+    fun fillDemoData()
 }
 
 @HiltViewModel(assistedFactory = ConsultationViewModel.Factory::class)
@@ -106,6 +109,22 @@ class ConsultationViewModel @AssistedInject constructor(
     override fun onRelievingFactorsChange(value: String) = _uiState.update { it.copy(relievingFactors = value) }
     override fun onImpactChange(value: String) = _uiState.update { it.copy(impactOnDailyActivities = value) }
     override fun onRelevantHistoryChange(value: String) = _uiState.update { it.copy(relevantHistory = value) }
+
+    /** Investor-demo shortcut: fills every HPI field from [DemoPatientProfile] in one tap. */
+    override fun fillDemoData() {
+        _uiState.update {
+            it.copy(
+                chiefComplaint = DemoPatientProfile.MAIN_CONCERN,
+                onset = DemoPatientProfile.SYMPTOM_ONSET,
+                durationBucket = DemoPatientProfile.DURATION_BUCKET,
+                severityScore = DemoPatientProfile.SEVERITY_SCORE,
+                aggravatingFactors = DemoPatientProfile.AGGRAVATING_FACTORS,
+                relievingFactors = DemoPatientProfile.RELIEVING_FACTORS,
+                impactOnDailyActivities = DemoPatientProfile.IMPACT_ON_DAILY_ACTIVITIES,
+                relevantHistory = DemoPatientProfile.RELEVANT_HISTORY,
+            )
+        }
+    }
 
     override fun onAddAttachment(type: AttachmentType, uri: String) {
         _uiState.update { it.copy(pendingAttachments = it.pendingAttachments + PendingAttachment(type, uri)) }

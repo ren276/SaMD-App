@@ -12,7 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
+import com.example.samdapp.presentation.common.SamdLoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -45,7 +45,7 @@ fun ReferralsScreen(bottomBar: @Composable () -> Unit = {}, viewModel: Referrals
     ) { padding: PaddingValues ->
         Column(modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp, vertical = 8.dp)) {
             when {
-                uiState.isLoading -> CircularProgressIndicator(modifier = Modifier.padding(24.dp))
+                uiState.isLoading -> SamdLoadingIndicator(modifier = Modifier.padding(24.dp))
                 uiState.referrals.isEmpty() -> Text(
                     text = "No referrals sent yet.",
                     style = MaterialTheme.typography.bodyMedium,
@@ -89,3 +89,4 @@ private fun ReferralRow(referral: ReferralRequest) {
         }
     }
 }
+

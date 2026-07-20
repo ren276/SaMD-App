@@ -17,7 +17,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
+import com.example.samdapp.presentation.common.SamdLoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -98,7 +98,7 @@ fun PatientSummaryScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             if (uiState.isLoading || uiState.patient == null) {
-                CircularProgressIndicator()
+                SamdLoadingIndicator()
                 return@Column
             }
             val patient = uiState.patient!!
@@ -236,7 +236,7 @@ private fun ConsultationHistorySection(
     onOpenChain: (rootEncounterId: String) -> Unit,
 ) {
     when {
-        isLoading -> CircularProgressIndicator(modifier = Modifier.padding(16.dp))
+        isLoading -> SamdLoadingIndicator(modifier = Modifier.padding(16.dp))
         chains.isEmpty() -> Text(
             text = "No prior visits.",
             style = MaterialTheme.typography.bodyMedium,
@@ -339,7 +339,7 @@ private fun FollowUpPickerDialog(
                     TextButton(onClick = { onPick(entry.encounterId) }, modifier = Modifier.fillMaxWidth()) {
                         Column(modifier = Modifier.fillMaxWidth()) {
                             Text(
-                                text = "${formatter.format(entry.visitDate)} — ${entry.chiefComplaint ?: "No complaint recorded"}",
+                                text = "${formatter.format(entry.visitDate)} — ${entry.chiefComplaint ?: "No concern recorded"}",
                                 style = MaterialTheme.typography.bodyMedium,
                             )
                         }
@@ -366,3 +366,4 @@ private fun Patient.displayAge(): String {
     age?.let { return "$it yrs" }
     return "Unknown"
 }
+

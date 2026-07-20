@@ -72,6 +72,15 @@ private fun MedicalBackgroundContent(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             item { StepProgressIndicator(current = 3, total = 4, label = "Medical background") }
+            // ── Demo shortcut — investor-demo only ──────────────────────────────────
+            item {
+                OutlinedButton(
+                    onClick = actions::fillDemoData,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                ) {
+                    Text("👤 Fill demo patient data", style = MaterialTheme.typography.labelLarge)
+                }
+            }
             item {
                 MedicalHistorySection(
                     items = uiState.medicalHistoryItems.map { "${it.category}: ${it.description}" },
