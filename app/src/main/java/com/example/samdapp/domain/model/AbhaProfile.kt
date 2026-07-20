@@ -43,3 +43,12 @@ fun formatAbhaId(rawAbhaId: String): String =
     } else {
         rawAbhaId
     }
+
+/** Same shape as [formatAbhaId] but masks every digit except the last 4 (e.g. `XX-XXXX-XXXX-6749`)
+ *  — used on the clinical report, which leaves the patient's device/hands and shouldn't carry the
+ *  full ABHA number in the clear. */
+fun maskAbhaId(rawAbhaId: String): String =
+    formatAbhaId(rawAbhaId).let { formatted ->
+        val visible = 4
+        formatted.mapIndexed { i, c -> if (c != '-' && i < formatted.length - visible) 'X' else c }.joinToString("")
+    }

@@ -72,7 +72,14 @@ data class ReportMedicationLine(
     val text: String,
 )
 
-data class ReportSignatureBlock(val doctorName: String, val registrationNumber: String?)
+data class ReportSignatureBlock(
+    val doctorName: String,
+    val registrationNumber: String?,
+    /** Specialty/department of the doctor who reviewed the case (e.g. "General Medicine"). */
+    val specialty: String?,
+    /** Facility the case was reviewed at — where the report was sent for physician review. */
+    val facilityName: String?,
+)
 
 data class ClinicalReport(
     val audience: ReportAudience,

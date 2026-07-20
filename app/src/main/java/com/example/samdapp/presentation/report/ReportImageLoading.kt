@@ -18,3 +18,9 @@ fun decodeReportLogo(context: Context): Bitmap? = runCatching {
 fun decodeAttachmentBitmap(context: Context, uriString: String): Bitmap? = runCatching {
     context.contentResolver.openInputStream(Uri.parse(uriString))?.use { BitmapFactory.decodeStream(it) }
 }.getOrNull()
+
+/** Mock handwritten-signature ink squiggle for the report footer — `assets/sign.png`. Decoded once
+ *  by the caller, same posture as [decodeReportLogo]; null on failure just omits the image. */
+fun decodeReportSignature(context: Context): Bitmap? = runCatching {
+    context.assets.open("sign.png").use { BitmapFactory.decodeStream(it) }
+}.getOrNull()

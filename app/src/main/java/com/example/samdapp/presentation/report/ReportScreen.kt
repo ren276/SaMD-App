@@ -121,6 +121,9 @@ private fun ReportContent(
     val logoBitmap by produceState<android.graphics.Bitmap?>(initialValue = null) {
         value = withContext(Dispatchers.IO) { decodeReportLogo(context) }
     }
+    val signatureBitmap by produceState<android.graphics.Bitmap?>(initialValue = null) {
+        value = withContext(Dispatchers.IO) { decodeReportSignature(context) }
+    }
     val attachmentBitmaps by produceState(initialValue = emptyMap(), report) {
         value = withContext(Dispatchers.IO) {
             report.attachments.associate { it.uri to decodeAttachmentBitmap(context, it.uri) }
@@ -130,9 +133,13 @@ private fun ReportContent(
     // straight into Compose's hardware-accelerated Canvas: on some OEM skins the hardware
     // RenderNode path corrupts/misplaces content across stacked Canvas composables, while a
     // software Bitmap+Canvas always renders correctly regardless of GPU driver quirks.
-    val pageBitmaps by produceState(initialValue = emptyList<androidx.compose.ui.graphics.ImageBitmap>(), report, logoBitmap, attachmentBitmaps) {
+    val pageBitmaps by produceState(initialValue = emptyList<androidx.compose.ui.graphics.ImageBitmap>(), report, logoBitmap, signatureBitmap, attachmentBitmaps) {
         value = withContext(Dispatchers.Default) {
-            val renderer = ReportCanvasRenderer(logoBitmap = logoBitmap, imageLoader = { uri -> attachmentBitmaps[uri] })
+            val renderer = ReportCanvasRenderer(
+                logoBitmap = logoBitmap,
+                imageLoader = { uri -> attachmentBitmaps[uri] },
+                signatureBitmap = signatureBitmap,
+            )
             val bitmapWidth = 1000
             val scale = bitmapWidth / ReportCanvasRenderer.PAGE_WIDTH
             val bitmapHeight = (ReportCanvasRenderer.PAGE_HEIGHT * scale).toInt()

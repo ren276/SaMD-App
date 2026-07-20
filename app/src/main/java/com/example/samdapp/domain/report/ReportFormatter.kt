@@ -13,7 +13,7 @@ import com.example.samdapp.domain.model.Patient
 import com.example.samdapp.domain.model.Prescription
 import com.example.samdapp.domain.model.Visibility
 import com.example.samdapp.domain.model.VitalsSnapshot
-import com.example.samdapp.domain.model.formatAbhaId
+import com.example.samdapp.domain.model.maskAbhaId
 import java.time.Instant
 import java.time.LocalDate
 import java.time.Period
@@ -79,7 +79,7 @@ class ReportFormatter @Inject constructor() {
             mobileNumber = patient.mobileNumber,
             category = patient.category,
             ageSex = "${ageSexAge(patient)} / ${patient.biologicalSex}",
-            abhaNumberFormatted = patient.abhaNumber?.takeIf { it.isNotBlank() }?.let(::formatAbhaId),
+            abhaNumberFormatted = patient.abhaNumber?.takeIf { it.isNotBlank() }?.let(::maskAbhaId),
             abhaAddress = abhaProfile?.abhaAddress,
             abhaVerified = abhaProfile?.kycVerified == true,
         )
@@ -97,6 +97,8 @@ class ReportFormatter @Inject constructor() {
             ReportSignatureBlock(
                 doctorName = prescribingDoctor?.name ?: "Physician",
                 registrationNumber = prescribingDoctor?.registrationNumber,
+                specialty = prescribingDoctor?.specialty,
+                facilityName = prescribingDoctor?.facilityName,
             )
         }
 
