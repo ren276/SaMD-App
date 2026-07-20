@@ -9,6 +9,7 @@ fun CaseStatus.doctorTrackerLabel(): String = when (this) {
     CaseStatus.DRAFT, CaseStatus.SAVED_LOCALLY, CaseStatus.PENDING_SYNC -> "Sent"
     CaseStatus.SENT_TO_DOCTOR -> "Awaiting Review"
     CaseStatus.PRESCRIPTION_RECEIVED -> "Reviewed"
+    CaseStatus.ABANDONED -> "Abandoned"
 }
 
 /** Consultation-history-facing label (Part C) — same enum, different audience than
@@ -20,4 +21,5 @@ fun CaseStatus.historyLabel(): String = when (this) {
     CaseStatus.PENDING_SYNC -> "Queued — will send when online"
     CaseStatus.SENT_TO_DOCTOR -> "Awaiting doctor's review"
     CaseStatus.PRESCRIPTION_RECEIVED -> "Doctor's response received"
+    CaseStatus.ABANDONED -> "Abandoned — restarted as a new visit"
 }

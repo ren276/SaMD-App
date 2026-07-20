@@ -32,7 +32,7 @@ Only `id`, `fullName`, one contact method required in UI.
 Mock/static JSON asset. `id`, `name`, `specialty`, `available`, `facilityName?`.
 
 ### `CaseRecord`
-`id`, `patientId`, `vitalsId?`, `consultationId?`, `status` (`draft`/`saved_locally`/`sent_to_doctor`), `assignedDoctorId?`, `updatedAt`.
+`id`, `patientId`, `vitalsId?`, `consultationId?`, `status` (`draft`/`saved_locally`/`pending_sync`/`sent_to_doctor`/`prescription_received`/`abandoned`), `assignedDoctorId?`, `updatedAt`. `ABANDONED` added 2026-07-20 (bug fix — see PROGRESS.md): `StartCaseUseCase`/`CaseRecordRepositoryImpl.createDraft` marks any pre-existing `DRAFT` case for the same `patientId` as `ABANDONED` before inserting a new one, so an orphaned in-progress draft (worker backed out mid-flow, never reached Acknowledgement) can't resurface via `HomeViewModel`'s crash-recovery resume prompt and get confused with the visit actually in progress.
 
 ### `AuditLogEntity` (new — see agent_docs/hardening.md for why)
 - `id: String`, `timestamp: Instant`

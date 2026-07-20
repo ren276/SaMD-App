@@ -19,6 +19,7 @@ class CaseRecordRepositoryImpl @Inject constructor(
 
     override suspend fun createDraft(patientId: String, encounterId: String): Result<CaseRecord> = asDataResult {
         val now = Instant.now()
+        caseRecordDao.abandonDraftsForPatient(patientId, now)
         val caseRecord = CaseRecord(
             id = UUID.randomUUID().toString(),
             patientId = patientId,
