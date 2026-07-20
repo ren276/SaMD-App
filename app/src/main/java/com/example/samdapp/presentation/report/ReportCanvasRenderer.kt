@@ -38,6 +38,9 @@ import java.util.Locale
 class ReportCanvasRenderer(
     private val logoBitmap: Bitmap? = null,
     private val imageLoader: (String) -> Bitmap? = { null },
+    /** Mock handwritten-signature ink squiggle drawn above the doctor's printed name in the
+     *  footer (`assets/sign.png`) — decoded once by the caller, same posture as [logoBitmap]. */
+    private val signatureBitmap: Bitmap? = null,
 ) {
 
     companion object {
@@ -137,7 +140,7 @@ class ReportCanvasRenderer(
         add(headerBlock(report))
         add(demographicBlock(report))
         add(gap(6f))
-        add(sectionHeaderBlock("Chief Complaints & Clinical Findings"))
+        add(sectionHeaderBlock("Primary Ailments & Clinical Findings"))
         add(complaintBlock(report))
         addAll(ailmentBlocks(report))
         if (report.vitals.isNotEmpty()) {
@@ -163,34 +166,49 @@ class ReportCanvasRenderer(
 
     private fun gap(h: Float) = Block(h) { _, _ -> }
 
-    private fun headerBlock(report: ClinicalReport): Block = Block(74f) { c, top ->
-        // Top-left: institutional logo slot. Falls back to a bordered "LOGO" placeholder box if
-        // no bitmap was supplied (e.g. decode failed) — never a blank gap.
-        val logo = logoBitmap
-        if (logo != null) {
-            val dst = RectF(MARGIN, top, MARGIN + 46f, top + 46f)
-            c.drawBitmap(logo, null, dst, null)
-        } else {
-            c.drawRect(MARGIN, top, MARGIN + 46f, top + 46f, boxPaint)
-            drawCentered(c, "LOGO", MARGIN, MARGIN + 46f, top + 27f, smallPaint)
-        }
+    private fun headerBlock(report: ClinicalReport): Block {
+        val sig = report.signature
+        val height = if (sig != null) 74f + lineHeight(metaPaint) else 74f
+        return Block(height) { c, top ->
+            // Top-left: institutional logo slot. Falls back to a bordered "LOGO" placeholder box if
+            // no bitmap was supplied (e.g. decode failed) — never a blank gap.
+            val logo = logoBitmap
+            if (logo != null) {
+                val dst = RectF(MARGIN, top, MARGIN + 46f, top + 46f)
+                c.drawBitmap(logo, null, dst, null)
+            } else {
+                c.drawRect(MARGIN, top, MARGIN + 46f, top + 46f, boxPaint)
+                drawCentered(c, "LOGO", MARGIN, MARGIN + 46f, top + 27f, smallPaint)
+            }
 
-        // Top-center: system title, PHC name, CR No.
-        val centerLeft = MARGIN + 54f
-        val centerRight = PAGE_WIDTH - MARGIN - 128f
-        var ty = top + titlePaint.textSize
-        wrap("PRIMARY HEALTH CENTER DIGITAL HEALTH SYSTEM", titlePaint, centerRight - centerLeft).forEach {
-            drawCentered(c, it, centerLeft, centerRight, ty, titlePaint); ty += lineHeight(titlePaint)
-        }
-        drawCentered(c, report.header.phcName, centerLeft, centerRight, ty + 2f, phcPaint)
-        ty += lineHeight(phcPaint) + 4f
-        drawCentered(c, "CR No: ${report.header.consultationRecordNo}", centerLeft, centerRight, ty, metaPaint)
+            // Top-center: system title, PHC name, CR No, prescribing-physician sub-header.
+            val centerLeft = MARGIN + 54f
+            val centerRight = PAGE_WIDTH - MARGIN - 128f
+            var ty = top + titlePaint.textSize
+            wrap("PRIMARY HEALTH CENTER DIGITAL HEALTH SYSTEM", titlePaint, centerRight - centerLeft).forEach {
+                drawCentered(c, it, centerLeft, centerRight, ty, titlePaint); ty += lineHeight(titlePaint)
+            }
+            drawCentered(c, report.header.phcName, centerLeft, centerRight, ty + 2f, phcPaint)
+            ty += lineHeight(phcPaint) + 4f
+            drawCentered(c, "CR No: ${report.header.consultationRecordNo}", centerLeft, centerRight, ty, metaPaint)
+            if (sig != null) {
+                ty += lineHeight(metaPaint)
+                drawCentered(
+                    c,
+                    "Prescribing Physician: ${sig.doctorName} | ${sig.registrationNumber ?: "Reg No. pending"}",
+                    centerLeft,
+                    centerRight,
+                    ty,
+                    metaPaint,
+                )
+            }
 
-        // Top-right: barcode of the Patient UID + human-readable UID beneath.
-        val barcodeRight = PAGE_WIDTH - MARGIN
-        val barcodeLeft = barcodeRight - 118f
-        drawBarcode(c, report.header.patientUid, barcodeLeft, top + 2f, 118f, 30f)
-        drawCentered(c, "UID: ${report.header.patientUid}", barcodeLeft, barcodeRight, top + 42f, smallPaint)
+            // Top-right: barcode of the Patient UID + human-readable UID beneath.
+            val barcodeRight = PAGE_WIDTH - MARGIN
+            val barcodeLeft = barcodeRight - 118f
+            drawBarcode(c, report.header.patientUid, barcodeLeft, top + 2f, 118f, 30f)
+            drawCentered(c, "UID: ${report.header.patientUid}", barcodeLeft, barcodeRight, top + 42f, smallPaint)
+        }
     }
 
     private fun demographicBlock(report: ClinicalReport): Block {
@@ -205,7 +223,7 @@ class ReportCanvasRenderer(
         val rightRows = buildList {
             add("Age / Sex" to p.ageSex)
             add("Visit" to report.header.visitDateTime.atZone(ZoneId.systemDefault()).format(DATE_FMT))
-            if (p.abhaNumberFormatted != null) add("ABHA No." to p.abhaNumberFormatted)
+            if (p.abhaNumberFormatted != null) add("ABHA ID" to p.abhaNumberFormatted)
             if (p.abhaAddress != null) add("ABHA Address" to p.abhaAddress)
             // Encounter Information (Part A addendum): device/app identity that produced the AI
             // section below — captured for the report artifact, never shown in any in-app UI.
@@ -357,7 +375,12 @@ class ReportCanvasRenderer(
 
     private fun footerHeight(report: ClinicalReport): Float {
         val consentLines = wrap(report.consentStatement, smallPaint, CONTENT_WIDTH)
-        return consentLines.size * lineHeight(smallPaint) + 46f
+        val sig = report.signature
+        val deptFacility = sig?.let { listOfNotNull(it.specialty, it.facilityName).joinToString(" · ") }?.takeIf { it.isNotBlank() }
+        val sigLineCount = if (deptFacility != null) 3 else 2
+        val sigImageHeight = if (sig != null && signatureBitmap != null) 18f else 0f
+        val sigBlockHeight = 12f + sigImageHeight + sigLineCount * lineHeight(smallPaint) + lineHeight(verifiedPaint)
+        return maxOf(consentLines.size * lineHeight(smallPaint) + 46f, sigBlockHeight + 12f)
     }
 
     private fun drawFooter(canvas: Canvas, report: ClinicalReport) {
@@ -370,16 +393,31 @@ class ReportCanvasRenderer(
         // Bottom-right signature block, double-underlined.
         val sigRight = PAGE_WIDTH - MARGIN
         val sigLeft = PAGE_WIDTH / 2f
-        val sigLineY = PAGE_HEIGHT - MARGIN - 22f
+        val sig = report.signature
+        val deptFacility = sig?.let { listOfNotNull(it.specialty, it.facilityName).joinToString(" · ") }?.takeIf { it.isNotBlank() }
+        val sigLineCount = if (deptFacility != null) 3 else 2
+        val sigImageHeight = if (sig != null && signatureBitmap != null) 18f else 0f
+        val sigLineY = PAGE_HEIGHT - MARGIN - (12f + sigImageHeight + sigLineCount * lineHeight(smallPaint))
+        if (sig != null && signatureBitmap != null) {
+            val sigImageWidth = sigImageHeight * signatureBitmap.width / signatureBitmap.height
+            val dst = RectF(sigRight - sigImageWidth, sigLineY - sigImageHeight, sigRight, sigLineY)
+            canvas.drawBitmap(signatureBitmap, null, dst, null)
+        }
         canvas.drawLine(sigLeft, sigLineY, sigRight, sigLineY, linePaint)
         canvas.drawLine(sigLeft, sigLineY + 2.5f, sigRight, sigLineY + 2.5f, linePaint)
-        val reg = report.signature?.registrationNumber
-        val sigText = when {
-            report.signature != null -> "Physician Verification Node / Reg No: ${reg ?: "—"}"
-            else -> "Physician Verification Node — pending"
+        var sy = sigLineY + 12f
+        if (sig != null) {
+            canvas.drawText("Reviewed by: ${sig.doctorName} / Reg No: ${sig.registrationNumber ?: "—"}", sigLeft, sy, smallPaint)
+            sy += lineHeight(smallPaint)
+            if (deptFacility != null) {
+                canvas.drawText(deptFacility, sigLeft, sy, smallPaint)
+                sy += lineHeight(smallPaint)
+            }
+        } else {
+            canvas.drawText("Physician Verification Node — pending", sigLeft, sy, smallPaint)
+            sy += lineHeight(smallPaint)
         }
-        canvas.drawText(sigText, sigLeft, sigLineY + 12f, smallPaint)
-        canvas.drawText(report.disclaimer, sigLeft, sigLineY + 12f + lineHeight(smallPaint), verifiedPaint)
+        canvas.drawText(report.disclaimer, sigLeft, sy, verifiedPaint)
     }
 
     private fun drawRunningHeader(canvas: Canvas, report: ClinicalReport): Float {

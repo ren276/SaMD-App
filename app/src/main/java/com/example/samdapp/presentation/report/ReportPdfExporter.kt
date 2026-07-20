@@ -21,13 +21,18 @@ class ReportPdfExporter @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
     private val logoBitmap by lazy { decodeReportLogo(context) }
+    private val signatureBitmap by lazy { decodeReportSignature(context) }
 
     /** One consult's report → one PDF. Follow-up visits are viewed/exported individually (each
      *  from its own report screen) — there is no combined multi-visit PDF; the chain screen lists
      *  each visit separately instead. */
     fun export(report: ClinicalReport): Result<Uri> = runCatching {
         val attachmentBitmaps = report.attachments.associate { it.uri to decodeAttachmentBitmap(context, it.uri) }
-        val renderer = ReportCanvasRenderer(logoBitmap = logoBitmap, imageLoader = { uri -> attachmentBitmaps[uri] })
+        val renderer = ReportCanvasRenderer(
+            logoBitmap = logoBitmap,
+            imageLoader = { uri -> attachmentBitmaps[uri] },
+            signatureBitmap = signatureBitmap,
+        )
         val document = PdfDocument()
         try {
             val pageCount = renderer.pageCount(report)

@@ -67,7 +67,7 @@ class ReportFormatterTest {
         assertEquals("PHC Rampur", report.header.phcName)
         assertEquals("Anita Kumari", report.patient.fullName)
         assertEquals("34y / Female", report.patient.ageSex)
-        assertEquals("43-4221-5105-6749", report.patient.abhaNumberFormatted)
+        assertEquals("XX-XXXX-XXXX-6749", report.patient.abhaNumberFormatted)
         assertTrue(report.patient.address!!.contains("Sitapur"))
     }
 
@@ -169,6 +169,8 @@ class ReportFormatterTest {
         assertEquals(1, report.prescription.size)
         assertEquals("Dr. Anjali Sharma", report.signature!!.doctorName)
         assertEquals("NMC/TS/2011/45231", report.signature!!.registrationNumber)
+        assertEquals("General Physician", report.signature!!.specialty)
+        assertEquals("PHC Rampur", report.signature!!.facilityName)
         assertEquals(com.example.samdapp.domain.model.KernelDecision.AGREE, report.kernelDecision)
     }
 
