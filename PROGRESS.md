@@ -771,6 +771,45 @@ needed — Room/SQLite's existing durability + this app's no-hard-delete posture
       auto-syncs-on-reconnect, does-not-auto-sync-from-cold-start-already-online (plus the 2
       pre-existing). `assembleDebug` clean.
 
+## Orphaned-draft resume bug fix (2026-07-20, user bug report)
+
+Bug report: sending one consultation ended up producing two case records for two different
+doctors — the intended doctor's case sat empty/"awaiting review" forever, and an unrelated doctor
+got the mock report. Traced root cause: `StartCaseUseCase`/`createDraft` always minted a brand-new
+`DRAFT` case for a patient with no check for an existing unfinished draft; any earlier abandoned
+attempt (worker backed out mid-flow) sat forever as `DRAFT`. `HomeViewModel.observeResumableDraftForUser`
+watches for `DRAFT` rows continuously in the background regardless of whether Home is visible, so
+the instant a *real, successful* send finishes and `DoctorAssignmentConfirmScreen.onDone` jumps
+back to Home, that unrelated stale draft's resume prompt fires immediately — reading as if the
+send itself got interrupted. Resuming it re-enters the flow on a *different* `caseRecordId` for the
+same patient, and least-busy doctor auto-assignment (`ResolveDoctorAssignmentUseCase`) then picks a
+different doctor since the first doctor's open-case count just went up — producing the second,
+independent case record. Not an ID-matching or race-condition bug in the send/report path itself
+(`MockDoctorPrescriptionInbox`/`ReceiveDoctorPrescriptionUseCase` are correctly scoped by an
+explicit `caseRecordId`); the actual gap was the missing "abandon a stale draft" cleanup step.
+
+- [x] **`CaseStatus.ABANDONED`** (new) — additive, Room stores the enum by name string so no
+      migration needed.
+- [x] **`CaseRecordDao.abandonDraftsForPatient(patientId, updatedAt)`** — single conditional
+      `UPDATE ... WHERE patientId = :patientId AND status = 'DRAFT'`.
+- [x] **`CaseRecordRepositoryImpl.createDraft`** now calls `abandonDraftsForPatient` before
+      inserting the new draft, so a leftover `DRAFT` for that patient can never resurface via
+      `observeResumableDraftForUser` (query is scoped to `status = 'DRAFT'`) once a genuinely new
+      visit starts. `ABANDONED` rows stay invisible to the doctor-tracker query
+      (`status IN ('SENT_TO_DOCTOR', 'PRESCRIPTION_RECEIVED')`) but still show honestly in
+      consultation-history (`historyLabel()` → "Abandoned — restarted as a new visit"), not hidden.
+- [x] Updated the two exhaustive `when` blocks on `CaseStatus` (`CaseStatusDisplay.kt`:
+      `doctorTrackerLabel`/`historyLabel`) for the new case — compiler would otherwise refuse an
+      unhandled branch.
+- [x] Docs updated: `agent_docs/spec.md` `CaseRecord.status` list + note, this entry.
+- [x] **Verified:** `./gradlew :app:compileDebugKotlin` clean. No existing unit tests cover
+      `StartCaseUseCase`/`CaseRecordRepositoryImpl` yet, so no test suite to update/re-run for this
+      path — worth a follow-up test (`abandonDraftsForPatient` marks prior drafts, doesn't touch
+      other patients' drafts or non-`DRAFT` statuses) next time this file is touched.
+- [ ] Not fixed here: the specific already-orphaned Anjali case from the bug report itself — it's
+      real, correctly `SENT_TO_DOCTOR`, just never polled for a report. Worker needs to open its
+      Report screen once to trigger `MockDoctorPrescriptionInbox.fetchPrescription` for it.
+
 ## Not started
 - [ ] Demo-theater additions from agent_docs/hardening.md — the AI assessment panel item is now
       DONE (Phase 4); re-check hardening.md for what (if anything) remains (e.g. security shield

@@ -22,6 +22,13 @@ interface CaseRecordDao {
     )
     suspend fun assignDoctor(caseRecordId: String, doctorId: String, status: CaseStatus, updatedAt: Instant)
 
+    /** Called right before a fresh [CaseRecordEntity] is inserted for [patientId] (see
+     *  [com.example.samdapp.domain.usecase.StartCaseUseCase]) so an earlier attempt this worker
+     *  backed out of mid-flow — still `DRAFT`, never reaching Acknowledgement — can't resurface via
+     *  [observeResumableDraftForUser] and get confused with the visit that's actually in progress. */
+    @Query("UPDATE case_records SET status = 'ABANDONED', updatedAt = :updatedAt WHERE patientId = :patientId AND status = 'DRAFT'")
+    suspend fun abandonDraftsForPatient(patientId: String, updatedAt: Instant)
+
     /** "Sync Up": every locally-queued case (doctor already assigned, just waiting for network)
      *  moves to `SENT_TO_DOCTOR` in one round. */
     @Query("UPDATE case_records SET status = 'SENT_TO_DOCTOR', updatedAt = :updatedAt WHERE status = 'PENDING_SYNC'")
