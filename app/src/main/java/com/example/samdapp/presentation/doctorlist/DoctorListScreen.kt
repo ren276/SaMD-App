@@ -13,7 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
+import com.example.samdapp.presentation.common.SamdLoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -39,7 +39,7 @@ fun DoctorListScreen(onOpenReport: (caseRecordId: String) -> Unit, viewModel: Do
     Scaffold(topBar = { TopAppBar(title = { Text("Sent to doctor") }) }) { padding: PaddingValues ->
         Column(modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp, vertical = 8.dp)) {
             when {
-                uiState.isLoading -> CircularProgressIndicator(modifier = Modifier.padding(24.dp))
+                uiState.isLoading -> SamdLoadingIndicator(modifier = Modifier.padding(24.dp))
                 uiState.entries.isEmpty() -> Text(
                     text = "No cases sent to a doctor yet.",
                     style = MaterialTheme.typography.bodyMedium,
@@ -67,7 +67,7 @@ private fun DoctorTrackerRow(entry: DoctorTrackerEntry, onOpenReport: (caseRecor
         Column(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(text = entry.patientFullName, style = MaterialTheme.typography.titleMedium)
             Text(
-                text = entry.chiefComplaint ?: "No chief complaint recorded",
+                text = entry.chiefComplaint ?: "No main concern recorded",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -92,3 +92,4 @@ private fun DoctorTrackerRow(entry: DoctorTrackerEntry, onOpenReport: (caseRecor
         }
     }
 }
+

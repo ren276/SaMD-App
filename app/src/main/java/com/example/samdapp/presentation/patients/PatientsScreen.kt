@@ -10,7 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.CircularProgressIndicator
+import com.example.samdapp.presentation.common.SamdLoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -48,7 +48,7 @@ fun PatientsScreen(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
             )
             when {
-                uiState.isLoading -> CircularProgressIndicator(modifier = Modifier.padding(24.dp))
+                uiState.isLoading -> SamdLoadingIndicator(modifier = Modifier.padding(24.dp))
                 uiState.patients.isEmpty() -> Text(
                     text = if (uiState.query.isBlank()) {
                         "No patients seen in the last 7 days."
@@ -68,3 +68,4 @@ fun PatientsScreen(
         }
     }
 }
+

@@ -3,6 +3,7 @@ package com.example.samdapp.presentation.compounder
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.samdapp.data.mock.DemoPatientProfile
 import com.example.samdapp.domain.audit.AuditAction
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
@@ -170,6 +171,8 @@ interface CompounderActions {
     fun onAddAilment()
     fun onDeleteAilment(id: String, audioUri: String?)
     fun onContinue()
+    /** Pre-fills main concern, vitals and the ailment form from [DemoPatientProfile] — demo only. */
+    fun fillDemoData()
 }
 
 @HiltViewModel(assistedFactory = CompounderViewModel.Factory::class)
@@ -280,6 +283,29 @@ class CompounderViewModel @AssistedInject constructor(
     override fun onAilmentDurationChange(value: String) = _uiState.update { it.copy(newAilmentDuration = value) }
     override fun onAilmentOnsetChange(value: String) = _uiState.update { it.copy(newAilmentOnset = value) }
     override fun onAilmentQualifiersChange(value: String) = _uiState.update { it.copy(newAilmentQualifiers = value) }
+
+    /** Investor-demo shortcut: fills main concern, vitals and ailment form in one tap. */
+    override fun fillDemoData() {
+        _uiState.update { state ->
+            state.copy(
+                chiefComplaint = DemoPatientProfile.MAIN_CONCERN,
+                pulseBpm = DemoPatientProfile.PULSE_BPM,
+                bpSystolic = DemoPatientProfile.BP_SYSTOLIC,
+                bpDiastolic = DemoPatientProfile.BP_DIASTOLIC,
+                spo2Percent = DemoPatientProfile.SPO2_PERCENT,
+                temperatureCelsius = DemoPatientProfile.TEMPERATURE_CELSIUS,
+                respiratoryRate = DemoPatientProfile.RESPIRATORY_RATE,
+                weightKg = DemoPatientProfile.WEIGHT_KG,
+                heightCm = DemoPatientProfile.HEIGHT_CM,
+                painScore = DemoPatientProfile.PAIN_SCORE,
+                captureMethod = VitalsCaptureMethod.DIGITAL_MONITOR,
+                newAilmentDescription = DemoPatientProfile.AILMENT.description,
+                newAilmentSeverity = DemoPatientProfile.AILMENT.severity,
+                newAilmentDuration = DemoPatientProfile.AILMENT.duration,
+            )
+        }
+    }
+
 
     /** Toggling to PRIVATE surfaces the "hand the device to the patient" interstitial
      *  (REQ-AIL-02) — toggling back to PUBLIC needs no such handoff cue. */

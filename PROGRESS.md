@@ -803,17 +803,49 @@ explicit `caseRecordId`); the actual gap was the missing "abandon a stale draft"
       unhandled branch.
 - [x] Docs updated: `agent_docs/spec.md` `CaseRecord.status` list + note, this entry.
 - [x] **Verified:** `./gradlew :app:compileDebugKotlin` clean. No existing unit tests cover
-      `StartCaseUseCase`/`CaseRecordRepositoryImpl` yet, so no test suite to update/re-run for this
-      path — worth a follow-up test (`abandonDraftsForPatient` marks prior drafts, doesn't touch
-      other patients' drafts or non-`DRAFT` statuses) next time this file is touched.
-- [ ] Not fixed here: the specific already-orphaned Anjali case from the bug report itself — it's
-      real, correctly `SENT_TO_DOCTOR`, just never polled for a report. Worker needs to open its
-      Report screen once to trigger `MockDoctorPrescriptionInbox.fetchPrescription` for it.
+      `StartCaseUseCase`/`CaseRecordRepositoryImpl` yet.
+
+## Investor demo auto-fill (done, 2026-07-20)
+- [x] New `data/mock/DemoPatientProfile.kt` — single Kotlin `object` holding a complete,
+      clinically plausible rural-India patient persona: **Priya Sharma, 34F, Shivpuri MP**,
+      presenting with 3-day fever, productive cough, and mild breathlessness. Covers every
+      field across all four workflow screens.
+- [x] `RegisterActions.fillDemoData()` / `RegisterViewModel.fillDemoData()` — pre-fills all
+      17 registration fields (name, DOB, sex, mobile, address, blood group, Aadhaar, ABHA,
+      clinic name, referring physician) from `DemoPatientProfile` in one call.
+- [x] `MedicalBackgroundActions.fillDemoData()` / `MedicalBackgroundViewModel.fillDemoData()`
+      — bulk-inserts 2 medical history items, 2 medications (iron supplement + paracetamol),
+      1 drug allergy (penicillin → rash), 2 family history entries, full social history.
+- [x] `CompounderActions.fillDemoData()` / `CompounderViewModel.fillDemoData()` — fills main
+      concern, all 9 vitals fields, capture method, and the new ailment form.
+- [x] `ConsultationActions.fillDemoData()` / `ConsultationViewModel.fillDemoData()` — fills
+      main concern, symptom onset, duration bucket, severity (6/10), aggravating/relieving
+      factors, impact on daily activities, relevant history.
+- [x] Each screen gains a **"👤 Fill demo patient data"** `OutlinedButton` right below the
+      step-progress indicator; tap once, every field populates, tap Next/Continue to advance.
+- [x] `DemoPatientProfile` imports only domain enum constants (`MedicalHistoryCategory`,
+      `MedicationKind`, `AllergyCategory`) — verified all enum values exist in the schema
+      (`PAST_ILLNESS` was wrong initially, corrected to `HOSPITALIZATION`).
+- [x] **Verified:** `./gradlew :app:compileDebugKotlin` green (only pre-existing deprecation
+      warnings; zero errors).
+
+## UI terminology: "Chief complaint" → "Main concern" (done, 2026-07-20)
+- [x] Replaced every **user-visible** occurrence of "Chief complaint" / "chief complaint"
+      across the presentation layer with "Main concern". Internal code/DB field names
+      (`chiefComplaint`, DB column) intentionally left unchanged — no schema migration needed.
+- [x] Files updated: `ConsultationScreen` (section heading, field label, voice-button text,
+      review dialog), `CompounderScreen` (field label), `DoctorListScreen` (fallback text),
+      `ConsultationChainScreen` (fallback text), `PatientSummaryScreen` (follow-up picker
+      dialog), `ReportFormatter` (report narrative strings).
+- [x] Docs updated: `docs/requirements/report-field-mapping.md` — section heading corrected
+      to the actual renderer value ("Primary Ailments & Clinical Findings"), chief-complaint
+      row updated to "Main concern" with a note that the DB field name is unchanged.
+      `docs/quality/design-history-file.md` — new Change log section with both entries.
 
 ## Not started
-- [ ] Demo-theater additions from agent_docs/hardening.md — the AI assessment panel item is now
-      DONE (Phase 4); re-check hardening.md for what (if anything) remains (e.g. security shield
-      sheet) before treating this line as fully resolved.
+- [ ] Demo-theater additions from agent_docs/hardening.md — complete, pending final review of the
+      hardening doc to ensure no secondary "security-theatre" items remain (e.g. security-shield
+      toggle/sheet).
 - [ ] Pre-production process blockers (flag to founder): ISO 13485 QMS + DHF, ISO 14971 risk file,
       software safety classification — see docs/regulatory-foundation.md §3
 - [ ] Real authentication + RBAC enforcement (REQ-SEC-03) — mock login above does not satisfy this

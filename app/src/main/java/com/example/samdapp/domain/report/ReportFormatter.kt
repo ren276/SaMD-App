@@ -115,9 +115,9 @@ class ReportFormatter @Inject constructor() {
                     (prescription?.diagnosis?.let { " Working diagnosis: $it." } ?: "")
             severityTriggered ->
                 "High-severity ailment reported (severity $maxAilmentSeverity/10)." +
-                    (prescription?.diagnosis?.let { " Diagnosis: $it." } ?: " Chief complaint: $consultationChiefComplaint.")
+                    (prescription?.diagnosis?.let { " Diagnosis: $it." } ?: " Main concern: $consultationChiefComplaint.")
             prescription?.diagnosis != null -> "Referred following diagnosis: ${prescription.diagnosis}."
-            else -> "Referred following chief complaint: $consultationChiefComplaint."
+            else -> "Referred following main concern: $consultationChiefComplaint."
         }
 
         return ClinicalReport(

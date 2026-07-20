@@ -17,7 +17,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
+import com.example.samdapp.presentation.common.SamdLoadingIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -79,7 +79,7 @@ fun ReportScreen(
         topBar = { TopAppBar(title = { Text("Preliminary report") }) },
     ) { padding ->
         when {
-            uiState.isLoading -> CircularProgressIndicator(modifier = Modifier.padding(padding).padding(32.dp))
+            uiState.isLoading -> SamdLoadingIndicator(modifier = Modifier.padding(padding).padding(32.dp))
             uiState.report == null ->
                 Text(
                     uiState.errorMessage ?: "Could not build report",
@@ -157,7 +157,7 @@ private fun ReportContent(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         if (pageBitmaps.isEmpty()) {
-            CircularProgressIndicator(modifier = Modifier.padding(32.dp))
+            SamdLoadingIndicator(modifier = Modifier.padding(32.dp))
         }
         pageBitmaps.forEach { pageBitmap ->
             Image(
@@ -223,3 +223,4 @@ private fun ReferralSheet(uiState: ReportUiState, actions: ReportReferralActions
         }
     }
 }
+
