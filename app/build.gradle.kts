@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.kotlin.ksp)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.hilt.android)
+    alias(libs.plugins.cyclonedx.bom)
 }
 
 android {
@@ -92,4 +93,16 @@ dependencies {
     androidTestImplementation(libs.androidx.room.testing)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
+}
+
+// SBOM generation (SaMD off-the-shelf/third-party component validation — see
+// docs/regulatory-foundation.md and docs/sbom/README.md). Run: ./gradlew :app:cyclonedxBom
+tasks.named("cyclonedxBom", org.cyclonedx.gradle.CycloneDxTask::class) {
+    setProjectType("application")
+    setSchemaVersion("1.6")
+    setDestination(project.file("../docs/sbom"))
+    setOutputName("sbom-latest")
+    setOutputFormat("json")
+    setIncludeConfigs(listOf("releaseRuntimeClasspath"))
+    setSkipConfigs(listOf("releaseUnitTestRuntimeClasspath", "releaseAndroidTestRuntimeClasspath"))
 }

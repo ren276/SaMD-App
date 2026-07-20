@@ -119,6 +119,11 @@ exist **before** production code is written; they cannot be retrofitted late wit
    other) — small now, painful after data exists.
 8. **Backend + sync + localisation** — none exist yet; see `docs/sync-design.md` for the
    deferred design.
+9. ~~**Off-the-shelf/third-party (SOUP) component validation + SBOM.**~~ Closed — see
+   `docs/sbom/README.md`. A CycloneDX SBOM is generated from the resolved Gradle dependency
+   graph (`./gradlew :app:cyclonedxBom`) and committed under `docs/sbom/`. **Stays closed only
+   if a new dated SBOM is actually generated and committed at every tagged release** — check
+   this convention is followed, don't assume it from a past commit.
 
 **Verdict:** the architecture is a correct and healthy foundation, and the early hardening
 choices map cleanly onto real regulatory requirements. The main risk is *process lag* — the
