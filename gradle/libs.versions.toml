@@ -22,6 +22,7 @@ androidxSqlite = "2.6.2"
 androidxDatastore = "1.2.1"
 androidxBiometric = "1.1.0"
 androidxFragment = "1.8.5"
+cyclonedxGradle = "2.3.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -65,3 +66,4 @@ kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "ko
 kotlin-ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 hilt-android = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
+cyclonedx-bom = { id = "org.cyclonedx.bom", version.ref = "cyclonedxGradle" }
