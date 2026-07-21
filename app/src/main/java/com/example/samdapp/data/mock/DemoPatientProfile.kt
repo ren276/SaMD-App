@@ -45,15 +45,16 @@ object DemoPatientProfile {
     // ── Compounder / Vitals (Step 4) ─────────────────────────────────────────
 
     // Vitals consistent with moderate respiratory infection in a 34-year-old woman
-    const val PULSE_BPM = "98"
-    const val BP_SYSTOLIC = "118"
-    const val BP_DIASTOLIC = "76"
-    const val SPO2_PERCENT = "96"
-    const val TEMPERATURE_CELSIUS = "38.6"
-    const val RESPIRATORY_RATE = "22"
-    const val WEIGHT_KG = "54.5"
-    const val HEIGHT_CM = "158"
-    const val PAIN_SCORE = "5"
+    const val PULSE_BPM = "77"
+    const val BP_SYSTOLIC = "142"
+    const val BP_DIASTOLIC = "82"
+    const val SPO2_PERCENT = "99"
+    const val TEMPERATURE_CELSIUS = "37.0"
+    const val RESPIRATORY_RATE = "12"
+    const val WEIGHT_KG = "82.2"
+    const val HEIGHT_CM = "161.0"
+    const val PAIN_SCORE = "6"
+    const val BLOOD_GLUCOSE = "110"
 
     // ── Ailment entry ─────────────────────────────────────────────────────────
 

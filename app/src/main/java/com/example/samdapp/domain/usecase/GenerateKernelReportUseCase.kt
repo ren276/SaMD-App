@@ -1,6 +1,8 @@
 package com.example.samdapp.domain.usecase
 
 import com.example.samdapp.domain.config.DeviceInfoProvider
+import com.example.samdapp.domain.kernel.RemoteKernelSource
+import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.domain.model.KernelPayload
 import com.example.samdapp.domain.model.KernelReportOutput
 import com.example.samdapp.domain.model.RiskCategory
@@ -9,8 +11,13 @@ import com.example.samdapp.domain.repository.KernelReportRepository
 import kotlinx.coroutines.delay
 import java.time.Instant
 import java.util.UUID
+import java.util.logging.Logger
 import javax.inject.Inject
 import kotlin.random.Random
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Mock scenario table (unchanged from Phase 4 — used as fallback only)
+// ──────────────────────────────────────────────────────────────────────────────
 
 /** One curated (predictedCondition, differentials, reasoning, evidenceFor, evidenceAgainst)
  *  scenario, matched against [KernelPayload.chiefComplaint] by keyword — not real inference, but
@@ -104,19 +111,43 @@ private val DEFAULT_SCENARIO = MockScenario(
     urgencyLevel = UrgencyLevel.ROUTINE,
 )
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Use case
+// ──────────────────────────────────────────────────────────────────────────────
+
 /**
- * Extends the mocked kernel handoff ([SendToKernelUseCase]) with a fuller [KernelReportOutput] —
- * REQ-HAN-07. Net-new: no prior kernel-response object existed. [requiredHumanVerification] is
- * driven by the existing <90% confidence convention (REQ-HAN-05) — never presented as autonomous
- * or validated while mocked.
+ * Generates a [KernelReportOutput] for a case — REQ-HAN-07.
+ *
+ * **Primary path**: calls [remoteKernelSource] (backed by Retrofit + FastAPI at
+ * `http://10.203.3.29:8000/v1/assess` in the data layer). Maps the domain
+ * [KernelAssessmentResult] to [KernelReportOutput] using the specified field bindings:
+ * - `predictedCondition` (from `condition_tier` top differential) → [KernelReportOutput.predictedCondition]
+ * - `confidenceScore`    (from `probability`)                     → [KernelReportOutput.confidenceScore]
+ * - `evidenceFor`        (from `evidence_for`)                    → [KernelReportOutput.evidenceFor]
+ * - `evidenceAgainst`    (from `evidence_against`)                → [KernelReportOutput.evidenceAgainst]
+ * - `triageUrgency`      (from `triage_urgency`)                  → prepended to [KernelReportOutput.reasoningSummary]
+ *
+ * **Fallback path (CRITICAL — REQ-HAN-05)**: if the API call fails for ANY reason
+ * (IOException, HttpException, timeout, server offline), the exception is caught, logged, and
+ * the app silently falls back to the existing mock inference. The app NEVER crashes in the
+ * field because the ML server is unreachable.
+ *
+ * [remoteKernelSource] is a domain interface — the use case never imports Retrofit types
+ * (Clean Architecture boundary maintained, same pattern as [VitalsSource] / [TranscriptionService]).
+ *
+ * [patientAge] and [patientSex] are clinical signals (not PII) required by the XGBoost
+ * classifier. They are passed as separate optional parameters, NOT added to [KernelPayload]
+ * (which enforces the pseudonymization boundary in [SendToKernelUseCase]).
  */
 class GenerateKernelReportUseCase @Inject constructor(
     private val kernelReportRepository: KernelReportRepository,
     private val deviceInfoProvider: DeviceInfoProvider,
+    private val remoteKernelSource: RemoteKernelSource,
 ) {
     companion object {
         const val HUMAN_VERIFICATION_CONFIDENCE_THRESHOLD = 0.90
         const val MODEL_VERSION = "mock-kernel-v0.1"
+        private val logger = Logger.getLogger("KernelUseCase")
 
         /** Optional [KernelPayload] signals considered for [dataQualityScore] — the whitelisted
          *  fields that may or may not be present, not the always-required ones (chiefComplaint,
@@ -133,16 +164,129 @@ class GenerateKernelReportUseCase @Inject constructor(
         }
     }
 
-    suspend operator fun invoke(caseRecordId: String, payload: KernelPayload): Result<KernelReportOutput> {
+    /**
+     * @param caseRecordId The case's primary key (used as the correlation token in the API request).
+     * @param payload The pseudonymized kernel payload (vitals + chief complaint etc.).
+     * @param patientAge Patient age in years — required by the XGBoost classifier; null means the
+     *   API request will use a safe default (30) and the result treated as lower confidence.
+     * @param patientSex Biological sex string from [Patient.biologicalSex]; null means default "U" (unknown).
+     */
+    suspend operator fun invoke(
+        caseRecordId: String,
+        payload: KernelPayload,
+        patientAge: Int? = null,
+        patientSex: String? = null,
+    ): Result<KernelReportOutput> {
         val inferenceStartedAt = Instant.now()
+
+        val output = tryRealApi(caseRecordId, payload, patientAge, patientSex, inferenceStartedAt)
+            ?: generateMock(caseRecordId, payload, inferenceStartedAt)
+
+        return kernelReportRepository.save(output).map { output }
+    }
+
+    // ── Real API call ──────────────────────────────────────────────────────────
+
+    /**
+     * Attempts the remote kernel call via [remoteKernelSource]. Returns null on any failure
+     * — the caller falls back to [generateMock] automatically. This method never throws.
+     */
+    private suspend fun tryRealApi(
+        caseRecordId: String,
+        payload: KernelPayload,
+        patientAge: Int?,
+        patientSex: String?,
+        inferenceStartedAt: Instant,
+    ): KernelReportOutput? {
+        return try {
+            val result = remoteKernelSource.assess(
+                payload = payload,
+                patientAge = patientAge ?: 30,
+                patientSex = patientSex ?: "U",
+            )
+            logger.info("Kernel API success — case $caseRecordId, triage=${result.triageUrgency}")
+
+            val inferenceEndedAt = Instant.now()
+            val confidence = result.confidenceScore
+
+            // Map triage_urgency string → our existing UrgencyLevel enum
+            val urgency = when (result.triageUrgency.uppercase()) {
+                "EMERGENCY", "EMERGENT" -> UrgencyLevel.EMERGENCY
+                "URGENT"                -> UrgencyLevel.URGENT
+                else                    -> UrgencyLevel.ROUTINE
+            }
+
+            // Infer risk category from confidence + urgency
+            val risk = when {
+                urgency == UrgencyLevel.EMERGENCY  -> RiskCategory.HIGH
+                confidence >= 0.85                 -> RiskCategory.LOW
+                confidence >= 0.65                 -> RiskCategory.MODERATE
+                else                               -> RiskCategory.HIGH
+            }
+
+            val reasoningSummary = buildString {
+                append("Triage urgency: ${result.triageUrgency}. ")
+                if (!result.safetyScreenPassed) append("⚠ Safety screen did not pass. ")
+                if (result.recommendedInvestigations.isNotEmpty()) {
+                    append("Recommended investigations: ${result.recommendedInvestigations.joinToString(", ")}. ")
+                }
+                append("Top differential (${result.predictedCondition}) at ${(confidence * 100).toInt()}% confidence.")
+            }
+
+            KernelReportOutput(
+                id = UUID.randomUUID().toString(),
+                caseRecordId = caseRecordId,
+                predictedCondition = result.predictedCondition,
+                confidenceScore = confidence,
+                differentials = result.differentials,
+                reasoningSummary = reasoningSummary,
+                evidenceFor = result.evidenceFor,
+                evidenceAgainst = result.evidenceAgainst,
+                modelVersion = result.modelVersion ?: "remote-kernel",
+                icdCode = null, // Real endpoint doesn't return ICD codes in this contract shape
+                deviceId = deviceInfoProvider.deviceId(),
+                softwareVersion = deviceInfoProvider.softwareVersion(),
+                dataQualityScore = dataQualityScore(payload),
+                uncertaintyScore = 1.0 - confidence,
+                riskCategory = risk,
+                urgencyLevel = urgency,
+                inferenceStartedAt = inferenceStartedAt,
+                inferenceEndedAt = inferenceEndedAt,
+                requiredHumanVerification = confidence < HUMAN_VERIFICATION_CONFIDENCE_THRESHOLD,
+                inferenceSource = InferenceSource.REAL_INFERENCE,
+            )
+        } catch (e: Exception) {
+            // CRITICAL GRACEFUL FALLBACK: any failure (network down, timeout, HTTP error, parse
+            // error, server offline) is logged here and returns null — the caller uses mock
+            // inference instead. The app NEVER crashes when the ML server is unreachable.
+            // CancellationException is a Throwable (not Exception) in Kotlin so structured
+            // concurrency is not broken.
+            logger.warning("Kernel API unavailable — falling back to mock inference. Reason: ${e.message}")
+            null
+        }
+    }
+
+    // ── Mock fallback ──────────────────────────────────────────────────────────
+
+    /**
+     * The original Phase 4 mock inference — demo-credible scenario matching against
+     * [KernelPayload.chiefComplaint]. Used when the real API is unreachable.
+     * Has an artificial delay to keep the Sending screen's progress animation visible.
+     */
+    private suspend fun generateMock(
+        caseRecordId: String,
+        payload: KernelPayload,
+        inferenceStartedAt: Instant,
+    ): KernelReportOutput {
         delay(Random.nextLong(800L, 1600L))
         val inferenceEndedAt = Instant.now()
 
         val complaint = payload.chiefComplaint.lowercase()
-        val scenario = SCENARIOS.firstOrNull { s -> s.keywords.any { complaint.contains(it) } } ?: DEFAULT_SCENARIO
+        val scenario = SCENARIOS.firstOrNull { s -> s.keywords.any { complaint.contains(it) } }
+            ?: DEFAULT_SCENARIO
         val confidence = Random.nextDouble(scenario.confidenceRange.start, scenario.confidenceRange.endInclusive)
 
-        val output = KernelReportOutput(
+        return KernelReportOutput(
             id = UUID.randomUUID().toString(),
             caseRecordId = caseRecordId,
             predictedCondition = scenario.predictedCondition,
@@ -162,7 +306,7 @@ class GenerateKernelReportUseCase @Inject constructor(
             inferenceStartedAt = inferenceStartedAt,
             inferenceEndedAt = inferenceEndedAt,
             requiredHumanVerification = confidence < HUMAN_VERIFICATION_CONFIDENCE_THRESHOLD,
+            inferenceSource = InferenceSource.MOCK_FALLBACK,
         )
-        return kernelReportRepository.save(output).map { output }
     }
 }

@@ -81,6 +81,7 @@ class KernelAssessmentViewModel @AssistedInject constructor(
                 payload = auditPayload(
                     "predictedCondition" to _uiState.value.output?.predictedCondition,
                     "requiredHumanVerification" to _uiState.value.output?.requiredHumanVerification?.toString(),
+                    "inferenceSource" to _uiState.value.output?.inferenceSource?.name,
                 ),
             )
             _effects.send(KernelAssessmentEffect.Continue)

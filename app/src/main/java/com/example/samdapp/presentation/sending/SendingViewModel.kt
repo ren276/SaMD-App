@@ -2,11 +2,14 @@ package com.example.samdapp.presentation.sending
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.samdapp.domain.audit.AuditAction
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.model.VitalsReading
 import com.example.samdapp.domain.model.toVitalsReading
 import com.example.samdapp.domain.repository.ConsultationRepository
+import com.example.samdapp.domain.repository.EncounterRepository
+import com.example.samdapp.domain.repository.PatientRepository
 import com.example.samdapp.domain.repository.VitalsRepository
 import com.example.samdapp.domain.usecase.GenerateKernelReportUseCase
 import com.example.samdapp.domain.usecase.SendToKernelUseCase
@@ -32,6 +35,8 @@ class SendingViewModel @AssistedInject constructor(
     @Assisted("encounterId") private val encounterId: String,
     private val vitalsRepository: VitalsRepository,
     private val consultationRepository: ConsultationRepository,
+    private val encounterRepository: EncounterRepository,
+    private val patientRepository: PatientRepository,
     private val sendToKernelUseCase: SendToKernelUseCase,
     private val generateKernelReportUseCase: GenerateKernelReportUseCase,
     private val auditLogger: AuditLogger,
@@ -58,17 +63,35 @@ class SendingViewModel @AssistedInject constructor(
                 ?: VitalsReading()
             val consultation = consultationRepository.observeForEncounter(encounterId).filterNotNull().first()
 
+            // Resolve age + sex for the XGBoost classifier — these are clinical signals, not PII.
+            // The encounter → patient lookup is a one-hop read; null is safe (the use case
+            // uses safe defaults when age/sex are unavailable).
+            val encounter = encounterRepository.observeEncounter(encounterId).first()
+            val patient = encounter?.patientId?.let { patientRepository.observePatient(it).first() }
+            val patientAge = patient?.age
+            val patientSex = patient?.biologicalSex
+
             val payload = sendToKernelUseCase(vitals = vitals, consultation = consultation, caseToken = caseRecordId)
                 .getOrNull()
 
-            if (payload != null) {
-                generateKernelReportUseCase(caseRecordId, payload)
+            val kernelResult = if (payload != null) {
+                generateKernelReportUseCase(
+                    caseRecordId = caseRecordId,
+                    payload = payload,
+                    patientAge = patientAge,
+                    patientSex = patientSex,
+                )
+            } else {
+                null
             }
 
             auditLogger.log(
-                action = "kernel_response_received",
+                action = AuditAction.KERNEL_RESPONSE_RECEIVED,
                 caseRecordId = caseRecordId,
-                payload = auditPayload("consultationId" to consultationId),
+                payload = auditPayload(
+                    "consultationId" to consultationId,
+                    "inferenceSource" to kernelResult?.getOrNull()?.inferenceSource?.name,
+                ),
             )
             _effects.send(SendingEffect.Done(caseRecordId, consultationId, audioUri))
         }

@@ -9,6 +9,7 @@ import com.example.samdapp.domain.model.MedicalHistoryCategory
 import com.example.samdapp.domain.model.MedicationKind
 import com.example.samdapp.domain.model.ObservationSource
 import com.example.samdapp.domain.model.ObservationType
+import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.domain.model.KernelDecision
 import com.example.samdapp.domain.model.ReferralStatus
 import com.example.samdapp.domain.model.RiskCategory
@@ -72,6 +73,9 @@ class Converters {
     @TypeConverter fun kernelDecisionToString(value: KernelDecision?): String? = value?.name
     @TypeConverter fun stringToKernelDecision(value: String?): KernelDecision? =
         value?.let { runCatching { KernelDecision.valueOf(it) }.getOrNull() }
+
+    @TypeConverter fun inferenceSourceToString(value: InferenceSource): String = value.name
+    @TypeConverter fun stringToInferenceSource(value: String): InferenceSource = InferenceSource.valueOf(value)
 
     @TypeConverter fun stringListToJson(value: List<String>): String =
         Json.encodeToString(ListSerializer(String.serializer()), value)

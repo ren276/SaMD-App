@@ -52,7 +52,8 @@
 | REQ-RPT-01 | `domain/report/ReportFormatter`, `domain/usecase/AssembleReportUseCase`, `domain/report/ClinicalReport` | — | Manual (nav flow reviewed) | ✓ ReportFormatterTest |
 | REQ-RPT-02 | `presentation/report/ReportCanvasRenderer` (Canvas), `ReportPdfExporter` (PdfDocument), `ReportScreen` (drawIntoCanvas), `Code128`, `ReportImageLoading.kt` (logo + attachment decode) | — | Manual (renderer is on-device only — see note) | ✓ Code128Test (barcode), ReportFormatterTest (attachment mapping); renderer TODO (needs Robolectric/instrumented) |
 | REQ-RPT-03 | `docs/requirements/report-field-mapping.md` | — | Doc reviewed against renderer | n/a |
-| REQ-HAN-07 | `domain/usecase/GenerateKernelReportUseCase`, `presentation/kernelassessment/KernelAssessmentScreen`+VM, `SendingViewModel`, `KernelReportRepository` | H-02,H-09 | Manual (nav flow reviewed) | ✓ GenerateKernelReportUseCaseTest |
+| REQ-HAN-07 | `domain/usecase/GenerateKernelReportUseCase`, `domain/kernel/RemoteKernelSource`, `data/remote/RetrofitKernelSource`+`api/KernelApiService`+`dto/*`, `di/NetworkModule`, `presentation/kernelassessment/KernelAssessmentScreen`+VM, `SendingViewModel`, `KernelReportRepository` | H-02,H-09 | Manual (nav flow reviewed) | ✓ GenerateKernelReportUseCaseTest |
+| REQ-HAN-08 | `domain/model/InferenceSource`, `domain/model/KernelReportOutput`, `domain/usecase/GenerateKernelReportUseCase`, `data/local/entity/KernelReportEntity`, `data/local/Converters`, `data/local/Migrations` (MIGRATION_7_8), `data/repository/KernelReportRepositoryImpl`, `presentation/kernelassessment/KernelAssessmentScreen`, `presentation/report/ReportCanvasRenderer`, `presentation/sending/SendingViewModel`, `domain/audit/AuditLogger` | H-02,H-09 | Manual (nav flow reviewed) | ✓ GenerateKernelReportUseCaseTest, MigrationTest (instrumented, migration7To8) |
 | REQ-RX-01 | `domain/doctor/DoctorPrescriptionInbox`+`MockDoctorPrescriptionInbox`, `ReceiveDoctorPrescriptionUseCase`, `PatientSummaryScreen` follow-up UI | — | Manual (nav flow reviewed) | ✓ ReceiveDoctorPrescriptionUseCaseTest, MockDoctorPrescriptionInboxTest |
 | REQ-RX-02 | `MedicationLine` KDoc + `ReportFormatter.formatMedicationLine` (throws on banned token) | — | Documented + enforced at report boundary | ✓ ReportFormatterTest (banned-abbrev) |
 | REQ-RX-03 | `domain/model/KernelDecision`, `Prescription.kernelDecision`, `MIGRATION_4_5`, rendered in `ReportCanvasRenderer.rxBlock` | — | Manual (nav flow reviewed) | ✓ MockDoctorPrescriptionInboxTest (decision distribution) |
@@ -69,7 +70,8 @@
 - **Automated coverage (blocker #4, first pass):** a JVM unit suite now covers registration
   validation, audit payload/logger, sync mock, Home roster/sync, the kernel-payload boundary, and
   the mock-login audit wiring (see the ✓ rows), plus a permanent instrumented DAO test for the
-  day-scoped roster query. **36 tests, 0 failures.** GitHub Actions
+  day-scoped roster query. **130 tests, 0 failures** (grew from the initial 36 across every
+  subsequent phase — see `PROGRESS.md` for the per-pass counts). GitHub Actions
   (`.github/workflows/android-ci.yml`) runs the unit suite + assembleDebug on every push/PR
   (unit-only tests; instrumented tests run locally for now). This first pass also caught a real
   regression — the cache-scoping interface change had silently broken a pre-existing use-case

@@ -23,6 +23,7 @@ private class FakeRegisterActions : RegisterActions {
     override fun onSubmit() {
         submitted = true
     }
+    override fun fillDemoData() = Unit
 }
 
 class RegisterScreenTest {

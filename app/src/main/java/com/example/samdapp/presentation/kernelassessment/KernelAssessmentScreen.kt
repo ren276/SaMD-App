@@ -33,6 +33,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
+import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.domain.model.KernelReportOutput
 
 @Composable
@@ -79,6 +80,16 @@ internal fun KernelAssessmentContent(uiState: KernelAssessmentUiState, actions: 
         ) {
             ConfidenceGauge(output)
             ExplainabilityCard(output)
+            if (output.inferenceSource == InferenceSource.MOCK_FALLBACK) {
+                Card(colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)) {
+                    Text(
+                        "This assessment used the offline fallback (mock kernel) — the live AI server was unavailable.",
+                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(12.dp),
+                    )
+                }
+            }
             if (output.requiredHumanVerification) {
                 Card(colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
                     Text(

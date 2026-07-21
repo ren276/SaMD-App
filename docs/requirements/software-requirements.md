@@ -227,17 +227,36 @@ Conventions: `REQ-<AREA>-NN`. Status: **DONE** (implemented + manually verified)
   differentials, reasoningSummary, evidenceFor/Against, modelVersion, inferenceTimestamp,
   requiredHumanVerification) via `GenerateKernelReportUseCase`, called from `SendingViewModel` right
   after `SendToKernelUseCase`, persisted through `KernelReportRepository` (net-new object — no prior
-  `AiKernelResponse` existed). Mock data is keyword-matched against `KernelPayload.chiefComplaint`
-  against a small curated scenario table (fever/respiratory/GI/headache + a lower-confidence
-  default) rather than pure random text, for demo credibility — still explicitly a mock, not real
-  inference. `requiredHumanVerification` = `confidenceScore < 0.90` (existing convention).
+  `AiKernelResponse` existed). `requiredHumanVerification` = `confidenceScore < 0.90` (existing
+  convention).
+  **Primary path (2026-07-21):** real HTTP call to a local FastAPI + XGBoost kernel via
+  `RemoteKernelSource`/`RetrofitKernelSource` (`data/remote/`) — `POST /v1/assess`, base URL
+  `http://10.203.3.29:8000/` (LAN IP of the host machine, for physical-device testing; requires
+  `android:usesCleartextTraffic="true"`, plain HTTP not TLS — acceptable for this local dev/demo
+  server, not production). **Fallback path:** any failure (IOException/HttpException/timeout/server
+  offline) is caught in `GenerateKernelReportUseCase.tryRealApi` and falls back to the original
+  Phase 4 mock — keyword-matched against `KernelPayload.chiefComplaint` against a small curated
+  scenario table (fever/respiratory/GI/headache + a lower-confidence default), still explicitly a
+  mock. The app never crashes when the ML server is unreachable.
   **AI Assessment Panel** (`presentation/kernelassessment`) — confidence gauge, explainability
   (reasoning + evidence for/against), and a liability checkbox gating Continue — shown between
-  Sending and Transcription/Acknowledgement. This is net-new UI (memory of a pre-existing panel
-  was stale; nothing matching it existed in code before this phase). Extends the existing
-  pseudonymization posture (REQ-HAN-05/06); still MOCK, never presented as validated. The same
-  `KernelReportOutput` feeds `ClinicalReport.kernelOutput` (Phase 3's report object) automatically
-  once persisted — no second document.
+  Sending and Transcription/Acknowledgement. Extends the existing pseudonymization posture
+  (REQ-HAN-05/06) — real-path request body carries only pseudonymized clinical signals (age/sex/
+  vitals/BMI), no identity fields; never presented as fully validated regardless of path taken. The
+  same `KernelReportOutput` feeds `ClinicalReport.kernelOutput` (Phase 3's report object)
+  automatically once persisted — no second document. See REQ-HAN-08 for the per-record
+  traceability marker of which path (real vs. mock) produced a given result.
+- **REQ-HAN-08** (DONE) Every persisted `KernelReportOutput` records a non-nullable
+  `inferenceSource: InferenceSource` (`REAL_INFERENCE` | `MOCK_FALLBACK`), stamped once in
+  `GenerateKernelReportUseCase` at the same real-vs-mock branch point as REQ-HAN-07. Previously
+  this distinction existed only as a Logcat line (`GenerateKernelReportUseCase.tryRealApi`'s
+  `logger.warning(...)`) — unqueryable, absent in production. Surfaced in the AI Assessment
+  Panel (`presentation/kernelassessment/KernelAssessmentScreen`) as a distinct fallback notice,
+  independent of the confidence-driven verification warning, and in the exported report
+  (`presentation/report/ReportCanvasRenderer.kernelBlock`) as an "Inference source" line, plus
+  carried into the `kernel_response_received`/`kernel_assessment_acknowledged` audit log payloads.
+  Strengthens the existing residual-risk control for H-09 ("gate real kernel behind validation +
+  version field") — not a new hazard (risk H-02, H-09).
 
 ### Prescription (RX — Phase 5)
 > **Scope correction (2026-07):** the doctor's own review/prescription-authoring UI is built and

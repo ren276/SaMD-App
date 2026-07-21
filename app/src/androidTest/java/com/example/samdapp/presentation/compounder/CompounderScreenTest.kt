@@ -51,6 +51,7 @@ private class FakeCompounderActions : CompounderActions {
     override fun onContinue() {
         continued = true
     }
+    override fun fillDemoData() = Unit
 }
 
 class CompounderScreenTest {

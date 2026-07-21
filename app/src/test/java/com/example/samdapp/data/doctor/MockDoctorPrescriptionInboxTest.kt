@@ -2,6 +2,7 @@ package com.example.samdapp.data.doctor
 
 import com.example.samdapp.domain.model.CaseRecord
 import com.example.samdapp.domain.model.CaseStatus
+import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.domain.model.KernelReportOutput
 import com.example.samdapp.domain.model.RiskCategory
 import com.example.samdapp.domain.model.UrgencyLevel
@@ -29,6 +30,7 @@ class MockDoctorPrescriptionInboxTest {
         softwareVersion = "test-version", dataQualityScore = 0.8, uncertaintyScore = 0.15,
         riskCategory = RiskCategory.MODERATE, urgencyLevel = UrgencyLevel.ROUTINE,
         inferenceStartedAt = Instant.EPOCH, inferenceEndedAt = Instant.EPOCH, requiredHumanVerification = true,
+        inferenceSource = InferenceSource.MOCK_FALLBACK,
     )
 
     @Test

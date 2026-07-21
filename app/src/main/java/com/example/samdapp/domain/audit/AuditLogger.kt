@@ -24,6 +24,7 @@ object AuditAction {
     const val REFERRAL_CREATED = "referral_created"
     const val REFERRAL_STATUS_CHANGED = "referral_status_changed"
     const val KERNEL_ASSESSMENT_ACKNOWLEDGED = "kernel_assessment_acknowledged"
+    const val KERNEL_RESPONSE_RECEIVED = "kernel_response_received"
 
     /** Crash-recovery resume: the worker was dropped back into an already-`DRAFT` case rather than
      *  [com.example.samdapp.domain.usecase.StartCaseUseCase] minting a new encounter/case record —

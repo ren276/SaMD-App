@@ -842,6 +842,55 @@ explicit `caseRecordId`); the actual gap was the missing "abandon a stale draft"
       row updated to "Main concern" with a note that the DB field name is unchanged.
       `docs/quality/design-history-file.md` — new Change log section with both entries.
 
+## Real kernel API integration (2026-07-21)
+
+`GenerateKernelReportUseCase` now calls a real local FastAPI + XGBoost kernel as its primary
+path, with the Phase 4 mock as an automatic fallback — not a replacement of the mock, an addition
+in front of it.
+
+- [x] **`domain/kernel/RemoteKernelSource`** — new domain interface (`assess(payload, patientAge,
+      patientSex) → KernelAssessmentResult`), same "named mock/real boundary" pattern as
+      `VitalsSource`/`TranscriptionService`. `KernelAssessmentResult` is a plain domain model —
+      `GenerateKernelReportUseCase` never imports Retrofit types.
+- [x] **`data/remote/`** — `RetrofitKernelSource` (impl), `api/KernelApiService` (`POST /v1/assess`),
+      `dto/KernelAssessmentRequestDto`+`KernelAssessmentResponseDto`+`DifferentialDto`+
+      `ModelMetadataDto` (Gson `@SerializedName`, snake_case wire format). Request carries only
+      pseudonymized clinical signals (case token, age, sex, vitals, computed BMI) — no identity
+      fields, same posture as `KernelPayload`. BMI is computed from `vitals.weightKg`/`heightCm`
+      when present, else defaults to 22.0 (normal); other missing vitals default to clinically
+      unremarkable values (BP 120/80, HR 72, glucose 100, SpO2 98) rather than nulls, since the
+      classifier requires all fields.
+- [x] **`di/NetworkModule`** — Retrofit + OkHttp + Gson stack, base URL
+      `http://10.203.3.29:8000/` (LAN IP of the host machine running the FastAPI server, for
+      physical-device testing over Wi-Fi — not the emulator loopback). Conservative timeouts
+      (connect 10s, read/write 30s) so real inference has time to complete while failures still
+      surface quickly enough for the fallback to kick in. `AndroidManifest.xml` gained
+      `INTERNET` permission + `usesCleartextTraffic="true"` (plain HTTP, acceptable for this local
+      dev/demo server — production would need HTTPS).
+- [x] **`GenerateKernelReportUseCase.tryRealApi`** — wraps the real call, catches any exception
+      (IOException/HttpException/timeout/server offline/parse error), logs, returns null on
+      failure. The `invoke()` entry point tries the real API first, falls back to the unchanged
+      Phase 4 mock scenario table (`generateMock`) on any failure — the app never crashes when the
+      ML server is unreachable. `triage_urgency` string maps to the existing `UrgencyLevel` enum;
+      `riskCategory` derived from urgency + confidence (no separate risk field on the real
+      response contract).
+- [x] `invoke()` gained optional `patientAge`/`patientSex` params (both nullable, default to 30/"U"
+      when absent) — required by the classifier but not part of `KernelPayload` (keeps
+      `SendToKernelUseCase`'s pseudonymization boundary intact). `SendingViewModel` now fetches the
+      patient record to pass these through.
+- [x] `libs.versions.toml`/`app/build.gradle.kts` gained Retrofit 2.11.0 + OkHttp logging
+      interceptor 4.12.0.
+- [x] Docs updated: `docs/requirements/software-requirements.md` REQ-HAN-07 (primary/fallback
+      path description), `docs/requirements/traceability-matrix.md` REQ-HAN-07 row (new files),
+      `agent_docs/hardening.md` (AI Assessment Panel note + `ai_kernel_version` gap flag).
+- **Known gap (flagged, not fabricated):** no per-record marker of whether a given
+  `KernelReportOutput` came from the real API or the mock fallback — "mocked" is no longer
+  all-or-nothing per case, but nothing on the persisted record or the report distinguishes the two
+  paths. Relevant if/when `ai_kernel_version` (see `agent_docs/hardening.md`) gets built.
+- [ ] Not yet verified against a real running FastAPI server this pass (no server available) — the
+      fallback path is what's actually been exercised. On-device/emulator test against a live
+      kernel server at `10.203.3.29:8000` is the next verification step.
+
 ## Not started
 - [ ] Demo-theater additions from agent_docs/hardening.md — complete, pending final review of the
       hardening doc to ensure no secondary "security-theatre" items remain (e.g. security-shield

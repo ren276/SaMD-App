@@ -30,7 +30,7 @@ private fun String.toPatientFacingDescription(): String = when (this) {
     "audio_captured" -> "An audio note was recorded for your consultation"
     "attachment_added" -> "A photo or file was attached to your record"
     "consultation_saved" -> "PHC worker saved your consultation details"
-    "kernel_response_received" -> "Kernel AI processed your data"
+    AuditAction.KERNEL_RESPONSE_RECEIVED -> "Kernel AI processed your data"
     AuditAction.KERNEL_ASSESSMENT_ACKNOWLEDGED -> "PHC worker reviewed the AI assistant's suggestion"
     "transcription_completed" -> "Your audio note was transcribed"
     "consultation_locked" -> "Your consultation was finalized and saved"
