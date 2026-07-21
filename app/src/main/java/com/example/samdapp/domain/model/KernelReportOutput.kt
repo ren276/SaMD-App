@@ -39,4 +39,8 @@ data class KernelReportOutput(
     val inferenceStartedAt: Instant,
     val inferenceEndedAt: Instant,
     val requiredHumanVerification: Boolean,
+    /** Which path produced this record — REQ-HAN-08 (audit-traceability addendum). Stamped once
+     *  in [com.example.samdapp.domain.usecase.GenerateKernelReportUseCase] at the real-vs-mock
+     *  branch point; never inferred after the fact. */
+    val inferenceSource: InferenceSource,
 )

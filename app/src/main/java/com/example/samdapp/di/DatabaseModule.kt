@@ -11,6 +11,7 @@ import com.example.samdapp.data.local.MIGRATION_3_4
 import com.example.samdapp.data.local.MIGRATION_4_5
 import com.example.samdapp.data.local.MIGRATION_5_6
 import com.example.samdapp.data.local.MIGRATION_6_7
+import com.example.samdapp.data.local.MIGRATION_7_8
 import com.example.samdapp.data.local.security.DatabasePassphraseProvider
 import com.example.samdapp.data.local.dao.AbhaProfileDao
 import com.example.samdapp.data.local.dao.AilmentDao
@@ -73,7 +74,7 @@ object DatabaseModule {
         val factory = SupportOpenHelperFactory(passphrase)
         return Room.databaseBuilder(context, AppDatabase::class.java, AppDatabase.DATABASE_NAME)
             .openHelperFactory(factory)
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
             .addCallback(seedDoctorsOnCreate)
             .build()
     }

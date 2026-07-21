@@ -63,7 +63,7 @@ import com.example.samdapp.data.local.entity.SocialHistoryEntity
         ReferralEntity::class,
         DoctorEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)

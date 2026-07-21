@@ -172,3 +172,16 @@ val MIGRATION_6_7 = object : Migration(6, 7) {
         connection.execSQL(insertPrefix + "('doc-oph-001', 'Dr. Vikram Singh', 'Ophthalmology', 1, 'District Hospital, Sitapur', 'NMC/UP/2011/46009')")
     }
 }
+
+/**
+ * Inference-source traceability (REQ-HAN-08): every persisted `kernel_reports` row now records
+ * whether it came from the real kernel or the mock fallback — previously only a Logcat line,
+ * unqueryable and lost in production. Existing rows predate real inference entirely (it wasn't
+ * wired until REQ-HAN-07's 2026-07-21 update), so the conservative backfill for historical rows
+ * is `MOCK_FALLBACK`, not a guess at `REAL_INFERENCE`.
+ */
+val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL("ALTER TABLE `kernel_reports` ADD COLUMN `inferenceSource` TEXT NOT NULL DEFAULT 'MOCK_FALLBACK'")
+    }
+}

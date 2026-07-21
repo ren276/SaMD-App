@@ -39,6 +39,7 @@ private fun KernelReportOutput.toEntity() = KernelReportEntity(
     inferenceStartedAt = inferenceStartedAt,
     inferenceEndedAt = inferenceEndedAt,
     requiredHumanVerification = requiredHumanVerification,
+    inferenceSource = inferenceSource,
 )
 
 private fun KernelReportEntity.toDomain() = KernelReportOutput(
@@ -61,4 +62,5 @@ private fun KernelReportEntity.toDomain() = KernelReportOutput(
     inferenceStartedAt = inferenceStartedAt,
     inferenceEndedAt = inferenceEndedAt,
     requiredHumanVerification = requiredHumanVerification,
+    inferenceSource = inferenceSource,
 )

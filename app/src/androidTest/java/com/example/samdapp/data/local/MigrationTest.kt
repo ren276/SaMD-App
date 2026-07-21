@@ -10,7 +10,8 @@ import org.junit.Test
  * database and validates the result against Room's exported schema JSON (`app/schemas/`) — the
  * same DDL-identity guarantee PROGRESS.md already relies on for earlier migrations, now actually
  * exercised on-device instead of only checked by eye. Covers [MIGRATION_5_6] (kernel_reports
- * report-capture addendum) and [MIGRATION_6_7] (encounters.followUpOfEncounterId + doctors table).
+ * report-capture addendum), [MIGRATION_6_7] (encounters.followUpOfEncounterId + doctors table),
+ * and [MIGRATION_7_8] (kernel_reports.inferenceSource traceability, REQ-HAN-08).
  */
 class MigrationTest {
 
@@ -23,12 +24,12 @@ class MigrationTest {
     )
 
     @Test
-    fun migrateAllTheWayFrom1To7() {
+    fun migrateAllTheWayFrom1To8() {
         helper.createDatabase(testDbName, 1).close()
 
         helper.runMigrationsAndValidate(
             testDbName,
-            7,
+            8,
             true,
             MIGRATION_1_2,
             MIGRATION_2_3,
@@ -36,6 +37,7 @@ class MigrationTest {
             MIGRATION_4_5,
             MIGRATION_5_6,
             MIGRATION_6_7,
+            MIGRATION_7_8,
         )
     }
 
@@ -79,5 +81,29 @@ class MigrationTest {
         migrated.close()
 
         assert(doctorCount == 9) { "expected 9 seeded doctors, got $doctorCount" }
+    }
+
+    @Test
+    fun migration7To8_backfillsInferenceSourceAsMockFallback() {
+        helper.createDatabase(testDbName, 7).apply {
+            execSQL(
+                "INSERT INTO kernel_reports (id, caseRecordId, predictedCondition, confidenceScore, " +
+                    "differentials, reasoningSummary, evidenceFor, evidenceAgainst, modelVersion, " +
+                    "deviceId, softwareVersion, riskCategory, urgencyLevel, inferenceStartedAt, " +
+                    "inferenceEndedAt, requiredHumanVerification) VALUES ('k1', 'case-1', 'Viral fever', " +
+                    "0.8, '[]', 'reasoning', '[]', '[]', 'mock-kernel-v0.1', 'dev', 'v1', 'MODERATE', " +
+                    "'ROUTINE', 1000, 2000, 1)",
+            )
+            close()
+        }
+
+        val migrated = helper.runMigrationsAndValidate(testDbName, 8, true, MIGRATION_7_8)
+        val cursor = migrated.query("SELECT inferenceSource FROM kernel_reports WHERE id = 'k1'")
+        cursor.moveToFirst()
+        val inferenceSource = cursor.getString(cursor.getColumnIndexOrThrow("inferenceSource"))
+        cursor.close()
+        migrated.close()
+
+        assert(inferenceSource == "MOCK_FALLBACK") { "expected backfilled inferenceSource=MOCK_FALLBACK, got $inferenceSource" }
     }
 }

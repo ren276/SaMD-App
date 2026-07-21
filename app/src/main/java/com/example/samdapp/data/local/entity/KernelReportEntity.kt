@@ -3,6 +3,7 @@ package com.example.samdapp.data.local.entity
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.domain.model.RiskCategory
 import com.example.samdapp.domain.model.UrgencyLevel
 import java.time.Instant
@@ -10,7 +11,7 @@ import java.time.Instant
 /** [differentials]/[evidenceFor]/[evidenceAgainst] persist as JSON string lists (Converters).
  *  [icdCode]/[dataQualityScore]/[uncertaintyScore] are the only genuinely-nullable additions
  *  from the report-capture schema addendum — [deviceId]/[softwareVersion]/[riskCategory]/
- *  [urgencyLevel]/[inferenceStartedAt] are always populated by the mock kernel use case. */
+ *  [urgencyLevel]/[inferenceStartedAt]/[inferenceSource] are always populated by the use case. */
 @Entity(tableName = "kernel_reports", indices = [Index("caseRecordId")])
 data class KernelReportEntity(
     @PrimaryKey val id: String,
@@ -32,4 +33,5 @@ data class KernelReportEntity(
     val inferenceStartedAt: Instant,
     val inferenceEndedAt: Instant,
     val requiredHumanVerification: Boolean,
+    val inferenceSource: InferenceSource,
 )

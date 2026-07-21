@@ -8,6 +8,7 @@ import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Typeface
 import com.example.samdapp.domain.model.AttachmentType
+import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.domain.model.MeasurementType
 import com.example.samdapp.domain.report.ClinicalReport
 import com.example.samdapp.domain.report.ReportAttachmentEntry
@@ -333,6 +334,12 @@ class ReportCanvasRenderer(
         val paras = buildList {
             // Risk/urgency near the top, most visible — Part A addendum.
             add("Risk: ${k.riskCategory}   Urgency: ${k.urgencyLevel}")
+            add(
+                when (k.inferenceSource) {
+                    InferenceSource.REAL_INFERENCE -> "Inference source: Real-time AI inference"
+                    InferenceSource.MOCK_FALLBACK -> "Inference source: Offline fallback (mock) — ML server unavailable"
+                },
+            )
             add(
                 "Predicted: ${k.predictedCondition}${k.icdCode?.let { " (ICD-10: $it)" } ?: ""}  " +
                     "(confidence ${(k.confidenceScore * 100).toInt()}%)",
