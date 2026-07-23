@@ -8,7 +8,7 @@ import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Typeface
 import com.example.samdapp.domain.model.AttachmentType
-import com.example.samdapp.domain.model.InferenceSource
+import com.example.samdapp.domain.model.EvaluateReportOutput
 import com.example.samdapp.domain.model.MeasurementType
 import com.example.samdapp.domain.report.ClinicalReport
 import com.example.samdapp.domain.report.ReportAttachmentEntry
@@ -58,6 +58,8 @@ class ReportCanvasRenderer(
     private val sectionPaint = paint(9.5f, bold = true)
     private val labelPaint = paint(7f, bold = true, color = Color.DKGRAY)
     private val bodyPaint = paint(8f)
+    private val boldBodyPaint = paint(8f, bold = true)
+    private val urgentPaint = paint(8f, bold = true, color = Color.RED)
     private val quotePaint = paint(8.5f, italic = true)
     private val smallPaint = paint(6.5f, color = Color.DKGRAY)
     private val rxPaint = paint(12f, bold = true)
@@ -149,15 +151,15 @@ class ReportCanvasRenderer(
             add(sectionHeaderBlock("Vitals"))
             add(vitalsBlock(report))
         }
+        report.evaluateOutput?.let {
+            add(gap(4f))
+            add(sectionHeaderBlock("AI Clinical Evaluation"))
+            add(evaluateBlock(it))
+        }
         if (report.attachments.isNotEmpty()) {
             add(gap(4f))
             add(sectionHeaderBlock("Attachments"))
             addAll(attachmentBlocks(report))
-        }
-        report.kernelOutput?.let {
-            add(gap(4f))
-            add(sectionHeaderBlock("Kernel AI Assessment (model ${it.modelVersion})"))
-            add(kernelBlock(report))
         }
         if (report.prescription.isNotEmpty() || report.diagnosis != null) {
             add(gap(6f))
@@ -328,31 +330,67 @@ class ReportCanvasRenderer(
         }
     }
 
-    private fun kernelBlock(report: ClinicalReport): Block {
-        val k = report.kernelOutput!!
-        val inferenceMillis = java.time.Duration.between(k.inferenceStartedAt, k.inferenceEndedAt).toMillis()
-        val paras = buildList {
-            // Risk/urgency near the top, most visible — Part A addendum.
-            add("Risk: ${k.riskCategory}   Urgency: ${k.urgencyLevel}")
+    /**
+     * `/api/v1/evaluate` real-inference output — vitals triage first (so the reviewing physician
+     * sees the graded urgency signal before the diagnosis), then the top diagnostic candidate only
+     * (not the full differential list — that's a physician-review detail, not a prescription one),
+     * then the recommended treatment (drug name, dosage, AI-suggested India brand from
+     * [com.example.samdapp.domain.kernel.BrandLookupSource]), ending on overall urgency. Inference
+     * time is a single small line at the very bottom, for reference only.
+     *
+     * Diagnosis/drug/brand and any urgent/human-review/pediatric-referral flags are bolded (red for
+     * the flags) — the findings a physician's eye needs to land on first, not buried in body text.
+     */
+    private fun evaluateBlock(output: EvaluateReportOutput): Block {
+        val triage = output.safetyAndTriage.vitalsTriage
+        val summary = output.diagnosticSummary
+        val treatment = output.nlemTreatment
+        val safety = output.safetyAndTriage
+        val inferenceMillis = java.time.Duration.between(output.inferenceStartedAt, output.inferenceEndedAt).toMillis()
+        val isUrgent = triage?.overallUrgency?.equals("urgent-review", ignoreCase = true) == true
+
+        val lines = buildList {
+            if (triage != null) {
+                add(
+                    "Vitals triage — BP: ${triage.bpGrade} · Pulse: ${triage.pulse} · SpO2: ${triage.spo2} · " +
+                        "Temp: ${triage.temperature} · Resp: ${triage.respiratoryRate} · BMI: ${triage.bmi}" +
+                        (triage.glucose?.let { " · Glucose: $it" } ?: "") to bodyPaint,
+                )
+            }
             add(
-                when (k.inferenceSource) {
-                    InferenceSource.REAL_INFERENCE -> "Inference source: Real-time AI inference"
-                    InferenceSource.MOCK_FALLBACK -> "Inference source: Offline fallback (mock) — ML server unavailable"
-                },
+                "Diagnosis (AI): " + listOfNotNull(
+                    summary.primaryAilmentName,
+                    summary.primaryIcdCandidate?.let { "ICD-10: $it" },
+                ).joinToString(" · ").ifBlank { "No primary candidate" } to boldBodyPaint,
             )
             add(
-                "Predicted: ${k.predictedCondition}${k.icdCode?.let { " (ICD-10: $it)" } ?: ""}  " +
-                    "(confidence ${(k.confidenceScore * 100).toInt()}%)",
+                buildString {
+                    append("Recommended treatment: ")
+                    append(treatment.recommendedDrug ?: "No drug recommendation")
+                    if (treatment.dosageForms.isNotEmpty()) append(" (${treatment.dosageForms.joinToString(", ")})")
+                } to boldBodyPaint,
             )
-            add("Inference time: ${inferenceMillis} ms")
-            if (k.differentials.isNotEmpty()) add("Differentials: ${k.differentials.joinToString(", ")}")
-            add("Reasoning: ${k.reasoningSummary}")
-            if (k.requiredHumanVerification) add("⚠ Requires physician verification before any diagnosis is final.")
+            add("Brand (India, AI-suggested): ${output.topIndianBrand?.displayName ?: "Not available"}" to boldBodyPaint)
+            if (safety.requiresHumanReview) {
+                add("⚠ Requires physician verification before any diagnosis is final." to urgentPaint)
+            }
+            if (safety.pediatricReferralFlag) {
+                add("⚠ Pediatric referral required." to urgentPaint)
+            }
+            triage?.overallUrgency?.let {
+                add("Vitals rule-check urgency: $it" to if (isUrgent) urgentPaint else boldBodyPaint)
+            }
+            add("Inference time: $inferenceMillis ms" to smallPaint)
         }
-        val wrapped = paras.flatMap { wrap(it, bodyPaint, CONTENT_WIDTH) }
-        return Block(wrapped.size * lineHeight(bodyPaint) + 4f) { c, top ->
-            var ty = top + bodyPaint.textSize
-            wrapped.forEach { c.drawText(it, MARGIN, ty, bodyPaint); ty += lineHeight(bodyPaint) }
+
+        val wrapped = lines.flatMap { (text, paint) -> wrap(text, paint, CONTENT_WIDTH).map { it to paint } }
+        val height = wrapped.fold(4f) { acc, (_, paint) -> acc + lineHeight(paint) }
+        return Block(height) { c, top ->
+            var ty = top
+            wrapped.forEach { (text, paint) ->
+                c.drawText(text, MARGIN, ty + paint.textSize, paint)
+                ty += lineHeight(paint)
+            }
         }
     }
 

@@ -11,8 +11,10 @@ import com.example.samdapp.domain.repository.ConsultationRepository
 import com.example.samdapp.domain.repository.EncounterRepository
 import com.example.samdapp.domain.repository.PatientRepository
 import com.example.samdapp.domain.repository.VitalsRepository
+import com.example.samdapp.domain.usecase.GenerateEvaluateReportUseCase
 import com.example.samdapp.domain.usecase.GenerateKernelReportUseCase
 import com.example.samdapp.domain.usecase.SendToKernelUseCase
+import com.google.gson.Gson
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
@@ -39,6 +41,7 @@ class SendingViewModel @AssistedInject constructor(
     private val patientRepository: PatientRepository,
     private val sendToKernelUseCase: SendToKernelUseCase,
     private val generateKernelReportUseCase: GenerateKernelReportUseCase,
+    private val generateEvaluateReportUseCase: GenerateEvaluateReportUseCase,
     private val auditLogger: AuditLogger,
 ) : ViewModel() {
 
@@ -54,6 +57,7 @@ class SendingViewModel @AssistedInject constructor(
 
     private val _effects = Channel<SendingEffect>(Channel.BUFFERED)
     val effects = _effects.receiveAsFlow()
+    private val gson = Gson()
 
     init {
         viewModelScope.launch {
@@ -83,6 +87,39 @@ class SendingViewModel @AssistedInject constructor(
                 )
             } else {
                 null
+            }
+
+            // Fire alongside the /v1/assess call above — a distinct clinical concern (NLEM
+            // treatment/brand-mapping/vitals-triage), no mock fallback, failure just means the
+            // report screen omits that section (see GenerateEvaluateReportUseCase KDoc).
+            val evaluateResult = if (payload != null) {
+                generateEvaluateReportUseCase(
+                    caseRecordId = caseRecordId,
+                    payload = payload,
+                    patientAge = patientAge,
+                    patientSex = patientSex,
+                )
+            } else {
+                null
+            }
+
+            // Full raw backend response dump (inference start/end, diagnostic summary, treatment,
+            // safety/triage) into the audit trail — distinct from the curated subset the report/
+            // prescription page actually renders (see AuditAction.EVALUATE_RESPONSE_RECEIVED KDoc).
+            evaluateResult?.onSuccess { output ->
+                auditLogger.log(
+                    action = AuditAction.EVALUATE_RESPONSE_RECEIVED,
+                    patientId = patient?.id,
+                    caseRecordId = caseRecordId,
+                    payload = gson.toJson(output),
+                )
+            }?.onFailure { e ->
+                auditLogger.log(
+                    action = AuditAction.EVALUATE_RESPONSE_FAILED,
+                    patientId = patient?.id,
+                    caseRecordId = caseRecordId,
+                    payload = auditPayload("error" to e.message),
+                )
             }
 
             auditLogger.log(

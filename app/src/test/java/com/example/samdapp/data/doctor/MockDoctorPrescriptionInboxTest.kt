@@ -7,6 +7,7 @@ import com.example.samdapp.domain.model.KernelReportOutput
 import com.example.samdapp.domain.model.RiskCategory
 import com.example.samdapp.domain.model.UrgencyLevel
 import com.example.samdapp.testutil.FakeCaseRecordRepository
+import com.example.samdapp.testutil.FakeEvaluateReportRepository
 import com.example.samdapp.testutil.FakeKernelReportRepository
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -36,14 +37,14 @@ class MockDoctorPrescriptionInboxTest {
     @Test
     fun `no doctor assigned yet returns null, not a fabricated response`() = runTest {
         val caseRepo = FakeCaseRecordRepository(listOf(caseRecord(assignedDoctorId = null)))
-        val inbox = MockDoctorPrescriptionInbox(caseRepo, FakeKernelReportRepository())
+        val inbox = MockDoctorPrescriptionInbox(caseRepo, FakeKernelReportRepository(), FakeEvaluateReportRepository())
 
         assertNull(inbox.fetchPrescription("case-1").getOrThrow())
     }
 
     @Test
     fun `unknown case record returns null rather than throwing`() = runTest {
-        val inbox = MockDoctorPrescriptionInbox(FakeCaseRecordRepository(), FakeKernelReportRepository())
+        val inbox = MockDoctorPrescriptionInbox(FakeCaseRecordRepository(), FakeKernelReportRepository(), FakeEvaluateReportRepository())
 
         assertNull(inbox.fetchPrescription("no-such-case").getOrThrow())
     }
@@ -52,7 +53,7 @@ class MockDoctorPrescriptionInboxTest {
     fun `an assigned doctor with a kernel output produces a real prescription with a medication line`() = runTest {
         val caseRepo = FakeCaseRecordRepository(listOf(caseRecord()))
         val kernelRepo = FakeKernelReportRepository().apply { saved["case-1"] = kernelOutput() }
-        val inbox = MockDoctorPrescriptionInbox(caseRepo, kernelRepo)
+        val inbox = MockDoctorPrescriptionInbox(caseRepo, kernelRepo, FakeEvaluateReportRepository())
 
         val incoming = inbox.fetchPrescription("case-1").getOrThrow()!!
 
@@ -64,7 +65,7 @@ class MockDoctorPrescriptionInboxTest {
     @Test
     fun `no kernel output on record still produces a fallback prescription (MODIFY)`() = runTest {
         val caseRepo = FakeCaseRecordRepository(listOf(caseRecord()))
-        val inbox = MockDoctorPrescriptionInbox(caseRepo, FakeKernelReportRepository())
+        val inbox = MockDoctorPrescriptionInbox(caseRepo, FakeKernelReportRepository(), FakeEvaluateReportRepository())
 
         val incoming = inbox.fetchPrescription("case-1").getOrThrow()!!
 

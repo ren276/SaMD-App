@@ -49,11 +49,30 @@ object once Phases 4/5 populate those sections.
 | Vitals table | `VitalsSnapshot` (reassembled from `Observation` rows): pulse/BP/SpO₂/temp/RR/weight/height/BMI/glucose/pain/urinalysis |
 | "Attachments" section — photo/affected-area photo thumbnails | `Consultation.attachments` (`AttachmentType.IMAGE`/`AFFECTED_AREA_PHOTO`) → `ReportAttachmentEntry`, decoded via `decodeAttachmentBitmap()`; unmodified pass-through, same posture as `KernelPayload.attachments` |
 | "Attachments" section — audio/video lines | `Consultation.attachments` (`AttachmentType.AUDIO`/`VIDEO`) → labeled text line (no playback on a static page) |
-| Kernel AI Assessment (final report) | `KernelReportOutput.predictedCondition/confidenceScore/differentials/reasoningSummary/requiredHumanVerification/modelVersion` |
 | "Rx / Advice" marker | Fixed label (rendered only when a prescription/diagnosis exists) |
 | Diagnosis | `Prescription.diagnosis` |
-| "Doctor's review of AI assessment: …" | `Prescription.kernelDecision` (`KernelDecision.AGREE/MODIFY/REJECT`) — arrives via the mock doctor intake, REQ-RX-03 |
+| "Doctor's review of AI assessment: …" | `Prescription.kernelDecision` (`KernelDecision.AGREE/MODIFY/REJECT`) — set by `SubmitDoctorDecisionUseCase` from the reviewer's real in-app pick, REQ-RX-03 (2026-07: no longer a mock intake) |
 | Numbered medication lines | `MedicationLine` → `[genericName] ([brandName]) - [strength] \| [route] \| [frequency] \| [duration] \| [quantity]` |
+
+## 3a. AI Clinical Evaluation block (`/api/v1/evaluate`, REQ-EVL-03 — 2026-07)
+
+> Renders only when `ClinicalReport.evaluateOutput` is non-null (the `/api/v1/evaluate` call
+> succeeded for this case — no mock fallback exists for this leg, see REQ-HAN-08/EVL-01). Supersedes
+> the removed "Kernel AI Assessment" block (old `/v1/assess`-sourced `KernelReportOutput` display) —
+> that field/model still exists and still feeds the AI Assessment Panel's fallback path, but is no
+> longer drawn on the printed report/prescription. Section header: "AI Clinical Evaluation".
+> Rendered by `ReportCanvasRenderer.evaluateBlock`, in this fixed order:
+
+| Rendered element | Source |
+|---|---|
+| Vitals triage line (BP/pulse/SpO₂/temp/resp/BMI[/glucose] grades) | `EvaluateReportOutput.safetyAndTriage.vitalsTriage` (`EvaluateVitalsTriage`) — omitted if null |
+| Diagnosis (AI) — top candidate only, bold | `EvaluateReportOutput.diagnosticSummary.primaryAilmentName` + `.primaryIcdCandidate` (NOT the full differential list — that's a physician-review-screen detail, not a prescription one) |
+| Recommended treatment — drug + dosage forms, bold | `EvaluateReportOutput.nlemTreatment.recommendedDrug` + `.dosageForms` |
+| Brand (India, AI-suggested), bold | `EvaluateReportOutput.topIndianBrand.displayName` (`IndianBrandSuggestion.brandName`/`.companyName`, via Gemini, REQ-EVL-02) — "Not available" if null |
+| "⚠ Requires physician verification…" (bold red, conditional) | `EvaluateReportOutput.safetyAndTriage.requiresHumanReview` |
+| "⚠ Pediatric referral required." (bold red, conditional) | `EvaluateReportOutput.safetyAndTriage.pediatricReferralFlag` |
+| "Vitals rule-check urgency: …" (bold; bold red if `urgent-review`) | `EvaluateReportOutput.safetyAndTriage.vitalsTriage.overallUrgency` — deterministic vitals-threshold bucketing, independent of ML classifier's `triage_urgency` (see reasoning summary) |
+| Inference time (small line, bottom, reference only) | `Duration.between(EvaluateReportOutput.inferenceStartedAt, .inferenceEndedAt)` |
 
 ## 4. Legal footer & consent segment
 

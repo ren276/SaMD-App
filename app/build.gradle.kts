@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -5,6 +7,18 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.hilt.android)
     alias(libs.plugins.cyclonedx.bom)
+}
+
+// Secrets read from local.properties (git-ignored, never committed) — currently just the Gemini
+// API key used for the AI-suggested India-brand lookup on the prescription.
+//
+// Read via providers.fileContents (not File.inputStream()) so the configuration cache tracks
+// local.properties as an input — otherwise editing the key alone doesn't invalidate a cached
+// configuration and BuildConfig.GEMINI_API_KEY silently keeps the stale (often blank) value.
+val localProperties = Properties().apply {
+    providers.fileContents(rootProject.layout.projectDirectory.file("local.properties"))
+        .asText.orNull
+        ?.let { load(it.reader()) }
 }
 
 android {
@@ -21,6 +35,8 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "GEMINI_API_KEY", "\"${localProperties.getProperty("GEMINI_API_KEY", "")}\"")
     }
 
     buildTypes {

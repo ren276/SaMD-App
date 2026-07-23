@@ -16,8 +16,13 @@
 **PHC Patient Care** — an Android app for rural Indian Primary Health Centres. A frontline
 worker (ASHA/nurse/compounder) registers a patient, records medical background and vitals,
 captures a consultation (text/voice/attachments), the case is assessed by a clinical
-"kernel" (currently mocked), and is handed off to a doctor. The app is **offline-first** for
-field devices with intermittent connectivity.
+"kernel" — **real HTTP inference against a local FastAPI + XGBoost backend as of 2026-07**
+(`/v1/assess` with a mock fallback on failure, plus `/api/v1/evaluate` for NLEM treatment
+recommendation with no mock fallback) — and is handed off to a doctor (also real/interactive as of
+2026-07, not mocked — see `docs/requirements/software-requirements.md` REQ-RX/EVL/RFN). The app is
+**offline-first** for field devices with intermittent connectivity. **Still not a validated medical
+device**: the backend model itself has no clinical validation, dataset governance, or version-gating
+yet — "real HTTP call" is not the same as "clinically validated," see §3 gap #5 below.
 
 This is intended to become a **Software as a Medical Device (SaMD)** and go to production.
 The current repository is a **hardened mockup / architectural foundation** — the real app is
@@ -61,9 +66,13 @@ software provides and (2) the severity of the healthcare situation. Class C/D ge
 Authority review; A/B go through State Licensing Authorities, with Class A non-measuring/non-sterile
 software exempt from full licensing (self-registration via **SUGAM**). **Classification argument
 for this product:** a human-in-the-loop clinical decision-support tool — the doctor reviews and can
-**Agree / Modify / Reject** the AI output (Phase 5), never autonomous — plausibly targets **Class B
-or C rather than D**, precisely because of the mandatory physician-verification step. The liability
-checkbox and "Doctor Validation" flow are doing real classification work, not just UX; worth stating
+**Agree / Modify / Reject** the AI output, never autonomous — plausibly targets **Class B or C
+rather than D**, precisely because of the mandatory physician-verification step. **2026-07: this is
+now a real interactive decision** (`SubmitDoctorDecisionUseCase`, `PatientSummaryScreen`), not a
+Phase-5-mocked placeholder — the reviewer sees the AI's confidence/differential/reasoning and picks
+AGREE/MODIFY/REJECT for real, which makes the classification argument stronger, not weaker: the
+control it leans on now actually exists in the demo, not just in the requirements doc. The liability
+checkbox and doctor-review flow are doing real classification work, not just UX; worth stating
 explicitly in investor conversations and in the report's legal footer.
 
 ### 2.3a EU MDR — Rule 11 (for CE-marking / export framing)
@@ -109,9 +118,13 @@ exist **before** production code is written; they cannot be retrofitted late wit
 3. **Requirements + traceability** (requirement → design → code → test) — not yet present.
 4. **Verification/test coverage** is currently near-zero (only throwaway checks). IEC 62304
    B/C require unit + integration + system testing with records. CI must run them.
-5. **The clinical kernel** (AI/ML decision component) will need its own validation, dataset
-   governance, and **versioning** (the deferred `ai_kernel_version` field) — and may attract
-   additional AI/ML-SaMD regulatory treatment. Keep it mocked and clearly bounded until then.
+5. **The clinical kernel** (AI/ML decision component) is now real HTTP inference (2026-07, both
+   `/v1/assess` and `/api/v1/evaluate`, plus a Gemini API call for brand lookup) but still has none
+   of its own validation, dataset governance, or **versioning** (the deferred `ai_kernel_version`
+   field) — and may attract additional AI/ML-SaMD regulatory treatment. "Real inference" must not be
+   mistaken for "validated" in any investor-facing or regulatory conversation; keep the report's
+   "AI-Assisted, Physician-Verified" framing and the mandatory doctor-review step (REQ-RX/RFN)
+   front and center until formal validation exists.
 6. **Real authentication + RBAC** — today `userId` is a placeholder (`phc_field_worker`). Audit
    accountability and access control depend on real identity.
 7. **Data-model deviation:** `spec.md` says `Patient.id` is a 10–12 char alphanumeric UID, but
@@ -134,7 +147,8 @@ represented as a validated medical device.
 
 | Area | Now (mockup) | Production |
 |------|--------------|-----------|
-| Kernel / clinical assessment | Mocked behind use case | Validated, versioned AI/ML SaMD component |
+| Kernel / clinical assessment | Real HTTP inference (2026-07) behind a mockable interface — no clinical validation/versioning yet | Validated, versioned AI/ML SaMD component |
+| Brand-name lookup | Real Gemini API call, best-effort, never blocks the pipeline | Same, or an India-hosted/on-device alternative if Gemini's data-processing terms don't clear production review |
 | Vitals device | `MockVitalsSource` (random) | Real device integration behind same interface |
 | Transcription | Real (Android `SpeechRecognizer`) | Same, possibly server ASR |
 | Sync | `MockSyncStatus` (UI only, no transport) | WorkManager + backend, see `docs/sync-design.md` |
@@ -163,8 +177,10 @@ represented as a validated medical device.
   `agent_docs/hardening.md` (local-only working notes), then this file + `docs/sync-design.md`.
 - **Stack & conventions:** Kotlin + Compose (M3), MVVM + Clean Architecture, Hilt, Room 2 +
   SQLCipher, Coroutines/Flow. Versions pinned in `libs.versions.toml`. No real network/AWS yet.
-- **Keep mocked, do not build real yet:** the kernel, `VitalsSource`, sync transport, backend,
-  auth. Build them only when their phase arrives.
+- **Keep mocked, do not build real yet:** `VitalsSource`, sync transport, backend, auth. **The
+  kernel is no longer mocked** (2026-07: real HTTP inference, `/v1/assess` + `/api/v1/evaluate` +
+  Gemini brand lookup) — it still has no clinical validation, which is a different gap than "not
+  built." Build the remaining mocked items only when their phase arrives.
 - **Working conventions honoured in this repo's history:** one focused commit per unit of work;
   verify changes on a real emulator (not just compile); flag deprecated deps and spec gaps
   rather than silently proceeding; never sweep the user's unrelated uncommitted edits into a

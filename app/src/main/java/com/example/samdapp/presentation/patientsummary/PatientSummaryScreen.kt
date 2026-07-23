@@ -18,8 +18,10 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import com.example.samdapp.presentation.common.SamdLoadingIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -39,6 +41,9 @@ import com.example.samdapp.domain.model.CaseStatus
 import com.example.samdapp.domain.model.ConsultationChain
 import com.example.samdapp.domain.model.ConsultationHistoryEntry
 import com.example.samdapp.domain.model.Patient
+import com.example.samdapp.domain.model.PhysicianDecision
+import com.example.samdapp.domain.model.TRAINED_ICD_CANDIDATES
+import com.example.samdapp.presentation.common.DropdownField
 import com.example.samdapp.presentation.common.LowResourceWarningDialog
 import com.example.samdapp.presentation.common.deviceResourceWarnings
 import com.example.samdapp.presentation.common.historyLabel
@@ -175,33 +180,28 @@ fun PatientSummaryScreen(
                 }
             }
 
-            // Doctor's own review happens on a separate channel (out of scope here) — this is
-            // where the worker checks whether that channel has produced a response yet.
+            // Doctor's review — for this demo, the reviewer decides AGREE/MODIFY/REJECT right here
+            // (mirrors refine_diagnosis.py's DiagnosisFeedback schema) instead of a randomly-mocked
+            // async channel response.
             if (uiState.caseStatus == CaseStatus.SENT_TO_DOCTOR || uiState.caseStatus == CaseStatus.PRESCRIPTION_RECEIVED) {
-                Column(modifier = Modifier.padding(top = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(modifier = Modifier.fillMaxWidth().padding(top = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         text = if (uiState.caseStatus == CaseStatus.PRESCRIPTION_RECEIVED) {
-                            "Doctor's response received"
+                            "Doctor's review received"
                         } else {
-                            "Awaiting doctor's response"
+                            "Awaiting doctor's review"
                         },
                         style = MaterialTheme.typography.titleSmall,
                     )
                     if (uiState.caseStatus == CaseStatus.SENT_TO_DOCTOR) {
-                        OutlinedButton(
-                            onClick = viewModel::onCheckForDoctorResponse,
-                            enabled = uiState.canCheckForDoctorResponse,
-                            modifier = Modifier.padding(top = 8.dp),
-                        ) {
-                            Text(if (uiState.isCheckingForResponse) "Checking…" else "Check for doctor's response (mock)")
-                        }
-                        if (uiState.noResponseYet) {
-                            Text(
-                                "No response yet — check again later.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 4.dp),
-                            )
+                        if (uiState.showDoctorReviewPicker) {
+                            DoctorReviewCard(uiState, viewModel)
+                        } else {
+                            OutlinedButton(
+                                onClick = viewModel::onOpenDoctorReviewPicker,
+                                enabled = uiState.canOpenDoctorReview,
+                                modifier = Modifier.padding(top = 8.dp),
+                            ) { Text("Review AI diagnosis (doctor)") }
                         }
                     }
                 }
@@ -225,6 +225,110 @@ fun PatientSummaryScreen(
                 onOpenChain = { rootEncounterId -> onOpenChain(patientId, rootEncounterId) },
             )
         }
+    }
+}
+
+/**
+ * Investor-demo capture point for `refine_diagnosis.py`'s `DiagnosisFeedback` schema — the
+ * doctor-sided AGREE/MODIFY/REJECT decision on the AI kernel's diagnosis, right where the worker
+ * checks for the doctor's review. AGREE prescribes exactly what the kernel recommended (drug,
+ * dosage, the Gemini-suggested top India brand); MODIFY/REJECT let the reviewer write their own
+ * drug/dosage/brand (with a one-tap brand lookup) before generating the report.
+ */
+@Composable
+private fun DoctorReviewCard(uiState: PatientSummaryUiState, actions: PatientSummaryActions) {
+    Card(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Physician Review", style = MaterialTheme.typography.titleMedium)
+            uiState.evaluateOutput?.diagnosticSummary?.primaryAilmentName?.let {
+                Text("AI diagnosis: $it", style = MaterialTheme.typography.bodyMedium)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                PhysicianDecision.entries.forEach { decision ->
+                    FilterChip(
+                        selected = uiState.selectedDecision == decision,
+                        onClick = { actions.onDecisionSelected(decision) },
+                        label = { Text(decision.name) },
+                    )
+                }
+            }
+            when (uiState.selectedDecision) {
+                PhysicianDecision.AGREE -> {
+                    val treatment = uiState.evaluateOutput?.nlemTreatment
+                    Text(
+                        "Will prescribe: ${treatment?.recommendedDrug ?: "No drug recommendation"}" +
+                            (treatment?.dosageForms?.takeIf { it.isNotEmpty() }?.let { " (${it.joinToString(", ")})" } ?: "") +
+                            (uiState.evaluateOutput?.topIndianBrand?.let { " — brand: ${it.displayName}" } ?: ""),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                PhysicianDecision.MODIFY -> {
+                    // Corrected-diagnosis picker + clinical note are entirely independent of the
+                    // prescription fields below — these feed DiagnosisFeedback (the future
+                    // training-reimport record), the prescription fields feed MedicationLine.
+                    DropdownField(
+                        label = "Corrected diagnosis (must be one of the trained classes)",
+                        value = TRAINED_ICD_CANDIDATES.firstOrNull { it.icdCode == uiState.correctedIcdCandidate }?.label.orEmpty(),
+                        options = TRAINED_ICD_CANDIDATES.map { it.label },
+                        onValueChange = { label ->
+                            TRAINED_ICD_CANDIDATES.firstOrNull { it.label == label }
+                                ?.let { actions.onCorrectedIcdCandidateSelected(it.icdCode) }
+                        },
+                    )
+                    OutlinedTextField(
+                        value = uiState.clinicalNoteText,
+                        onValueChange = actions::onClinicalNoteChange,
+                        label = { Text("Clinical note (audit only, not used for retraining)") },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    ManualPrescriptionFields(uiState, actions)
+                }
+                PhysicianDecision.REJECT -> ManualPrescriptionFields(uiState, actions)
+                null -> Unit
+            }
+            uiState.selectedDecision?.let { decision ->
+                Text(
+                    decision.outcomeExplanation(),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            Button(
+                onClick = actions::onConfirmDoctorDecision,
+                enabled = uiState.canConfirmDecision && !uiState.isSubmittingDecision,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text(if (uiState.isSubmittingDecision) "Generating report…" else "Confirm & generate report") }
+        }
+    }
+}
+
+/** Drug/dosage/brand — the prescription (MedicationLine) fields, shared by MODIFY and REJECT.
+ *  Never feeds DiagnosisFeedback/training data — see [PatientSummaryScreen] MODIFY branch. */
+@Composable
+private fun ManualPrescriptionFields(uiState: PatientSummaryUiState, actions: PatientSummaryActions) {
+    OutlinedTextField(
+        value = uiState.manualDrugName,
+        onValueChange = actions::onManualDrugNameChange,
+        label = { Text("Drug name") },
+        modifier = Modifier.fillMaxWidth(),
+    )
+    OutlinedTextField(
+        value = uiState.manualDosage,
+        onValueChange = actions::onManualDosageChange,
+        label = { Text("Dosage") },
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(
+            value = uiState.manualBrandName,
+            onValueChange = actions::onManualBrandNameChange,
+            label = { Text("Brand name") },
+            modifier = Modifier.weight(1f),
+        )
+        OutlinedButton(
+            onClick = actions::onLookupBrand,
+            enabled = uiState.manualDrugName.isNotBlank() && !uiState.isLookingUpBrand,
+        ) { Text(if (uiState.isLookingUpBrand) "…" else "Get brand") }
     }
 }
 

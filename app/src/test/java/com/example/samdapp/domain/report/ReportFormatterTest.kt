@@ -55,7 +55,7 @@ class ReportFormatterTest {
         audience = audience, patient = patient, abhaProfile = null,
         consultationChiefComplaint = "Fever and body ache for two days", ailments = ailments,
         vitals = null, consultationAttachments = attachments, consultationRecordNo = "CR-001",
-        visitDateTime = Instant.EPOCH, kernelOutput = null, prescription = prescription,
+        visitDateTime = Instant.EPOCH, kernelOutput = null, evaluateOutput = null, prescription = prescription,
         prescribingDoctor = doctor,
     )
 

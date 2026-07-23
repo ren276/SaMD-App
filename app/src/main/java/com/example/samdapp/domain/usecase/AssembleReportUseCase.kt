@@ -9,6 +9,7 @@ import com.example.samdapp.domain.repository.CaseRecordRepository
 import com.example.samdapp.domain.repository.ConsultationRepository
 import com.example.samdapp.domain.repository.DoctorRepository
 import com.example.samdapp.domain.repository.EncounterRepository
+import com.example.samdapp.domain.repository.EvaluateReportRepository
 import com.example.samdapp.domain.repository.KernelReportRepository
 import com.example.samdapp.domain.repository.PatientRepository
 import com.example.samdapp.domain.repository.PrescriptionRepository
@@ -33,6 +34,7 @@ class AssembleReportUseCase @Inject constructor(
     private val vitalsRepository: VitalsRepository,
     private val prescriptionRepository: PrescriptionRepository,
     private val kernelReportRepository: KernelReportRepository,
+    private val evaluateReportRepository: EvaluateReportRepository,
     private val doctorRepository: DoctorRepository,
     private val reportFormatter: ReportFormatter,
 ) {
@@ -49,6 +51,7 @@ class AssembleReportUseCase @Inject constructor(
         val vitals = vitalsRepository.observeLatestForEncounter(caseRecord.encounterId).first()
         val prescription = prescriptionRepository.getForCase(caseRecordId)
         val kernelOutput = kernelReportRepository.getForCase(caseRecordId)
+        val evaluateOutput = evaluateReportRepository.getForCase(caseRecordId)
         val prescribingDoctor = prescription?.doctorId?.let { docId ->
             doctorRepository.getDoctors().getOrNull()?.firstOrNull { it.id == docId }
         }
@@ -65,6 +68,7 @@ class AssembleReportUseCase @Inject constructor(
                 consultationRecordNo = caseRecord.id,
                 visitDateTime = encounter?.startedAt ?: caseRecord.createdAt,
                 kernelOutput = kernelOutput,
+                evaluateOutput = evaluateOutput,
                 prescription = prescription,
                 prescribingDoctor = prescribingDoctor,
             ),

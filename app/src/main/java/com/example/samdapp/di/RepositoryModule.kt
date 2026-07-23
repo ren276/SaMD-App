@@ -7,6 +7,8 @@ import com.example.samdapp.data.repository.AbhaProfileRepositoryImpl
 import com.example.samdapp.data.repository.AilmentRepositoryImpl
 import com.example.samdapp.data.repository.AuditLogRepositoryImpl
 import com.example.samdapp.data.repository.CaseRecordRepositoryImpl
+import com.example.samdapp.data.repository.DiagnosisFeedbackRepositoryImpl
+import com.example.samdapp.data.repository.EvaluateReportRepositoryImpl
 import com.example.samdapp.data.repository.KernelReportRepositoryImpl
 import com.example.samdapp.data.repository.PrescriptionRepositoryImpl
 import com.example.samdapp.data.repository.ReferralRepositoryImpl
@@ -23,6 +25,8 @@ import com.example.samdapp.domain.sync.SyncStatus
 import com.example.samdapp.domain.repository.AbhaProfileRepository
 import com.example.samdapp.domain.repository.AilmentRepository
 import com.example.samdapp.domain.repository.CaseRecordRepository
+import com.example.samdapp.domain.repository.DiagnosisFeedbackRepository
+import com.example.samdapp.domain.repository.EvaluateReportRepository
 import com.example.samdapp.domain.repository.KernelReportRepository
 import com.example.samdapp.domain.repository.PrescriptionRepository
 import com.example.samdapp.domain.repository.ReferralRepository
@@ -89,4 +93,10 @@ abstract class RepositoryModule {
 
     @Binds @Singleton
     abstract fun bindReferralRepository(impl: ReferralRepositoryImpl): ReferralRepository
+
+    @Binds @Singleton
+    abstract fun bindEvaluateReportRepository(impl: EvaluateReportRepositoryImpl): EvaluateReportRepository
+
+    @Binds @Singleton
+    abstract fun bindDiagnosisFeedbackRepository(impl: DiagnosisFeedbackRepositoryImpl): DiagnosisFeedbackRepository
 }

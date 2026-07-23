@@ -40,6 +40,7 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.example.samdapp.data.mock.DemoPatientProfile
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -126,11 +127,25 @@ internal fun RegisterContent(uiState: RegisterUiState, actions: RegisterActions)
             item { StepProgressIndicator(current = 2, total = 4, label = "Registration") }
             // ── Demo shortcut — investor-demo only ──────────────────────────────────
             item {
-                OutlinedButton(
-                    onClick = actions::fillDemoData,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("👤 Fill demo patient data", style = MaterialTheme.typography.labelLarge)
+                var selectedPersona by rememberSaveable { mutableStateOf(0) }
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    DropdownField(
+                        label = "Demo patient",
+                        value = DemoPatientProfile.PERSONAS[selectedPersona].label,
+                        options = DemoPatientProfile.PERSONAS.map { it.label },
+                        onValueChange = { label ->
+                            selectedPersona = DemoPatientProfile.PERSONAS.indexOfFirst { it.label == label }
+                        },
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            DemoPatientProfile.select(selectedPersona)
+                            actions.fillDemoData()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("👤 Fill demo patient data", style = MaterialTheme.typography.labelLarge)
+                    }
                 }
             }
             item { SectionLabel("Core details") }

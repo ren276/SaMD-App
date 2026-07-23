@@ -225,7 +225,7 @@ class GenerateKernelReportUseCase @Inject constructor(
             }
 
             val reasoningSummary = buildString {
-                append("Triage urgency: ${result.triageUrgency}. ")
+                append("ML risk model triage: ${result.triageUrgency}. ")
                 if (!result.safetyScreenPassed) append("⚠ Safety screen did not pass. ")
                 if (result.recommendedInvestigations.isNotEmpty()) {
                     append("Recommended investigations: ${result.recommendedInvestigations.joinToString(", ")}. ")

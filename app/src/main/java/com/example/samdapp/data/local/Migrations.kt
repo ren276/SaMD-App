@@ -185,3 +185,47 @@ val MIGRATION_7_8 = object : Migration(7, 8) {
         connection.execSQL("ALTER TABLE `kernel_reports` ADD COLUMN `inferenceSource` TEXT NOT NULL DEFAULT 'MOCK_FALLBACK'")
     }
 }
+
+/**
+ * `/api/v1/evaluate` NLEM-treatment kernel output storage — additive-only new table, no existing
+ * data touched. `payloadJson` holds the diagnosticSummary/nlemTreatment/brandMapping/
+ * safetyAndTriage tree as one Gson blob (see [com.example.samdapp.data.repository.EvaluateReportRepositoryImpl]).
+ */
+val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL(
+            "CREATE TABLE IF NOT EXISTS `evaluate_reports` (`id` TEXT NOT NULL, `caseRecordId` TEXT NOT NULL, " +
+                "`payloadJson` TEXT NOT NULL, `inferenceStartedAt` INTEGER NOT NULL, `inferenceEndedAt` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`id`))",
+        )
+        connection.execSQL("CREATE INDEX IF NOT EXISTS `index_evaluate_reports_caseRecordId` ON `evaluate_reports` (`caseRecordId`)")
+    }
+}
+
+/**
+ * Physician AGREE/MODIFY/REJECT feedback on the AI's top diagnostic candidate — mirrors
+ * `refine_diagnosis.py`'s `DiagnosisFeedback` schema (SaMDClassifier). Captured locally only; no
+ * backend capture/reimport endpoint exists yet (see [com.example.samdapp.domain.model.DiagnosisFeedback] KDoc).
+ */
+val MIGRATION_9_10 = object : Migration(9, 10) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL(
+            "CREATE TABLE IF NOT EXISTS `diagnosis_feedback` (`id` TEXT NOT NULL, `caseRecordId` TEXT NOT NULL, " +
+                "`icdCandidate` TEXT NOT NULL, `physicianDecision` TEXT NOT NULL, `physicianFinalDiagnosis` TEXT, " +
+                "`createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        )
+        connection.execSQL("CREATE INDEX IF NOT EXISTS `index_diagnosis_feedback_caseRecordId` ON `diagnosis_feedback` (`caseRecordId`)")
+    }
+}
+
+/**
+ * Adds `diagnosis_feedback.clinicalNote` — a free-text note captured for clinical/audit purposes
+ * only, deliberately separate from `physicianFinalDiagnosis` (which must stay one of the 18
+ * trained ICD classes or null — see [com.example.samdapp.domain.model.DiagnosisFeedback] KDoc).
+ * Never fed into any training-dataset reimport.
+ */
+val MIGRATION_10_11 = object : Migration(10, 11) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL("ALTER TABLE `diagnosis_feedback` ADD COLUMN `clinicalNote` TEXT")
+    }
+}

@@ -1,6 +1,7 @@
 package com.example.samdapp.domain.report
 
 import com.example.samdapp.domain.model.AttachmentType
+import com.example.samdapp.domain.model.EvaluateReportOutput
 import com.example.samdapp.domain.model.KernelDecision
 import com.example.samdapp.domain.model.KernelReportOutput
 import com.example.samdapp.domain.model.MeasurementType
@@ -90,6 +91,9 @@ data class ClinicalReport(
     val ailments: List<ReportAilmentLine>,
     val vitals: List<ReportVitalLine>,
     val kernelOutput: KernelReportOutput?,
+    /** Real-inference NLEM treatment/brand-mapping/vitals-triage output from `/api/v1/evaluate` —
+     *  null when that call hasn't run yet or failed (no mock fallback for this endpoint). */
+    val evaluateOutput: EvaluateReportOutput?,
     val attachments: List<ReportAttachmentEntry>,
     val diagnosis: String?,
     /** Doctor's Agree/Modify/Reject on the kernel differential — reported back via the out-of-app

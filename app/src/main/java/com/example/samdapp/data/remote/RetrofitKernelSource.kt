@@ -41,7 +41,9 @@ class RetrofitKernelSource @Inject constructor(
         val request = KernelAssessmentRequestDto(
             caseToken = payload.caseToken,
             age = patientAge,
-            sex = patientSex,
+            // Same normalization as RetrofitEvaluateSource — the backend checks `sex.upper() == "M"`
+            // exactly, and Patient.biologicalSex is a full word ("Male"/"Female"), not a letter.
+            sex = patientSex.take(1).uppercase(),
             systolicBp = vitals.bpSystolic?.toDouble() ?: 120.0,
             diastolicBp = vitals.bpDiastolic?.toDouble() ?: 80.0,
             bmi = bmi,

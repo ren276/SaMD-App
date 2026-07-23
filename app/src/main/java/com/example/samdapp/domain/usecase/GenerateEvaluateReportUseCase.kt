@@ -1,0 +1,66 @@
+package com.example.samdapp.domain.usecase
+
+import com.example.samdapp.domain.kernel.BrandLookupSource
+import com.example.samdapp.domain.kernel.EvaluateKernelSource
+import com.example.samdapp.domain.model.EvaluateReportOutput
+import com.example.samdapp.domain.model.KernelPayload
+import com.example.samdapp.domain.repository.EvaluateReportRepository
+import kotlinx.coroutines.CancellationException
+import java.time.Instant
+import java.util.UUID
+import java.util.logging.Logger
+import javax.inject.Inject
+
+/**
+ * Generates an [EvaluateReportOutput] via the real `/api/v1/evaluate` NLEM-treatment kernel.
+ *
+ * Unlike [GenerateKernelReportUseCase], there is no mock fallback here — this endpoint's value
+ * IS the real inference (drug recommendation, NLEM citation, vitals triage grades), so a failure
+ * surfaces as [Result.failure] rather than fabricating treatment data. The report screen simply
+ * omits this section when it's absent, same as the preliminary-report path omits [kernelOutput].
+ */
+class GenerateEvaluateReportUseCase @Inject constructor(
+    private val evaluateReportRepository: EvaluateReportRepository,
+    private val evaluateKernelSource: EvaluateKernelSource,
+    private val brandLookupSource: BrandLookupSource,
+) {
+    companion object {
+        private val logger = Logger.getLogger("EvaluateUseCase")
+    }
+
+    suspend operator fun invoke(
+        caseRecordId: String,
+        payload: KernelPayload,
+        patientAge: Int? = null,
+        patientSex: String? = null,
+    ): Result<EvaluateReportOutput> {
+        val inferenceStartedAt = Instant.now()
+        return try {
+            val result = evaluateKernelSource.evaluate(
+                payload = payload,
+                patientAge = patientAge ?: 30,
+                patientSex = patientSex ?: "U",
+            )
+            // Best-effort — never throws, never blocks the report on a slow/unreachable Gemini call.
+            val topIndianBrand = result.nlemTreatment.recommendedDrug
+                ?.let { brandLookupSource.lookupTopIndianBrand(it) }
+            val output = EvaluateReportOutput(
+                id = UUID.randomUUID().toString(),
+                caseRecordId = caseRecordId,
+                diagnosticSummary = result.diagnosticSummary,
+                nlemTreatment = result.nlemTreatment,
+                brandMapping = result.brandMapping,
+                safetyAndTriage = result.safetyAndTriage,
+                topIndianBrand = topIndianBrand,
+                inferenceStartedAt = inferenceStartedAt,
+                inferenceEndedAt = Instant.now(),
+            )
+            evaluateReportRepository.save(output).map { output }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.warning("Evaluate API unavailable — no treatment section will be shown. Reason: ${e.message}")
+            Result.failure(e)
+        }
+    }
+}

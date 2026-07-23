@@ -13,12 +13,16 @@ import com.example.samdapp.domain.model.AbhaProfile
 import com.example.samdapp.domain.model.AilmentEntry
 import com.example.samdapp.domain.doctor.DoctorPrescriptionInbox
 import com.example.samdapp.domain.doctor.IncomingPrescription
+import com.example.samdapp.domain.kernel.BrandLookupSource
 import com.example.samdapp.domain.model.CaseRecord
 import com.example.samdapp.domain.model.ConsultationHistoryEntry
 import com.example.samdapp.domain.model.DoctorTrackerEntry
 import com.example.samdapp.domain.model.CaseStatus
 import com.example.samdapp.domain.model.Doctor
 import com.example.samdapp.domain.model.Encounter
+import com.example.samdapp.domain.model.DiagnosisFeedback
+import com.example.samdapp.domain.model.EvaluateReportOutput
+import com.example.samdapp.domain.model.IndianBrandSuggestion
 import com.example.samdapp.domain.model.KernelReportOutput
 import com.example.samdapp.domain.model.Patient
 import com.example.samdapp.domain.model.Prescription
@@ -29,6 +33,8 @@ import com.example.samdapp.domain.repository.AuditLogRepository
 import com.example.samdapp.domain.repository.CaseRecordRepository
 import com.example.samdapp.domain.repository.DoctorRepository
 import com.example.samdapp.domain.repository.EncounterRepository
+import com.example.samdapp.domain.repository.DiagnosisFeedbackRepository
+import com.example.samdapp.domain.repository.EvaluateReportRepository
 import com.example.samdapp.domain.repository.KernelReportRepository
 import com.example.samdapp.domain.repository.PatientRepository
 import com.example.samdapp.domain.repository.PrescriptionRepository
@@ -41,6 +47,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import java.time.Instant
+
+class FakeBrandLookupSource(
+    private val brand: IndianBrandSuggestion? = IndianBrandSuggestion("Fake Brand", "Fake Pharma Co"),
+) : BrandLookupSource {
+    override suspend fun lookupTopIndianBrand(genericDrugName: String): IndianBrandSuggestion? = brand
+}
 
 fun testPatient(id: String, fullName: String = "P-$id", age: Int? = 30): Patient = Patient(
     id = id, fullName = fullName, dateOfBirth = null, age = age, biologicalSex = "Female",
@@ -236,6 +248,30 @@ class FakeKernelReportRepository : KernelReportRepository {
     }
 
     override suspend fun getForCase(caseRecordId: String): KernelReportOutput? = saved[caseRecordId]
+}
+
+class FakeEvaluateReportRepository : EvaluateReportRepository {
+    val saved = mutableMapOf<String, EvaluateReportOutput>()
+    var saveResult: Result<Unit> = Result.success(Unit)
+
+    override suspend fun save(report: EvaluateReportOutput): Result<Unit> {
+        if (saveResult.isSuccess) saved[report.caseRecordId] = report
+        return saveResult
+    }
+
+    override suspend fun getForCase(caseRecordId: String): EvaluateReportOutput? = saved[caseRecordId]
+}
+
+class FakeDiagnosisFeedbackRepository : DiagnosisFeedbackRepository {
+    val saved = mutableMapOf<String, DiagnosisFeedback>()
+    var saveResult: Result<Unit> = Result.success(Unit)
+
+    override suspend fun save(feedback: DiagnosisFeedback): Result<Unit> {
+        if (saveResult.isSuccess) saved[feedback.caseRecordId] = feedback
+        return saveResult
+    }
+
+    override suspend fun getForCase(caseRecordId: String): DiagnosisFeedback? = saved[caseRecordId]
 }
 
 class FakeAilmentRepository : AilmentRepository {

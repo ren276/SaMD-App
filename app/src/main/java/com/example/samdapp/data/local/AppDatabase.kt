@@ -10,8 +10,10 @@ import com.example.samdapp.data.local.dao.AttachmentDao
 import com.example.samdapp.data.local.dao.AuditLogDao
 import com.example.samdapp.data.local.dao.CaseRecordDao
 import com.example.samdapp.data.local.dao.ConsultationDao
+import com.example.samdapp.data.local.dao.DiagnosisFeedbackDao
 import com.example.samdapp.data.local.dao.DoctorDao
 import com.example.samdapp.data.local.dao.EncounterDao
+import com.example.samdapp.data.local.dao.EvaluateReportDao
 import com.example.samdapp.data.local.dao.FamilyHistoryEntryDao
 import com.example.samdapp.data.local.dao.KernelReportDao
 import com.example.samdapp.data.local.dao.MedicalHistoryItemDao
@@ -28,8 +30,10 @@ import com.example.samdapp.data.local.entity.AttachmentEntity
 import com.example.samdapp.data.local.entity.AuditLogEntity
 import com.example.samdapp.data.local.entity.CaseRecordEntity
 import com.example.samdapp.data.local.entity.ConsultationEntity
+import com.example.samdapp.data.local.entity.DiagnosisFeedbackEntity
 import com.example.samdapp.data.local.entity.DoctorEntity
 import com.example.samdapp.data.local.entity.EncounterEntity
+import com.example.samdapp.data.local.entity.EvaluateReportEntity
 import com.example.samdapp.data.local.entity.FamilyHistoryEntryEntity
 import com.example.samdapp.data.local.entity.KernelReportEntity
 import com.example.samdapp.data.local.entity.MedicalHistoryItemEntity
@@ -62,8 +66,10 @@ import com.example.samdapp.data.local.entity.SocialHistoryEntity
         KernelReportEntity::class,
         ReferralEntity::class,
         DoctorEntity::class,
+        EvaluateReportEntity::class,
+        DiagnosisFeedbackEntity::class,
     ],
-    version = 8,
+    version = 11,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -86,6 +92,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun kernelReportDao(): KernelReportDao
     abstract fun referralDao(): ReferralDao
     abstract fun doctorDao(): DoctorDao
+    abstract fun evaluateReportDao(): EvaluateReportDao
+    abstract fun diagnosisFeedbackDao(): DiagnosisFeedbackDao
 
     companion object {
         const val DATABASE_NAME = "samd_app.db"
