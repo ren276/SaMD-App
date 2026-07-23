@@ -891,6 +891,124 @@ in front of it.
       fallback path is what's actually been exercised. On-device/emulator test against a live
       kernel server at `10.203.3.29:8000` is the next verification step.
 
+## /api/v1/evaluate NLEM-treatment integration + physician AGREE/MODIFY/REJECT feedback (done, 2026-07-24)
+
+New real backend call, separate concern from `/v1/assess` (kept, unchanged, still the confidence/
+differential source). `/api/v1/evaluate` returns NLEM drug/dosage/brand-mapping/vitals-triage —
+no mock fallback for this one by design (failure just means the report/prescription omits that
+section). Feeds a new physician-review loop that mirrors SaMDClassifier's `refine_diagnosis.py`
+`DiagnosisFeedback` schema, for a future model-retraining pipeline (capture-only today, no backend
+reimport endpoint yet).
+
+- [x] **Domain models:** `EvaluateReportOutput` (+`EvaluateDiagnosticSummary`/`EvaluateRankedCandidate`/
+      `EvaluateNlemTreatment`/`EvaluateBrandMapping`/`EvaluateSafetyAndTriage`/`EvaluateVitalsTriage`/
+      `IndianBrandSuggestion`), `DiagnosisFeedback`+`PhysicianDecision` (AGREE/MODIFY/REJECT).
+      `Evaluate*` prefix throughout to avoid clashing with the pre-existing `Kernel*` (`/v1/assess`)
+      types.
+- [x] **Data layer:** `RetrofitEvaluateSource`/`EvaluateKernelSource` (domain boundary, same pattern
+      as `RemoteKernelSource`), `ClinicalApiService` (`POST /api/v1/evaluate`), DTOs
+      (`EvaluateRequestDto`/`EvaluateReportDto`/`EvaluateErrorDto`). `EvaluateReportEntity`/Dao
+      (payload stored as one Gson JSON blob) + `DiagnosisFeedbackEntity`/Dao.
+      `EvaluateReportRepository`/Impl, `DiagnosisFeedbackRepository`/Impl.
+      `GenerateEvaluateReportUseCase` — fires alongside `GenerateKernelReportUseCase` in
+      `SendingViewModel`, persists on success, logs `AuditAction.EVALUATE_RESPONSE_RECEIVED` (full
+      raw response) or `EVALUATE_RESPONSE_FAILED` on failure.
+- [x] **India-brand lookup:** `GeminiBrandLookupSource`/`BrandLookupSource` (`GeminiApiService`,
+      `GeminiNetworkModule`) — best-effort AI suggestion of a top India-manufactured brand for the
+      NLEM-recommended generic drug. `GEMINI_API_KEY` read from `local.properties` (git-ignored) via
+      `providers.fileContents` in `app/build.gradle.kts` (chosen over `File.inputStream()` so the
+      Gradle configuration cache tracks the file as a build input — otherwise editing the key alone
+      wouldn't invalidate a stale cached `BuildConfig` value).
+- [x] **Room v8→v10:** `MIGRATION_8_9` (`evaluate_reports` table, additive), `MIGRATION_9_10`
+      (`diagnosis_feedback` table, additive). Schemas `9.json`/`10.json` exported.
+- [x] **`RetrofitKernelSource` sex-field fix:** backend checks `sex.upper() == "M"` exactly;
+      `Patient.biologicalSex` is a full word ("Male"/"Female"). Was passed through unnormalized —
+      now `patientSex.take(1).uppercase()`, matching `RetrofitEvaluateSource`'s existing
+      normalization.
+- [x] **`KernelAssessmentViewModel`/Screen:** new unified `AssessmentDisplay` — sourced from
+      `EvaluateReportOutput` first (real inference, per-candidate confidence/reasoning), falling
+      back to the old `KernelReportOutput` (`/v1/assess`, has its own REAL_INFERENCE/MOCK_FALLBACK
+      split) only when no evaluate output exists yet. Old direct `KernelReportOutput` UI state
+      replaced; audit payload on continue now logs `isMockFallback`/`sourceLabel` instead of the
+      old `inferenceSource` field.
+- [x] **Doctor review redesign — `ReceiveDoctorPrescriptionUseCase` (async mock-inbox polling)
+      replaced by `SubmitDoctorDecisionUseCase`** (synchronous, on-device): `PatientSummaryScreen`'s
+      "Check for doctor's response" button is now "Review AI diagnosis" → opens a picker showing the
+      `EvaluateReportOutput` top candidate, AGREE/MODIFY/REJECT buttons. MODIFY/REJECT require a
+      manual drug name + dosage (with an optional Gemini brand-name lookup button); AGREE needs no
+      extra input. Confirm calls `SubmitDoctorDecisionUseCase`, which persists a `DiagnosisFeedback`
+      row (`AuditAction.DIAGNOSIS_FEEDBACK_RECORDED`) and builds the final `Prescription` from
+      either the AI candidate (AGREE) or the manual entry (MODIFY/REJECT).
+      `PhysicianDecision.outcomeExplanation()` — investor-demo-facing copy explaining what each
+      decision means for the training pipeline (AGREE → confirmed training example, MODIFY → new
+      training example from the physician's own entry, REJECT → discarded, no reliable ground
+      truth).
+      **`MockDoctorPrescriptionInbox` still exists** (Phase 5's original mock inbox path, used only
+      as `IncomingPrescription` fallback plumbing) but its diagnosis/medication now source PRIMARILY
+      from `EvaluateReportOutput` (NLEM drug/dose/brand) when present, falling back to the old
+      `KernelReportOutput`/static-Paracetamol behavior otherwise.
+- [x] **`RegisterScreen` demo-persona picker:** the single "Fill demo patient data" button is now a
+      dropdown (`DemoPatientProfile.PERSONAS`) + button — `DemoPatientProfile.select(index)` before
+      `fillDemoData()`. `DemoPatientProfile.kt` grew substantially (598-line diff) to hold multiple
+      personas instead of one hardcoded patient.
+- [x] `ClinicalReport`/`ReportFormatter`/`AssembleReportUseCase`/`ReportCanvasRenderer` all gained an
+      `evaluateOutput: EvaluateReportOutput?` alongside the existing `kernelOutput` — same
+      "progressively assembled, null until available" posture as every other report section.
+- [x] **Verified against the live backend for real:** started the FastAPI + XGBoost server on the
+      dev host (had to fix a real backend bug first — `SaMDClassifier/app.py` imported
+      `xgboost`/`shap` before the torch-dependent RAG chain, corrupting OpenMP DLL state on Windows;
+      reordered two import lines), curl-tested `/api/v1/evaluate` directly against 5 different
+      symptom/vitals combos — diagnosis, NLEM treatment, and vitals-triage grading all confirmed
+      correct against the real model. Base URL is `http://10.16.4.182:8000/` (confirmed, matches the
+      current dev host's LAN IP).
+- [x] **Removed the "Kernel AI Assessment" canvas block, added bolding + inference time.**
+      `ReportCanvasRenderer.kernelBlock` (old `/v1/assess`-sourced, mock-fallback-capable) deleted
+      entirely from `buildBlocks()` — superseded by the evaluate section, which has no mock path.
+      `evaluateBlock` rewritten: diagnosis/drug/brand lines and urgent/human-review/pediatric flags
+      now render bold (urgent ones bold red, new `boldBodyPaint`/`urgentPaint`) — the findings a
+      reviewing physician needs to see first. Inference time moved to a single small line at the
+      very bottom (reference only, not a metric to act on).
+- [x] **Gemini brand lookup — two real bugs found and fixed, plus company name added.**
+      (1) `gemini-2.0-flash` had zero quota on the provided key (`RESOURCE_EXHAUSTED`, `limit: 0`) —
+      switched to `gemini-2.5-flash`. (2) `gemini-2.5-flash`'s "thinking" mode measured ~5.6s
+      latency, right past the original 6s OkHttp timeout — silent timeouts caused "Not available"
+      even with a valid key; added `generationConfig.thinkingConfig.thinkingBudget: 0`
+      (`GeminiGenerationConfigDto`/`GeminiThinkingConfigDto`, new), dropping latency to ~0.7s, and
+      raised timeouts to 10s/12s for margin anyway. Prompt now asks for brand **and** manufacturer
+      (`"BrandName | CompanyName"`, biased toward real Indian pharma companies e.g. Cipla/Sun
+      Pharma/Jagsonpal) — new `IndianBrandSuggestion(brandName, companyName)` replaces the old bare
+      `String?` everywhere it's consumed (`EvaluateReportOutput.topIndianBrand`, canvas, prescription,
+      `PatientSummaryScreen`'s brand-lookup button).
+- [x] **Doctor-review placement corrected.** First built (wrongly) on `KernelAssessmentScreen`
+      (worker-facing, pre-diagnosis) — reverted there in full, then rebuilt correctly on
+      `PatientSummaryScreen`'s doctor-response flow (the "doc-sided" screen, per the user). Button
+      renamed "Check for doctor's response (mock)" → "Review AI diagnosis (doctor)".
+- [x] **Dataset-safety fix for the refinement feedback.** Checked `SaMDClassifier/train_model.py`/
+      `train_symptom_classifier.py` directly: neither reads drug/brand/company columns at all.
+      Found `DiagnosisFeedback.physicianFinalDiagnosis` was hardcoded null always — MODIFY and AGREE
+      produced identical training-relevant records. Fixed: new `TRAINED_ICD_CANDIDATES` (the 18
+      classes `symptom_model.json` actually trained on) dropdown, shown only on MODIFY, validated in
+      `SubmitDoctorDecisionUseCase` to be one of the 18 or dropped to null; new `clinicalNote`
+      free-text field (`MIGRATION_10_11`, DB v10→v11), explicitly separate, never reimportable.
+      Confirmed drug/dosage/brand flow only into `Prescription`/`MedicationLine`, never
+      `DiagnosisFeedback` — no code path crosses that boundary either direction.
+- [x] `GEMINI_API_KEY` confirmed present in `local.properties` (user-provided) and confirmed reaching
+      `BuildConfig.GEMINI_API_KEY` after fixing a Gradle config-cache bug (`local.properties` reads
+      weren't tracked as configuration-cache inputs via plain `File.inputStream()` — switched to
+      `providers.fileContents` so editing the key alone correctly invalidates the cache).
+- [x] Test suite re-run repeatedly across this whole pass — **133 tests, 0 failures**, final state.
+      `PatientSummaryViewModelTest`, `MockDoctorPrescriptionInboxTest`, `ReportFormatterTest`,
+      `Fakes.kt` all updated for the new constructor/state shapes.
+- [x] Docs updated: `software-requirements.md` (new REQ-EVL-01/02/03, REQ-RFN-01/02, rewrote
+      REQ-RX-01/03), `traceability-matrix.md` (new rows, orphaned-but-passing note for the unused
+      mock inbox, test count), `report-field-mapping.md` (removed Kernel AI Assessment row, added
+      AI Clinical Evaluation section), `risk-management-file.md` (H-02/H-09 updated, new H-11 for
+      the Gemini external dependency, H-10 extended), `data-retention.md` (DB v11, new tables),
+      `regulatory-foundation.md` (kernel no longer "mocked"), `design-history-file.md` (6 new
+      change-log entries).
+- No physician-side auth/identity captured on `DiagnosisFeedback` (matches the rest of the app's
+  mock-login posture — same worker device, no separate doctor account) — unchanged, still true.
+
 ## Not started
 - [ ] Demo-theater additions from agent_docs/hardening.md — complete, pending final review of the
       hardening doc to ensure no secondary "security-theatre" items remain (e.g. security-shield

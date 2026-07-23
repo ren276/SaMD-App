@@ -1,8 +1,11 @@
 package com.example.samdapp.di
 
 import android.util.Log
+import com.example.samdapp.data.remote.RetrofitEvaluateSource
 import com.example.samdapp.data.remote.RetrofitKernelSource
+import com.example.samdapp.data.remote.api.ClinicalApiService
 import com.example.samdapp.data.remote.api.KernelApiService
+import com.example.samdapp.domain.kernel.EvaluateKernelSource
 import com.example.samdapp.domain.kernel.RemoteKernelSource
 import dagger.Binds
 import dagger.Module
@@ -19,7 +22,7 @@ import javax.inject.Singleton
 /**
  * Provides the Retrofit + OkHttp stack for the local FastAPI kernel endpoint.
  *
- * Base URL: `http://10.203.3.29:8000/` — LAN IP of host machine running the FastAPI kernel,
+ * Base URL: `http://10.16.4.182:8000/` — LAN IP of host machine running the FastAPI kernel,
  * for physical-device testing over Wi-Fi. Requires `android:usesCleartextTraffic="true"` in the manifest
  * (plain HTTP, not TLS — acceptable for a local dev/demo server; production would use HTTPS
  * behind an internal VPN or a real backend URL).
@@ -37,7 +40,7 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object NetworkModule {
 
-    private const val KERNEL_BASE_URL = "http://10.203.3.29:8000/"
+    private const val KERNEL_BASE_URL = "http://10.16.4.182:8000/"
     private const val TAG = "KernelNetwork"
 
     @Provides
@@ -73,6 +76,11 @@ object NetworkModule {
     fun provideKernelApiService(retrofit: Retrofit): KernelApiService =
         retrofit.create(KernelApiService::class.java)
 
+    @Provides
+    @Singleton
+    fun provideClinicalApiService(retrofit: Retrofit): ClinicalApiService =
+        retrofit.create(ClinicalApiService::class.java)
+
     /** Separate abstract class to host @Binds methods (Hilt requirement). */
     @Module
     @InstallIn(SingletonComponent::class)
@@ -80,5 +88,9 @@ object NetworkModule {
         @Binds
         @Singleton
         abstract fun bindRemoteKernelSource(impl: RetrofitKernelSource): RemoteKernelSource
+
+        @Binds
+        @Singleton
+        abstract fun bindEvaluateKernelSource(impl: RetrofitEvaluateSource): EvaluateKernelSource
     }
 }

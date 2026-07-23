@@ -2,10 +2,13 @@ package com.example.samdapp.presentation.patientsummary
 
 import com.example.samdapp.domain.model.CaseStatus
 import com.example.samdapp.domain.model.ConsultationHistoryEntry
-import com.example.samdapp.domain.usecase.ReceiveDoctorPrescriptionUseCase
+import com.example.samdapp.domain.usecase.SubmitDoctorDecisionUseCase
+import com.example.samdapp.testutil.FakeAuditLogger
+import com.example.samdapp.testutil.FakeBrandLookupSource
 import com.example.samdapp.testutil.FakeCaseRecordRepository
-import com.example.samdapp.testutil.FakeDoctorPrescriptionInbox
+import com.example.samdapp.testutil.FakeDiagnosisFeedbackRepository
 import com.example.samdapp.testutil.FakeEncounterRepository
+import com.example.samdapp.testutil.FakeEvaluateReportRepository
 import com.example.samdapp.testutil.FakePatientRepository
 import com.example.samdapp.testutil.FakePrescriptionRepository
 import com.example.samdapp.testutil.MainDispatcherRule
@@ -38,10 +41,14 @@ class PatientSummaryViewModelTest {
             patientRepository = patientRepo,
             caseRecordRepository = FakeCaseRecordRepository(),
             encounterRepository = FakeEncounterRepository(history = history),
-            receiveDoctorPrescriptionUseCase = ReceiveDoctorPrescriptionUseCase(
-                inbox = FakeDoctorPrescriptionInbox(),
+            evaluateReportRepository = FakeEvaluateReportRepository(),
+            brandLookupSource = FakeBrandLookupSource(),
+            submitDoctorDecisionUseCase = SubmitDoctorDecisionUseCase(
                 caseRecordRepository = FakeCaseRecordRepository(),
                 prescriptionRepository = FakePrescriptionRepository(),
+                evaluateReportRepository = FakeEvaluateReportRepository(),
+                diagnosisFeedbackRepository = FakeDiagnosisFeedbackRepository(),
+                auditLogger = FakeAuditLogger(),
             ),
         )
     }

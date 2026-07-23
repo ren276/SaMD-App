@@ -39,7 +39,8 @@ Conventions: `REQ-<AREA>-NN`. Status: **DONE** (implemented + manually verified)
 - **REQ-CON-02** (DONE) Require a review-summary confirmation before sending (risk H-08).
 
 ## Hand-off (HAN)
-- **REQ-HAN-01** (DONE) Submit the case to a (currently mocked) clinical kernel.
+- **REQ-HAN-01** (DONE) Submit the case to a clinical kernel (real HTTP, see REQ-HAN-07/EVL-01;
+  mock fallback only on the `/v1/assess` leg).
 - **REQ-HAN-02** (DONE) Transcribe captured audio (Android SpeechRecognizer).
 - **REQ-HAN-03** (DONE) Persist the case locally with status `saved_locally`.
 - **REQ-HAN-04** (DONE) Assign a doctor and set status `sent_to_doctor`.
@@ -231,16 +232,24 @@ Conventions: `REQ-<AREA>-NN`. Status: **DONE** (implemented + manually verified)
   convention).
   **Primary path (2026-07-21):** real HTTP call to a local FastAPI + XGBoost kernel via
   `RemoteKernelSource`/`RetrofitKernelSource` (`data/remote/`) — `POST /v1/assess`, base URL
-  `http://10.203.3.29:8000/` (LAN IP of the host machine, for physical-device testing; requires
+  `http://10.16.4.182:8000/` (LAN IP of the host machine, for physical-device testing; requires
   `android:usesCleartextTraffic="true"`, plain HTTP not TLS — acceptable for this local dev/demo
-  server, not production). **Fallback path:** any failure (IOException/HttpException/timeout/server
-  offline) is caught in `GenerateKernelReportUseCase.tryRealApi` and falls back to the original
-  Phase 4 mock — keyword-matched against `KernelPayload.chiefComplaint` against a small curated
-  scenario table (fever/respiratory/GI/headache + a lower-confidence default), still explicitly a
-  mock. The app never crashes when the ML server is unreachable.
+  server, not production; IP updated 2026-07 when the dev host changed networks — see
+  `di/NetworkModule.kt`, same host now also serves `/api/v1/evaluate`, REQ-EVL-01). **Fallback
+  path:** any failure (IOException/HttpException/timeout/server offline) is caught in
+  `GenerateKernelReportUseCase.tryRealApi` and falls back to the original Phase 4 mock —
+  keyword-matched against `KernelPayload.chiefComplaint` against a small curated scenario table
+  (fever/respiratory/GI/headache + a lower-confidence default), still explicitly a mock. The app
+  never crashes when the ML server is unreachable. **This mock-fallback behaviour is unique to the
+  `/v1/assess` leg — the newer `/api/v1/evaluate` leg (REQ-EVL-01) has deliberately NO mock
+  fallback**, since fabricated treatment/brand data would be worse than an omitted section.
   **AI Assessment Panel** (`presentation/kernelassessment`) — confidence gauge, explainability
   (reasoning + evidence for/against), and a liability checkbox gating Continue — shown between
-  Sending and Transcription/Acknowledgement. Extends the existing pseudonymization posture
+  Sending and Transcription/Acknowledgement. **Sourcing updated 2026-07:** now reads the real
+  `/api/v1/evaluate` output as primary (`EvaluateReportRepository`, real confidence % + ICD +
+  per-candidate reasoning from the backend), falling back to this `KernelReportOutput` path only
+  when no evaluate output exists for the case (`KernelAssessmentViewModel.toDisplay()` on each
+  type, unified into `AssessmentDisplay`). Extends the existing pseudonymization posture
   (REQ-HAN-05/06) — real-path request body carries only pseudonymized clinical signals (age/sex/
   vitals/BMI), no identity fields; never presented as fully validated regardless of path taken. The
   same `KernelReportOutput` feeds `ClinicalReport.kernelOutput` (Phase 3's report object)
@@ -252,38 +261,98 @@ Conventions: `REQ-<AREA>-NN`. Status: **DONE** (implemented + manually verified)
   this distinction existed only as a Logcat line (`GenerateKernelReportUseCase.tryRealApi`'s
   `logger.warning(...)`) — unqueryable, absent in production. Surfaced in the AI Assessment
   Panel (`presentation/kernelassessment/KernelAssessmentScreen`) as a distinct fallback notice,
-  independent of the confidence-driven verification warning, and in the exported report
-  (`presentation/report/ReportCanvasRenderer.kernelBlock`) as an "Inference source" line, plus
-  carried into the `kernel_response_received`/`kernel_assessment_acknowledged` audit log payloads.
+  independent of the confidence-driven verification warning, plus carried into the
+  `kernel_response_received`/`kernel_assessment_acknowledged` audit log payloads. **2026-07:** the
+  exported report's "Kernel AI Assessment" canvas block (`ReportCanvasRenderer.kernelBlock`) was
+  removed — that mock-fallback-capable section is superseded on the report/prescription by the
+  real `/api/v1/evaluate` "AI Clinical Evaluation" block (REQ-EVL-01), which has no mock fallback
+  to disclose in the first place. `KernelReportOutput`/`inferenceSource` still exist and still
+  drive the AI Assessment Panel fallback path above — only the printed-report block was removed.
   Strengthens the existing residual-risk control for H-09 ("gate real kernel behind validation +
   version field") — not a new hazard (risk H-02, H-09).
 
-### Prescription (RX — Phase 5)
-> **Scope correction (2026-07):** the doctor's own review/prescription-authoring UI is built and
-> run via a **separate communication channel** — a different app/portal, not this codebase — so
-> "Doctor Prescription Screen" is not built here. What Phase 5 delivers instead is the **receiving
-> boundary**: a swappable intake interface that accepts whatever that channel eventually sends and
-> feeds it into the same `ClinicalReport`. Mocked now (no real transport exists yet), but the
-> interface/data-contract shape is the real foundation — a future real API/webhook client only
-> needs to replace one class ([MockDoctorPrescriptionInbox]), not any call site.
+### Evaluate / NLEM treatment kernel (EVL — 2026-07)
+> Adds a second, independent real-inference leg alongside `/v1/assess` (REQ-HAN-07): the same
+> FastAPI backend's `/api/v1/evaluate` endpoint returns a diagnostic summary **and** an NLEM 2022
+> treatment recommendation (drug, dosage, referral reason), which the old `/v1/assess` contract
+> never provided. No mock fallback exists for this leg by design (see REQ-HAN-08 update above) —
+> a failed call just omits the section rather than fabricating treatment data.
+- **REQ-EVL-01** (DONE) `GenerateEvaluateReportUseCase` calls `/api/v1/evaluate` via
+  `EvaluateKernelSource`/`RetrofitEvaluateSource` (`ClinicalApiService`), fired alongside the
+  `/v1/assess` call in `SendingViewModel`. Persists `EvaluateReportOutput`
+  (`EvaluateReportRepository`, Room migration 8→9) — diagnostic summary (primary candidate +
+  ranked differential with per-candidate confidence/reasoning), NLEM treatment (drug, dosage
+  forms, level of healthcare, referral reason), brand mapping, and safety/vitals-triage grading.
+  Full raw response dumped to the audit log (`AuditAction.EVALUATE_RESPONSE_RECEIVED`/
+  `EVALUATE_RESPONSE_FAILED`) — distinct from the curated subset shown on the report/prescription.
+- **REQ-EVL-02** (DONE) India-brand lookup: `BrandLookupSource`/`GeminiBrandLookupSource` asks the
+  Gemini API for the top-selling India-manufactured brand **and its manufacturer** for the
+  recommended generic drug (`gemini-2.5-flash`, `thinkingBudget: 0` for latency — measured ~0.7s
+  vs ~5.6s with thinking enabled). Result (`IndianBrandSuggestion`, brand + company) stored on
+  `EvaluateReportOutput.topIndianBrand`, persisted alongside it. Best-effort only — never throws,
+  never blocks the evaluate pipeline; a missing/blank `GEMINI_API_KEY` (`local.properties`,
+  git-ignored, `BuildConfig.GEMINI_API_KEY`) or any lookup failure just leaves it null.
+- **REQ-EVL-03** (DONE) Report/prescription rendering: `ReportCanvasRenderer.evaluateBlock`
+  ("AI Clinical Evaluation" section) draws, in order, vitals triage → top diagnostic candidate only
+  (not the full differential list) → recommended treatment (drug + dosage + brand) → overall
+  urgency → inference time (small line, reference only). Diagnosis/drug/brand lines and any
+  urgent/human-review/pediatric-referral flags render bold (urgent ones bold red) — the findings a
+  reviewing physician needs to see first. See `docs/requirements/report-field-mapping.md`.
+
+### Prescription (RX — Phase 5, revised 2026-07)
+> **Scope correction superseded (2026-07):** the original plan deferred the doctor's own review to
+> a separate out-of-app channel, with only a receiving boundary built here. That receiving boundary
+> (`DoctorPrescriptionInbox`/`MockDoctorPrescriptionInbox`/`ReceiveDoctorPrescriptionUseCase`) still
+> exists in code but is **no longer wired to any UI** — for the investor demo, the physician review
+> is now a real interactive AGREE/MODIFY/REJECT decision made in-app on `PatientSummaryScreen`
+> (`SubmitDoctorDecisionUseCase`), not a randomly-simulated async response. See REQ-RFN-01 for the
+> training-dataset-reimport contract this decision also feeds.
 - **REQ-RX-01** (DONE) Doctor prescription = diagnosis + ordered medication lines (generic, brand?,
   strength, dosage, frequency, route, duration, quantity, foodRelation?, instructions?).
-  `Prescription` + child `medication_lines`. Populated via `domain/doctor/DoctorPrescriptionInbox`
-  (mock impl: `data/doctor/MockDoctorPrescriptionInbox`) → `ReceiveDoctorPrescriptionUseCase` →
-  `PrescriptionRepository` — the PHC worker triggers the check from `PatientSummaryScreen`
-  ("Check for doctor's response (mock)"), reachable only through the day-scoped roster
-  (REQ-ROS-02 stays intact — no new all-patients query). New `CaseStatus.PRESCRIPTION_RECEIVED`.
+  `Prescription` + child `medication_lines`. **Populated via `SubmitDoctorDecisionUseCase`**,
+  triggered from `PatientSummaryScreen`'s "Review AI diagnosis (doctor)" button (renamed from
+  "Check for doctor's response (mock)" — no longer mock), reachable only through the day-scoped
+  roster (REQ-ROS-02 stays intact — no new all-patients query). `CaseStatus.PRESCRIPTION_RECEIVED`
+  unchanged. AGREE prescribes exactly the `/api/v1/evaluate` recommendation (drug + dosage + the
+  Gemini brand suggestion, REQ-EVL-02, no re-lookup); MODIFY/REJECT let the reviewer type their own
+  drug/dosage/brand, with a one-tap "Get brand" re-lookup via `BrandLookupSource`.
 - **REQ-RX-02** (HARD RULE, PARTIAL) No ambiguous Latin abbreviations (OD/BD/TDS/QID/SOS/HS) in any
   stored or displayed dosing text; frequencies written out in full (NMC/EU). Documented in
   `MedicationLine` KDoc, enforced at the report boundary (`ReportFormatter.formatMedicationLine`
-  throws on a banned token). The doctor's own entry-form guard is out of scope here (that form lives
-  in the separate doctor-channel app) — this app's mock intake never generates a banned token, and
-  the report-boundary throw is the backstop if a real future intake ever did.
-- **REQ-RX-03** (DONE, mock) Doctor's Agree/Modify/Reject on the kernel differential
-  (`KernelDecision` enum, `Prescription.kernelDecision`, additive migration 4→5). The mock intake
-  (`MockDoctorPrescriptionInbox`) simulates a realistic decision distribution (weighted toward
-  Agree) rather than fabricating a fixed value, and the decision renders on the final report's
-  Rx/Advice block. The doctor's real decision-making UI is out of scope (separate channel).
+  throws on a banned token) — the in-app manual-entry fields (REQ-RX-01) don't yet enforce this at
+  entry time, so the report-boundary throw remains the real backstop.
+- **REQ-RX-03** (DONE) Doctor's Agree/Modify/Reject on the AI diagnosis (`KernelDecision` enum,
+  `Prescription.kernelDecision`, additive migration 4→5). **No longer mock** — `SubmitDoctorDecisionUseCase`
+  persists whichever of AGREE/MODIFY/REJECT the reviewer actually picks (`PhysicianDecision`), and
+  the decision renders on the final report's Rx/Advice block. See REQ-RFN-01 for what (if anything)
+  each decision means for a future training-dataset reimport.
+
+### Diagnosis refinement feedback (RFN — 2026-07)
+> Mirrors `refine_diagnosis.py`'s `DiagnosisFeedback` Pydantic schema in the SaMDClassifier repo —
+> that schema is currently unwired on the backend (no live capture/reimport endpoint), so this is
+> the demo-visible capture point for a future training-dataset reimport pipeline. **Verified against
+> the actual training scripts** (`train_model.py`, `train_symptom_classifier.py`): neither reads
+> drug/brand/company columns at all — Classifier A trains on
+> `age, sex_encoded, systolic_bp, diastolic_bp, bmi, heart_rate, spo2, glucose` → `tier`; Classifier
+> B trains on `symptom_string` → `icd_candidate`. Drug/brand/company are prescription-only concerns
+> (REQ-RX-01/EVL-02) and must never leak into this record.
+- **REQ-RFN-01** (DONE) `SubmitDoctorDecisionUseCase` persists a `DiagnosisFeedback` row
+  (`DiagnosisFeedbackRepository`, migration 9→10, `clinicalNote` column added 10→11) alongside the
+  prescription: `icdCandidate` (the AI's original top candidate, for traceability),
+  `physicianDecision` (AGREE/MODIFY/REJECT), `physicianFinalDiagnosis` (the corrected diagnosis —
+  **only** ever set on MODIFY, and only ever one of the 18 classes `symptom_model.json` was
+  actually trained on, `TRAINED_ICD_CANDIDATES`; validated in the use case, silently dropped to
+  null otherwise), and `clinicalNote` (free-text audit note, explicitly never reimported — no
+  dataset column or reimport contract exists for free text). AGREE and MODIFY are the only
+  decisions ever eligible for a future reimport; REJECT never is — "no reliable ground truth to
+  trust once the AI's candidate is rejected outright" (schema docstring). Audit log
+  (`AuditAction.DIAGNOSIS_FEEDBACK_RECORDED`) carries an explicit `reimportable` flag.
+- **REQ-RFN-02** (DONE) UI: `PatientSummaryScreen`'s doctor-review card shows a corrected-diagnosis
+  dropdown (`TRAINED_ICD_CANDIDATES`, 18 entries) and an optional clinical-note field **only when
+  MODIFY is selected**, entirely separate Compose fields from the drug/dosage/brand prescription
+  fields shared by MODIFY and REJECT (`ManualPrescriptionFields`) — confirmed no code path lets
+  drug/brand/company reach `DiagnosisFeedback`, and no code path lets the corrected diagnosis reach
+  `MedicationLine`.
 
 ### Referral (REF — Phase 6)
 - **REQ-REF-01** (DONE) Refer a case to a higher facility (CHC/District). "Refer to Higher

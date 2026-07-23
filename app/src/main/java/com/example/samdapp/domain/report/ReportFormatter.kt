@@ -5,6 +5,7 @@ import com.example.samdapp.domain.model.AilmentEntry
 import com.example.samdapp.domain.model.Attachment
 import com.example.samdapp.domain.model.AttachmentType
 import com.example.samdapp.domain.model.Doctor
+import com.example.samdapp.domain.model.EvaluateReportOutput
 import com.example.samdapp.domain.model.KernelDecision
 import com.example.samdapp.domain.model.KernelReportOutput
 import com.example.samdapp.domain.model.MeasurementType
@@ -59,6 +60,7 @@ class ReportFormatter @Inject constructor() {
         consultationRecordNo: String,
         visitDateTime: Instant,
         kernelOutput: KernelReportOutput?,
+        evaluateOutput: EvaluateReportOutput?,
         prescription: Prescription?,
         prescribingDoctor: Doctor?,
     ): ClinicalReport {
@@ -128,6 +130,7 @@ class ReportFormatter @Inject constructor() {
             ailments = ailmentLines,
             vitals = vitals?.let(::toVitalLines).orEmpty(),
             kernelOutput = kernelOutput,
+            evaluateOutput = evaluateOutput,
             attachments = attachmentLines,
             diagnosis = prescription?.diagnosis,
             kernelDecision = prescription?.kernelDecision,

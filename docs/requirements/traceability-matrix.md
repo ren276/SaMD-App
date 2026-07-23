@@ -54,10 +54,23 @@
 | REQ-RPT-03 | `docs/requirements/report-field-mapping.md` | — | Doc reviewed against renderer | n/a |
 | REQ-HAN-07 | `domain/usecase/GenerateKernelReportUseCase`, `domain/kernel/RemoteKernelSource`, `data/remote/RetrofitKernelSource`+`api/KernelApiService`+`dto/*`, `di/NetworkModule`, `presentation/kernelassessment/KernelAssessmentScreen`+VM, `SendingViewModel`, `KernelReportRepository` | H-02,H-09 | Manual (nav flow reviewed) | ✓ GenerateKernelReportUseCaseTest |
 | REQ-HAN-08 | `domain/model/InferenceSource`, `domain/model/KernelReportOutput`, `domain/usecase/GenerateKernelReportUseCase`, `data/local/entity/KernelReportEntity`, `data/local/Converters`, `data/local/Migrations` (MIGRATION_7_8), `data/repository/KernelReportRepositoryImpl`, `presentation/kernelassessment/KernelAssessmentScreen`, `presentation/report/ReportCanvasRenderer`, `presentation/sending/SendingViewModel`, `domain/audit/AuditLogger` | H-02,H-09 | Manual (nav flow reviewed) | ✓ GenerateKernelReportUseCaseTest, MigrationTest (instrumented, migration7To8) |
-| REQ-RX-01 | `domain/doctor/DoctorPrescriptionInbox`+`MockDoctorPrescriptionInbox`, `ReceiveDoctorPrescriptionUseCase`, `PatientSummaryScreen` follow-up UI | — | Manual (nav flow reviewed) | ✓ ReceiveDoctorPrescriptionUseCaseTest, MockDoctorPrescriptionInboxTest |
+| REQ-RX-01 | `domain/usecase/SubmitDoctorDecisionUseCase`, `presentation/patientsummary/PatientSummaryViewModel`+`Screen` ("Review AI diagnosis (doctor)" card) | — | Manual (on-device, Vivo) | TODO — no ViewModel/use-case test yet for the new interactive flow |
 | REQ-RX-02 | `MedicationLine` KDoc + `ReportFormatter.formatMedicationLine` (throws on banned token) | — | Documented + enforced at report boundary | ✓ ReportFormatterTest (banned-abbrev) |
-| REQ-RX-03 | `domain/model/KernelDecision`, `Prescription.kernelDecision`, `MIGRATION_4_5`, rendered in `ReportCanvasRenderer.rxBlock` | — | Manual (nav flow reviewed) | ✓ MockDoctorPrescriptionInboxTest (decision distribution) |
+| REQ-RX-03 | `domain/model/KernelDecision`, `Prescription.kernelDecision`, `MIGRATION_4_5`, rendered in `ReportCanvasRenderer.rxBlock`, set by `SubmitDoctorDecisionUseCase` per the reviewer's real pick | — | Manual (on-device, Vivo) | TODO |
+| REQ-EVL-01 | `domain/usecase/GenerateEvaluateReportUseCase`, `domain/kernel/EvaluateKernelSource`, `data/remote/RetrofitEvaluateSource`+`api/ClinicalApiService`+`dto/Evaluate*Dto`, `domain/repository/EvaluateReportRepository`, `data/local/entity/EvaluateReportEntity` (MIGRATION_8_9), `presentation/sending/SendingViewModel` | H-02,H-09 | Manual (on-device, Vivo; curl-verified against live backend) | ✓ EvaluateReportDtoTest (deserialization) |
+| REQ-EVL-02 | `domain/kernel/BrandLookupSource`, `data/remote/GeminiBrandLookupSource`, `data/remote/api/GeminiApiService`, `di/GeminiNetworkModule`, `domain/model/IndianBrandSuggestion` | — | Manual (curl-verified against live Gemini API: Paracetamol→Dolo 650, Nystatin→Nystin/Jagsonpal) | TODO |
+| REQ-EVL-03 | `presentation/report/ReportCanvasRenderer.evaluateBlock`, `docs/requirements/report-field-mapping.md` | — | Manual (on-device, Vivo) | TODO |
+| REQ-RFN-01 | `domain/usecase/SubmitDoctorDecisionUseCase`, `domain/model/DiagnosisFeedback`, `domain/repository/DiagnosisFeedbackRepository`, `data/local/entity/DiagnosisFeedbackEntity` (MIGRATION_9_10, MIGRATION_10_11), `domain/audit/AuditAction.DIAGNOSIS_FEEDBACK_RECORDED` | H-02 | Manual (on-device, Vivo; cross-checked against `train_model.py`/`train_symptom_classifier.py` column usage) | TODO |
+| REQ-RFN-02 | `domain/model/TRAINED_ICD_CANDIDATES`, `presentation/patientsummary/PatientSummaryScreen` (MODIFY-only dropdown + note field, `ManualPrescriptionFields` kept separate) | — | Manual (on-device, Vivo) | TODO |
 | REQ-REF-01 | `presentation/report/ReportScreen` (referral sheet), `CreateReferralUseCase`, `ReferralRepository`, `ReportFormatter.suggestsReferral` | — | Manual (nav flow reviewed) | ✓ CreateReferralUseCaseTest, ReportFormatterTest (eligibility) |
+
+> **Orphaned-but-passing note (2026-07):** `domain/doctor/DoctorPrescriptionInbox`+
+> `MockDoctorPrescriptionInbox`, `ReceiveDoctorPrescriptionUseCase`, and their tests
+> (`MockDoctorPrescriptionInboxTest`, `ReceiveDoctorPrescriptionUseCaseTest`) are left in place and
+> still pass, but nothing in the UI calls them anymore — `PatientSummaryViewModel` now calls
+> `SubmitDoctorDecisionUseCase` instead (REQ-RX-01). Kept rather than deleted since they still
+> represent a plausible future real-channel intake shape; revisit if that channel is ever built for
+> real, otherwise consider removing the dead code in a later pass.
 
 > **Rename note (Phase 2, done):** "Complaints" → "Ailments" — `AddSymptomUseCase`/`SymptomEntity`/
 > `SymptomDao`/`Symptom` domain model are gone; `MIGRATION_3_4` backfilled `symptoms` into
@@ -70,8 +83,11 @@
 - **Automated coverage (blocker #4, first pass):** a JVM unit suite now covers registration
   validation, audit payload/logger, sync mock, Home roster/sync, the kernel-payload boundary, and
   the mock-login audit wiring (see the ✓ rows), plus a permanent instrumented DAO test for the
-  day-scoped roster query. **130 tests, 0 failures** (grew from the initial 36 across every
-  subsequent phase — see `PROGRESS.md` for the per-pass counts). GitHub Actions
+  day-scoped roster query. **133 tests, 0 failures** (grew from the initial 36 across every
+  subsequent phase — see `PROGRESS.md` for the per-pass counts). The 2026-07 evaluate/refinement
+  work (REQ-EVL/RFN) added new production code faster than test coverage — see the TODO rows
+  above; `SubmitDoctorDecisionUseCase`, `PatientSummaryViewModel`'s new interactive flow, and
+  `GeminiBrandLookupSource` are all currently verified manually only. GitHub Actions
   (`.github/workflows/android-ci.yml`) runs the unit suite + assembleDebug on every push/PR
   (unit-only tests; instrumented tests run locally for now). This first pass also caught a real
   regression — the cache-scoping interface change had silently broken a pre-existing use-case

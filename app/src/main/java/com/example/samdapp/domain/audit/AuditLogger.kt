@@ -26,6 +26,20 @@ object AuditAction {
     const val KERNEL_ASSESSMENT_ACKNOWLEDGED = "kernel_assessment_acknowledged"
     const val KERNEL_RESPONSE_RECEIVED = "kernel_response_received"
 
+    /** Full raw `/api/v1/evaluate` response dump (inference start/end timestamps, diagnostic
+     *  summary, NLEM treatment, brand mapping, safety/triage) — the complete backend data, not
+     *  just the curated subset shown on the prescription page. Insert-only audit trail per
+     *  REQ-AUD-02; the prescription/report only ever shows the curated view. */
+    const val EVALUATE_RESPONSE_RECEIVED = "evaluate_response_received"
+
+    /** The `/api/v1/evaluate` call failed — logged so the audit trail shows why no evaluate
+     *  section appears on the report/prescription for this case. */
+    const val EVALUATE_RESPONSE_FAILED = "evaluate_response_failed"
+
+    /** Physician AGREE/MODIFY/REJECT decision on the AI's top diagnostic candidate — mirrors
+     *  `refine_diagnosis.py`'s `DiagnosisFeedback` schema. See [com.example.samdapp.domain.model.DiagnosisFeedback] KDoc. */
+    const val DIAGNOSIS_FEEDBACK_RECORDED = "diagnosis_feedback_recorded"
+
     /** Crash-recovery resume: the worker was dropped back into an already-`DRAFT` case rather than
      *  [com.example.samdapp.domain.usecase.StartCaseUseCase] minting a new encounter/case record —
      *  distinct from the pre-existing `"encounter_started"` string literal. */

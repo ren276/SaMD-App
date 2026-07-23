@@ -9,6 +9,7 @@ import com.example.samdapp.domain.model.MedicalHistoryCategory
 import com.example.samdapp.domain.model.MedicationKind
 import com.example.samdapp.domain.model.ObservationSource
 import com.example.samdapp.domain.model.ObservationType
+import com.example.samdapp.domain.model.PhysicianDecision
 import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.domain.model.KernelDecision
 import com.example.samdapp.domain.model.ReferralStatus
@@ -76,6 +77,9 @@ class Converters {
 
     @TypeConverter fun inferenceSourceToString(value: InferenceSource): String = value.name
     @TypeConverter fun stringToInferenceSource(value: String): InferenceSource = InferenceSource.valueOf(value)
+
+    @TypeConverter fun physicianDecisionToString(value: PhysicianDecision): String = value.name
+    @TypeConverter fun stringToPhysicianDecision(value: String): PhysicianDecision = PhysicianDecision.valueOf(value)
 
     @TypeConverter fun stringListToJson(value: List<String>): String =
         Json.encodeToString(ListSerializer(String.serializer()), value)

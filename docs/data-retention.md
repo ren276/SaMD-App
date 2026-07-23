@@ -5,7 +5,7 @@ hard-deletes clinical or audit data today.** Before adding any `@Delete`, `DELET
 destructive migration, check this file — several tables are append-only *by design* (regulatory /
 audit reasons), not just by omission, and changing that is a deliberate decision, not a cleanup.
 
-DB: `samd_app.db` (SQLCipher-encrypted), current schema **version 7**. Room entities live in
+DB: `samd_app.db` (SQLCipher-encrypted), current schema **version 11**. Room entities live in
 `data/local/entity/`, DAOs in `data/local/dao/`.
 
 ## Legend
@@ -28,13 +28,15 @@ DB: `samd_app.db` (SQLCipher-encrypted), current schema **version 7**. Room enti
 | `consultations` | `ConsultationEntity` | Mutable, no-delete | Insert + transcription update. |
 | `observations` | `ObservationEntity` | Insert + read | Vitals snapshots. |
 | `case_records` | `CaseRecordEntity` | Mutable, no-delete | Status/doctor-assignment updates only. |
-| `prescriptions` / `medication_lines` | `PrescriptionEntity` / `MedicationLineEntity` | Insert + read | Doctor-intake results. |
+| `prescriptions` / `medication_lines` | `PrescriptionEntity` / `MedicationLineEntity` | Insert + read | Doctor-review results — written by `SubmitDoctorDecisionUseCase` from the reviewer's real in-app AGREE/MODIFY/REJECT decision (2026-07; previously a randomly-mocked intake). |
 | `kernel_reports` | `KernelReportEntity` | Insert (upsert) + read | `@Insert(REPLACE)` upsert per case. |
 | `referrals` | `ReferralEntity` | Insert + status update | Never advances past QUEUED in the mock. |
 | `abha_profiles` | `AbhaProfileEntity` | Insert + read | Mock ABHA identities. |
 | `medical_history_items`, `allergies`, `family_history_entries`, `social_histories`, `medication_entries` | (respective) | Insert / update, no-delete | Medical background. |
 | `attachments` | `AttachmentEntity` | Insert + read | Consultation attachments (URIs). |
 | `doctors` | `DoctorEntity` | **Reference/seed** | Seeded with 9 mock doctors on fresh install (`RoomDatabase.Callback.onCreate`) and by `MIGRATION_6_7` on upgrade. Real onboarding is out of scope; if replaced, replace wholesale. |
+| `evaluate_reports` | `EvaluateReportEntity` | Insert (upsert) + read | `@Insert(REPLACE)` upsert per case, same pattern as `kernel_reports`. `payloadJson` is the whole diagnosticSummary/nlemTreatment/brandMapping/safetyAndTriage/topIndianBrand tree as one Gson blob (added MIGRATION_8_9, 2026-07). |
+| `diagnosis_feedback` | `DiagnosisFeedbackEntity` | Insert (upsert) + read | `@Insert(REPLACE)` upsert per case (MIGRATION_9_10; `clinicalNote` column added MIGRATION_10_11, 2026-07). Physician AGREE/MODIFY/REJECT decision + optional corrected diagnosis (one of 18 trained ICD classes or null) + optional free-text clinical note — mirrors `refine_diagnosis.py`'s `DiagnosisFeedback` schema, captured locally only (no backend reimport endpoint exists yet). |
 
 ## Historical exception
 
