@@ -4,6 +4,7 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import androidx.core.content.edit
 import com.example.samdapp.data.local.AppDatabase
 import java.security.GeneralSecurityException
 import java.security.KeyStore
@@ -29,13 +30,13 @@ class DatabasePassphraseProvider(private val context: Context) {
         if (storedIv != null && storedCiphertext != null) {
             try {
                 return decrypt(Base64.decode(storedIv, Base64.NO_WRAP), Base64.decode(storedCiphertext, Base64.NO_WRAP))
-            } catch (e: GeneralSecurityException) {
+            } catch (_: GeneralSecurityException) {
                 // Stored ciphertext no longer matches the Keystore key — e.g. this
                 // SharedPreferences file was restored from a device-transfer/backup that
                 // doesn't carry the non-exportable Keystore key with it. The old database
                 // is unreadable without the lost passphrase, so drop both and start clean
                 // instead of crashing on every launch.
-                prefs.edit().clear().apply()
+                prefs.edit { clear() }
                 deleteDatabaseFiles()
             }
         }
@@ -43,11 +44,66 @@ class DatabasePassphraseProvider(private val context: Context) {
         val passphrase = ByteArray(PASSPHRASE_LENGTH_BYTES)
         SecureRandom().nextBytes(passphrase)
         val (iv, ciphertext) = encrypt(passphrase)
-        prefs.edit()
-            .putString(KEY_IV, Base64.encodeToString(iv, Base64.NO_WRAP))
-            .putString(KEY_CIPHERTEXT, Base64.encodeToString(ciphertext, Base64.NO_WRAP))
-            .apply()
+        prefs.edit {
+            putString(KEY_IV, Base64.encodeToString(iv, Base64.NO_WRAP))
+            putString(KEY_CIPHERTEXT, Base64.encodeToString(ciphertext, Base64.NO_WRAP))
+        }
+
+        // If a database file already exists at this point, it is unencrypted (because we didn't 
+        // have a Keystore entry). We migrate it to an encrypted database using sqlcipher_export
+        // so that users don't lose data when upgrading to the SQLCipher version of the app.
+        migratePlaintextToEncrypted(passphrase)
+
         return passphrase
+    }
+
+    private fun migratePlaintextToEncrypted(passphrase: ByteArray) {
+        val originalFile = context.getDatabasePath(AppDatabase.DATABASE_NAME)
+        if (!originalFile.exists()) return
+
+        val tempFile = context.getDatabasePath(AppDatabase.DATABASE_NAME + "_tmp_encrypted")
+        tempFile.delete()
+
+        try {
+            val db = net.zetetic.database.sqlcipher.SQLiteDatabase.openOrCreateDatabase(
+                tempFile,
+                passphrase,
+                null as net.zetetic.database.sqlcipher.SQLiteDatabase.CursorFactory?,
+                null as net.zetetic.database.DatabaseErrorHandler?
+            )
+            db.rawExecSQL("ATTACH DATABASE '${originalFile.absolutePath}' AS plaintext KEY ''")
+            db.rawExecSQL("SELECT sqlcipher_export('main', 'plaintext')")
+            db.rawExecSQL("DETACH DATABASE plaintext")
+            db.close()
+
+            // Open the new encrypted temp DB to verify integrity
+            val verifyDb = net.zetetic.database.sqlcipher.SQLiteDatabase.openDatabase(
+                tempFile.absolutePath,
+                passphrase,
+                null as net.zetetic.database.sqlcipher.SQLiteDatabase.CursorFactory?,
+                net.zetetic.database.sqlcipher.SQLiteDatabase.OPEN_READONLY,
+                null as net.zetetic.database.sqlcipher.SQLiteDatabaseHook?
+            )
+            var isIntegrityOk = false
+            verifyDb.rawQuery("PRAGMA integrity_check", null).use { cursor ->
+                if (cursor.moveToFirst()) {
+                    isIntegrityOk = cursor.getString(0).equals("ok", ignoreCase = true)
+                }
+            }
+            verifyDb.close()
+
+            if (isIntegrityOk) {
+                // Migration successful. Delete the old plaintext files and rename the encrypted temp file.
+                deleteDatabaseFiles()
+                tempFile.renameTo(originalFile)
+            } else {
+                // Keep BOTH files intact and flag for manual recovery
+                throw IllegalStateException("Database migration failed integrity check, keeping original file intact for manual recovery.")
+            }
+        } catch (e: Exception) {
+            // Keep BOTH files intact and flag for manual recovery, throwing exception to halt initialization
+            throw IllegalStateException("Database migration failed: ${e.message}. Keeping original file intact for manual recovery.", e)
+        }
     }
 
     private fun getOrCreateSecretKey(): SecretKey {
