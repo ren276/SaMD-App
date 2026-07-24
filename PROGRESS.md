@@ -1020,3 +1020,18 @@ reimport endpoint yet).
 - [ ] Pre-production process blockers (flag to founder): ISO 13485 QMS + DHF, ISO 14971 risk file,
       software safety classification — see docs/regulatory-foundation.md §3
 - [ ] Real authentication + RBAC enforcement (REQ-SEC-03) — mock login above does not satisfy this
+
+### Latest Session Updates
+
+**1. SQLCipher Database Upgrade Bug Fix**
+- **Issue**: Upgrading the app from an older, unencrypted database version to the new SQLCipher-encrypted version caused the app to crash with a `SQLiteNotADatabaseException` (or "stale nmae" / `sqlite_schema` read error) because it attempted to open the plaintext DB as if it were encrypted.
+- **Fix**: Implemented a safe, non-destructive migration path in `DatabasePassphraseProvider`. 
+  - The app now automatically detects the unencrypted DB, creates a temporary encrypted DB, and uses `sqlcipher_export` to safely copy all data over.
+  - Added a crucial `PRAGMA integrity_check` verification step. The app now verifies the new encrypted DB is fully intact before deleting the old plaintext DB. If verification fails, it halts safely, preserving both files to prevent any accidental data loss.
+
+**2. Comprehensive Doctor Specialty Mapping**
+- **Issue**: Essential hypertension was incorrectly routing to Cardiology instead of a primary care physician.
+- **Fix**: Re-wrote the `mapConditionToSpecialty` routing logic in `ResolveDoctorAssignmentUseCase`.
+- Expanded the ailment routing list significantly to include a comprehensive set of patient presentations (e.g., chest pain -> Cardiology, stroke -> Neurology, asthma -> Pulmonology, hypertension/viral/headache -> General Physician).
+- Ensured emergency cues ("severe", "haemorrhagic") take precedence for Critical Care routing before defaulting to symptom-specific departments.
+
