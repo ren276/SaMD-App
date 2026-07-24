@@ -1009,6 +1009,10 @@ reimport endpoint yet).
 - No physician-side auth/identity captured on `DiagnosisFeedback` (matches the rest of the app's
   mock-login posture — same worker device, no separate doctor account) — unchanged, still true.
 
+## Investor Demo Bug Fixes (2026-07-24)
+- [x] Fixed an issue where the Obesity mock persona resulted in "No drug recommendation" because its match (0.605) did not pass the ML backend's strict safety confidence threshold (< 0.6). Substituted the mock persona in `DemoPatientProfile` with "Type 2 Diabetes", which reliably returns an NLEM treatment (Glimepiride) and triggers Gemini brand mapping successfully for the investor demo.
+- [x] Fixed an issue in `ResolveDoctorAssignmentUseCase` where the new Type 2 Diabetes persona was falling back to the default/least-busy doctor (Neurology) instead of being correctly assigned to Endocrinology. Updated the mapping logic to match against the plain text `primaryAilmentName` ("Type 2 diabetes mellitus") rather than the ICD-10 code ("E11").
+
 ## Not started
 - [ ] Demo-theater additions from agent_docs/hardening.md — complete, pending final review of the
       hardening doc to ensure no secondary "security-theatre" items remain (e.g. security-shield
