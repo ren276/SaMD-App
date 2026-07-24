@@ -117,11 +117,11 @@ object DemoPatientProfile {
         val socialHistory: DemoSocialHistory,
     )
 
-    // ── Persona 1 — Obesity (E66), best-performing classifier class (F1 0.94), routine/low-risk.
-    //    BMI 29.4 (80kg/165cm, "obese" tier), all other vitals normal. Metformin/lifestyle-mod
-    //    treatment path → brand mapping hits (metformin has Indian brand coverage). ────────────
+    // ── Persona 1 — Type 2 Diabetes (E11), routine/low-risk.
+    //    BMI 29.4 (80kg/165cm, "obese" tier), glucose 210, all other vitals normal. Glimepiride
+    //    treatment path → brand mapping hits. ────────────
     private val OBESITY = Persona(
-        label = "Suresh Yadav — routine (obesity)",
+        label = "Suresh Yadav — routine (type 2 diabetes)",
         fullName = "Suresh Yadav",
         dateOfBirth = "1983-06-20",
         biologicalSex = "Male",
@@ -140,7 +140,7 @@ object DemoPatientProfile {
         abhaNumber = "91234500011122",
         primaryCareClinicName = "Barwaha PHC",
         referringPhysicianName = "Dr. Meena Tiwari",
-        mainConcern = "Poor sleep | general weakness | exertional dyspnoea | joint pain | fatigue",
+        mainConcern = "Excessive thirst | frequent urination | general weakness | fatigue | blurred vision",
         pulseBpm = "78",
         bpSystolic = "128",
         bpDiastolic = "82",
@@ -150,19 +150,19 @@ object DemoPatientProfile {
         weightKg = "80.0",
         heightCm = "165.0",
         painScore = "3",
-        bloodGlucose = "108",
+        bloodGlucose = "210",
         ailment = DemoAilment(
-            description = "Progressive weight gain with joint pain and low exercise tolerance",
+            description = "Excessive thirst and frequent urination with general weakness",
             severity = "3",
             duration = "several months",
         ),
         symptomOnset = "Gradual onset over the past 6 months, worsening",
         durationBucket = "months",
         severityScore = 3,
-        aggravatingFactors = "Prolonged standing, climbing stairs, physical exertion",
-        relievingFactors = "Rest, elevating legs in the evening",
-        impactOnDailyActivities = "Tires easily during farm work; avoids long walks",
-        relevantHistory = "No prior hospitalisation; weight steadily increased since last pregnancy 6 years ago",
+        aggravatingFactors = "Sugary food, physical exertion",
+        relievingFactors = "Rest, drinking water",
+        impactOnDailyActivities = "Tires easily during farm work; needs frequent bathroom breaks",
+        relevantHistory = "Borderline raised blood sugar noted last year but not treated",
         medicalHistory = listOf(
             DemoMedicalHistoryItem(
                 category = MedicalHistoryCategory.CHRONIC_CONDITION,
