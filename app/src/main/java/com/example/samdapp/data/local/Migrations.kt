@@ -229,3 +229,22 @@ val MIGRATION_10_11 = object : Migration(10, 11) {
         connection.execSQL("ALTER TABLE `diagnosis_feedback` ADD COLUMN `clinicalNote` TEXT")
     }
 }
+
+/**
+ * Adds missing mock doctors to support AI Kernel disease routing (REQ-DOC-MAP).
+ * The specialties cover Endocrinology, Cardiology, Neurology, Pulmonology, Infectious Disease, Urology, Gastroenterology, and Critical Care.
+ */
+val MIGRATION_11_12 = object : Migration(11, 12) {
+    override fun migrate(connection: SQLiteConnection) {
+        val insertPrefix = "INSERT OR IGNORE INTO `doctors` (`id`, `name`, `specialty`, `available`, `facilityName`, `registrationNumber`) VALUES "
+        connection.execSQL(insertPrefix + "('doc-cardio-001', 'Dr. Ramesh Gupta', 'Cardiology', 1, 'District Hospital, Sitapur', 'NMC/UP/2005/11234')")
+        connection.execSQL(insertPrefix + "('doc-endo-001', 'Dr. Sunita Patel', 'Endocrinology', 1, 'City General Hospital, Ahmedabad', 'NMC/GJ/2010/45678')")
+        connection.execSQL(insertPrefix + "('doc-neuro-001', 'Dr. Amit Trivedi', 'Neurology', 1, 'District Hospital, Sitapur', 'NMC/UP/2012/89012')")
+        connection.execSQL(insertPrefix + "('doc-pulmo-001', 'Dr. Rajesh Khanna', 'Pulmonology', 1, 'Community Health Centre, Bhainsa', 'NMC/TS/2008/34567')")
+        connection.execSQL(insertPrefix + "('doc-id-001', 'Dr. Meena Kumar', 'Infectious Disease', 1, 'District Hospital, Sitapur', 'NMC/UP/2015/67890')")
+        connection.execSQL(insertPrefix + "('doc-uro-001', 'Dr. Prakash Rao', 'Urology', 1, 'PHC Rampur', 'NMC/MH/2011/23456')")
+        connection.execSQL(insertPrefix + "('doc-gastro-001', 'Dr. Anita Desai', 'Gastroenterology', 1, 'District Hospital, Sitapur', 'NMC/UP/2014/90123')")
+        connection.execSQL(insertPrefix + "('doc-crit-001', 'Dr. Sanjay Singh', 'Critical Care', 1, 'District Hospital, Sitapur', 'NMC/UP/2009/56789')")
+        connection.execSQL(insertPrefix + "('doc-int-001', 'Dr. Vivek Sharma', 'Internal Medicine', 1, 'Community Health Centre, Bhainsa', 'NMC/TS/2016/12345')")
+    }
+}
