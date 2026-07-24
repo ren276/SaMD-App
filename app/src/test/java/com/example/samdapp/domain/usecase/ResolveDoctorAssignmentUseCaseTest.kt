@@ -7,6 +7,8 @@ import com.example.samdapp.domain.model.Encounter
 import com.example.samdapp.testutil.FakeCaseRecordRepository
 import com.example.samdapp.testutil.FakeDoctorRepository
 import com.example.samdapp.testutil.FakeEncounterRepository
+import com.example.samdapp.testutil.FakeEvaluateReportRepository
+import com.example.samdapp.testutil.FakeKernelReportRepository
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -32,7 +34,7 @@ class ResolveDoctorAssignmentUseCaseTest {
         val encounters = FakeEncounterRepository(
             initialEncounters = listOf(Encounter(id = "enc-1", patientId = "p1", startedAt = Instant.EPOCH, createdAt = Instant.EPOCH, updatedAt = Instant.EPOCH, followUpOfEncounterId = null)),
         )
-        val useCase = ResolveDoctorAssignmentUseCase(encounters, caseRecords, FakeDoctorRepository(doctors))
+        val useCase = ResolveDoctorAssignmentUseCase(encounters, caseRecords, FakeDoctorRepository(doctors), FakeKernelReportRepository(), FakeEvaluateReportRepository())
 
         val proposal = useCase("case-1", "enc-1").getOrThrow()
 
@@ -52,7 +54,7 @@ class ResolveDoctorAssignmentUseCaseTest {
         val encounters = FakeEncounterRepository(
             initialEncounters = listOf(Encounter(id = "enc-new", patientId = "p1", startedAt = Instant.EPOCH, createdAt = Instant.EPOCH, updatedAt = Instant.EPOCH, followUpOfEncounterId = "enc-prior")),
         )
-        val useCase = ResolveDoctorAssignmentUseCase(encounters, caseRecords, FakeDoctorRepository(doctors))
+        val useCase = ResolveDoctorAssignmentUseCase(encounters, caseRecords, FakeDoctorRepository(doctors), FakeKernelReportRepository(), FakeEvaluateReportRepository())
 
         val proposal = useCase("case-new", "enc-new").getOrThrow()
 
@@ -72,7 +74,7 @@ class ResolveDoctorAssignmentUseCaseTest {
         val encounters = FakeEncounterRepository(
             initialEncounters = listOf(Encounter(id = "enc-new", patientId = "p1", startedAt = Instant.EPOCH, createdAt = Instant.EPOCH, updatedAt = Instant.EPOCH, followUpOfEncounterId = "enc-prior")),
         )
-        val useCase = ResolveDoctorAssignmentUseCase(encounters, caseRecords, FakeDoctorRepository(doctors))
+        val useCase = ResolveDoctorAssignmentUseCase(encounters, caseRecords, FakeDoctorRepository(doctors), FakeKernelReportRepository(), FakeEvaluateReportRepository())
 
         val proposal = useCase("case-new", "enc-new").getOrThrow()
 
@@ -85,9 +87,9 @@ class ResolveDoctorAssignmentUseCaseTest {
         val doctors = listOf(
             doctor("gp-1", specialty = "General Physician"),
             doctor("gp-2", specialty = "General Physician"),
-            doctor("derm-1", specialty = "Dermatology"),
+            doctor("doc-1", specialty = "Dermatology"),
         )
-        val useCase = ResolveDoctorAssignmentUseCase(FakeEncounterRepository(), FakeCaseRecordRepository(), FakeDoctorRepository(doctors))
+        val useCase = ResolveDoctorAssignmentUseCase(FakeEncounterRepository(), FakeCaseRecordRepository(), FakeDoctorRepository(doctors), FakeKernelReportRepository(), FakeEvaluateReportRepository())
 
         val alternatives = useCase.sameSpecialtyAlternatives("General Physician", excludingDoctorId = "gp-1").getOrThrow()
 

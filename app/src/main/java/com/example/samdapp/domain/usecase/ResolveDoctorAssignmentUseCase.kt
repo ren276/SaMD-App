@@ -77,18 +77,63 @@ class ResolveDoctorAssignmentUseCase @Inject constructor(
     private fun mapConditionToSpecialty(condition: String): String? {
         val lower = condition.lowercase()
         return when {
+            // High acuity / Emergency
             lower.contains("severe") || lower.contains("haemorrhagic") -> "Critical Care"
-            lower.contains("hypertension") || lower.contains("tachycardia") || lower.contains("white coat") -> "Cardiology"
-            lower.contains("migraine") || lower.contains("headache") -> "Neurology"
-            lower.contains("obesity") || lower.contains("thyroid") || lower.contains("diabetes") || lower.contains("metabolic") -> "Endocrinology"
-            lower.contains("anxiety") || lower.contains("panic") -> "Psychiatry"
-            lower.contains("anemia") || lower.contains("anaemia") -> "Internal Medicine"
-            lower.contains("osteoarthritis") -> "Orthopedics"
-            lower.contains("viral") || lower.contains("typhoid") || lower.contains("dengue") || lower.contains("malaria") || lower.contains("chikungunya") -> "Infectious Disease"
-            lower.contains("urinary") || lower.contains("uti") -> "Urology"
-            lower.contains("gastroenteritis") -> "Gastroenterology"
-            lower.contains("respiratory") || lower.contains("tuberculosis") || lower.contains("pneumonia") -> "Pulmonology"
+
+            // Cardiology
+            lower.contains("chest pain") || lower.contains("tachycardia") || lower.contains("palpitation") -> "Cardiology"
+
+            // Neurology
+            lower.contains("stroke") || lower.contains("seizure") || lower.contains("fits") ||
+            lower.contains("weakness") || lower.contains("numbness") || lower.contains("fainting") ||
+            lower.contains("syncope") || lower.contains("dizziness") || lower.contains("vertigo") ||
+            lower.contains("migraine") -> "Neurology"
+
+            // Pulmonology
+            lower.contains("asthma") || lower.contains("pneumonia") || lower.contains("tuberculosis") ||
+            lower.contains("breathlessness") || lower.contains("shortness of breath") || 
+            lower.contains("cough") || lower.contains("respiratory") -> "Pulmonology"
+
+            // Orthopedics
+            lower.contains("fracture") || lower.contains("osteoarthritis") || lower.contains("arthritis") ||
+            lower.contains("back pain") || lower.contains("neck pain") || lower.contains("joint pain") -> "Orthopedics"
+
+            // Gastroenterology
+            lower.contains("jaundice") || lower.contains("constipation") || lower.contains("acidity") ||
+            lower.contains("reflux") || lower.contains("heartburn") -> "Gastroenterology"
+
+            // Urology
+            lower.contains("kidney stone") || lower.contains("blood in urine") || lower.contains("prostate") -> "Urology"
+
+            // Endocrinology
+            lower.contains("diabetes") || lower.contains("thyroid") || lower.contains("obesity") || lower.contains("metabolic") -> "Endocrinology"
+
+            // Psychiatry
+            lower.contains("depression") || lower.contains("anxiety") || lower.contains("panic") || lower.contains("insomnia") -> "Psychiatry"
+
+            // Gynecology
+            lower.contains("pregnancy") || lower.contains("menstrual") || lower.contains("pcos") || lower.contains("infertility") -> "Gynecology"
+
+            // Dermatology
+            lower.contains("skin rash") || lower.contains("eczema") || lower.contains("psoriasis") || lower.contains("acne") -> "Dermatology"
+
+            // ENT
+            lower.contains("ear pain") || lower.contains("sore throat") || lower.contains("sinusitis") -> "ENT"
+
+            // Ophthalmology
+            lower.contains("eye pain") || lower.contains("blurred vision") -> "Ophthalmology"
+
+            // Internal Medicine
+            lower.contains("typhoid") || lower.contains("dengue") || lower.contains("malaria") ||
+            lower.contains("chikungunya") || lower.contains("anemia") || lower.contains("anaemia") -> "Internal Medicine"
+
+            // General Physician
+            lower.contains("headache") || lower.contains("fever") || lower.contains("viral") || 
+            lower.contains("hypertension") || lower.contains("white coat") || lower.contains("abdominal pain") || 
+            lower.contains("vomiting") || lower.contains("diarrhea") || lower.contains("diarrhoea") || 
+            lower.contains("gastroenteritis") || lower.contains("urinary") || lower.contains("uti") || 
             lower.contains("non-specific") || lower.contains("non specific") -> "General Physician"
+
             else -> null
         }
     }
