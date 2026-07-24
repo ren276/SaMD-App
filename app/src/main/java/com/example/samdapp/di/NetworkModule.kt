@@ -22,7 +22,7 @@ import javax.inject.Singleton
 /**
  * Provides the Retrofit + OkHttp stack for the local FastAPI kernel endpoint.
  *
- * Base URL: `http://10.16.4.182:8000/` — LAN IP of host machine running the FastAPI kernel,
+ * Base URL: Dynamically loaded from local.properties via BuildConfig.KERNEL_BASE_URL
  * for physical-device testing over Wi-Fi. Requires `android:usesCleartextTraffic="true"` in the manifest
  * (plain HTTP, not TLS — acceptable for a local dev/demo server; production would use HTTPS
  * behind an internal VPN or a real backend URL).
@@ -40,16 +40,20 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object NetworkModule {
 
-    private const val KERNEL_BASE_URL = "http://10.16.4.182:8000/"
     private const val TAG = "KernelNetwork"
 
     @Provides
     @Singleton
     fun provideHttpLoggingInterceptor(): HttpLoggingInterceptor =
         HttpLoggingInterceptor { message -> Log.d(TAG, message) }.apply {
-            // BODY level in debug builds for full request/response tracing;
-            // would be NONE in a production build via BuildConfig flag.
-            level = HttpLoggingInterceptor.Level.BODY
+            // Network logging is gated by a local.properties flag to prevent PHI leaks in logcat.
+            // Full request/response tracing is disabled by default. Audit logging handles
+            // secure, timestamped persistence of necessary clinical data.
+            level = if (com.example.samdapp.BuildConfig.ENABLE_NETWORK_LOGGING) {
+                HttpLoggingInterceptor.Level.BODY
+            } else {
+                HttpLoggingInterceptor.Level.NONE
+            }
         }
 
     @Provides
@@ -66,7 +70,7 @@ object NetworkModule {
     @Singleton
     fun provideRetrofit(okHttpClient: OkHttpClient): Retrofit =
         Retrofit.Builder()
-            .baseUrl(KERNEL_BASE_URL)
+            .baseUrl(com.example.samdapp.BuildConfig.KERNEL_BASE_URL)
             .client(okHttpClient)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
