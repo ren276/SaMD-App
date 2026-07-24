@@ -7,7 +7,7 @@ import retrofit2.http.POST
 
 /**
  * Retrofit interface for the local FastAPI + XGBoost ML kernel.
- * Base URL: `http://10.203.3.29:8000/` (LAN IP of host machine, for physical-device testing).
+ * Base URL: Injected via BuildConfig.KERNEL_BASE_URL (from local.properties).
  *
  * This is a one-endpoint service — the full clinical assessment is a single synchronous
  * inference request. Retrofit suspends the coroutine internally, so callers are

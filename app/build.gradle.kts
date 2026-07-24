@@ -37,6 +37,8 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "GEMINI_API_KEY", "\"${localProperties.getProperty("GEMINI_API_KEY", "")}\"")
+        buildConfigField("String", "KERNEL_BASE_URL", "\"${localProperties.getProperty("KERNEL_BASE_URL", "http://10.16.4.182:8000/")}\"")
+        buildConfigField("boolean", "ENABLE_NETWORK_LOGGING", "${localProperties.getProperty("ENABLE_NETWORK_LOGGING", "false")}")
     }
 
     buildTypes {
