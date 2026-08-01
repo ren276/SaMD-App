@@ -1,34 +1,147 @@
-# PHC SaMD — Claude Code memory
+# PHC SaMD — Agent Memory
 
-Android mockup → future SaMD for rural Indian PHCs. Investor demo is live (8 screens built). Current phase: hardening the mockup with real security/audit primitives without turning it into a full production build.
+Android mockup → SaMD for rural Indian PHCs. Investor demo live. Target: ASHA workers,
+nurses, compounders at a PHC. The doctor's review/prescription UI runs on a **separate
+channel** — this app is the PHC-worker side only.
 
-Full details, don't duplicate here — read on demand:
-- `agent_docs/spec.md` — data models, screen-by-screen spec
-- `agent_docs/hardening.md` — security/audit/cache work, triaged now-vs-later
-- `PROGRESS.md` — what's done, what's next, read this first every session
+---
 
-## Stack (do not deviate without asking)
+## Read first, on demand
 
-- Kotlin only, Jetpack Compose + Material 3, no XML layouts
-- MVVM + Clean Architecture: `presentation/` (Android-dependent) → `domain/` (zero Android deps) → `data/`
-- Hilt for DI, Coroutines + Flow for async, Room for persistence
-- Retrofit + OkHttp when networking is needed — no AWS SDK yet, no real backend calls
-- Versions pinned exactly in `libs.versions.toml`, no `+` ranges
-- `minSdk` 26/27 (field devices), `compileSdk`/`targetSdk` latest (dev device is Pixel 9 Pro)
+| File | Contains |
+|------|---------|
+| `agent_docs/spec.md` | Data models, screen-by-screen spec, package structure |
+| `agent_docs/hardening.md` | Security/audit triage, what's done vs. deferred |
+| `PROGRESS.md` | Ground truth for current state — read this, not just CLAUDE.md |
+| `docs/requirements/software-requirements.md` | REQ-IDs — reference these when touching any requirement |
+| `docs/requirements/traceability-matrix.md` | Requirement → code → test mapping |
+| `docs/sync-design.md` | Offline-first sync architecture |
+| `docs/data-retention.md` | Per-table deletion posture (insert-only vs. soft-delete vs. mutable) |
 
-## Two mock boundaries — keep mocked, don't build real yet
+---
 
-- `VitalsSource` interface (`domain/`) — `MockVitalsSource` returns randomized fake data. UI/ViewModel never touches the mock directly.
-- `TranscriptionService` interface (`domain/`) — implemented with Android's `SpeechRecognizer` (this one is real, not faked — reads better in a demo).
+## File placement — three categories, explicit rule
 
-## Now hardening (real, not demo theater)
+| Directory | Category | Git | Rule |
+|-----------|----------|-----|------|
+| `docs/` | Controlled documentation | **Tracked** | IEC 62304-controlled. Regulatory, requirements, QMS. Never write clinical/audit-clean content anywhere else. |
+| `agent_docs/` | Agent scratch | **Gitignored** | Spec, hardening plan, this file. Local only. Never commit. |
+| `second-brain/` | Personal vault | **Gitignored** | Founder's opinions, mistakes log, working style. Mirrored to a separate private repo by the founder. Agents append to `mistakes-log.md` when they catch a wrong turn. **Never `git add` anything here from this repo's working tree.** |
 
-- **SQLCipher** on the Room database — encrypt at rest, passphrase from Android Keystore. Swap `SupportFactory` in `DatabaseModule.kt`, not a schema rewrite.
-- **Audit logger** — `AuditLogEntity`, separate Room table, **insert-only**: no `UPDATE`/`DELETE` DAO methods should exist on it at all, not just "unused." Log every clinical action (encounter start, audio captured, kernel response, consultation locked) with timestamp, user ID, patient ID, payload.
-- **Local cache** — see `agent_docs/hardening.md` for scope; don't let this turn into syncing the entire patient DB to the tablet.
+---
 
-## Anti-patterns already hit (don't reintroduce)
+## Stack — do not deviate without asking
 
-- Don't call AWS SDKs directly from `data/` — abstracted behind repository interfaces, no exceptions.
-- Don't add fields to `domain/model` without checking `agent_docs/spec.md` first — flag gaps, don't silently extend.
-- Don't put demo-only UI (role switcher, network-drop toggle) behind the same interfaces as real hardening — see `agent_docs/hardening.md` for which is which.
+- **Language/UI:** Kotlin only. Jetpack Compose + Material 3. No XML layouts.
+- **Architecture:** MVVM + Clean Architecture.  
+  `presentation/` (Android-dependent) → `domain/` (zero Android deps) → `data/`
+- **DI:** Hilt. Not Koin — see `second-brain/decisions-and-opinions.md` for why.
+- **Async:** Coroutines + Flow throughout.
+- **Persistence:** Room + SQLCipher (encrypted at rest, passphrase from Android Keystore).
+- **Networking:** Retrofit + OkHttp + Gson. Two real endpoints exist:
+  - `POST /v1/assess` — `/v1/assess` XGBoost confidence + differentials (`RemoteKernelSource` / `RetrofitKernelSource`). Has a mock fallback.
+  - `POST /api/v1/evaluate` — NLEM drug/dosage/brand-mapping/vitals-triage (`EvaluateKernelSource` / `RetrofitEvaluateSource`). **No mock fallback** — failure omits that section, no crash.
+  - Base URL: `http://10.16.4.182:8000/` (dev host LAN IP — physical device over Wi-Fi).
+- **External AI:** Gemini API (`gemini-2.5-flash`, thinking disabled for latency) for India brand-name lookup. Key in `local.properties` → `BuildConfig.GEMINI_API_KEY`. gitignored.
+- **Versions:** pinned exactly in `libs.versions.toml`. No `+` ranges.
+- **SDK:** `minSdk` 26/27 (field devices). `compileSdk`/`targetSdk` latest. Dev device: Pixel 9 Pro.
+
+---
+
+## Auth & session
+
+- **`MockAuthSession`** (`data/local/auth/`) — no credential check. Preferences DataStore (not Room: one small key-value blob). Survives app restart.
+- **`AuthViewModel`** — Activity-scoped. Gates the Nav display: cold-start with no session → Login screen; session exists → skip directly. Drives Home's signed-in display and the idle-lock re-auth gate.
+- **`UserRole`:** `ASHA_WORKER`, `NURSE`, `COMPOUNDER` (PHC-field roles). Admin/CMO dashboard is out of scope.
+- **userId:** derived deterministically from `name + role` (SHA-256, truncated) — same worker signing in on different days keeps the same audit-trail userId.
+- **Biometric gate (REQ-SEC-03, PARTIAL):** `BiometricPrompt` fires on Sign-in tap, after name+role entry. Gates `AuthSession.signIn`. Worker login only, not the ABHA patient flow. A device with no biometric enrolled *and* no screen lock is refused outright.
+- **Idle lock:** `IdleLockViewModel` (Activity-scoped) — 75s no-touch timeout → `IdleLockScreen` drawn over `NavDisplay` in a Box (never removes NavDisplay from composition — doing so would destroy in-flight ViewModels like `CompounderViewModel`, minting duplicate encounters).
+
+---
+
+## Connectivity
+
+- **`ConnectivityController`** (`domain/connectivity`) — single source of truth for online state. Merges real `NetworkMonitor` AND the manual debug toggle. **Not just a UI flag** — the send path (`DoctorAssignmentConfirmViewModel.onConfirm()`) checks this before sending.
+- **`ConnectivityViewModel`** — thin wrapper delegating to `ConnectivityController`. Activity-scoped shared instance, same pattern as `AuthViewModel`/`IdleLockViewModel`.
+- **`CaseStatus.PENDING_SYNC`** — the queued state. Offline doctor confirm → `PENDING_SYNC`, not `SENT_TO_DOCTOR`. Auto-syncs on reconnect (real network back or worker flips toggle).
+
+---
+
+## Kernel integration — current state
+
+### `/v1/assess` path (GenerateKernelReportUseCase)
+Real FastAPI + XGBoost call. `RemoteKernelSource` / `RetrofitKernelSource`. Has a mock
+scenario-table fallback on any failure (network down, timeout, server offline). The per-record
+`inferenceSource` (`REAL_INFERENCE` / `MOCK_FALLBACK`) is stamped on `KernelReportOutput`.
+`GenerateKernelReportUseCase` fires in `SendingViewModel`.
+
+### `/api/v1/evaluate` path (GenerateEvaluateReportUseCase)
+Real FastAPI + XGBoost call. `EvaluateKernelSource` / `RetrofitEvaluateSource`. Returns NLEM
+drug/dosage/brand-mapping/vitals-triage via `EvaluateReportOutput`. **No mock fallback** —
+failure just means those fields are absent from the report, app never crashes. Fires alongside
+`/v1/assess` in `SendingViewModel`.
+
+### KernelAssessmentScreen display
+`AssessmentDisplay` is sourced from `EvaluateReportOutput` **first** (per-candidate
+confidence/reasoning, no mock path). Falls back to `KernelReportOutput` (`/v1/assess`,
+has its own REAL/MOCK split) only when no evaluate output exists. The old canvas block
+sourced purely from `KernelReportOutput` has been **deleted** — do not try to add it back.
+
+---
+
+## Doctor review flow — current shape
+
+Old shape (Phase 5): async mock-inbox polling via `ReceiveDoctorPrescriptionUseCase`.
+**Superseded.** `MockDoctorPrescriptionInbox` still exists as plumbing but is no longer the
+primary path.
+
+Current shape: `PatientSummaryScreen` → "Review AI diagnosis (doctor)" → shows
+`EvaluateReportOutput` top candidate → physician AGREE / MODIFY / REJECT picker →
+`SubmitDoctorDecisionUseCase` → persists `DiagnosisFeedback` + builds final `Prescription`.
+- MODIFY/REJECT: manual drug name + dosage, optional Gemini brand-lookup button, ICD dropdown
+  (`TRAINED_ICD_CANDIDATES`, 18 classes the model actually trained on — validated in use case).
+- AGREE: no extra input needed.
+- Logs `AuditAction.DIAGNOSIS_FEEDBACK_RECORDED`.
+- `PhysicianDecision.outcomeExplanation()` — investor-demo copy explaining training-pipeline
+  implication of each decision.
+
+---
+
+## Named mock/real boundaries — keep mocked, don't build real yet
+
+| Interface | Location | Status |
+|-----------|----------|--------|
+| `VitalsSource` | `domain/vitalssource/` | Mock only — `MockVitalsSource` returns randomized fake data |
+| `TranscriptionService` | `domain/transcription/` | Real — Android `SpeechRecognizer` |
+| `DoctorPrescriptionInbox` | `domain/doctor/` | Mock — `MockDoctorPrescriptionInbox` (plumbing, not primary path anymore) |
+| `RemoteKernelSource` | `domain/kernel/` | Real API + mock fallback |
+| `EvaluateKernelSource` | `domain/kernel/` | Real API, no fallback |
+| `BrandLookupSource` | `domain/kernel/` | Real Gemini call, best-effort |
+
+---
+
+## Screen landscape (25+ presentation modules)
+
+Home, Login, AbhaEntry, AbhaSignUp, AbhaLogin, AbhaOtp, Register, MedicalBackground,
+Compounder, Consent, EmergencyOverride, Consultation, Sending, KernelAssessment,
+Transcription, Acknowledgement, DoctorAssignmentConfirm, DoctorList, PatientSummary,
+ConsultationChain, PatientAudit, Report, Referrals, Patients, Profile.
+
+Bottom nav tabs: **Home / Patients / Referrals / Profile.** Bar is absent from
+in-flow screens (Register, ABHA, Consultation, Compounder, Sending, Transcription,
+Acknowledgement, KernelAssessment, Consent, EmergencyOverride, Report, DoctorList,
+DoctorAssignmentConfirm) by construction — they never receive a `bottomBar` param.
+
+---
+
+## Anti-patterns — do not reintroduce
+
+- Don't call AWS SDKs directly from `data/` — abstracted behind repository interfaces.
+- Don't add fields to `domain/model/` without checking `agent_docs/spec.md` first — flag gaps, don't silently extend.
+- Don't put demo-only UI behind the same interfaces as real hardening — see `agent_docs/hardening.md` for which is which.
+- Don't create a Room entity without a companion `MIGRATION_N_M` in `DatabaseModule`. DB is currently at **v11**. Next migration is `MIGRATION_11_12`.
+- Don't add a clinical action point without `AuditLogger.log(AuditAction.X)` — every clinical touch point must be logged. See `AuditAction.kt` for existing constants; add a new constant if none fits.
+- Don't write regulatory documentation to `agent_docs/` — it belongs in `docs/` (tracked).
+- Don't build the "explicitly later" list from `agent_docs/hardening.md` — it's there so it isn't forgotten, not so it gets started early.
+- Don't add an all-patients query to the DAO — the only list query is day/week-scoped (data minimisation, REQ-ROS-02 / H-04).
+- Don't re-litigate Hilt vs. Koin, multi-module, or `Result<T,E>` — all three are settled. See `second-brain/decisions-and-opinions.md`.
