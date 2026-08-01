@@ -14,3 +14,9 @@
 .cxx
 local.properties
 
+# --- Doc category boundaries ---
+# docs/          → tracked, IEC 62304-controlled, never gitignored
+# second-brain/  → gitignored personal vault — mirrored to a separate private repo by founder
+second-brain/
+.obsidian
+.kiro

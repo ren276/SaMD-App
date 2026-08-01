@@ -32,7 +32,9 @@ Only `id`, `fullName`, one contact method required in UI.
 Mock/static JSON asset. `id`, `name`, `specialty`, `available`, `facilityName?`.
 
 ### `CaseRecord`
-`id`, `patientId`, `vitalsId?`, `consultationId?`, `status` (`draft`/`saved_locally`/`pending_sync`/`sent_to_doctor`/`prescription_received`/`abandoned`), `assignedDoctorId?`, `updatedAt`. `ABANDONED` added 2026-07-20 (bug fix — see PROGRESS.md): `StartCaseUseCase`/`CaseRecordRepositoryImpl.createDraft` marks any pre-existing `DRAFT` case for the same `patientId` as `ABANDONED` before inserting a new one, so an orphaned in-progress draft (worker backed out mid-flow, never reached Acknowledgement) can't resurface via `HomeViewModel`'s crash-recovery resume prompt and get confused with the visit actually in progress.
+`id`, `patientId`, `vitalsId?`, `consultationId?`, `status` (`DRAFT`/`SAVED_LOCALLY`/`PENDING_SYNC`/`SENT_TO_DOCTOR`/`PRESCRIPTION_RECEIVED`/`ABANDONED`), `assignedDoctorId?`, `updatedAt`.
+- `PENDING_SYNC` (2026-07-19) — offline doctor confirm queues here, auto-syncs on reconnect.
+- `ABANDONED` (2026-07-20) — `CaseRecordRepositoryImpl.createDraft` marks any pre-existing `DRAFT` for the same `patientId` as `ABANDONED` before inserting a new one; prevents orphaned drafts resurfacing via the crash-recovery resume prompt. Shows as "Abandoned — restarted as a new visit" in consultation history.
 
 ### `AuditLogEntity` (new — see agent_docs/hardening.md for why)
 - `id: String`, `timestamp: Instant`
@@ -69,6 +71,8 @@ Mock/static JSON asset. `id`, `name`, `specialty`, `available`, `facilityName?`.
   `MockDoctorPrescriptionInbox`) → `ReceiveDoctorPrescriptionUseCase` → `PrescriptionRepository`,
   triggered from `PatientSummaryScreen`'s "Check for doctor's response" action. `CaseStatus` gained
   `PRESCRIPTION_RECEIVED`.
+- `EvaluateReportOutput` (+`EvaluateDiagnosticSummary`/`EvaluateRankedCandidate`/`EvaluateNlemTreatment`/`EvaluateBrandMapping`/`EvaluateSafetyAndTriage`/`EvaluateVitalsTriage`/`IndianBrandSuggestion`) — output from `/api/v1/evaluate`. `Evaluate*` prefix throughout to avoid clash with `Kernel*` (`/v1/assess`) types. Stored as one Gson JSON blob in `evaluate_reports`. **Primary display source** on `KernelAssessmentScreen` (no mock fallback).
+- `DiagnosisFeedback` + `PhysicianDecision` (AGREE/MODIFY/REJECT) — physician's on-device review decision. Persisted in `diagnosis_feedback`. `physicianFinalDiagnosis` validated against `TRAINED_ICD_CANDIDATES` (18 classes the symptom model trained on) on MODIFY; null on AGREE/REJECT. Feeds future model-retraining pipeline (capture-only today).
 - `ReferralRequest` — higher-facility referral (Phase 6). `id`, `patientUid`, `caseRecordId`,
   `urgencyLevel` (ROUTINE/URGENT/EMERGENCY), `reason`, `sendingPhcId`, `status`
   (QUEUED/SENT/ACKNOWLEDGED/CANCELLED), `timestamp`. PHC-side only, no receiver.
@@ -90,7 +94,7 @@ Mock/static JSON asset. `id`, `name`, `specialty`, `available`, `facilityName?`.
 - `Patient`/`PatientEntity` +`guardianRelation` (minors only).
 - `Observation`/`ObservationEntity` +`captureMethod` (data-quality), +`syncedToCloudAt` (dual
   timestamp; `createdAt`/`recordedAt` = offline capture).
-- Room DB version **2 → 3** (`MIGRATION_2_3`, additive). New action strings in `AuditAction`.
+- Room DB version **2 → 11** (migrations are additive, run in sequence). Current: **v11**. Next migration will be `MIGRATION_11_12`. Do not skip a version.
 
 ## Screen flow (built — see PROGRESS.md for actual status)
 
