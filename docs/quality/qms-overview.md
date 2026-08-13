@@ -8,7 +8,12 @@
 ## Scope
 Quality system for **PHC Patient Care**, a Software as a Medical Device (SaMD) intended for
 CDSCO-regulated deployment in India. Software developed under **IEC 62304**; risk managed under
-**ISO 14971**; quality system per **ISO 13485:2016**; usability per **IEC 62366-1**.
+**ISO 14971**; quality system per **ISO 13485:2016**; usability per **IEC 62366-1**; CDSCO
+submission guided by the **CDSCO Guidance Document on Medical Device Software (Doc No.
+CDSCO/MD/GD/MDSW/01/2026)** — supersedes the October-2025 draft and the older MD-5/MD-9
+shorthand this project previously referenced. Full text tracked at
+`docs/Guidance document on Medical Device Software under MDR-2017.md`; classification analysis
+in `docs/regulatory-foundation.md` §2.3.
 
 ## Roles & responsibilities (TODO — assign named owners)
 | Role | Responsibility | Owner |
@@ -37,6 +42,10 @@ CDSCO-regulated deployment in India. Software developed under **IEC 62304**; ris
 | Cybersecurity | IEC 81001-5-1 / AAMI TIR57 | **partial** — SQLCipher, Keystore; threat model TODO |
 | Post-market surveillance | ISO 13485 §8, MDR 2017 | TODO |
 | Data protection | DPDP Act 2023 | **partial** — encryption + data minimisation; consent/DPO TODO |
+| Algorithm Change Protocol (ACP) | CDSCO/MD/GD/MDSW/01/2026 §9.0 | TODO — required before any post-deployment update to the kernel model (`/v1/assess`, `/api/v1/evaluate`); no version-gating exists yet (`ai_kernel_version` gap, see `agent_docs/hardening.md`) |
+| Continuous performance assurance / drift monitoring | CDSCO/MD/GD/MDSW/01/2026 §9.0 | TODO — production monitoring for clinically significant performance degradation and algorithm drift; nothing exists post-deployment today, only pre-release scenario testing |
+| AI risk management | IS/ISO/IEC 23894 | TODO — distinct from the general ISO 14971 hazard register; AI-specific risks (dataset bias, drift, out-of-distribution inputs) not yet separately tracked |
+| AI management system | IS/ISO/IEC 42001 | TODO — organisational AI governance layer, separate from the software QMS above |
 
 ## Management review & CAPA
 TODO — establish periodic management review and a Corrective/Preventive Action process before

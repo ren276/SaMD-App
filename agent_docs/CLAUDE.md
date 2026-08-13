@@ -145,3 +145,19 @@ DoctorAssignmentConfirm) by construction — they never receive a `bottomBar` pa
 - Don't build the "explicitly later" list from `agent_docs/hardening.md` — it's there so it isn't forgotten, not so it gets started early.
 - Don't add an all-patients query to the DAO — the only list query is day/week-scoped (data minimisation, REQ-ROS-02 / H-04).
 - Don't re-litigate Hilt vs. Koin, multi-module, or `Result<T,E>` — all three are settled. See `second-brain/decisions-and-opinions.md`.
+
+---
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live as GitHub issues in `ren276/SaMD-App`, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five canonical labels (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at repo root. See `docs/agents/domain.md`.

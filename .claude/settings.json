@@ -1,5 +1,6 @@
 {
   "enabledPlugins": {
-    "ponytail@ponytail": true
+    "ponytail@ponytail": true,
+    "obsidian-second-brain@obsidian-second-brain": true
   }
 }

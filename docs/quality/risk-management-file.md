@@ -7,18 +7,22 @@
 
 ## 1. Scope & policy
 Device: **PHC Patient Care** SaMD. Intended use: frontline capture of patient
-registration/vitals/consultation at rural PHCs, with a (currently mocked) clinical kernel and
-**mandatory doctor review** before any clinical action. Provisional software safety class:
-**B** (see `docs/regulatory-foundation.md` §2.1 — becomes **C** if kernel output can drive an
-unreviewed action). Risk acceptability policy, severity/probability scales, and residual-risk
-sign-off: **TODO** by the risk team.
+registration/vitals/consultation at rural PHCs, with a real HTTP clinical kernel (`/v1/assess`,
+`/api/v1/evaluate`) and **mandatory doctor review** (AGREE/MODIFY/REJECT) before any clinical
+action. Provisional software safety class, **re-examined 2026-08 against CDSCO/MD/GD/MDSW/01/2026
+Table 2** (full derivation: `docs/regulatory-foundation.md` §2.3): **B or C, genuinely
+unresolved** — base case (Serious situation × Drive-clinical-management) is B; the guidance's
+non-clinical-user note may escalate the situation to Critical (→ C) since the doctor's review is
+asynchronous, not co-located with the frontline worker at the point the AI output is generated.
+Risk acceptability policy, severity/probability scales, and residual-risk sign-off: **TODO** by
+the risk team; **budget for C, do not assume B**, pending CDSCO confirmation.
 
 ## 2. Hazard register (initial)
 
 | ID | Hazard / hazardous situation | Potential harm | Sev* | Prob* | Risk controls implemented | Residual / open work |
 |----|------------------------------|----------------|------|-------|---------------------------|----------------------|
 | H-01 | Wrong/mistyped vitals recorded | Clinician acts on wrong data | High | Med | Digit/decimal input filters (`NumericInputFilters`); review-before-send dialog; doctor review | Add range/plausibility validation; unit tests |
-| H-02 | Mis-triage / automation bias on kernel output | Delayed or wrong care | High | Med | **Human-in-the-loop**: kernel not autonomous; review gates; doctor confirms. **2026-07:** the doctor-review step is now a real interactive AGREE/MODIFY/REJECT decision (`SubmitDoctorDecisionUseCase`, REQ-RX-01/RFN-01) rather than a randomly-simulated response — the reviewer sees the AI's confidence/differential/reasoning before deciding, and REJECT is structurally never eligible for a future training-dataset reimport (no fabricated ground truth). MODIFY requires a corrected diagnosis from a fixed 18-class list, not free text, closing one path for an unreviewable/untrainable correction to enter the loop silently. | Kernel validation + versioning (deferred); confidence/explainability UI; still no enforcement stopping a reviewer from picking AGREE without actually reading the evidence (a UX/training issue, not a code gate) |
+| H-02 | Mis-triage / automation bias on kernel output | Delayed or wrong care | High | Med | *(this is the hazard the Class C determination above is centred on — the risk control here is load-bearing for the whole classification argument, not just this row)* **Human-in-the-loop**: kernel not autonomous; review gates; doctor confirms. **2026-07:** the doctor-review step is now a real interactive AGREE/MODIFY/REJECT decision (`SubmitDoctorDecisionUseCase`, REQ-RX-01/RFN-01) rather than a randomly-simulated response — the reviewer sees the AI's confidence/differential/reasoning before deciding, and REJECT is structurally never eligible for a future training-dataset reimport (no fabricated ground truth). MODIFY requires a corrected diagnosis from a fixed 18-class list, not free text, closing one path for an unreviewable/untrainable correction to enter the loop silently. | Kernel validation + versioning (deferred); confidence/explainability UI; still no enforcement stopping a reviewer from picking AGREE without actually reading the evidence (a UX/training issue, not a code gate) |
 | H-03 | Wrong-patient record mix-up | Wrong treatment | High | Low | Persistent patient **name + ID banner**; patient context derived from nav back stack; `Patient.id` now a 12-char alphanumeric UID matching `agent_docs/spec.md` (was a 36-char UUID) — closes the format gap flagged since early hardening | None open on this control; broader wrong-patient mitigations (e.g. barcode/photo confirmation) remain future work |
 | H-04 | PHI breach on lost/stolen device | Privacy harm (DPDP) | High | Med | **SQLCipher** at rest + non-exportable **Keystore** key; **day-scoped cache** (minimisation) | Formal threat model; screen-lock/session policy; secure backend later |
 | H-05 | Offline data loss before sync | Lost clinical record | Med | Med | Durable local Room writes (local ACID) | Real outbox/dirty-flag sync (`docs/sync-design.md`); currently sync is mocked |

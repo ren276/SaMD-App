@@ -1,0 +1,475 @@
+{
+	"info": {
+		"_postman_id": "2f90dd6c-9599-4aa5-bbcf-025ea2a2112e",
+		"name": "Face Auth Creation APIs",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "34082172"
+	},
+	"item": [
+		{
+			"name": "ABHA Face AUTH via  QR CODE Registration Copy",
+			"item": [
+				{
+					"name": "Generate Txn ID",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{accessToken}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "sec-ch-ua-platform",
+								"value": "\"Windows\""
+							},
+							{
+								"key": "TIMESTAMP",
+								"value": "{{$isoTimestamp}}"
+							},
+							{
+								"key": "REQUEST-ID",
+								"value": "{{$guid}}"
+							},
+							{
+								"key": "User-Agent",
+								"value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json, text/plain, */*"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"scope\": [\r\n        \"abha-enrol\",\r\n        \"face-verify\"\r\n    ]\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "https://abhasbx.abdm.gov.in/abha/api/v3/enrollment/enrol/auth/init",
+							"protocol": "https",
+							"host": [
+								"abhasbx",
+								"abdm",
+								"gov",
+								"in"
+							],
+							"path": [
+								"abha",
+								"api",
+								"v3",
+								"enrollment",
+								"enrol",
+								"auth",
+								"init"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Capture PID",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{accessToken}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "TIMESTAMP",
+								"value": "{{$isoTimestamp}}"
+							},
+							{
+								"key": "REQUEST-ID",
+								"value": "{{$guid}}"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json, text/plain, */*"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"scope\": [\r\n        \"abha-enrol\",\r\n        \"face-verify\"\r\n    ],\r\n    \"txnId\": \"06691f76-e009-463d-90e2-14234595dc6c\"\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "https://abhasbx.abdm.gov.in/abha/api/v3/enrollment/enrol/capturePID",
+							"protocol": "https",
+							"host": [
+								"abhasbx",
+								"abdm",
+								"gov",
+								"in"
+							],
+							"path": [
+								"abha",
+								"api",
+								"v3",
+								"enrollment",
+								"enrol",
+								"capturePID"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Face Auth API",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{AccessToken}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "REQUEST-ID",
+								"value": "{{$guid}}",
+								"type": "text"
+							},
+							{
+								"key": "TIMESTAMP",
+								"value": "{{$isoTimestamp}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"authData\": {\r\n        \"authMethods\": [\r\n            \"face\"\r\n        ],\r\n        \"face\": {\r\n           \r\n            \"aadhaar\": \"{{encrypted aadhaar}}\",\r\n            \"rdPidData\": \"{{PID}}\",\r\n            \"mobile\": \"{{Mobile Number}}\"\r\n        }\r\n    },\r\n    \"consent\": {\r\n        \"code\": \"abha-enrollment\",\r\n        \"version\": \"1.4\"\r\n    }\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "https://abhasbx.abdm.gov.in/abha/api/v3/enrollment/enrol/byAadhaar",
+							"protocol": "https",
+							"host": [
+								"abhasbx",
+								"abdm",
+								"gov",
+								"in"
+							],
+							"path": [
+								"abha",
+								"api",
+								"v3",
+								"enrollment",
+								"enrol",
+								"byAadhaar"
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "200",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "REQUEST-ID",
+										"value": "{{$guid}}",
+										"type": "text"
+									},
+									{
+										"key": "TIMESTAMP",
+										"value": "{{$isoTimestamp}}",
+										"type": "text"
+									},
+									{
+										"key": "benefit-name",
+										"value": "healthid api",
+										"type": "text",
+										"disabled": true
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\r\n    \"authData\": {\r\n        \"authMethods\": [\r\n            \"face\"\r\n        ],\r\n        \"face\": {\r\n           \r\n            \"aadhaar\": \"{{encrypted aadhaar}}\",\r\n            \"rdPidData\": \"{{PID}}\",\r\n            \"mobile\": \"{{Mobile Number}}\"\r\n        }\r\n    },\r\n    \"consent\": {\r\n        \"code\": \"abha-enrollment\",\r\n        \"version\": \"1.4\"\r\n    }\r\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "https://abhasbx.abdm.gov.in/abha/api/v3/enrollment/enrol/byAadhaar",
+									"protocol": "https",
+									"host": [
+										"abhasbx",
+										"abdm",
+										"gov",
+										"in"
+									],
+									"path": [
+										"abha",
+										"api",
+										"v3",
+										"enrollment",
+										"enrol",
+										"byAadhaar"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "expires",
+									"value": "0"
+								},
+								{
+									"key": "x-envoy-upstream-service-time",
+									"value": "1119"
+								},
+								{
+									"key": "access-control-allow-origin",
+									"value": ""
+								},
+								{
+									"key": "vary",
+									"value": "Origin,Access-Control-Request-Method,Access-Control-Request-Headers"
+								},
+								{
+									"key": "access-control-allow-methods",
+									"value": "POST"
+								},
+								{
+									"key": "x-frame-options",
+									"value": "DENY"
+								},
+								{
+									"key": "permissions-policy",
+									"value": "geolocation=(self)"
+								},
+								{
+									"key": "access-control-allow-headers",
+									"value": "authorization,Content-Type,SOAPAction,apikey,Internal-Key,TIMESTAMP,REQUEST-ID,TRANSACTION_ID,Access-Control-Allow-Origin,Authorization"
+								},
+								{
+									"key": "pragma",
+									"value": "no-cache"
+								},
+								{
+									"key": "strict-transport-security",
+									"value": "max-age=31536000 ; includeSubDomains"
+								},
+								{
+									"key": "activityid",
+									"value": "9c862c89-a2e2-47f1-ac6b-21cbf8523c40"
+								},
+								{
+									"key": "access-control-expose-headers",
+									"value": ""
+								},
+								{
+									"key": "content-security-policy",
+									"value": "form-action 'self'"
+								},
+								{
+									"key": "x-content-type-options",
+									"value": "nosniff"
+								},
+								{
+									"key": "x-xss-protection",
+									"value": "1 ; mode=block"
+								},
+								{
+									"key": "referrer-policy",
+									"value": "no-referrer"
+								},
+								{
+									"key": "content-type",
+									"value": "application/json"
+								},
+								{
+									"key": "cache-control",
+									"value": "no-cache, no-store, max-age=0, must-revalidate"
+								},
+								{
+									"key": "date",
+									"value": "Tue, 24 Sep 2024 10:23:40 GMT"
+								},
+								{
+									"key": "Transfer-Encoding",
+									"value": "chunked"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"message\": \"Account created successfully\",\n    \"txnId\": \"99cced17-ac63-41aa-a9f4-0a3d904e7fca\",\n    \"tokens\": {\n        \"token\": \"eyJhbGciOiJSUzUxMiJ9.eyJpc0t5Y1ZlcmlmaWVkIjp0cnVlLCJzdWIiOiI5MS03NzI3LTE1ODMtNjMzOCIsImNsaWVudElkIjoiYWJoYS1wcm9maWxlLWFwcC1hcGkiLCJzeXN0ZW0iOiJBQkhBLU4iLCJhY2NvdW50VHlwZSI6InN0YW5kYXJkIiwibW9iaWxlIjpudWxsLCJhYmhhTnVtYmVyIjoiOTEtNzcyNy0xNTgzLTYzMzgiLCJwcmVmZXJyZWRBYmhhQWRkcmVzcyI6IjkxNzcyNzE1ODM2MzM4QHNieCIsInR5cCI6IlRyYW5zYWN0aW9uIiwiZXhwIjoxNzI3MTc1MjIwLCJpYXQiOjE3MjcxNzM0MjAsInR4bklkIjoiOTljY2VkMTctYWM2My00MWFhLWE5ZjQtMGEzZDkwNGU3ZmNhIn0.P3RvUQs3L5b6M5wBQDJwg8GEk1FzF64CfFHCgB-l4zr96fiwXm764yKE8T1GF3W_WAIkNHFtDFmcbSNIBuMCYlOHC68O-B4RmFp_u4VLSdKVg7Rok6JbRzME5tQTtJki-xF3wr6bEnkVunHEeRHe_beQx2IOcCqSXA7Wnmh0JOf89CCVOYmGphz5jifZLHYiMm8p56dS2Ra8I9WzOdPwgbMwlt7WEAWVvdD_2JCYgoIJRRnJTx0SxKWg1UriLLYausijQ5Ino7Nr2juUGBXEyRC3qGAkqJg5HxeLXvOO1DmKmc0_Z1XLxv4U6s9waVNPVfFBb26hd1vG0-KPq_F4NijM1buefz8OlgmSSvO4STtWt_VBx7u8zEhhJfSkugdq6pT9m5ouy0o0NAH3bMC2Zn-6lW8Bl3x1Ewyhrm6Hsr_ZCb_L6vMY3u6NU_NXdgM59IvKAS6H1VUgFzUHe0_KeBgL-yuQXUYds1iv2-5yvA9JUTz6VXtU0rcTR_9P60iVhKFg-7QJLl2V71WFugMbVzJhTpSvvGYKdjjZgMdjOnt9rIJLpJZcVSw7iBEp2uGNxL_Q4CF_zX1yyd9k3_AW1zJwznb3Nx_grAcrb7CVMfMuMqujisYTxKWsX13foZQJQf3C4pczFoGiBwN2DMJL7MdTIfJ9ftMmqcNynsH83oc\",\n        \"expiresIn\": 1800,\n        \"refreshToken\": \"eyJhbGciOiJSUzUxMiJ9.eyJzdWIiOiI5MS03NzI3LTE1ODMtNjMzOCIsImNsaWVudElkIjoiYWJoYS1wcm9maWxlLWFwcC1hcGkiLCJzeXN0ZW0iOiJBQkhBLU4iLCJ0eXAiOiJSZWZyZXNoIiwiZXhwIjoxNzI4NDY5NDIwLCJpYXQiOjE3MjcxNzM0MjB9.YPGBOs0vQFU8aQfn6XpcxH2rdzLo1IO5Hfz5kHWQL7GIVHBgf06OhSKILl0M6h8fMvDeonthFPZ2nQvaqJaVKJTT8bzPvg6CyNV9IrFtfwM_EvnXWhS_j8yZirtraeuTX_SXazwmZccF1AlKZptrKWEp_i8WrQ-l7xkNOM0IkrXsaXDvaJenO65ZY6lFZ9kSj_IwPLoHlMd68mXfUNsmIqR2CzA2S61THXrTucZAne5fEMLsZzzJwvV5fHIHv2GiN5o1tzrr7t4fj3Gp9R2Ko4y5htlJLHdW8MLmV6VRYr96AbVuDYXixMpHcgjTd4DnjXEdA5SLTVvNN--I1knSc9fVvWb4U2INZSdp7ZupVyloI0JcGc3GzI8upGIG0sFhfQ3qitfAqnKD-dc99kh8avXlQzVQ0lJw827wTJT6fMO1OJd71z-81qBqOVx6Sbs_pHIUobFWab_0f48r_cFht4dsRhZip7a_oO6JuvwF-B1_3D7IOfJGM6NAKZ1nuJe8o7vvWsanQkc1gjgRiZoryQSCyw3yVOtgLHeOHpi0w1KIAjIIp1G5R-ni4xL8x2lDhUAT6S-Gkytlk1uLtbCWLp12qs_nkN3I0tHVSFcl2RBoZ4l8AbXcUXHqKBCE2VpsQaWqdB3aiiccEkknMtO2gyGRhuaXr4BJNF0j_M3WqJw\",\n        \"refreshExpiresIn\": 1296000\n    },\n    \"ABHAProfile\": {\n        \"firstName\": \"Kushal\",\n        \"middleName\": \"\",\n        \"lastName\": \"Pandita\",\n        \"dob\": \"11-02-2000\",\n        \"gender\": \"M\",\n        \"photo\": \"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\",\n        \"mobile\": null,\n        \"email\": null,\n        \"phrAddress\": [\n            \"91772715836338@sbx\"\n        ],\n        \"address\": \"House no 954, Lane no 14, Subash Nagar, Rehari Mohalla, Jammu, Jammu and Kashmir\",\n        \"districtCode\": \"5\",\n        \"stateCode\": \"1\",\n        \"pinCode\": \"180005\",\n        \"abhaType\": \"STANDARD\",\n        \"stateName\": \"JAMMU AND KASHMIR\",\n        \"districtName\": \"JAMMU\",\n        \"ABHANumber\": \"91-7727-1583-6338\",\n        \"abhaStatus\": \"ACTIVE\"\n    },\n    \"isNew\": true\n}"
+						},
+						{
+							"name": "Invalid PID",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "REQUEST-ID",
+										"value": "{{$guid}}",
+										"type": "text"
+									},
+									{
+										"key": "TIMESTAMP",
+										"value": "{{$isoTimestamp}}",
+										"type": "text"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\r\n    \"authData\": {\r\n        \"authMethods\": [\r\n            \"face\"\r\n        ],\r\n        \"face\": {\r\n           \r\n            \"aadhaar\": \"{{encrypted aadhaar}}\",\r\n            \"rdPidData\": \"{{Invalid PID}}\",\r\n            \"mobile\": \"{{Mobile Number}}\"\r\n        }\r\n    },\r\n    \"consent\": {\r\n        \"code\": \"abha-enrollment\",\r\n        \"version\": \"1.4\"\r\n    }\r\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "https://abhasbx.abdm.gov.in/abha/api/v3/enrollment/enrol/byAadhaar",
+									"protocol": "https",
+									"host": [
+										"abhasbx",
+										"abdm",
+										"gov",
+										"in"
+									],
+									"path": [
+										"abha",
+										"api",
+										"v3",
+										"enrollment",
+										"enrol",
+										"byAadhaar"
+									]
+								}
+							},
+							"status": "Bad Request",
+							"code": 400,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "expires",
+									"value": "0"
+								},
+								{
+									"key": "x-envoy-upstream-service-time",
+									"value": "996"
+								},
+								{
+									"key": "access-control-allow-origin",
+									"value": ""
+								},
+								{
+									"key": "vary",
+									"value": "Origin,Access-Control-Request-Method,Access-Control-Request-Headers"
+								},
+								{
+									"key": "access-control-allow-methods",
+									"value": "POST"
+								},
+								{
+									"key": "x-frame-options",
+									"value": "DENY"
+								},
+								{
+									"key": "permissions-policy",
+									"value": "geolocation=(self)"
+								},
+								{
+									"key": "access-control-allow-headers",
+									"value": "authorization,Content-Type,SOAPAction,apikey,Internal-Key,TIMESTAMP,REQUEST-ID,TRANSACTION_ID,Access-Control-Allow-Origin,Authorization"
+								},
+								{
+									"key": "pragma",
+									"value": "no-cache"
+								},
+								{
+									"key": "strict-transport-security",
+									"value": "max-age=31536000 ; includeSubDomains"
+								},
+								{
+									"key": "activityid",
+									"value": "c5f0e5b0-446e-4ff2-a6c3-695ea9fc780d"
+								},
+								{
+									"key": "access-control-expose-headers",
+									"value": ""
+								},
+								{
+									"key": "content-security-policy",
+									"value": "form-action 'self'"
+								},
+								{
+									"key": "x-content-type-options",
+									"value": "nosniff"
+								},
+								{
+									"key": "x-xss-protection",
+									"value": "1 ; mode=block"
+								},
+								{
+									"key": "referrer-policy",
+									"value": "no-referrer"
+								},
+								{
+									"key": "content-type",
+									"value": "application/json"
+								},
+								{
+									"key": "cache-control",
+									"value": "no-cache, no-store, max-age=0, must-revalidate"
+								},
+								{
+									"key": "date",
+									"value": "Tue, 26 Nov 2024 05:32:46 GMT"
+								},
+								{
+									"key": "Transfer-Encoding",
+									"value": "chunked"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"pid\": \"Invalid Face Auth PID\",\n    \"timestamp\": \"2024-11-26 11:02:46\"\n}"
+						}
+					]
+				}
+			]
+		}
+	]
+}

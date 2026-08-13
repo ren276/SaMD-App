@@ -38,10 +38,13 @@ The lifecycle standard we develop against. Two things it forces early:
   - **A** — no injury possible
   - **B** — non-serious injury possible
   - **C** — death or serious injury possible
-  - *Provisional working assumption: **Class B**, on the strength of mandatory
-    human-in-the-loop review before any hand-off (a doctor confirms; the kernel does not act
-    autonomously). If the kernel's output can drive an unreviewed clinical action, it becomes
-    **Class C**. This must be decided by formal risk analysis, not assumed.*
+  - *Provisional working assumption, revised 2026-08 against the CDSCO 2026 guidance's Table 2
+    (see §2.3 below for the full derivation): **B or C, genuinely unresolved** — the base case
+    (Serious situation × Drive-clinical-management output) is **B**, but the guidance's
+    non-clinical-user note may escalate this app's situation to Critical, which would make it
+    **C**. The swing factor is a single judgment call (does the async doctor-review step count
+    as "support from specialized professionals" for that note's purpose), not yet decided by
+    CDSCO or a qualified risk team. Plan/budget for C; do not claim B or C as settled.*
 - **Required processes** (must exist as process, with records): development planning,
   requirements, architectural + detailed design, implementation & unit verification,
   integration & integration testing, system testing, release; plus **risk management**
@@ -60,20 +63,80 @@ CDSCO aligns with the **IMDRF SaMD** framework. Production requires a **manufact
 license** (Class A/B via State Licensing Authority; C/D via CDSCO Central), an **ISO 13485**
 QMS, and conformity to the **Essential Principles** of safety & performance.
 
-**Live framework — CDSCO draft Medical Device Software guidance (October 2025):** supersedes the
-older MD-5/MD-9 shorthand. SaMD is classified A–D by (1) the significance of the information the
-software provides and (2) the severity of the healthcare situation. Class C/D get Central Licensing
-Authority review; A/B go through State Licensing Authorities, with Class A non-measuring/non-sterile
-software exempt from full licensing (self-registration via **SUGAM**). **Classification argument
-for this product:** a human-in-the-loop clinical decision-support tool — the doctor reviews and can
-**Agree / Modify / Reject** the AI output, never autonomous — plausibly targets **Class B or C
-rather than D**, precisely because of the mandatory physician-verification step. **2026-07: this is
-now a real interactive decision** (`SubmitDoctorDecisionUseCase`, `PatientSummaryScreen`), not a
-Phase-5-mocked placeholder — the reviewer sees the AI's confidence/differential/reasoning and picks
-AGREE/MODIFY/REJECT for real, which makes the classification argument stronger, not weaker: the
-control it leans on now actually exists in the demo, not just in the requirements doc. The liability
-checkbox and doctor-review flow are doing real classification work, not just UX; worth stating
-explicitly in investor conversations and in the report's legal footer.
+**Live framework — CDSCO Guidance Document on Medical Device Software (Doc No.
+CDSCO/MD/GD/MDSW/01/2026 — supersedes the October-2025 draft and the older MD-5/MD-9
+shorthand; full text: `docs/Guidance document on Medical Device Software under MDR-2017.md`):**
+SaMD is classified A–D under Rule 4 / First Schedule of MDR-2017. For **standalone** MDSW
+(§7.1, Table 2), classification is a 2-axis lookup:
+
+| Healthcare situation | Treatment/diagnosis | Drive clinical management | Inform clinical management |
+|---|---|---|---|
+| Critical | D | C | B |
+| Serious | C | B | A |
+| Non-serious | B | A | A |
+
+**Run this app's actual intended-use statement through the table, not an assumption:**
+- **Information-significance axis — "Drive clinical management," not "Inform."** §7.1(ii)
+  defines "drive" as: aid in diagnosis by analyzing information to help predict risk of a
+  disease/condition, and/or triage. This app's `/api/v1/evaluate` leg does exactly that —
+  NLEM-mapped diagnosis + treatment recommendation, ranked differentials with confidence, that
+  the doctor Agrees/Modifies/Rejects (`SubmitDoctorDecisionUseCase`). Human-in-the-loop
+  determines *how the risk is controlled*, not which column applies — the column is about what
+  the software's *output* does, and this output aids diagnosis/triage. It is not merely
+  "inform" (aggregating background information with no next-step guidance).
+- **Situation axis — likely "Serious," and the guidance's own note pushes toward "Critical."**
+  §7.1(b)(ii)/(iii): PHC presentations here (fever, respiratory, GI, headache, hypertension,
+  diabetes, chest pain routed to Cardiology, stroke to Neurology) span non-serious to serious;
+  the emergency-override path (SpO2<90, BP thresholds) exists precisely because some cases *are*
+  time-critical. Critically, the guidance's explicit note under Table 2 states: *"Standalone
+  MDSW intended to be used by non-clinical users in a 'serious situation or condition' … without
+  the support from specialized professionals, may be considered as a MDSW used in a 'critical
+  situation or condition.'"* This app's primary users are **non-clinical** (ASHA worker, nurse,
+  compounder — `UserRole` in `AuthSession`), operating in the field without a specialist present
+  at the point of AI output generation (the doctor reviews later, asynchronously, not
+  co-located). That is exactly the scenario the note describes.
+- **Table 2 arithmetic, stated precisely (columns: Treatment/diagnosis | Drive | Inform):**
+  Critical row = D, C, B. Serious row = C, B, A. Non-serious row = B, A, A. So **Serious × Drive
+  = B** — the base case, before any escalation, lands on the original B assumption, not C.
+- **The B→C swing depends entirely on one thing: does the non-clinical-user note escalate this
+  app's situation from Serious to Critical?** If it does, **Critical × Drive = C**. If it
+  doesn't, it stays **Serious × Drive = B**. This is a single, identifiable judgment call, not a
+  settled fact — argued both ways:
+  - **For escalation (→ C):** the note's condition is "non-clinical users … without the support
+    from specialized professionals." The AI output is generated and acted on for the *initial*
+    care decision by a non-clinical worker in the field, with no specialist present at that
+    moment — the doctor's review happens asynchronously, later, not at the point of output.
+  - **Against escalation (→ stays B):** a regulator could reasonably read "support from
+    specialized professionals" as satisfied by the mandatory doctor AGREE/MODIFY/REJECT step
+    itself — the worker never finalizes a prescription alone; a specialist always confirms
+    before the output becomes clinical action, just not in the same room at the same moment.
+  - **Working assumption for planning purposes: treat as unresolved, budget for C, hope for B.**
+    Do not state C as decided in investor or regulatory conversations — state the swing factor
+    and that CDSCO confirmation is pending.
+- Final classification is CDSCO's to confirm (§7.1: "risk class shall be confirmed by CDSCO
+  (CLA) upon review") or via the published risk-classification list/CDSCO MD Online portal query
+  (§7.1) — **do this lookup/query as an actual pre-production task**, don't keep re-deriving it
+  from the table.
+- **2026-07 status unchanged as a fact, reframed as a risk amplifier:** the doctor-review step is
+  a real interactive decision (`SubmitDoctorDecisionUseCase`, `PatientSummaryScreen`), not a
+  mocked placeholder — the reviewer sees confidence/differential/reasoning and picks
+  AGREE/MODIFY/REJECT for real. That strengthens the *risk-control* story (mandatory
+  verification genuinely exists) but does not lower the *classification*, because classification
+  is driven by intended use/output significance, not by how good the mitigating control is —
+  the control is what an ISO 14971 risk file leans on to justify residual risk at whatever class
+  CDSCO confirms, not a lever on the class itself.
+
+**Licensing consequence (§11.0, Table 5):** if Class C is confirmed, **manufacturing license
+moves to the Central Licensing Authority (CLA)**, not the State Licensing Authority path Class
+A/B would use. Test license, import license, and clinical-investigation permission are CLA
+regardless of class. This changes the Phase 4 (regulatory & launch) roadmap step from "SLA
+license" to "CLA license" — material for founder/investor timeline conversations, not a detail.
+
+**New AI-specific QMS obligations named in the 2026 guidance (§9.0), not yet reflected in
+`docs/quality/qms-overview.md`:** Algorithm Change Protocol (ACP) for any post-deployment model
+update; continuous performance assurance / drift monitoring in production, not just at release;
+IS/ISO/IEC 42001 (AI management system) and IS/ISO/IEC 23894 (AI risk management) alongside the
+already-tracked ISO 14971/IEC 62304. See `docs/quality/qms-overview.md` for the tracking rows.
 
 ### 2.3a EU MDR — Rule 11 (for CE-marking / export framing)
 Under **EU MDR Annex VIII Rule 11**, software intended to provide information used to take

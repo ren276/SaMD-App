@@ -1,0 +1,762 @@
+{
+	"info": {
+		"_postman_id": "2ce12532-d4a6-4e5a-9c92-b8f3aba38676",
+		"name": "SBX_SCAN_PAY_V3_11_08",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "32356161",
+		"_collection_link": "https://asa333-1288.postman.co/workspace/test~84f505ef-d753-46c3-984d-556bc6a4375e/collection/32356161-2ce12532-d4a6-4e5a-9c92-b8f3aba38676?action=share&source=collection_link&creator=32356161"
+	},
+	"item": [
+		{
+			"name": "SHARE_OPEN_ORDER",
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"exec": [
+							""
+						],
+						"type": "text/javascript",
+						"packages": {}
+					}
+				}
+			],
+			"request": {
+				"auth": {
+					"type": "noauth"
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Authorization",
+						"value": "Gateway Session Token"
+					},
+					{
+						"key": "X-CM-ID",
+						"value": "sbx"
+					},
+					{
+						"key": "X-HIU-ID",
+						"value": "HIU_ID"
+					},
+					{
+						"key": "X-AUTH-TOKEN",
+						"value": "User Login Token"
+					},
+					{
+						"key": "REQUEST-ID",
+						"value": "{{$guid}}",
+						"type": "text"
+					},
+					{
+						"key": "TIMESTAMP",
+						"value": "{{$isoTimestamp}}",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n    \"intent\": \"OPEN_PAYMENT_ORDER\",\r\n    \"metadata\": {\r\n        \"hipId\": \"HIP_ID\",\r\n        \"counterId\": \"12\"\r\n    },\r\n    \"profile\": {\r\n        \"patient\": {\r\n            \"abhaNumber\": null,\r\n            \"abhaAddress\": \"abhaAddress@sbx\",\r\n            \"name\": \"Full Name\",\r\n            \"gender\": \"M\",\r\n            \"dayOfBirth\": \"12\",\r\n            \"monthOfBirth\": \"12\",\r\n            \"yearOfBirth\": \"1994\",\r\n            \"address\": {\r\n                \"line\": \"String\",\r\n                \"district\": \"String\",\r\n                \"state\": \"String\",\r\n                \"pincode\": \"XXXXXX\"\r\n            },\r\n            \"phoneNumber\": \"989141XXXX\"\r\n        }\r\n    }\r\n}"
+				},
+				"url": {
+					"raw": "https://dev.abdm.gov.in/api/hiecm/scan-gateway/v3/patient/share/open-order",
+					"protocol": "https",
+					"host": [
+						"dev",
+						"abdm",
+						"gov",
+						"in"
+					],
+					"path": [
+						"api",
+						"hiecm",
+						"scan-gateway",
+						"v3",
+						"patient",
+						"share",
+						"open-order"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "ON_SHARE_OPEN_ORDER",
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"exec": [
+							"const moment = require('moment');pm.globals.set(\"timestamp\", moment.utc().add(300, 'seconds').format(\"YYYY-MM-DDTHH:mm:ss.SSSSSS\"));"
+						],
+						"type": "text/javascript",
+						"packages": {}
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Gateway Session Token",
+						"type": "text"
+					},
+					{
+						"key": "X-CM-ID",
+						"value": "sbx",
+						"type": "text"
+					},
+					{
+						"key": "REQUEST-ID",
+						"value": "{{$guid}}",
+						"type": "text"
+					},
+					{
+						"key": "TIMESTAMP",
+						"value": "{{$isoTimestamp}}",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n    \"intent\": \"OPEN_PAYMENT_ORDER\",\r\n    \"abhaAddress\": \"abhaAddress@sbx\",\r\n    \"patientUid\": \"manishk_12\", // patient_uid\r\n    // \"error\": {\r\n    //     \"code\": \"1000\",\r\n    //     \"message\": \"string\"\r\n    // },\r\n    \"procedures\": [\r\n        {\r\n            \"category\": \"OPD consultation\",\r\n            \"services\": [\r\n                {\r\n                    \"serviceId\": \"Resistance 1\",\r\n                    \"name\": \"Activated Protein C Resistance.\",\r\n                    \"description\": \"Consult with a hematology specialist to assess for Protein C resistance\",\r\n                    \"amount\": 629\r\n                }\r\n            ]\r\n        },\r\n        {\r\n            \"category\": \"Laboratory and Diagnostics\",\r\n            \"services\": [\r\n                {\r\n                    \"serviceId\": \"Flowcytometric 2\",\r\n                    \"name\": \"Flowcytometric Enumeration Of Haematopietic Stem Cells 1\",\r\n                    \"description\": \"989261250000094 2; date:06-May-2025\",\r\n                    \"amount\": 629\r\n                }\r\n            ]\r\n        },\r\n        {\r\n            \"category\": \"Pharmacy\",\r\n            \"services\": [\r\n                {\r\n                    \"serviceId\": \"Tomography 1\",\r\n                    \"name\": \"Cbct (Cone Beam Computerized Tomography)\",\r\n                    \"description\": \"A high-resolution 3D imaging scan used primarily for dental.\",\r\n                    \"amount\": 629\r\n                }\r\n            ]\r\n        },\r\n        {\r\n            \"category\": \"Miscellaneous/Other\",\r\n            \"services\": [\r\n                {\r\n                    \"serviceId\": \"Computerized 2\",\r\n                    \"name\": \"Cbct (Cone Beam Computerized Tomography) 2\",\r\n                    \"description\": \"A high-resolution 3D imaging scan used primarily for dental.\",\r\n                    \"amount\": 129\r\n                }\r\n            ]\r\n        }\r\n    ],\r\n    \"response\": {\r\n        \"requestId\": \"f1859725-8111-449f-bf39-a0c762795eb7\"\r\n    }\r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "https://dev.abdm.gov.in/api/hiecm/scan-gateway/v3/patient/on-share/open-order",
+					"protocol": "https",
+					"host": [
+						"dev",
+						"abdm",
+						"gov",
+						"in"
+					],
+					"path": [
+						"api",
+						"hiecm",
+						"scan-gateway",
+						"v3",
+						"patient",
+						"on-share",
+						"open-order"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "SELECTION",
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"exec": [
+							"const moment = require('moment');pm.globals.set(\"timestamp\", moment.utc().add(300, 'seconds').format(\"YYYY-MM-DDTHH:mm:ss.SSSSSS\"));"
+						],
+						"type": "text/javascript",
+						"packages": {}
+					}
+				}
+			],
+			"request": {
+				"auth": {
+					"type": "noauth"
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Authorization",
+						"value": "Gateway Session Token"
+					},
+					{
+						"key": "X-CM-ID",
+						"value": "sbx"
+					},
+					{
+						"key": "REQUEST-ID",
+						"value": "{{$guid}}",
+						"type": "text"
+					},
+					{
+						"key": "TIMESTAMP",
+						"value": "{{$isoTimestamp}}",
+						"type": "text"
+					},
+					{
+						"key": "X-AUTH-TOKEN",
+						"value": "User Login Token",
+						"type": "text"
+					},
+					{
+						"key": "X-HIU-ID",
+						"value": "HIU_ID",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n    \"intent\": \"PAYMENT_ORDER\",\r\n    \"openOrderRequestId\": \"f1859725-8111-449f-bf39-a0c762795eb7\", //Open Order Request id\r\n    \"abhaAddress\": \"abhaAddress@sbx\",\r\n    \"procedures\": [\r\n        { //category :   OPD consultation,Laboratory and Diagnostics,Pharmacy,Miscellaneous/Other\r\n            \"category\": \"OPD consultation\",\r\n            \"services\": [\r\n                {\r\n                    \"serviceId\": \"Flowcytometric 1\",\r\n                    \"name\": \"consultation\",\r\n                    \"description\": \"string\",\r\n                    \"amount\": 629.00\r\n                }\r\n            ]\r\n        },\r\n        {\r\n            \"category\": \"Laboratory and Diagnostics\",\r\n            \"services\": [\r\n                {\r\n                    \"serviceId\": \"Diagnostics 1\",\r\n                    \"name\": \"Diagnostics\",\r\n                    \"description\": \"string\",\r\n                    \"amount\": 629.00\r\n                }\r\n            ]\r\n        },\r\n        {\r\n            \"category\": \"Pharmacy\",\r\n            \"services\": [\r\n                {\r\n                    \"serviceId\": \"Pharmacy 1\",\r\n                    \"name\": \"Pharmacy\",\r\n                    \"description\": \"string\",\r\n                    \"amount\": 629.00\r\n                }\r\n            ]\r\n        },\r\n        {\r\n            \"category\": \"Miscellaneous/Other\",\r\n            \"services\": [\r\n                {\r\n                    \"serviceId\": \"Other 1\",\r\n                    \"name\": \"Miscellaneous\",\r\n                    \"description\": \"string\",\r\n                    \"amount\": 629.00\r\n                }\r\n            ]\r\n        }\r\n    ]\r\n}"
+				},
+				"url": {
+					"raw": "https://dev.abdm.gov.in/api/hiecm/scan-gateway/v3/patient/selection",
+					"protocol": "https",
+					"host": [
+						"dev",
+						"abdm",
+						"gov",
+						"in"
+					],
+					"path": [
+						"api",
+						"hiecm",
+						"scan-gateway",
+						"v3",
+						"patient",
+						"selection"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "ON_SELECTION",
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"exec": [
+							"const moment = require('moment');pm.globals.set(\"timestamp\", moment.utc().add(300, 'seconds').format(\"YYYY-MM-DDTHH:mm:ss.SSSSSS\"));"
+						],
+						"type": "text/javascript",
+						"packages": {}
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Authorization",
+						"value": "Gateway Session Token"
+					},
+					{
+						"key": "X-CM-ID",
+						"value": "sbx"
+					},
+					{
+						"key": "REQUEST-ID",
+						"value": "{{$guid}}",
+						"type": "text"
+					},
+					{
+						"key": "TIMESTAMP",
+						"value": "{{$isoTimestamp}}",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n    \"intent\": \"PAYMENT_ORDER\",\r\n    \"openOrderRequestId\": \"f1859725-8111-449f-bf39-a0c762795eb7\", //Open Order Request id\r\n    \"abhaAddress\": \"abhaAddress@sbx\",\r\n    // \"error\": {\r\n    //     \"code\": \"1000\",\r\n    //     \"message\": \"string\"\r\n    // },\r\n    \"procedures\": [\r\n        { //category :   OPD consultation,Laboratory and Diagnostics,Pharmacy,Miscellaneous/Other\r\n            \"category\": \"OPD consultation\",\r\n            \"services\": [\r\n                {\r\n                    \"serviceId\": \"Flowcytometric 1\",\r\n                    \"name\": \"consultation\",\r\n                    \"description\": \"string\",\r\n                    \"amount\": 629.00\r\n                }\r\n            ]\r\n        },\r\n        {\r\n            \"category\": \"Laboratory and Diagnostics\",\r\n            \"services\": [\r\n                {\r\n                    \"serviceId\": \"Diagnostics 1\",\r\n                    \"name\": \"Diagnostics\",\r\n                    \"description\": \"string\",\r\n                    \"amount\": 629.00\r\n                }\r\n            ]\r\n        },\r\n        {\r\n            \"category\": \"Pharmacy\",\r\n            \"services\": [\r\n                {\r\n                    \"serviceId\": \"Pharmacy 1\",\r\n                    \"name\": \"Pharmacy\",\r\n                    \"description\": \"string\",\r\n                    \"amount\": 629.00\r\n                }\r\n            ]\r\n        },\r\n        {\r\n            \"category\": \"Miscellaneous/Other\",\r\n            \"services\": [\r\n                {\r\n                    \"serviceId\": \"Other 1\",\r\n                    \"name\": \"Miscellaneous\",\r\n                    \"description\": \"string\",\r\n                    \"amount\": 629.00\r\n                }\r\n            ]\r\n        }\r\n    ],\r\n    \"paymentBundle\": {\r\n        \"paymentMode\": \"GATEWAY\",\r\n        \"paymentUrl\": \"http://webhook.site/edfa5393-a6d1-4df8-8bd1-9a5553c76570\",\r\n        \"orderNumber\": \"123456\",\r\n        \"amount\": 1250.00,\r\n        \"merchantId\": \"string\",\r\n        \"description\": \"\"\r\n    },\r\n    \"response\": {\r\n        \"requestId\": \"742e5a32-39ef-49ce-bcea-ff0cc1ed955b\"\r\n    }\r\n}"
+				},
+				"url": {
+					"raw": "https://dev.abdm.gov.in/api/hiecm/scan-gateway/v3/patient/on-selection",
+					"protocol": "https",
+					"host": [
+						"dev",
+						"abdm",
+						"gov",
+						"in"
+					],
+					"path": [
+						"api",
+						"hiecm",
+						"scan-gateway",
+						"v3",
+						"patient",
+						"on-selection"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "SHARE_NOTIFY",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							""
+						],
+						"type": "text/javascript",
+						"packages": {}
+					}
+				},
+				{
+					"listen": "prerequest",
+					"script": {
+						"exec": [
+							"const moment = require('moment');pm.globals.set(\"timestamp\", moment.utc().add(300, 'seconds').format(\"YYYY-MM-DDTHH:mm:ss.SSSSSS\"));"
+						],
+						"type": "text/javascript",
+						"packages": {}
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "X-CM-ID",
+						"value": "sbx"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Authorization",
+						"value": "Gateway Session Token"
+					},
+					{
+						"key": "REQUEST-ID",
+						"value": "{{$guid}}",
+						"type": "text"
+					},
+					{
+						"key": "TIMESTAMP",
+						"value": "{{$isoTimestamp}}",
+						"type": "text"
+					},
+					{
+						"key": "X-HIP-ID",
+						"value": "HIP_ID",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"acknowledgement\": {\n        \"status\": \"PENDING\", //SUCCESS, CANCELED, PENDING, FAIL, REFUND_INITIATED, REFUND_SUCCESS\n        \"abhaAddress\": \"abhaAddress@sbx\",\n        \"transactionId\": \"123456\",\n        \"orderNumber\": \"123456\",\n        \"openOrderRequestId\": \"f1859725-8111-449f-bf39-a0c762795eb7\", //Open Order Request id\n        \"paymentDate\": \"{{$isoTimestamp}}\",  //iso timestamp\n        \"paymentReceiptLink\": \"https://webhook.site/d872d6ba-45e1-45b4-8fb9-2ee4b5a017b5\"\n    }\n}"
+				},
+				"url": {
+					"raw": "https://dev.abdm.gov.in/api/hiecm/scan-gateway/v3/patient/scan-pay/notify",
+					"protocol": "https",
+					"host": [
+						"dev",
+						"abdm",
+						"gov",
+						"in"
+					],
+					"path": [
+						"api",
+						"hiecm",
+						"scan-gateway",
+						"v3",
+						"patient",
+						"scan-pay",
+						"notify"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "SHARE_ON_NOTIFY",
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"exec": [
+							"const moment = require('moment');pm.globals.set(\"timestamp\", moment.utc().add(300, 'seconds').format(\"YYYY-MM-DDTHH:mm:ss.SSSSSS\"));"
+						],
+						"type": "text/javascript",
+						"packages": {}
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "X-CM-ID",
+						"value": "sbx"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Authorization",
+						"value": "Gateway Session Token"
+					},
+					{
+						"key": "REQUEST-ID",
+						"value": "{{$guid}}",
+						"type": "text"
+					},
+					{
+						"key": "TIMESTAMP",
+						"value": "{{$isoTimestamp}}",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"acknowledgement\": {\n        \"status\": \"PENDING\", //SUCCESS, CANCELED, PENDING, FAIL, REFUND_INITIATED, REFUND_SUCCESS\n        \"abhaAddress\": \"abhaAddress@sbx\",\n        \"transactionId\": \"123456\",\n        \"orderNumber\": \"123456\",\n        \"openOrderRequestId\": \"f1859725-8111-449f-bf39-a0c762795eb7\",  //Open Order Request id\n        \"paymentDate\": \"{{$isoTimestamp}}\", //iso timestamp\n        \"paymentReceiptLink\": \"https://webhook.site/d872d6ba-45e1-45b4-8fb9-2ee4b5a017b5\"\n    },\n    // in case of any error or FAIL then only send error object\n    // \"error\": {\n    //     \"code\": \"1000\",\n    //     \"message\": \"string\"\n    // },\n    \"response\": {\n        \"requestId\": \"bf0b6a82-aa44-4fe6-8377-3577a21fb44d\"\n    }\n}"
+				},
+				"url": {
+					"raw": "https://dev.abdm.gov.in/api/hiecm/scan-gateway/v3/patient/scan-pay/on-notify",
+					"protocol": "https",
+					"host": [
+						"dev",
+						"abdm",
+						"gov",
+						"in"
+					],
+					"path": [
+						"api",
+						"hiecm",
+						"scan-gateway",
+						"v3",
+						"patient",
+						"scan-pay",
+						"on-notify"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "ORDER_STATUS",
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"exec": [
+							"const moment = require('moment');pm.globals.set(\"timestamp\", moment.utc().add(300, 'seconds').format(\"YYYY-MM-DDTHH:mm:ss.SSSSSS\"));"
+						],
+						"type": "text/javascript",
+						"packages": {}
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "X-CM-ID",
+						"value": "sbx"
+					},
+					{
+						"key": "Authorization",
+						"value": "Gateway Session Token"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "REQUEST-ID",
+						"value": "{{$guid}}",
+						"type": "text"
+					},
+					{
+						"key": "TIMESTAMP",
+						"value": "{{$isoTimestamp}}",
+						"type": "text"
+					},
+					{
+						"key": "X-AUTH-TOKEN",
+						"value": "User Login Token",
+						"type": "text"
+					},
+					{
+						"key": "X-HIU-ID",
+						"value": "HIU_ID",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"queryStatus\": {\n        \"orderNumber\": \"123456\",\n        \"abhaAddress\": \"abhaAddress@sbx\",\n        \"openOrderRequestId\": \"f1859725-8111-449f-bf39-a0c762795eb7\"  //Open Order Request id\n    }\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "https://dev.abdm.gov.in/api/hiecm/scan-gateway/v3/patient/scan-pay/order-status",
+					"protocol": "https",
+					"host": [
+						"dev",
+						"abdm",
+						"gov",
+						"in"
+					],
+					"path": [
+						"api",
+						"hiecm",
+						"scan-gateway",
+						"v3",
+						"patient",
+						"scan-pay",
+						"order-status"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "ON_ORDER_STATUS",
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"exec": [
+							"const moment = require('moment');pm.globals.set(\"timestamp\", moment.utc().add(300, 'seconds').format(\"YYYY-MM-DDTHH:mm:ss.SSSSSS\"));"
+						],
+						"type": "text/javascript",
+						"packages": {}
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Gateway Session Token"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "X-CM-ID",
+						"value": "sbx"
+					},
+					{
+						"key": "REQUEST-ID",
+						"value": "{{$guid}}",
+						"type": "text"
+					},
+					{
+						"key": "TIMESTAMP",
+						"value": "{{$isoTimestamp}}",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"acknowledgement\": {\n        \"status\": \"SUCCESS\",\n        \"abhaAddress\": \"abhaAddress@sbx\",\n        \"transactionId\": \"123456\",\n        \"orderNumber\": \"123456\",\n        \"openOrderRequestId\": \"f1859725-8111-449f-bf39-a0c762795eb7\", //Open Order Request id\n        \"paymentDate\": \"{{$isoTimestamp}}\", //iso timestamp\n        \"paymentReceiptLink\": \"https://webhook.site/d872d6ba-45e1-45b4-8fb9-2ee4b5a017b5\"\n    },\n    // in case of any error or FAIL then only send error object\n    // \"error\": {\n    //     \"code\": \"1000\",\n    //     \"message\": \"string\"\n    // },\n    \"response\": {\n        \"requestId\": \"311cd439-9c0d-4f0e-9c22-c4ac305ac719\"\n    }\n}"
+				},
+				"url": {
+					"raw": "https://dev.abdm.gov.in/api/hiecm/scan-gateway/v3/patient/scan-pay/on-order-status",
+					"protocol": "https",
+					"host": [
+						"dev",
+						"abdm",
+						"gov",
+						"in"
+					],
+					"path": [
+						"api",
+						"hiecm",
+						"scan-gateway",
+						"v3",
+						"patient",
+						"scan-pay",
+						"on-order-status"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "GET_SCAN_PAY_DETAILS",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "X-CM-ID",
+						"value": "sbx"
+					},
+					{
+						"key": "Authorization",
+						"value": "Gateway Session Token"
+					},
+					{
+						"key": "X-AUTH-TOKEN",
+						"value": "User X-Auth-Token"
+					},
+					{
+						"key": "REQUEST-ID",
+						"value": "{{$guid}}"
+					},
+					{
+						"key": "TIMESTAMP",
+						"value": "{{$isoTimestamp}}"
+					}
+				],
+				"url": {
+					"raw": "https://dev.abdm.gov.in/api/hiecm/scan-gateway/v3/patient/scan-pay/details?status=null&limit=100&startDate=2025-04-22T08:12:00.902Z&endDate={{$isoTimestamp}}",
+					"protocol": "https",
+					"host": [
+						"dev",
+						"abdm",
+						"gov",
+						"in"
+					],
+					"path": [
+						"api",
+						"hiecm",
+						"scan-gateway",
+						"v3",
+						"patient",
+						"scan-pay",
+						"details"
+					],
+					"query": [
+						{
+							"key": "status",
+							"value": "null"
+						},
+						{
+							"key": "limit",
+							"value": "100"
+						},
+						{
+							"key": "startDate",
+							"value": "2025-04-22T08:12:00.902Z"
+						},
+						{
+							"key": "endDate",
+							"value": "{{$isoTimestamp}}"
+						}
+					]
+				},
+				"description": "Generated from cURL: curl --location 'http://localhost:8020/api/hiecm/scan-gateway/patient/scan-pay/details?status=null&limit=20&startDate=2024-01-03&endDate=2025-01-31' \\\r\n--header 'X-CM-ID: dev' \\\r\n--header 'Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJBbFJiNVdDbThUbTlFSl9JZk85ejA2ajlvQ3Y1MXBLS0ZrbkdiX1RCdkswIn0.eyJleHAiOjE3MzYxNzExNjksImlhdCI6MTczNjE2OTk2OSwianRpIjoiNjIwMWNkODQtMGRjZS00OWY3LTlhOGQtNTIzZmQ0ZjI2MTljIiwiaXNzIjoiaHR0cHM6Ly9kZXYubmRobS5nb3YuaW4vYXV0aC9yZWFsbXMvY2VudHJhbC1yZWdpc3RyeSIsImF1ZCI6ImFjY291bnQiLCJzdWIiOiJjN2NhMjk3Yi0yZTVhLTRkN2UtOGY5YS0xYWU2NDAxYWQ0Y2YiLCJ0eXAiOiJCZWFyZXIiLCJhenAiOiJTQlhfMDAwMTM1Iiwic2Vzc2lvbl9zdGF0ZSI6IjY5MmU1MTg4LTRjNTItNDY2Zi1hOTVhLWEwODdlMTQwMDg1OSIsImFjciI6IjEiLCJhbGxvd2VkLW9yaWdpbnMiOlsiaHR0cDovL2xvY2FsaG9zdDo5MDA3Il0sInJlYWxtX2FjY2VzcyI6eyJyb2xlcyI6WyJIaWRJbnRlZ3JhdGVkUHJvZ3JhbSIsIkhJVV9QQVlFUiIsImhmciIsImhpdSIsIm9mZmxpbmVfYWNjZXNzIiwiaGVhbHRoSWQiLCJwaHIiLCJPSURDIiwiaGVhbHRoX2xvY2tlciIsImhpcCIsImhwX2lkIiwiSElQX1BBWUVSIl19LCJyZXNvdXJjZV9hY2Nlc3MiOnsiU0JYXzAwMDEzNSI6eyJyb2xlcyI6WyJ1bWFfcHJvdGVjdGlvbiJdfSwiYWNjb3VudCI6eyJyb2xlcyI6WyJtYW5hZ2UtYWNjb3VudCIsIm1hbmFnZS1hY2NvdW50LWxpbmtzIiwidmlldy1wcm9maWxlIl19fSwic2NvcGUiOiJvcGVuaWQgZW1haWwgcHJvZmlsZSIsImNsaWVudEhvc3QiOiIxMDAuNjUuMTYwLjIxNCIsImNsaWVudElkIjoiU0JYXzAwMDEzNSIsImVtYWlsX3ZlcmlmaWVkIjpmYWxzZSwicHJlZmVycmVkX3VzZXJuYW1lIjoic2VydmljZS1hY2NvdW50LXNieF8wMDAxMzUiLCJjbGllbnRBZGRyZXNzIjoiMTAwLjY1LjE2MC4yMTQifQ.dl4mHl5e3pVbC9e9qAxRL6aULcvvfOjkkLotTfP6L-WZnihWC3adJqGFONpE94yZCLFWmJurCF7vel6Z4XhQYIrNADnO5FWHFjbDvpw8Npw7_xubJaMY3TadvXyBXn1xLNszKsKdVt-yIiXFBNH1MS58KrxR06M25sAzsL7Ml9m1APyLHIGIQQCJNzMoUhI6riS19HYPk4EsfUBiBk87x5gQPlQeX3gPVFHgfzzCNEff-9RFPZ9GHL602h5Hg1KQMLyCg3cdk4-8jaFQuX5SnpmNPYQ1_m1UUg58YlRfKJVdJUKPRPjPMiUJBzw3uACNuu2FVle5OEu-syVunuK0pQ' \\\r\n--header 'X-AUTH-TOKEN: eyJhbGciOiJSUzUxMiJ9.eyJzdWIiOiJtYW5pc2g5NkBzYngiLCJnZW5kZXIiOiJNIiwidHlwIjoiVHJhbnNhY3Rpb24iLCJoZWFsdGhJZE51bWJlciI6IjkxLTQwNTAtODY1Ni00MjY4IiwiYWJoYUFkZHJlc3MiOiJtYW5pc2g5NkBzYngiLCJtb250aE9mQmlydGgiOiI3Iiwic3RhdGVOYW1lIjoiTUFIQVJBU0hUUkEiLCJkYXlPZkJpcnRoIjoiMTIiLCJwaHJNb2JpbGUiOiI3Njc4Njk2NjQ5IiwiZXhwIjoxNzM4NTY1OTAwLCJpYXQiOjE3Mzg1NjQxMDAsInBockFkZHJlc3MiOiJtYW5pc2g5NkBzYngiLCJlbWFpbCI6IiIsImxvZ2luU3ViamVjdCI6bnVsbCwieWVhck9mQmlydGgiOiIxOTkyIiwiaXNLeWNWZXJpZmllZCI6IlZFUklGSUVEIiwicGluY29kZSI6IjQxMjExNSIsImNsaWVudElkIjoiVEVTVF9QSFIiLCJyZXF1ZXN0ZXJJZCI6IlBIUi1XRUIiLCJkaXN0cmljdE5hbWUiOiJQVU5FIiwibW9iaWxlIjoiNzY3ODY5NjY0OSIsImZ1bGxOYW1lIjoiTWFuaXNoIFByYXZpbiBLYWhhbmUiLCJhZGRyZXNzTGluZSI6IkZsYXQgbm8uIDcwMiwgQyBXaW5nLCBUaGUgT25lIFNvY2lldHksIFNpZGRoaXZpbmF5YWsgVmloYXIsIEJodWdhb24sIGJhdmRoYW4sIFBpcmFuZ3V0LCBQdW5lLCBNYWhhcmFzaHRyYSIsInN5c3RlbSI6IkFCSEEtQSIsInR4bklkIjpudWxsfQ.1NvwjzTzWp_86N9HzI5ksPwpvNBxyn9BJirsNVyR5crrsLFYLd_rDoeaB2MwaniMBapda4A5Al9c-BGKF51FR35vTZVNodNcdO-xmvYMsTI8HbtSHbP4z3QdyBPNbFrKFcJG_HNil_-6wkE_l_5JfVthq59ry2-hAp9j8DCczT0g-NkMzwIL3BNnjvX1-OgAFJyudH4CTNenegDjSzuqRsmniSIPpO_RA1QBwN7ui26Kkgb3YYjPkpXZPajrzOxpwgrbjeORCHjm-Ki1SV47rccY1CW_JTpwxnalnt2yVKSKmj-KAJ4fQ2GkCfOXepg5maP0jsst-RKujflcqeliMg' \\\r\n--header 'REQUEST-ID: 6aa3e1db-d214-4633-8cd2-6ee044a4f648' \\\r\n--header 'TIMESTAMP: 2025-02-03T09:23:26.078Z'"
+			},
+			"response": []
+		},
+		{
+			"name": "ENABLE_SCAN&PAY_RECORD_SHARE",
+			"request": {
+				"method": "PATCH",
+				"header": [
+					{
+						"key": "REQUEST-ID",
+						"value": "{{$guid}}"
+					},
+					{
+						"key": "TIMESTAMP",
+						"value": "{{$isoTimestamp}}"
+					},
+					{
+						"key": "X-CM-ID",
+						"value": "sbx"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Authorization",
+						"value": "Gateway Token"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n    \"recordShareEnabled\": true, \r\n    \"scanPayEnabled\": true,\r\n    \"scanPayVersion\": \"V2\",  // For Phase 1 = V2 and Phase 2 = V3\r\n    \"serviceId\": [\r\n        \"hipid_1\",\r\n        \"hipid_2\",\r\n        \"hipid_3\",\r\n        \"hipid_4\"\r\n    ]\r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "https://dev.abdm.gov.in/api/hiecm/gateway/v3/scanPay/updateVersion",
+					"protocol": "https",
+					"host": [
+						"dev",
+						"abdm",
+						"gov",
+						"in"
+					],
+					"path": [
+						"api",
+						"hiecm",
+						"gateway",
+						"v3",
+						"scanPay",
+						"updateVersion"
+					]
+				},
+				"description": "Generated from cURL: curl --location --request PATCH 'https://dev.abdm.gov.in/api/hiecm/gateway/v3/scanPay/updateVersion' \\\r\n--header 'REQUEST-ID: 2aa4a8da-bfb6-4c05-9b54-8815db268791' \\\r\n--header 'TIMESTAMP: 2025-07-14T10:29:16.657Z' \\\r\n--header 'X-CM-ID: sbx' \\\r\n--header 'Content-Type: application/json' \\\r\n--header 'Authorization: Bearer Bearer eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJBbFJiNVdDbThUbTlFSl9JZk85ejA2ajlvQ3Y1MXBLS0ZrbkdiX1RCdkswIn0.eyJleHAiOjE3NTEyNjk1MjksImlhdCI6MTc1MTI2ODMyOSwianRpIjoiOTkzN2U3ZjItYmFhZC00NmNiLThmOTctOGVjZjk1ZmE5MWY5IiwiaXNzIjoiaHR0cHM6Ly9kZXYubmRobS5nb3YuaW4vYXV0aC9yZWFsbXMvY2VudHJhbC1yZWdpc3RyeSIsImF1ZCI6ImFjY291bnQiLCJzdWIiOiIxNWYwM2Q3NC05YWY1LTRhYTgtYWM0ZC04ZTRjNzNiZGVlNzEiLCJ0eXAiOiJCZWFyZXIiLCJhenAiOiJNQU5JU0hfVEVTVCIsInNlc3Npb25fc3RhdGUiOiIwN2EyOWE4ZC05NjYxLTQ0Y2MtODc4Ny0xZWFmM2RiYzIyZmYiLCJhY3IiOiIxIiwiYWxsb3dlZC1vcmlnaW5zIjpbImh0dHA6Ly9sb2NhbGhvc3Q6OTAwNyJdLCJyZWFsbV9hY2Nlc3MiOnsicm9sZXMiOlsiaGVhbHRoaWRfc2VydmVyIiwiSGlkSW50ZWdyYXRlZFByb2dyYW0iLCJISVVfUEFZRVIiLCJoZWFsdGhJZCIsImhlYWx0aF9sb2NrZXIiLCJoaXAiLCJISVBfUEFZRVIiLCJoZnIiLCJoaXUiLCJvZmZsaW5lX2FjY2VzcyIsInBociIsIk9JREMiLCJnYXRld2F5IiwiaHBfaWQiXX0sInJlc291cmNlX2FjY2VzcyI6eyJNQU5JU0hfVEVTVCI6eyJyb2xlcyI6WyJ1bWFfcHJvdGVjdGlvbiJdfSwiYWNjb3VudCI6eyJyb2xlcyI6WyJtYW5hZ2UtYWNjb3VudCIsIm1hbmFnZS1hY2NvdW50LWxpbmtzIiwidmlldy1wcm9maWxlIl19fSwic2NvcGUiOiJvcGVuaWQgZW1haWwgcHJvZmlsZSIsImNsaWVudElkIjoiTUFOSVNIX1RFU1QiLCJlbWFpbF92ZXJpZmllZCI6ZmFsc2UsInByZWZlcnJlZF91c2VybmFtZSI6InNlcnZpY2UtYWNjb3VudC1tYW5pc2hfdGVzdCJ9.bdGeqCfrudCH9fpnPoxOFShOVcssl_XeD0V_TVkhFcAz8kIxAizuaFdIFYCm80oybW1_A1MCX5vFBR987YBj3xgKZJVvcHhKIupqSsKxGc99fUrh7auV0u-DnkNIKcz6Sb9BOGNI8DJ5pdsedZwmSrq0aJwKLoFJN4D28aaKVjtYrZx2FEpreRcJD08AAilZuerugGIV0CKEXrVkq2saGtpV-Ql3dvd6AOZN0djApC59yYnMXxgL3AEetyaFa-hzrgY6S_IIFbAghB6tDTwmopXZ0nVNy71QSVZjbb-ZoBr_rSipFoR_B5_rWMpA3bNFWMLMhl_JlCWZayiDuX8Mfg' \\\r\n--data '{\r\n    \"recordShareEnabled\": true,\r\n    \"scanPayEnabled\": true,\r\n    \"scanPayVersion\": \"v2\",\r\n    \"serviceId\": [\r\n        \"IN2910000125_1\",\r\n        \"INAN000087_1\",\r\n        \"IN0110000013_1\",\r\n        \"MANISH_HIP\"\r\n    ]\r\n}'"
+			},
+			"response": []
+		},
+		{
+			"name": "GET_PROVIDER_DETAILS",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "REQUEST-ID",
+						"value": "2afd4545-4875-4e96-818e-668c8ec42dea"
+					},
+					{
+						"key": "TIMESTAMP",
+						"value": "2025-08-05T11:19:39.442Z"
+					},
+					{
+						"key": "X-CM-ID",
+						"value": "sbx"
+					},
+					{
+						"key": "Authorization",
+						"value": "Bearer eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJBbFJiNVdDbThUbTlFSl9JZk85ejA2ajlvQ3Y1MXBLS0ZrbkdiX1RCdkswIn0.eyJleHAiOjE3NTQzODUzODQsImlhdCI6MTc1NDM4NDE4NCwianRpIjoiZjQ4Nzk1ZGYtZWE2NC00NmY3LTk0YmYtOTI2MmE5NTNjZTMxIiwiaXNzIjoiaHR0cHM6Ly9kZXYubmRobS5nb3YuaW4vYXV0aC9yZWFsbXMvY2VudHJhbC1yZWdpc3RyeSIsImF1ZCI6ImFjY291bnQiLCJzdWIiOiJjN2NhMjk3Yi0yZTVhLTRkN2UtOGY5YS0xYWU2NDAxYWQ0Y2YiLCJ0eXAiOiJCZWFyZXIiLCJhenAiOiJTQlhfMDAwMTM1Iiwic2Vzc2lvbl9zdGF0ZSI6ImU1YTE2MzdkLTUyYzgtNDA2NS1iMzRlLTg2ZDU3MjNjMDU3MiIsImFjciI6IjEiLCJhbGxvd2VkLW9yaWdpbnMiOlsiaHR0cDovL2xvY2FsaG9zdDo5MDA3Il0sInJlYWxtX2FjY2VzcyI6eyJyb2xlcyI6WyJISVVfUEFZRVIiLCJoZnIiLCJoaXUiLCJvZmZsaW5lX2FjY2VzcyIsImhlYWx0aElkIiwicGhyIiwiT0lEQyIsImhlYWx0aF9sb2NrZXIiLCJoaXAiLCJocF9pZCIsIkhJUF9QQVlFUiJdfSwicmVzb3VyY2VfYWNjZXNzIjp7IlNCWF8wMDAxMzUiOnsicm9sZXMiOlsidW1hX3Byb3RlY3Rpb24iXX0sImFjY291bnQiOnsicm9sZXMiOlsibWFuYWdlLWFjY291bnQiLCJtYW5hZ2UtYWNjb3VudC1saW5rcyIsInZpZXctcHJvZmlsZSJdfX0sInNjb3BlIjoib3BlbmlkIGVtYWlsIHByb2ZpbGUiLCJjbGllbnRJZCI6IlNCWF8wMDAxMzUiLCJlbWFpbF92ZXJpZmllZCI6ZmFsc2UsImNsaWVudEhvc3QiOiIxMDAuNjUuMTYwLjIxNSIsInByZWZlcnJlZF91c2VybmFtZSI6InNlcnZpY2UtYWNjb3VudC1zYnhfMDAwMTM1In0.hHem0fYH0XfdXR4AHPPBAQwtHZrNp0XIM2tPVKb80NAEK0pNPWTvpHnY6ofm1RoBAh12zurmGMibiI_7Q3xV22VlMPkRsogVwpkSQ7swqMKGQk5dxSzr-tSMADTSSBsU6ILkekH8Ojj8qHCXW8OgxXRqOOYBpS-vc-O5Y93ESVieULkgn7mnNRyStJYOsHx9BCGmy3u9qFPX0bGdmiGwJQJ0s4LstXzQUcZtvgdINX3Ex_MSERaNSCUzhyhprJ0u8wfw0qHQ9jqiwwohHQ_nh6gD80o8xpmLEPvOqdeUHeA3R75AYfXQzosByvRY8fnBpgZzITyCrQS2EIzSNmO1Cg"
+					}
+				],
+				"url": {
+					"raw": "https://dev.abdm.gov.in/api/hiecm/gateway/v3/providers/{provider-id}",
+					"protocol": "https",
+					"host": [
+						"dev",
+						"abdm",
+						"gov",
+						"in"
+					],
+					"path": [
+						"api",
+						"hiecm",
+						"gateway",
+						"v3",
+						"providers",
+						"{provider-id}"
+					]
+				},
+				"description": "Generated from cURL: curl --location 'https://dev.abdm.gov.in/api/hiecm/gateway/v3/providers/{provider-id}' \\\n--header 'REQUEST-ID: 2afd4545-4875-4e96-818e-668c8ec42dea' \\\n--header 'TIMESTAMP: 2025-08-05T11:19:39.442Z' \\\n--header 'X-CM-ID: sbx' \\\n--header 'Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJBbFJiNVdDbThUbTlFSl9JZk85ejA2ajlvQ3Y1MXBLS0ZrbkdiX1RCdkswIn0.eyJleHAiOjE3NTQzODUzODQsImlhdCI6MTc1NDM4NDE4NCwianRpIjoiZjQ4Nzk1ZGYtZWE2NC00NmY3LTk0YmYtOTI2MmE5NTNjZTMxIiwiaXNzIjoiaHR0cHM6Ly9kZXYubmRobS5nb3YuaW4vYXV0aC9yZWFsbXMvY2VudHJhbC1yZWdpc3RyeSIsImF1ZCI6ImFjY291bnQiLCJzdWIiOiJjN2NhMjk3Yi0yZTVhLTRkN2UtOGY5YS0xYWU2NDAxYWQ0Y2YiLCJ0eXAiOiJCZWFyZXIiLCJhenAiOiJTQlhfMDAwMTM1Iiwic2Vzc2lvbl9zdGF0ZSI6ImU1YTE2MzdkLTUyYzgtNDA2NS1iMzRlLTg2ZDU3MjNjMDU3MiIsImFjciI6IjEiLCJhbGxvd2VkLW9yaWdpbnMiOlsiaHR0cDovL2xvY2FsaG9zdDo5MDA3Il0sInJlYWxtX2FjY2VzcyI6eyJyb2xlcyI6WyJISVVfUEFZRVIiLCJoZnIiLCJoaXUiLCJvZmZsaW5lX2FjY2VzcyIsImhlYWx0aElkIiwicGhyIiwiT0lEQyIsImhlYWx0aF9sb2NrZXIiLCJoaXAiLCJocF9pZCIsIkhJUF9QQVlFUiJdfSwicmVzb3VyY2VfYWNjZXNzIjp7IlNCWF8wMDAxMzUiOnsicm9sZXMiOlsidW1hX3Byb3RlY3Rpb24iXX0sImFjY291bnQiOnsicm9sZXMiOlsibWFuYWdlLWFjY291bnQiLCJtYW5hZ2UtYWNjb3VudC1saW5rcyIsInZpZXctcHJvZmlsZSJdfX0sInNjb3BlIjoib3BlbmlkIGVtYWlsIHByb2ZpbGUiLCJjbGllbnRJZCI6IlNCWF8wMDAxMzUiLCJlbWFpbF92ZXJpZmllZCI6ZmFsc2UsImNsaWVudEhvc3QiOiIxMDAuNjUuMTYwLjIxNSIsInByZWZlcnJlZF91c2VybmFtZSI6InNlcnZpY2UtYWNjb3VudC1zYnhfMDAwMTM1In0.hHem0fYH0XfdXR4AHPPBAQwtHZrNp0XIM2tPVKb80NAEK0pNPWTvpHnY6ofm1RoBAh12zurmGMibiI_7Q3xV22VlMPkRsogVwpkSQ7swqMKGQk5dxSzr-tSMADTSSBsU6ILkekH8Ojj8qHCXW8OgxXRqOOYBpS-vc-O5Y93ESVieULkgn7mnNRyStJYOsHx9BCGmy3u9qFPX0bGdmiGwJQJ0s4LstXzQUcZtvgdINX3Ex_MSERaNSCUzhyhprJ0u8wfw0qHQ9jqiwwohHQ_nh6gD80o8xpmLEPvOqdeUHeA3R75AYfXQzosByvRY8fnBpgZzITyCrQS2EIzSNmO1Cg'"
+			},
+			"response": []
+		}
+	]
+}
