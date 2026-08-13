@@ -5,11 +5,11 @@ object FeatureFlags {
      *  recent-apps thumbnail).
      *  See
      *  [com.example.samdapp.presentation.navigation.requiresScreenSecurity]. */
-    const val SCREEN_SECURITY_ENABLED = true
+    const val SCREEN_SECURITY_ENABLED = false
 
     /** Idle auto-lock (75s) with biometric re-auth, drawn over the nav host.
      *  Off = app never locks on idle. See [com.example.samdapp.presentation.navigation.AppNavHost]. */
-    const val IDLE_LOCK_ENABLED = true
+    const val IDLE_LOCK_ENABLED = false
     /** Patient-facing "who has seen your file" audit trail entry point on the patient summary
      *  screen. Off = button hidden, screen unreachable.
      *  See [com.example.samdapp.presentation.patientsummary.PatientSummaryScreen]. */
