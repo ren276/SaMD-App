@@ -37,12 +37,58 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "GEMINI_API_KEY", "\"${localProperties.getProperty("GEMINI_API_KEY", "")}\"")
-        buildConfigField("String", "KERNEL_BASE_URL", "\"${localProperties.getProperty("KERNEL_BASE_URL", "http://10.0.2.2:8000/")}\"")
         buildConfigField("boolean", "ENABLE_NETWORK_LOGGING", "${localProperties.getProperty("ENABLE_NETWORK_LOGGING", "false")}")
+    }
+
+    flavorDimensions += "environment"
+    productFlavors {
+        create("dev") {
+            dimension = "environment"
+            applicationIdSuffix = ".dev"
+            buildConfigField("String", "KERNEL_BASE_URL", "\"${localProperties.getProperty("KERNEL_BASE_URL", "http://10.16.4.182:8000/")}\"")
+            buildConfigField("String", "BACKEND_BASE_URL", "\"http://10.16.4.182:8080/\"")
+            buildConfigField("String", "ABHA_BACKEND_BASE_URL", "\"http://10.16.4.182:8081/\"")
+            buildConfigField("String", "ENVIRONMENT", "\"dev\"")
+            // FLAG_SECURE off in dev so investor/demo screen recordings work; staging/prod enforce it.
+            buildConfigField("boolean", "SCREEN_SECURITY_ENABLED", "false")
+        }
+        create("staging") {
+            dimension = "environment"
+            applicationIdSuffix = ".staging"
+            buildConfigField("String", "KERNEL_BASE_URL", "\"https://staging.samd.example.com/\"")
+            buildConfigField("String", "BACKEND_BASE_URL", "\"https://staging.samd.example.com/backend/\"")
+            buildConfigField("String", "ABHA_BACKEND_BASE_URL", "\"https://staging.samd.example.com/abha/\"")
+            buildConfigField("String", "ENVIRONMENT", "\"staging\"")
+            buildConfigField("boolean", "SCREEN_SECURITY_ENABLED", "true")
+        }
+        create("prod") {
+            dimension = "environment"
+            buildConfigField("String", "KERNEL_BASE_URL", "\"https://api.samd.example.com/\"")
+            buildConfigField("String", "BACKEND_BASE_URL", "\"https://api.samd.example.com/backend/\"")
+            buildConfigField("String", "ABHA_BACKEND_BASE_URL", "\"https://api.samd.example.com/abha/\"")
+            buildConfigField("String", "ENVIRONMENT", "\"prod\"")
+            buildConfigField("boolean", "SCREEN_SECURITY_ENABLED", "true")
+        }
+    }
+
+    // Release signing: credentials come from env vars (CI: GitHub Secrets KEYSTORE_PASSWORD/
+    // KEY_ALIAS/KEY_PASSWORD/KEYSTORE_PATH), never committed. Config is only actually applied
+    // to release build types below, so its absence doesn't affect debug/dev builds.
+    signingConfigs {
+        create("release") {
+            val keystorePath = System.getenv("KEYSTORE_PATH")
+            if (keystorePath != null) {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS")
+                keyPassword = System.getenv("KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         release {
+            signingConfig = signingConfigs.getByName("release")
             optimization {
                 enable = false
             }

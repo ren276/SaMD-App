@@ -2,13 +2,17 @@ name: Android CI
 
 on:
   push:
-    branches: [ "**" ]
+    branches: [ "master", "**abha**", "**ABHA**" ]
   pull_request:
-    branches: [ "**" ]
+    branches: [ "master" ]
 
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        flavor: [ Dev, Staging, Prod ]
 
     steps:
       - name: Checkout
@@ -26,15 +30,15 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Run unit tests
-        run: ./gradlew testDebugUnitTest --console=plain
+      - name: Assemble ${{ matrix.flavor }}Debug
+        run: ./gradlew assemble${{ matrix.flavor }}Debug --console=plain
 
-      - name: Assemble debug build
-        run: ./gradlew assembleDebug --console=plain
+      - name: Run ${{ matrix.flavor }}Debug unit tests
+        run: ./gradlew test${{ matrix.flavor }}DebugUnitTest --console=plain
 
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: unit-test-reports
-          path: app/build/reports/tests/testDebugUnitTest/
+          name: unit-test-reports-${{ matrix.flavor }}
+          path: app/build/reports/tests/test${{ matrix.flavor }}DebugUnitTest/

@@ -6,7 +6,7 @@ channel** — this app is the PHC-worker side only.
 
 ---
 
-## Read first, on demand
+## Read first, on demand ( and other docs as they are made )
 
 | File | Contains |
 |------|---------|
@@ -27,6 +27,7 @@ channel** — this app is the PHC-worker side only.
 | `docs/` | Controlled documentation | **Tracked** | IEC 62304-controlled. Regulatory, requirements, QMS. Never write clinical/audit-clean content anywhere else. |
 | `agent_docs/` | Agent scratch | **Gitignored** | Spec, hardening plan, this file. Local only. Never commit. |
 | `second-brain/` | Personal vault | **Gitignored** | Founder's opinions, mistakes log, working style. Mirrored to a separate private repo by the founder. Agents append to `mistakes-log.md` when they catch a wrong turn. **Never `git add` anything here from this repo's working tree.** |
+| `backend/` | Backend source | **Tracked** | FastAPI Core API + ABDM adapter. Same repo, separate CI pipeline. |
 
 ---
 
@@ -41,10 +42,22 @@ channel** — this app is the PHC-worker side only.
 - **Networking:** Retrofit + OkHttp + Gson. Two real endpoints exist:
   - `POST /v1/assess` — `/v1/assess` XGBoost confidence + differentials (`RemoteKernelSource` / `RetrofitKernelSource`). Has a mock fallback.
   - `POST /api/v1/evaluate` — NLEM drug/dosage/brand-mapping/vitals-triage (`EvaluateKernelSource` / `RetrofitEvaluateSource`). **No mock fallback** — failure omits that section, no crash.
-  - Base URL: `http://10.16.4.182:8000/` (dev host LAN IP — physical device over Wi-Fi).
+  - Base URLs come from `BuildConfig` fields, flavor-scoped — never hardcoded in
+    `NetworkModule`. `KERNEL_BASE_URL` is wired today; `BACKEND_BASE_URL`/
+    `ABHA_BACKEND_BASE_URL` exist as flavor-scoped fields but have no consumer yet (no
+    `backend/` Retrofit service exists). See `## Environments` below for per-flavor values.
 - **External AI:** Gemini API (`gemini-2.5-flash`, thinking disabled for latency) for India brand-name lookup. Key in `local.properties` → `BuildConfig.GEMINI_API_KEY`. gitignored.
 - **Versions:** pinned exactly in `libs.versions.toml`. No `+` ranges.
 - **SDK:** `minSdk` 26/27 (field devices). `compileSdk`/`targetSdk` latest. Dev device: Pixel 9 Pro.
+
+### Backend (in progress)
+
+FastAPI, Python 3.12, PostgreSQL, SQLAlchemy 2.0, Alembic, Redis, JWT via python-jose, httpx,
+Docker. Location: `backend/core/` and `backend/abdm-adapter/`.
+
+### Build flavors
+
+See `## Environments` below.
 
 ---
 
@@ -64,6 +77,22 @@ channel** — this app is the PHC-worker side only.
 - **`ConnectivityController`** (`domain/connectivity`) — single source of truth for online state. Merges real `NetworkMonitor` AND the manual debug toggle. **Not just a UI flag** — the send path (`DoctorAssignmentConfirmViewModel.onConfirm()`) checks this before sending.
 - **`ConnectivityViewModel`** — thin wrapper delegating to `ConnectivityController`. Activity-scoped shared instance, same pattern as `AuthViewModel`/`IdleLockViewModel`.
 - **`CaseStatus.PENDING_SYNC`** — the queued state. Offline doctor confirm → `PENDING_SYNC`, not `SENT_TO_DOCTOR`. Auto-syncs on reconnect (real network back or worker flips toggle).
+
+---
+
+## Environments
+
+Three Gradle product flavors under `flavorDimension "environment"` in `app/build.gradle.kts`,
+so all three can be installed side by side on one device.
+
+| Flavor | applicationId suffix | `KERNEL_BASE_URL`/`BACKEND_BASE_URL`/`ABHA_BACKEND_BASE_URL` | Cleartext |
+|--------|----------------------|---------------------------------------------------------------|-----------|
+| `dev` | `.dev` | current LAN IPs over `http://` | Allowed — `src/dev/AndroidManifest.xml` sets `usesCleartextTraffic="true"` |
+| `staging` | `.staging` | `https://staging.samd.example.com/...` (placeholder — ABDM sandbox, infra not deployed yet) | Blocked (platform default) |
+| `prod` | none | `https://api.samd.example.com/...` (placeholder — ABDM production, infra not deployed yet) | Blocked (platform default) |
+
+Cleartext is **dev-only**. The main manifest no longer sets `usesCleartextTraffic` — only the
+`dev` flavor's manifest override does. Never add it back to the main manifest.
 
 ---
 
@@ -139,12 +168,13 @@ DoctorAssignmentConfirm) by construction — they never receive a `bottomBar` pa
 - Don't call AWS SDKs directly from `data/` — abstracted behind repository interfaces.
 - Don't add fields to `domain/model/` without checking `agent_docs/spec.md` first — flag gaps, don't silently extend.
 - Don't put demo-only UI behind the same interfaces as real hardening — see `agent_docs/hardening.md` for which is which.
-- Don't create a Room entity without a companion `MIGRATION_N_M` in `DatabaseModule`. DB is currently at **v11**. Next migration is `MIGRATION_11_12`.
+- Don't create a Room entity without a companion `MIGRATION_N_M` in `DatabaseModule`. DB is currently at **v12**. Next migration is `MIGRATION_12_13`.
 - Don't add a clinical action point without `AuditLogger.log(AuditAction.X)` — every clinical touch point must be logged. See `AuditAction.kt` for existing constants; add a new constant if none fits.
 - Don't write regulatory documentation to `agent_docs/` — it belongs in `docs/` (tracked).
 - Don't build the "explicitly later" list from `agent_docs/hardening.md` — it's there so it isn't forgotten, not so it gets started early.
 - Don't add an all-patients query to the DAO — the only list query is day/week-scoped (data minimisation, REQ-ROS-02 / H-04).
 - Don't re-litigate Hilt vs. Koin, multi-module, or `Result<T,E>` — all three are settled. See `second-brain/decisions-and-opinions.md`.
+- Don't hardcode base URLs in `NetworkModule`. All URLs come from `BuildConfig`, flavor-scoped.
 
 ---
 

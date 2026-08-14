@@ -1,11 +1,14 @@
 package com.example.samdapp.config
 
+import com.example.samdapp.BuildConfig
+
 object FeatureFlags {
     /** FLAG_SECURE on patient-data screens (blocks screenshots/screen-recording, blanks the
-     *  recent-apps thumbnail).
+     *  recent-apps thumbnail). Flavor-gated in build.gradle.kts: off for dev (investor/demo
+     *  screen recordings), on for staging/prod.
      *  See
      *  [com.example.samdapp.presentation.navigation.requiresScreenSecurity]. */
-    const val SCREEN_SECURITY_ENABLED = false
+    val SCREEN_SECURITY_ENABLED = BuildConfig.SCREEN_SECURITY_ENABLED
 
     /** Idle auto-lock (75s) with biometric re-auth, drawn over the nav host.
      *  Off = app never locks on idle. See [com.example.samdapp.presentation.navigation.AppNavHost]. */

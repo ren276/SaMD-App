@@ -14,6 +14,11 @@
 .cxx
 local.properties
 
+# Release signing keystore — never commit prod signing keys. Generate deliberately, back up
+# outside git (e.g. a password manager / secrets vault), and feed CI via KEYSTORE_PATH.
+*.jks
+*.keystore
+
 # --- Doc category boundaries ---
 # docs/          → tracked, IEC 62304-controlled, never gitignored
 # second-brain/  → gitignored personal vault — mirrored to a separate private repo by founder

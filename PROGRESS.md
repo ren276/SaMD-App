@@ -42,7 +42,19 @@ Read this first, every session. Continue from the first unchecked item unless to
 - [x] JVM unit test suite (32 tests): RegisterUiState/ViewModel, AuditPayload/RoomAuditLogger,
       MockSyncStatus, HomeViewModel + pre-existing use-case/repo tests (now actually run)
 - [x] Restored permanent instrumented DAO test for the day-scoped roster query
-- [x] GitHub Actions CI — unit tests + assembleDebug on every push/PR (see .github/workflows/android-ci.yml; passing)
+- [x] GitHub Actions CI — matrix over Dev/Staging/Prod flavors (`assemble{Flavor}Debug` +
+      `test{Flavor}DebugUnitTest`), on push to master/ABHA branches + PRs into master (see
+      `.github/workflows/android-ci.yml`; passing on all 3 legs)
+- [x] GitHub Actions release workflow — `v*.*.*` tag push only: `testProdReleaseUnitTest` →
+      `assembleProdRelease`, signing via `KEYSTORE_PASSWORD`/`KEY_ALIAS`/`KEY_PASSWORD` +
+      base64 `KEYSTORE_BASE64` GitHub Secrets, signed APK uploaded as a build artifact (see
+      `.github/workflows/android-release.yml`). New `signingConfigs.release` in
+      `app/build.gradle.kts`, reads env vars, only applied to the `release` build type.
+      **Flagged, not built blind:** no `.jks`/`.keystore` file exists in this repo, and none was
+      generated — a prod signing key must be created deliberately and backed up outside git (was
+      also missing from `.gitignore` before this pass; added `*.jks`/`*.keystore`). Release
+      workflow will fail at the decode step until `KEYSTORE_BASE64` + the three password/alias
+      secrets are actually provisioned in GitHub Secrets.
 - [ ] Compose UI tests (Register form, review dialogs); instrumented SEC-01/AUD-02 coverage
 - [ ] Add instrumented tests to CI once suite is larger (needs emulator action)
 
@@ -1008,6 +1020,53 @@ reimport endpoint yet).
       change-log entries).
 - No physician-side auth/identity captured on `DiagnosisFeedback` (matches the rest of the app's
   mock-login posture — same worker device, no separate doctor account) — unchanged, still true.
+
+## Doc corrections — Environments section + DB v12 propagation (2026-08-14)
+- [x] `agent_docs/CLAUDE.md`: Networking section now says base URLs come from `BuildConfig`
+      fields (flavor-scoped), not a hardcoded IP. New `## Environments` section after
+      `## Connectivity` with per-flavor table (URLs, applicationId suffix, cleartext posture).
+      "Build flavors" stub under Stack now points at it instead of duplicating.
+- [x] `agent_docs/spec.md`: package structure updated to the real current `presentation/`
+      module list (26 modules, checked against the directory, not the original 8). Screen flow
+      section reframed as the original mockup shape with a note pointing to PROGRESS.md as the
+      canonical current-status source.
+- [x] `docs/data-retention.md`: "current schema version 11" → "version 12".
+- [x] DB version (v12/`MIGRATION_12_13`) in CLAUDE.md/spec.md was already correct from the prior
+      doc pass — no further change needed there.
+
+## Gradle product flavors: dev/staging/prod (2026-08-14)
+- [x] `flavorDimension "environment"` with `dev`/`staging`/`prod` flavors in `app/build.gradle.kts`.
+      Flavor-scoped `buildConfigField`: `KERNEL_BASE_URL`, `BACKEND_BASE_URL`,
+      `ABHA_BACKEND_BASE_URL`, `ENVIRONMENT`. Dev = current LAN IPs over HTTP. Staging/prod =
+      HTTPS placeholder URLs (`staging.samd.example.com` / `api.samd.example.com`) pending real
+      infra. `dev`/`staging` get `applicationIdSuffix` (`.dev`/`.staging`) so all three install
+      side by side on one device; `prod` keeps the bare applicationId.
+- [x] `android:usesCleartextTraffic="true"` moved off the main manifest into a new
+      `src/dev/AndroidManifest.xml` manifest override — only the dev flavor gets cleartext,
+      staging/prod inherit the platform default (blocked).
+- [x] `KERNEL_BASE_URL` in `NetworkModule.kt` already read from `BuildConfig`, not hardcoded — no
+      change needed there. `BACKEND_BASE_URL` has no consumer yet (no `backend/` Retrofit service
+      exists) — left unwired until the backend is scaffolded, per YAGNI.
+- [x] `GEMINI_API_KEY` was already a flavor-independent `buildConfigField` sourced from
+      `local.properties` in `defaultConfig` — no change needed.
+- [ ] Skipped: bumping compileSdk/targetSdk to 36 — both are already at 37 (hardcoded in
+      `app/build.gradle.kts`, not in `libs.versions.toml`); 36 would be a downgrade. User
+      confirmed: skip.
+- [x] Verified: `assembleDevDebug`, `assembleStagingDebug`, `assembleProdDebug` all succeed.
+      `testDevDebugUnitTest` — 133 tests ran, 1 pre-existing failure (`RoutesSecurityTest`,
+      confirmed failing on baseline `master` too via `git stash` + `./gradlew test`, unrelated to
+      this change) — not touched.
+
+## Docs refresh — backend planning + DB v12 (2026-08-14)
+- [x] Doc-only edits, no code touched. `agent_docs/CLAUDE.md`: DB version bumped v11→v12 (next
+      migration `MIGRATION_12_13`), new "Backend (in progress)" and "Build flavors" stack
+      subsections, `BACKEND_BASE_URL`/`ABHA_BACKEND_BASE_URL` noted in Networking, `backend/` row
+      added to file placement table, new anti-pattern against hardcoded base URLs.
+- [x] `agent_docs/spec.md`: DB version reference updated to v12, ABHA fields noted as landing in
+      `MIGRATION_12_13` under `Patient`, backend Pydantic-model mirroring note added to Data models.
+- [x] `agent_docs/hardening.md`: "Explicitly later" split into "Approaching (this quarter)"
+      (RBAC, WorkManager sync, `ai_kernel_version`) and "Still deferred" (AWS infra, QMS). New
+      "Backend security (planned)" section added.
 
 ## Investor Demo Bug Fixes (2026-07-24)
 - [x] Fixed an issue where the Obesity mock persona resulted in "No drug recommendation" because its match (0.605) did not pass the ML backend's strict safety confidence threshold (< 0.6). Substituted the mock persona in `DemoPatientProfile` with "Type 2 Diabetes", which reliably returns an NLEM treatment (Glimepiride) and triggers Gemini brand mapping successfully for the investor demo.

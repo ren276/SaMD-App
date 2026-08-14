@@ -43,19 +43,57 @@ These are complete — do not reopen them.
 
 Don't start these yet — noted here so they're not forgotten, not so they get started early:
 
+### Approaching (this quarter)
+
 - **Role-Based Access Control** — real auth doesn't exist yet. Mock login (`MockAuthSession`,
   `UserRole`, biometric gate on sign-in tap) is the current posture. Real RBAC enforcement
   (REQ-SEC-03) needs real accounts, out of scope until there's a real backend.
 - **WorkManager-based sync worker** — no real backend to sync to yet.
+- **`ai_kernel_version` field** — per-record real-vs-mock marker is now closed
+  (`inferenceSource: InferenceSource` on `KernelReportOutput`). Versioning field itself
+  still deferred — add only when the kernel has a real versioned deployment.
+
+### Still deferred
+
 - **AWS infra** (Aurora/RDS Postgres, S3, Cognito, Lambda) — reasonable long-term target
   (AWS Mumbai for DPDP data localisation, managed Postgres for relational medical data,
   S3 for attachments, Cognito for auth). Don't provision anything from it yet.
 - **QMS (ISO 13485) and Design History File** — organisational/process artefacts that need to
   exist *before* production code is written. Flag to founder as a pre-production blocker;
   don't attempt to generate QMS documentation as a coding task. See `docs/quality/`.
-- **`ai_kernel_version` field** — per-record real-vs-mock marker is now closed
-  (`inferenceSource: InferenceSource` on `KernelReportOutput`). Versioning field itself
-  still deferred — add only when the kernel has a real versioned deployment.
+
+---
+
+## Environment separation (done, 2026-08-14)
+
+- **Gradle product flavors** — `dev`/`staging`/`prod` under `flavorDimension "environment"` in
+  `app/build.gradle.kts`. Each gets its own `KERNEL_BASE_URL`/`BACKEND_BASE_URL`/
+  `ABHA_BACKEND_BASE_URL`/`ENVIRONMENT` BuildConfig field. `dev`/`staging` carry an
+  `applicationIdSuffix` (`.dev`/`.staging`) so all three can be installed side by side on one
+  device — useful for demoing against a real staging backend without losing the dev build.
+- **Cleartext scoped to dev only** — `android:usesCleartextTraffic="true"` moved out of the main
+  manifest into `src/dev/AndroidManifest.xml`. Staging and prod inherit the platform default
+  (cleartext HTTP blocked), matching their HTTPS-only base URLs. See REQ-SEC-05/06 in
+  `docs/requirements/traceability-matrix.md`.
+- Real TLS certs / staging & prod infra don't exist yet — the HTTPS URLs
+  (`staging.samd.example.com`, `api.samd.example.com`) are placeholders until the backend is
+  deployed. Don't point a real device at them expecting a live server yet.
+
+---
+
+## Backend security (planned)
+
+- JWT auth
+- HTTPS enforcement
+- Request-ID middleware
+- Structured logging
+- Error envelope
+- PostgreSQL TLS
+- Redis AUTH
+- Docker non-root
+- Alembic tracking
+- Server-side audit log with hash chain
+- ABDM secrets in env vars only
 
 ---
 

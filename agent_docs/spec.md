@@ -4,6 +4,9 @@ Pulled out of root CLAUDE.md so it's loaded on demand, not every session. This i
 
 ## Data models
 
+Backend Pydantic models will mirror these domain models; see `backend/core/app/data/models/`
+once the backend is scaffolded.
+
 ### `Patient`
 - `id: String` — locally generated UID, 10–12 alphanumeric, assigned at creation (offline-first, not server-assigned)
 - `fullName: String` (required)
@@ -18,6 +21,9 @@ Pulled out of root CLAUDE.md so it's loaded on demand, not every session. This i
 - `createdAt: Instant`
 
 Only `id`, `fullName`, one contact method required in UI.
+
+ABHA fields (`abhaAddress`, `abhaStatus`, `kycStatus`, `verificationSource`, `verifiedAt`) will
+be added in `MIGRATION_12_13` per `ABHA planning/abha-integration-plan.md`.
 
 ### `VitalsReading`
 `id`, `patientId` (FK), `recordedAt`, `pulseBpm`, `bpSystolic`, `bpDiastolic`, `spo2Percent`, `temperatureCelsius`, `respiratoryRate`, `weightKg`, `heightCm`, `bmi` (calculated), `bloodGlucoseMgDl`, `source` (`"manual"` | `"device"`).
@@ -94,9 +100,15 @@ Mock/static JSON asset. `id`, `name`, `specialty`, `available`, `facilityName?`.
 - `Patient`/`PatientEntity` +`guardianRelation` (minors only).
 - `Observation`/`ObservationEntity` +`captureMethod` (data-quality), +`syncedToCloudAt` (dual
   timestamp; `createdAt`/`recordedAt` = offline capture).
-- Room DB version **2 → 11** (migrations are additive, run in sequence). Current: **v11**. Next migration will be `MIGRATION_11_12`. Do not skip a version.
+- Room DB version **2 → 12** (migrations are additive, run in sequence). Current: **v12**. Next migration will be `MIGRATION_12_13`. Do not skip a version.
 
-## Screen flow (built — see PROGRESS.md for actual status)
+## Screen flow (original mockup shape — see PROGRESS.md for the canonical current status)
+
+**PROGRESS.md is the source of truth for what's actually built.** The list below is the
+original 8-screen mockup flow; the real app has since grown ABHA, consent, compounder,
+emergency-override, kernel-assessment, patient-summary, referrals, and report screens around it
+(see `## Package structure` for the current module list). High-level shape still holds: register
+→ capture vitals/history → send to kernel → review/acknowledge → assign to a doctor.
 
 1. Home — big-button entry, "Register new patient"
 2. Register — `Patient` form
@@ -113,7 +125,10 @@ Prescription return flow: out of scope, model is forward-compatible via `status`
 
 ```
 app/
-  presentation/{home,register,vitals,consultation,sending,transcription,acknowledgement,doctorlist}/
+  presentation/{abha,acknowledgement,auth,common,compounder,connectivity,consent,consultation,
+    consultationchain,doctorassignment,doctorlist,emergency,home,kernelassessment,login,
+    medicalbackground,navigation,patients,patientsummary,profile,referrals,register,report,
+    sending,transcription}/
   domain/{model,repository,usecase,vitalssource,transcription,audit}/
   data/{local,repository,mock}/
   di/

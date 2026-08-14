@@ -5,7 +5,7 @@ hard-deletes clinical or audit data today.** Before adding any `@Delete`, `DELET
 destructive migration, check this file — several tables are append-only *by design* (regulatory /
 audit reasons), not just by omission, and changing that is a deliberate decision, not a cleanup.
 
-DB: `samd_app.db` (SQLCipher-encrypted), current schema **version 11**. Room entities live in
+DB: `samd_app.db` (SQLCipher-encrypted), current schema **version 12**. Room entities live in
 `data/local/entity/`, DAOs in `data/local/dao/`.
 
 ## Legend
