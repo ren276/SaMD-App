@@ -20,6 +20,21 @@ channel** — this app is the PHC-worker side only.
 
 ---
 
+## Git commits — no AI trailers, no push without explicit consent
+
+- **Never add `Co-Authored-By: Claude ...` (or any AI attribution trailer) to commit messages.**
+  It leaks into GitHub's contributor list, misrepresenting authorship on a regulated SaMD
+  codebase. Write commit messages as if the human authored them — no "Generated with Claude"
+  footers either.
+- **Never `git push` (including `--force`/`--force-with-lease`) without the user explicitly
+  asking for that push, in that turn.** A prior push approval does not carry forward.
+- If AI-attribution trailers are ever found already in pushed history, that requires a history
+  rewrite + force-push — treat as a destructive op needing explicit sign-off before touching it
+  (see 2026-08-14 incident: 8 commits on `master` had to be rewritten and force-pushed to strip
+  `Co-Authored-By: Claude` after it showed up in the GitHub contributor sidebar).
+
+---
+
 ## File placement — three categories, explicit rule
 
 | Directory | Category | Git | Rule |
