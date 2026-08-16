@@ -1,7 +1,8 @@
 # SaMD Backend API Contract (v1)
 
-> **Status:** Sections 1 and 2 (health, auth) are implemented as of 2026-08-16 in
-> `backend/core/`. Sections 3 through 8 are the contract for Phases 2 through 5 and are not
+> **Status:** Sections 1 through 4 (health, auth, patients, encounters) are implemented as of
+> 2026-08-17 in `backend/core/`. Section 5 (kernel proxy), section 6 (sync), section 7 (audit
+> read surface), and section 8 (ABHA) are the contract for Phases 3 through 5 and are not
 > implemented yet.
 > **Controlled document.** This file is the single source of truth from which both the FastAPI
 > routes (`backend/core/app/api/v1/`) and the Android Retrofit service interfaces

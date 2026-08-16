@@ -1072,6 +1072,127 @@ reimport endpoint yet).
 - [x] Fixed an issue where the Obesity mock persona resulted in "No drug recommendation" because its match (0.605) did not pass the ML backend's strict safety confidence threshold (< 0.6). Substituted the mock persona in `DemoPatientProfile` with "Type 2 Diabetes", which reliably returns an NLEM treatment (Glimepiride) and triggers Gemini brand mapping successfully for the investor demo.
 - [x] Fixed an issue in `ResolveDoctorAssignmentUseCase` where the new Type 2 Diabetes persona was falling back to the default/least-busy doctor (Neurology) instead of being correctly assigned to Endocrinology. Updated the mapping logic to match against the plain text `primaryAilmentName` ("Type 2 diabetes mellitus") rather than the ICD-10 code ("E11").
 
+## Backend Phase 1 scaffold (2026-08-16, FastAPI)
+
+First backend implementation session. Contract and PRD from the planning session
+(`docs/backend/api-contract.md`, `docs/backend/backend-prd.md`) are now partly built.
+
+- [x] `backend/core/` FastAPI service: Python 3.12, SQLAlchemy 2.0 async + asyncpg, Pydantic v2,
+      Alembic, python-jose, bcrypt, structlog. Versions pinned exactly in `pyproject.toml`, no
+      ranges, mirroring the `libs.versions.toml` discipline.
+- [x] `backend/docker-compose.yml` (FastAPI + PostgreSQL 16, no Redis) on port 8080, matching the
+      dev flavor's `BACKEND_BASE_URL`. Multi-stage Dockerfile, non-root uid 10001.
+- [x] Error envelope: RFC 9457 `application/problem+json`, the full `SAMD-{DOMAIN}-{NNNN}`
+      registry from api-contract.md section 9.1 as an enum, handlers for SamdError, validation,
+      HTTP, database, and unexpected. Validation details never echo the submitted value.
+- [x] Request-ID middleware (adopts a valid inbound UUID4 or mints one, echoes the header,
+      binds it to structlog), HTTPS-enforcement middleware (`/health` exempt), audit middleware.
+- [x] structlog JSON to stdout with a PHI redaction processor; request and response bodies are
+      never logged at any level in any environment.
+- [x] Auth: login, refresh with rotation and reuse detection, logout, me, change-pin. HS256 (D-8),
+      access 1 h, refresh 7 d. bcrypt cost 12. Login lockout (5 attempts, 15 min) as columns on
+      `user_accounts`, not Redis.
+- [x] `worker_id` provisioning reproduces `MockAuthSession.stableUserId` exactly
+      (`sha256(name.trim().lowercase() + "|" + ROLE)`, first 16 hex chars) so audit identity is
+      continuous across the mock-auth to real-auth cutover. Test asserts the derivation.
+- [x] D-3 implemented: `app/scripts/seed_accounts.py` provisions facilities and workers, prints a
+      one-time PIN, sets `must_change_pin`. Until changed, every endpoint except me/change-pin/
+      logout returns `SAMD-AUTH-1008`.
+- [x] Append-only hash-chained `audit_events`, one chain per facility over device-origin and
+      server-origin rows. Three enforcement layers: no mutation method in the service, no mutation
+      route, and a plpgsql trigger that raises on UPDATE/DELETE (a trigger, not only a GRANT,
+      because a GRANT does not restrain the owner). Appends serialised by
+      `pg_advisory_xact_lock` per facility. Closes the H-07 residual.
+- [x] Alembic migration 0001: facilities, user_accounts, devices, refresh_tokens, audit_events,
+      abha_transactions, plus the pgcrypto extension. `abha_transactions` is created now, in
+      Phase 1, shaped from the real ABDM V3 bodies in `abha api docs/`, so Phase 5 needs no
+      migration sequenced against Phases 2 to 4.
+- [x] `.github/workflows/backend-ci.yml`: ruff check, ruff format, mypy strict, alembic upgrade,
+      `alembic check` (a model change with no migration fails the build), pytest against a
+      PostgreSQL 16 service container, docker build plus a non-root uid assertion. Path-filtered
+      on `backend/**`; `android-ci.yml` and `android-release.yml` untouched.
+- [x] 60 tests passing. Verified locally end to end against a real PostgreSQL and a live uvicorn:
+      health, login, the forced PIN change, chain revocation on PIN change, refresh rotation,
+      reuse detection revoking the whole chain, and the audit chain linking correctly.
+
+Three real bugs found and fixed by running it rather than by reading it:
+
+1. **Self-deadlock on refresh reuse.** `rotate_refresh` revoked the chain on the request session
+   and then raised; the route opened a second session to redo the revocation durably and blocked
+   forever on the first transaction's row locks. The service now only raises, and the route owns
+   the out-of-band revocation.
+2. **`verify_chain` could be satisfied by its own cache.** A tampered row was not detected when
+   the verifying session had the ORM object in its identity map. Added `populate_existing`, so a
+   verifier always reads what is on disk.
+3. **Duplicate `X-Request-ID`.** The middleware appended while the error handlers also set it,
+   producing one comma-joined header value. The middleware now replaces.
+
+Also corrected: `refresh_reuse_detected` fired on a routine logout or PIN change, because any
+revoked token read as reuse. Only a token revoked with reason `ROTATED` is reuse now; false alarms
+at that severity are worse than none. And out-of-band audit rows (failed login, reuse) now resolve
+the worker's real facility instead of landing on an `UNKNOWN` side chain.
+
+Not in this session, by design: the 20 Room-mirrored clinical tables (Phase 2), kernel proxy
+(Phase 3), sync push (Phase 4), ABDM adapter (Phase 5), Android wiring (Phase 6).
+
+## Backend Phase 2: data foundation (2026-08-17)
+
+All 20 Room entities mirrored into PostgreSQL, plus patient and encounter CRUD.
+
+- [x] 20 device-mirrored tables with the same table names and the snake_case form of the same
+      fields, so a sync push stays a dumb row operation rather than a translation layer. Plus
+      three server-only operational tables (`sync_batches`, `sync_log`, `kernel_call_log`)
+      created now so Phases 3 and 4 are route work, not migration work. 29 tables total.
+- [x] Real foreign keys throughout, the deliberate divergence from Room. One documented
+      exception: `case_records.assigned_doctor_id` and `prescriptions.doctor_id` are indexed but
+      unconstrained, because `doctors` is reference data with an independent lifecycle and a
+      stale seed must not cost a clinical record.
+- [x] pgcrypto column encryption via a SQLAlchemy `TypeDecorator` (`app/db/types.py`): encryption
+      and decryption are expressions in the query, the key is a bound parameter that never
+      appears in statement text, and no call site outside that module ever handles ciphertext.
+      Encrypted: `full_name`, `guardian_or_spouse_name`, `mobile_number`, `aadhaar_number`,
+      `emergency_contact` on patients; `name`, `mobile_number`, `email_address` on abha_profiles.
+- [x] HMAC-SHA256 blind indexes (`name_blind_idx`, `aadhaar_blind_idx`, `mobile_blind_idx`) so an
+      encrypted column is still findable by exact match. Recomputed on every write.
+- [x] Sync columns on every syncable table: `facility_id` (stamped from the token, never accepted
+      from a body), `server_version`, `received_at`, `sync_state`.
+- [x] Patients: create (idempotent on the client-generated id), get, patch with `base_version`
+      optimistic concurrency, and a roster that **requires** both bounds and caps the window at
+      31 days. REQ-ROS-02 and H-04 now survive the network boundary instead of only living on the
+      device; there is no code path that returns every patient.
+- [x] `SAMD-PAT-3004` ABHA collision guard on both create and patch, backed by a UNIQUE index.
+      Late linking works (app UID stays primary, ABHA arrives later and never replaces it) and
+      claiming another patient's ABHA is refused rather than merged (hazard H-03).
+- [x] Encounters: create with FK and same-patient follow-up validation, DOCTOR-only bundle fetch
+      returning every child row with absent children as null or [], and the case-record status
+      state machine enforced server side.
+- [x] Migration 0002 applies clean and `alembic check` reports no drift. 116 tests passing,
+      ruff and mypy strict clean across 49 source files. Verified live against a real
+      PostgreSQL and uvicorn, not only under the test transport.
+
+Four bugs found by running it, all of which would have shipped:
+
+1. **pgcrypto never worked as first written.** `bind_expression` let the parameter inherit the
+   decorator's `bytea` impl, so asyncpg sent `$1::BYTEA` into `pgp_sym_encrypt(text, text)` and
+   every insert failed with `UndefinedFunctionError`. Fixed with `type_coerce` to text.
+2. **Timestamps shipped without milliseconds.** Python's `isoformat()` drops the fractional part
+   when it is exactly zero, so a timestamp landing on the second went out in a shape the Android
+   formatter cannot parse. The envelope now normalises every datetime in one place.
+3. **A test helper swallowed a 422.** Encounter ids longer than the column allowed were rejected
+   silently, so two roster tests asserted against an empty database and one of them passed for
+   entirely the wrong reason. The helper now asserts its own response.
+4. **The blind-index docstring claimed a normalisation it does not do** (stripping a country
+   code). Corrected rather than implemented: REQ-REG-02 fixes mobiles at 10 digits, so a prefixed
+   value is bad data, and silently folding the two together would let one patient match another
+   patient's number.
+
+Docs updated to match what was built: PRD section 5.4 (the encryption column list changed during
+implementation, including the decision to leave `abha_number` plaintext so its UNIQUE constraint
+can enforce the wrong-patient guard), section 4.7 (the doctor FK exception), and the phase table.
+
+Not in this session, by design: kernel proxy (Phase 3), sync push and pull (Phase 4), ABDM
+adapter (Phase 5), Android wiring (Phase 6).
+
 ## Not started
 - [ ] Demo-theater additions from agent_docs/hardening.md — complete, pending final review of the
       hardening doc to ensure no secondary "security-theatre" items remain (e.g. security-shield

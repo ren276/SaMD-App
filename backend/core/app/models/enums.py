@@ -71,6 +71,12 @@ class AuditAction(StrEnum):
     TOKEN_REFRESHED = "token_refreshed"
     REFRESH_REUSE_DETECTED = "refresh_reuse_detected"
     PATIENT_RECORD_READ = "patient_record_read"
+    PATIENT_REGISTERED = "patient_registered"
+    PATIENT_CREATE_REPLAYED = "patient_create_replayed"
+    PATIENT_UPDATED = "patient_updated"
+    ENCOUNTER_CREATED = "encounter_created"
+    ENCOUNTER_READ = "encounter_read"
+    CASE_STATUS_CHANGED = "case_status_changed"
     AUDIT_LOG_READ = "audit_log_read"
     KERNEL_CALL_FORWARDED = "kernel_call_forwarded"
     KERNEL_CALL_FAILED = "kernel_call_failed"
@@ -82,3 +88,158 @@ class AuditAction(StrEnum):
     # Generic fallback written by the audit middleware for a mutating request whose handler did
     # not declare a specific action. Its presence in the log is a hint that the handler should.
     REQUEST_COMPLETED = "request_completed"
+
+
+# ---------------------------------------------------------------------------
+# Clinical vocabularies mirrored from the Android domain models.
+#
+# Every value below matches a Kotlin enum constant name exactly, so no mapping
+# table is needed on either side of the wire. Stored as VARCHAR with a CHECK
+# constraint rather than a native PostgreSQL ENUM: adding a value to a native
+# enum is a migration with a lock, and these vocabularies will grow.
+# ---------------------------------------------------------------------------
+
+
+class CaseStatus(StrEnum):
+    """domain/model/CaseRecord.kt.
+
+    PENDING_SYNC is accepted from the client: the device legitimately writes it while offline
+    (CaseRecordRepository.assignDoctor(isOnline)) and the row reaches the server carrying it.
+    """
+
+    DRAFT = "DRAFT"
+    SAVED_LOCALLY = "SAVED_LOCALLY"
+    PENDING_SYNC = "PENDING_SYNC"
+    SENT_TO_DOCTOR = "SENT_TO_DOCTOR"
+    PRESCRIPTION_RECEIVED = "PRESCRIPTION_RECEIVED"
+    ABANDONED = "ABANDONED"
+
+
+class MeasurementType(StrEnum):
+    MEASURABLE = "MEASURABLE"
+    NON_MEASURABLE = "NON_MEASURABLE"
+
+
+class Visibility(StrEnum):
+    """PRIVATE hides an ailment from the worker-facing projection only (REQ-AIL-02).
+
+    PRIVATE rows and their clinical text DO cross this boundary. Only the audio file is
+    device-local (REQ-AIL-03). Getting this backwards in either direction is a defect.
+    """
+
+    PUBLIC = "PUBLIC"
+    PRIVATE = "PRIVATE"
+
+
+class ObservationType(StrEnum):
+    PULSE = "PULSE"
+    BP_SYSTOLIC = "BP_SYSTOLIC"
+    BP_DIASTOLIC = "BP_DIASTOLIC"
+    SPO2 = "SPO2"
+    TEMPERATURE = "TEMPERATURE"
+    RESPIRATORY_RATE = "RESPIRATORY_RATE"
+    WEIGHT = "WEIGHT"
+    HEIGHT = "HEIGHT"
+    BMI = "BMI"
+    BLOOD_GLUCOSE = "BLOOD_GLUCOSE"
+    PAIN_SCORE = "PAIN_SCORE"
+    URINALYSIS = "URINALYSIS"
+
+
+class ObservationSource(StrEnum):
+    MANUAL = "MANUAL"
+    DEVICE = "DEVICE"
+
+
+class VitalsCaptureMethod(StrEnum):
+    MANUAL_CUFF = "MANUAL_CUFF"
+    DIGITAL_MONITOR = "DIGITAL_MONITOR"
+    PULSE_OXIMETER = "PULSE_OXIMETER"
+    THERMOMETER = "THERMOMETER"
+    OTHER = "OTHER"
+
+
+class AttachmentType(StrEnum):
+    IMAGE = "IMAGE"
+    VIDEO = "VIDEO"
+    AUDIO = "AUDIO"
+    AFFECTED_AREA_PHOTO = "AFFECTED_AREA_PHOTO"
+
+
+class MedicalHistoryCategory(StrEnum):
+    CHRONIC_CONDITION = "CHRONIC_CONDITION"
+    SURGERY = "SURGERY"
+    HOSPITALIZATION = "HOSPITALIZATION"
+
+
+class AllergyCategory(StrEnum):
+    DRUG = "DRUG"
+    FOOD = "FOOD"
+    ENVIRONMENTAL = "ENVIRONMENTAL"
+
+
+class MedicationKind(StrEnum):
+    MEDICATION = "MEDICATION"
+    SUPPLEMENT = "SUPPLEMENT"
+
+
+class RiskCategory(StrEnum):
+    LOW = "LOW"
+    MODERATE = "MODERATE"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
+
+class UrgencyLevel(StrEnum):
+    ROUTINE = "ROUTINE"
+    URGENT = "URGENT"
+    EMERGENCY = "EMERGENCY"
+
+
+class InferenceSource(StrEnum):
+    """REQ-HAN-08. Which path produced a /v1/assess result.
+
+    Stored server side so the mock-fallback rate becomes a queryable metric for the first time.
+    """
+
+    REAL_INFERENCE = "REAL_INFERENCE"
+    MOCK_FALLBACK = "MOCK_FALLBACK"
+
+
+class PhysicianDecision(StrEnum):
+    AGREE = "AGREE"
+    MODIFY = "MODIFY"
+    REJECT = "REJECT"
+
+
+class KernelDecision(StrEnum):
+    AGREE = "AGREE"
+    MODIFY = "MODIFY"
+    REJECT = "REJECT"
+
+
+class ReferralStatus(StrEnum):
+    QUEUED = "QUEUED"
+    SENT = "SENT"
+    ACKNOWLEDGED = "ACKNOWLEDGED"
+    CANCELLED = "CANCELLED"
+
+
+class SyncState(StrEnum):
+    """Server-side state of a synced row.
+
+    ponytail: RECEIVED is the only value written today. CONFLICT is reserved for Phase 4, where a
+    push whose base_version does not match parks the row for worker resolution. If a third state
+    is ever needed, this is a CHECK constraint edit, not a type migration.
+    """
+
+    RECEIVED = "RECEIVED"
+    CONFLICT = "CONFLICT"
+
+
+class BlobStatus(StrEnum):
+    """Attachment binary transfer state. Always NOT_UPLOADED in v1; object storage is out of
+    scope (api-contract.md section 10)."""
+
+    NOT_UPLOADED = "NOT_UPLOADED"
+    UPLOADED = "UPLOADED"

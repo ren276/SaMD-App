@@ -149,3 +149,69 @@ async def client(test_settings: Settings) -> AsyncIterator[AsyncClient]:
 
     application.dependency_overrides.clear()
     get_settings.cache_clear()
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 fixtures: authenticated callers and a second facility to isolate against
+# ---------------------------------------------------------------------------
+
+TEST_DEVICE_ID = "device-abc12345"
+DOCTOR_WORKER_ID = "00000000000d0c00"
+OTHER_FACILITY_ID = "PHC-TEST-0002"
+OTHER_WORKER_ID = "0000000000000f02"
+
+
+async def _login_headers(http: AsyncClient, worker_id: str) -> dict[str, str]:
+    response = await http.post(
+        "/api/v1/auth/login",
+        json={"worker_id": worker_id, "pin": TEST_PIN, "device_id": TEST_DEVICE_ID},
+    )
+    token = response.json()["data"]["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+async def auth_headers(client: AsyncClient, seeded_account: UserAccount) -> dict[str, str]:
+    """An ASHA worker at TEST_FACILITY_ID, past the forced PIN change."""
+    return await _login_headers(client, TEST_WORKER_ID)
+
+
+@pytest.fixture
+async def doctor_headers(
+    client: AsyncClient, seeded_account: UserAccount, session: AsyncSession
+) -> dict[str, str]:
+    """A DOCTOR at the same facility. GET /encounters/{id} is DOCTOR only."""
+    session.add(
+        UserAccount(
+            worker_id=DOCTOR_WORKER_ID,
+            display_name="Dr Test",
+            role=UserRole.DOCTOR.value,
+            facility_id=TEST_FACILITY_ID,
+            pin_hash=hash_pin(TEST_PIN),
+            must_change_pin=False,
+            is_active=True,
+        )
+    )
+    await session.commit()
+    return await _login_headers(client, DOCTOR_WORKER_ID)
+
+
+@pytest.fixture
+async def other_facility_headers(
+    client: AsyncClient, seeded_account: UserAccount, session: AsyncSession
+) -> dict[str, str]:
+    """A worker at a different PHC. Every read and write must be invisible across this line."""
+    session.add(Facility(id=OTHER_FACILITY_ID, name="PHC Other"))
+    session.add(
+        UserAccount(
+            worker_id=OTHER_WORKER_ID,
+            display_name="Other Worker",
+            role=UserRole.NURSE.value,
+            facility_id=OTHER_FACILITY_ID,
+            pin_hash=hash_pin(TEST_PIN),
+            must_change_pin=False,
+            is_active=True,
+        )
+    )
+    await session.commit()
+    return await _login_headers(client, OTHER_WORKER_ID)

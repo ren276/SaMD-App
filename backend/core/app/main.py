@@ -21,7 +21,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.v1 import auth as auth_routes
+from app.api.v1 import encounters as encounter_routes
 from app.api.v1 import health as health_routes
+from app.api.v1 import patients as patient_routes
 from app.config import get_settings
 from app.db.session import dispose_engine
 from app.errors import (
@@ -132,6 +134,8 @@ def create_app() -> FastAPI:
 
     app.include_router(health_routes.router)
     app.include_router(auth_routes.router)
+    app.include_router(patient_routes.router)
+    app.include_router(encounter_routes.router)
 
     @app.exception_handler(SamdError)
     async def handle_samd_error(request: Request, exc: SamdError) -> JSONResponse:

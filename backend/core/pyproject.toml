@@ -62,6 +62,7 @@ ignore = ["B008"]
 # so `import logging` inside the package still resolves to the stdlib. The name is worth more
 # than the lint.
 "app/logging.py" = ["A005"]
+"app/db/types.py" = ["A005"]
 
 [tool.mypy]
 python_version = "3.12"

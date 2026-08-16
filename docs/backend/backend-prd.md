@@ -1,6 +1,6 @@
 # SaMD Backend: Product Requirements Document
 
-> **Status:** Phase 1 implemented (2026-08-16). Phases 2 through 8 remain planning. See §8.
+> **Status:** Phases 1 and 2 implemented (2026-08-17). Phases 3 through 8 remain planning. See §8.
 > **Owner:** solo developer / founder.
 > **Controlled document** under the IEC 62304 documentation set. Lives in `docs/` (tracked), not
 > `agent_docs/` (gitignored).
@@ -266,10 +266,10 @@ Table names are identical. Column names are the `snake_case` form of the Kotlin 
 | `PatientEntity` | `patients` | push | Identity columns encrypted at rest (§5.4). Adds `facility_id`, `server_version`, `synced_at`. ABHA columns (`abha_address`, `abha_status`, `kyc_status`, `verification_source`, `verified_at`) land on the device in `MIGRATION_12_13` and exist server side from day one. |
 | `EncounterEntity` | `encounters` | push | FK to `patients`. `follow_up_of_encounter_id` self-FK. |
 | `ConsultationEntity` | `consultations` | push | FK to `patients`, `encounters`. |
-| `AttachmentEntity` | `attachments` | push | `uri` stored as `local_uri`, plus `blob_status` (`NOT_UPLOADED` always in v1) and a nullable `object_key` for the future. Binaries do not move in v1. |
+| `AttachmentEntity` | `attachments` | push | `uri` stored as `local_uri`, plus `blob_status` (`NOT_UPLOADED` always in v1) and a nullable `object_key` for the future. Renamed deliberately: a `content://` URI means nothing off the device that wrote it, and calling the column `uri` would imply the server can fetch something it cannot. Binaries do not move in v1. |
 | `ObservationEntity` | `observations` | push | Vitals. `synced_to_cloud_at` is stamped by the server on apply and returned, closing the dual-timestamp contract of REQ-TRS-06 honestly instead of the device guessing. |
 | `AilmentEntity` | `ailments` | push | **`audio_local_uri` is not a column here and is rejected on the wire** (`SAMD-SYNC-6006`, REQ-AIL-03). `visibility` including `PRIVATE` does sync (REQ-AIL-04). Soft-delete via `deleted_at`. |
-| `CaseRecordEntity` | `case_records` | push, pull | Status transitions enforced server side. |
+| `CaseRecordEntity` | `case_records` | push, pull | Status transitions enforced server side. `assigned_doctor_id` carries **no** foreign key; see the note below §4.7. |
 | `KernelReportEntity` | `kernel_reports` | push | Includes `inference_source` (`REAL_INFERENCE` / `MOCK_FALLBACK`, REQ-HAN-08), which makes the mock-fallback rate a queryable server-side metric for the first time. |
 | `EvaluateReportEntity` | `evaluate_reports` | push | `payload_json` stored as `jsonb`, not `text`, so the founder can query inside it without an application. |
 | `DiagnosisFeedbackEntity` | `diagnosis_feedback` | push | Stored, not consumed (REQ-RFN-01). |
@@ -388,6 +388,14 @@ and PostgreSQL enforces it for free. The cost is that sync push must apply recor
 order, which is why §6.1 of the API contract fixes a table rank rather than trusting the client's
 array order.
 
+**One deliberate exception, decided in Phase 2.** `case_records.assigned_doctor_id` and
+`prescriptions.doctor_id` are indexed but unconstrained. `doctors` is reference data with a
+lifecycle independent of any clinical record, and a device can legitimately hold a doctor row the
+server has not been seeded with. An FK there converts a reference-data seeding gap into refused
+clinical writes, which is the wrong failure mode: losing a patient's record because a doctor list
+is stale is worse than an orphaned doctor reference. This is the only unconstrained relationship
+in the schema and it is documented in place, in `app/models/clinical.py`.
+
 ---
 
 ## 5. Security model
@@ -456,13 +464,26 @@ Three layers, listed in the order they actually stop something:
 1. **Volume and instance encryption.** RDS encryption in staging and production, encrypted volume
    in dev.
 2. **Column-level encryption** on the identity subset, via `pgcrypto`
-   (`pgp_sym_encrypt` / `pgp_sym_decrypt`), key from `PHI_ENCRYPTION_KEY` in the environment:
-   `full_name`, `aadhaar_number`, `abha_number`, `mobile_number`, `guardian_or_spouse_name`,
-   `emergency_contact`, and the address columns (`village`, `block`, `pincode`).
-3. **Blind indexes** for the two columns that must remain searchable, since an encrypted column
-   cannot be indexed usefully: `abha_number_hash` and `mobile_number_hash`, each
-   `HMAC-SHA256(value, BLIND_INDEX_KEY)`. Equality lookup works; range and prefix search do not,
-   and are not needed.
+   (`pgp_sym_encrypt` / `pgp_sym_decrypt`), key from `PHI_ENCRYPTION_KEY` in the environment.
+   Implemented in Phase 2 as a SQLAlchemy `TypeDecorator` (`app/db/types.py`), so encryption and
+   decryption are expressions in the query and no call site outside that module handles
+   ciphertext. Encrypted on `patients`: `full_name`, `guardian_or_spouse_name`, `mobile_number`,
+   `aadhaar_number`, `emergency_contact`. Encrypted on `abha_profiles`: `name`, `mobile_number`,
+   `email_address`.
+3. **Blind indexes** for the columns that must remain searchable, since an encrypted column
+   cannot be indexed usefully: `name_blind_idx`, `aadhaar_blind_idx`, `mobile_blind_idx`, each
+   `HMAC-SHA256(normalised value, BLIND_INDEX_KEY)` truncated to 32 hex characters. HMAC rather
+   than a bare hash: a plain SHA-256 of a 10-digit mobile number is brute forceable in seconds.
+   Equality lookup works; range and prefix search do not, and are not needed.
+
+**Two column decisions that changed during implementation, recorded rather than quietly
+adjusted.** `abha_number` is **not** encrypted: it is a pseudonymous government identifier rather
+than a direct one, and it needs exact-match lookup plus a `UNIQUE` constraint, which ciphertext
+cannot provide. That constraint is what enforces `SAMD-PAT-3004`, the wrong-patient guard
+(hazard H-03), so encrypting the column would weaken a safety control to strengthen a privacy
+one. And `village`, `block`, `pincode` stay plaintext alongside `district` and `state`: at PHC
+granularity an address line is not identifying on its own, and encrypting it would make every
+roster and aggregate query decrypt the table.
 
 **Stated honestly:** with the key in the application environment, layer 2 protects against a stolen
 database dump or a backup file, not against an attacker who already has the application host. The
@@ -716,7 +737,7 @@ Grafana panel.
 |---|---|---|---|
 | 0 | This document plus `api-contract.md` | nothing | this session |
 | 1 | **DONE 2026-08-16.** Scaffold: Docker, compose, config with startup validation, `/health`, request-ID, HTTPS-enforcement and audit middleware, RFC 9457 error envelope, structlog with PHI redaction, auth endpoints including forced PIN change, `facilities` / `user_accounts` / `devices` / `refresh_tokens` / `audit_events` / `abha_transactions`, the audit hash chain, account provisioning script, backend CI | Phase 0 review | 1 session (Opus) |
-| 2 | SQLAlchemy models for all 20 mirrored tables, pgcrypto columns and blind indexes, patient and encounter and case-record CRUD. The Alembic baseline, the pgcrypto extension, and `abha_transactions` already landed in Phase 1 | Phase 1 | 1 session |
+| 2 | **DONE 2026-08-17.** SQLAlchemy models for all 20 mirrored tables plus `sync_batches` / `sync_log` / `kernel_call_log`, migration 0002, pgcrypto column encryption with blind indexes, sync columns on every syncable table, patient CRUD with the ABHA collision guard and the day-scoped roster, encounter create and bundle fetch, case-record status state machine | Phase 1 | 1 session |
 | 3 | Kernel proxy: `/assess` and `/evaluate`, PHI-boundary guard plus its test, `kernel_call_log`, upstream error translation | Phase 2 | 1 session |
 | 4 | `POST /sync/push`: batch ordering, per-record apply, ack contract, idempotency, `audit_events` hash chain, `/audit/events` and `/audit/verify` | Phase 3 | 1 session |
 | 5 | ABDM adapter: M1 registration flow per `abha-integration-plan.md`, `ABDM_MODE=stub` first | Phase 4 plus sandbox approval | 2 sessions |

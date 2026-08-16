@@ -101,3 +101,23 @@ def test_every_code_has_a_status_and_a_title() -> None:
 def test_codes_are_unique() -> None:
     values = [code.value for code in ErrorCode]
     assert len(values) == len(set(values))
+
+
+async def test_success_timestamps_are_utc_with_millisecond_precision(
+    client: AsyncClient, auth_headers: dict[str, str]
+) -> None:
+    """api-contract.md section 0.3, asserted on a value that lands exactly on the second.
+
+    Python's isoformat() omits the fractional part when it is zero, which would ship a shape the
+    Android formatter cannot parse. The envelope normalises instead.
+    """
+    from tests.test_patients import create
+
+    response = await create(client, auth_headers)
+    data = response.json()["data"]
+
+    for field in ("created_at", "updated_at"):
+        assert data[field].endswith("Z"), data[field]
+        assert len(data[field]) == len("2026-08-16T09:40:00.000Z"), data[field]
+
+    assert response.json()["meta"]["timestamp"].endswith("Z")
