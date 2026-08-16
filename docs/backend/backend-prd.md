@@ -1,6 +1,6 @@
 # SaMD Backend: Product Requirements Document
 
-> **Status:** Phase 0, planning baseline. Approved for review, not for implementation.
+> **Status:** Phase 1 implemented (2026-08-16). Phases 2 through 8 remain planning. See §8.
 > **Owner:** solo developer / founder.
 > **Controlled document** under the IEC 62304 documentation set. Lives in `docs/` (tracked), not
 > `agent_docs/` (gitignored).
@@ -356,8 +356,11 @@ in one place is a convention that gets broken:
 
 1. No `UPDATE` or `DELETE` method exists on the audit service.
 2. No route exposes mutation of an audit record.
-3. The application's database role is granted `SELECT, INSERT` on `audit_events` and nothing else.
-   A migration that needs more runs as the owner role, deliberately and visibly.
+3. A database trigger raises on any `UPDATE` or `DELETE` against `audit_events`. A trigger rather
+   than only a `GRANT`, because a `GRANT` does not restrain the table owner and in dev the
+   application connects as the owner. Deployment additionally runs the application under a role
+   holding only `SELECT, INSERT` on that table; see `backend/README.md`. Migrations run as the
+   owner, deliberately and visibly.
 
 ### 4.6 Identifier strategy
 
@@ -712,8 +715,8 @@ Grafana panel.
 | Phase | Deliverable | Depends on | Effort |
 |---|---|---|---|
 | 0 | This document plus `api-contract.md` | nothing | this session |
-| 1 | Scaffold: Docker, compose, config, `/health`, request-ID and audit middleware, error envelope, structlog with redaction, auth endpoints, `user_accounts` and `refresh_tokens`, CI | Phase 0 review | 1 session (Opus) |
-| 2 | SQLAlchemy models for all 20 mirrored tables, Alembic baseline, pgcrypto columns and blind indexes, patient and encounter and case-record CRUD | Phase 1 | 1 session |
+| 1 | **DONE 2026-08-16.** Scaffold: Docker, compose, config with startup validation, `/health`, request-ID, HTTPS-enforcement and audit middleware, RFC 9457 error envelope, structlog with PHI redaction, auth endpoints including forced PIN change, `facilities` / `user_accounts` / `devices` / `refresh_tokens` / `audit_events` / `abha_transactions`, the audit hash chain, account provisioning script, backend CI | Phase 0 review | 1 session (Opus) |
+| 2 | SQLAlchemy models for all 20 mirrored tables, pgcrypto columns and blind indexes, patient and encounter and case-record CRUD. The Alembic baseline, the pgcrypto extension, and `abha_transactions` already landed in Phase 1 | Phase 1 | 1 session |
 | 3 | Kernel proxy: `/assess` and `/evaluate`, PHI-boundary guard plus its test, `kernel_call_log`, upstream error translation | Phase 2 | 1 session |
 | 4 | `POST /sync/push`: batch ordering, per-record apply, ack contract, idempotency, `audit_events` hash chain, `/audit/events` and `/audit/verify` | Phase 3 | 1 session |
 | 5 | ABDM adapter: M1 registration flow per `abha-integration-plan.md`, `ABDM_MODE=stub` first | Phase 4 plus sandbox approval | 2 sessions |
@@ -743,7 +746,7 @@ Every one of these needs the founder's answer. None of them blocks Phase 1.
 |---|---|---|
 | D-1 | Which roles may submit to the kernel? The brief says `COMPOUNDER` and `DOCTOR`; the shipped Android navigation lets any signed-in worker reach `SendingViewModel`, so enforcing that returns `403` to ASHA workers and nurses on day one. | Allow all four. The kernel output is never autonomous: it is gated by the liability acknowledgement and the mandatory doctor review. Role does not change that safety argument. |
 | D-2 | Add `DOCTOR` to the Android `UserRole` enum? | Yes. The physician AGREE/MODIFY/REJECT decision carries the whole H-02 risk-control argument and is currently attributed to a field role in the audit trail. This is worth fixing independently of the backend. |
-| D-3 | How are PINs distributed to workers on day one? | Facility administrator provisions accounts via a seed script and hands out an initial PIN in person, with a forced change on first login. No self-service reset endpoint in v1. |
+| D-3 | How are PINs distributed to workers on day one? | **Resolved and implemented.** Facility administrator provisions accounts via `python -m app.scripts.seed_accounts` and hands out an initial PIN in person. `user_accounts.must_change_pin` forces a change at first login: until then every endpoint except `/auth/me`, `/auth/change-pin`, and `/auth/logout` returns `SAMD-AUTH-1008`. No self-service reset endpoint in v1. |
 | D-4 | Does `KERNEL_BASE_URL` get deleted in Phase 6, or kept as an emergency direct-call fallback? | Delete it. A second path to the kernel is a second path that bypasses the audit log, which defeats the point of G-3. |
 | D-5 | Retention policy for `kernel_call_log` and `sync_log`. | 24 months, matching whatever `docs/data-retention.md` settles on for clinical rows. `audit_events` is never deleted. Needs the regulatory answer, not an engineering one. |
 | D-6 | Does the ABHA transaction store share the main database? | Yes (§4.3). One engine, one Alembic history. |

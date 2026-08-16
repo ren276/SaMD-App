@@ -1,6 +1,8 @@
 # SaMD Backend API Contract (v1)
 
-> **Status:** Planning baseline, Phase 0. No implementation exists yet.
+> **Status:** Sections 1 and 2 (health, auth) are implemented as of 2026-08-16 in
+> `backend/core/`. Sections 3 through 8 are the contract for Phases 2 through 5 and are not
+> implemented yet.
 > **Controlled document.** This file is the single source of truth from which both the FastAPI
 > routes (`backend/core/app/api/v1/`) and the Android Retrofit service interfaces
 > (`app/src/main/java/com/example/samdapp/data/remote/api/`) are built. If the two disagree, this
@@ -248,6 +250,7 @@ not a claim the client asserts. A client-asserted role is a privilege-escalation
     "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
     "token_type": "Bearer",
     "expires_in": 3600,
+    "must_change_pin": false,
     "worker": {
       "worker_id": "a3f5c9d21b8e4470",
       "display_name": "A. Devi",
@@ -277,6 +280,11 @@ Access token lifetime 3600 s (1 h). Refresh token lifetime 604800 s (7 d). Claim
   out for 15 minutes; counter is a column on `user_accounts`, not Redis)
 - 500: `SAMD-SYS-9005`
 - 503: `SAMD-SYS-9004`
+
+`must_change_pin` is `true` until the worker has replaced the administrator-issued PIN. Login
+still succeeds and still returns a usable token pair, but while the flag is set every endpoint
+except `/auth/me`, `/auth/change-pin`, and `/auth/logout` returns `403` / `SAMD-AUTH-1008`. The
+client must route the worker to a PIN-change screen on this signal.
 
 ### 2.3 POST /api/v1/auth/refresh
 
@@ -384,6 +392,43 @@ server-side per route, always.
 
 **Error Responses:**
 - 401: `SAMD-AUTH-1002`, `SAMD-AUTH-1003`
+- 500: `SAMD-SYS-9005`
+
+### 2.6 POST /api/v1/auth/change-pin
+
+**Purpose:** Replace the worker's PIN. Forced on first login (decision D-3), available
+voluntarily thereafter.
+**Auth:** Bearer access token. Permitted while `must_change_pin` is set, which is the point.
+**Android consumer:** a new PIN-change screen, reached from the Login flow when
+`must_change_pin` is true and from Profile otherwise.
+
+**Request:**
+
+```json
+{
+  "current_pin": "482915",
+  "new_pin": "551234"
+}
+```
+
+**Success Response (200):**
+
+```json
+{
+  "success": true,
+  "data": { "pin_changed": true, "reauthentication_required": true },
+  "meta": { "request_id": "...", "timestamp": "2026-08-16T10:00:00.000Z", "api_version": "v1" }
+}
+```
+
+Changing the PIN revokes **every** refresh chain for that worker, on every device. No new token
+pair is returned. The client must log in again with the new PIN. A PIN change that leaves old
+sessions alive is not a credential rotation.
+
+**Error Responses:**
+- 401: `SAMD-AUTH-1001` (`current_pin` wrong), `SAMD-AUTH-1002`, `SAMD-AUTH-1003`
+- 403: `SAMD-AUTH-1006`
+- 422: `SAMD-PAT-3003` (new PIN equal to the current one, or outside 6 to 12 characters)
 - 500: `SAMD-SYS-9005`
 
 ---
@@ -1301,6 +1346,7 @@ autofill changes when the mock is replaced:
 | `SAMD-AUTH-1005` | 403 | Role not permitted for this route or resource |
 | `SAMD-AUTH-1006` | 403 | Account disabled |
 | `SAMD-AUTH-1007` | 403 | Device not bound to this token |
+| `SAMD-AUTH-1008` | 403 | Initial PIN must be changed before this endpoint can be used |
 | `SAMD-ABHA-2001` | 404 | Registration or verification session not found |
 | `SAMD-ABHA-2002` | 409 | Invalid state transition for this session |
 | `SAMD-ABHA-2003` | 410 | Session expired |
@@ -1354,6 +1400,7 @@ Android branches on the string and older app builds stay in the field for a long
 | `POST /api/v1/auth/refresh` | OkHttp `Authenticator` in `di/NetworkModule.kt` | new |
 | `POST /api/v1/auth/logout` | `BackendAuthSession.signOut()` | new |
 | `GET /api/v1/auth/me` | `BackendAuthSession.currentUser()` → `AuthViewModel` | new |
+| `POST /api/v1/auth/change-pin` | new PIN-change screen (Login flow and Profile) | new |
 | `POST /api/v1/patients` | `RetrofitPatientSource` → `PatientRepositoryImpl` outbox | new |
 | `GET /api/v1/patients/{id}` | `PatientRepositoryImpl` | new, Phase 3 |
 | `PATCH /api/v1/patients/{id}` | `PatientRepositoryImpl` outbox | new |
@@ -1376,6 +1423,7 @@ Android branches on the string and older app builds stay in the field for a long
 | `GET /health` | public | public | public | public |
 | `POST /auth/login`, `/auth/refresh` | public | public | public | public |
 | `POST /auth/logout`, `GET /auth/me` | yes | yes | yes | yes |
+| `POST /auth/change-pin` | yes | yes | yes | yes |
 | `POST /patients`, `PATCH /patients/{id}` | yes | yes | yes | yes |
 | `GET /patients/{id}`, `GET /patients` | yes | yes | yes | yes |
 | `POST /encounters`, `PATCH /case-records/{id}/status` | yes | yes | yes | yes |

@@ -1,0 +1,50 @@
+# Dev only. Staging and production run the same image on AWS Mumbai with RDS.
+#
+# The XGBoost kernel is deliberately NOT a service here. It is an existing separate process on
+# the LAN and stays that way in dev; the backend reaches it through KERNEL_BASE_URL in .env.
+#
+# There is no Redis service. There is no Redis.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: samd
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-samd_dev_only}
+      POSTGRES_DB: samd
+    ports:
+      - "5432:5432"
+    volumes:
+      - samd_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U samd -d samd"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ./core
+    env_file:
+      - ./core/.env
+    environment:
+      # Compose-level values win over .env for the three that must match this file's topology.
+      DATABASE_URL: postgresql+asyncpg://samd:${POSTGRES_PASSWORD:-samd_dev_only}@db:5432/samd
+      ENVIRONMENT: dev
+      REQUIRE_HTTPS: "false"
+      ABDM_MODE: stub
+    # Port 8080 matches the dev flavor's BACKEND_BASE_URL (http://<LAN-IP>:8080/), so no Gradle
+    # edit is needed to point a device at a locally running backend.
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    # Migrations run in the command, not an entrypoint script, so their output lands in the
+    # container logs where it can be read after a failure.
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8080"
+
+volumes:
+  samd_pgdata:

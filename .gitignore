@@ -13,6 +13,7 @@
 .externalNativeBuild
 .cxx
 local.properties
+agent_docs/
 
 # Release signing keystore — never commit prod signing keys. Generate deliberately, back up
 # outside git (e.g. a password manager / secrets vault), and feed CI via KEYSTORE_PATH.
@@ -25,3 +26,15 @@ local.properties
 second-brain/
 .obsidian
 .kiro
+
+# --- Backend (Python / FastAPI) ---
+# backend/ is tracked. These are build artefacts and secrets inside it, not the source.
+backend/**/.env
+backend/**/__pycache__/
+backend/**/*.py[cod]
+backend/**/.pytest_cache/
+backend/**/.mypy_cache/
+backend/**/.ruff_cache/
+backend/**/.venv/
+backend/**/*.egg-info/
+backend/**/.coverage
