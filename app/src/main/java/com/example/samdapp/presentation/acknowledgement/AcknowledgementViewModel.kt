@@ -3,6 +3,7 @@ package com.example.samdapp.presentation.acknowledgement
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.samdapp.domain.audit.AuditAction
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.config.SyncWindowProvider
@@ -69,7 +70,7 @@ class AcknowledgementViewModel @AssistedInject constructor(
                 onSuccess = {
                     _uiState.update { it.copy(isSaving = false) }
                     auditLogger.log(
-                        action = "consultation_locked",
+                        action = AuditAction.CONSULTATION_LOCKED,
                         caseRecordId = caseRecordId,
                         payload = auditPayload("status" to "saved_locally"),
                     )

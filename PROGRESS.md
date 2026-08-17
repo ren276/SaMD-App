@@ -1710,3 +1710,131 @@ Both confirmed by direct investigation, not theoretical. Neither is fixed here.
 - Expanded the ailment routing list significantly to include a comprehensive set of patient presentations (e.g., chest pain -> Cardiology, stroke -> Neurology, asthma -> Pulmonology, hypertension/viral/headache -> General Physician).
 - Ensured emergency cues ("severe", "haemorrhagic") take precedence for Critical Care routing before defaulting to symptom-specific departments.
 
+## Android: AuditAction as the single source of truth for audit logging (2026-08-17)
+
+Root cause fix for the backend Phase 4 finding: the backend rejected 27 of 28 real device audit
+actions because the device had no enumerated vocabulary — 15 of 28 `auditLogger.log(...)` call
+sites passed free-text string literals straight through, bypassing `AuditAction` entirely, and 2
+`AuditAction` constants were dead. This session makes `AuditAction` the only way to log.
+
+### S1: call-site audit
+
+29 `auditLogger.log(...)` calls (confirmed by grep, matches the prior session's count), 28 distinct
+action strings. 13 calls already used an `AuditAction` constant; 16 calls (15 distinct strings,
+`audio_captured` used twice) passed a free-text literal. Every call site is a `ViewModel` or
+`UseCase`; `RoomAuditLogger` is the only place anywhere in the app that constructs an
+`AuditLogEntity`, so narrowing its input closes every call site at once (see S4).
+
+### S2: literals converted to constants, values unchanged
+
+Added one `AuditAction` entry per literal, string value byte-identical to what was already being
+emitted (`encounter_started` stays `"encounter_started"`; it was confirmed last session as the real
+production literal at `CompounderViewModel.kt:227`, not a typo for `encounter_created`, and this
+session did not rename it or any other value). All 16 literal call sites, plus 4 more found in
+`RoomAuditLoggerTest.kt` that this session's own grep for `auditLogger.log(` missed (it only matched
+the interface method name, not `RoomAuditLogger(...).log(` called directly in tests), now pass an
+`AuditAction` member.
+
+### S3: the 2 dead constants
+
+- **`AILMENT_VISIBILITY_CHANGED`: deleted.** `AilmentDao` has exactly two methods, `insert` and
+  `markDeleted` (read directly). No method changes an ailment's `visibility` after creation; the
+  field is set once at capture and is immutable in the current codebase. There is no real mutation
+  path to wire a log call into, dormant or otherwise. Its one reference (a display-string branch in
+  `PatientFacingAudit.kt`) was dead code and removed with it.
+- **`REFERRAL_STATUS_CHANGED`: kept, still unused.** `ReferralDao.updateStatus` is a real DAO method
+  but has zero callers anywhere in the codebase (confirmed by grep), independently matching this
+  same finding already recorded by the `MIGRATION_12_13` session: "unreachable in this build, no
+  caller... dormant, not active." Not deleted because the mutation path is real, deliberately
+  retained schema/DAO capability, not a hypothetical one; not wired with a log call because doing
+  that requires a live caller to attach the call to, and creating a referral-status-transition
+  UI/business flow to give it one is a different feature, out of scope for an audit-logging-
+  discipline session.
+
+### S4: enforcement chosen — narrow the type, not a lint rule or a scan
+
+`AuditLogger.log(action: String, ...)` became `AuditLogger.log(action: AuditAction, ...)`.
+`AuditAction` itself changed from an `object` of `const val String` to an `enum class
+AuditAction(val value: String)`, so it has a type the signature can narrow to. `value` is written
+out explicitly per entry rather than derived from the Kotlin identifier (e.g. `name.lowercase()`),
+even though every current entry would round-trip correctly that way: deriving it would silently
+change the wire value the moment someone renames an enum constant for readability, which is exactly
+what the string values must never do (they are already in shipped audit rows and are the wire
+contract). This is the strongest of the three options the session brief offered (narrowed type,
+lint rule, or a scanning unit test) and makes the other two redundant: a free-text literal at a
+`.log()` call site is now a compile error, not a lint warning or a test failure. No lint rule or
+scanning test was added on top, deliberately, to avoid three mechanisms enforcing the same thing.
+
+Ripple, all necessary and all made: `RoomAuditLogger.log` now writes `action.value` into
+`AuditLogEntity.action` (the Room column stays `String`, unaffected — only the logging API surface
+narrowed, not persistence); `FakeAuditLogger` in test utilities takes `AuditAction` and stores
+`action.value` in its `Entry` so every existing test assertion comparing `it.action == "..."`
+against a literal string kept working unchanged; `PatientFacingAudit.kt`'s `when (this: String)`
+branches, which used to match directly against `AuditAction.CONSENT_RECORDED` etc. back when that
+expression was itself a `String`, now match against `AuditAction.CONSENT_RECORDED.value` (every
+branch converted, not just the ones that would have failed to compile, so the file has one style
+throughout); `PatientFacingAuditTest.kt`'s three `AuditAction`-typed test fixtures needed the same
+`.value` treatment to keep compiling against the `entry(action: String)` test helper, which is
+correct as `String` since it is standing in for `AuditLogEntry.action`, the persisted column.
+
+### S5: the authoritative action list (29 entries, input to the next backend session)
+
+```
+ABHA_LOGIN_VERIFIED            abha_login_verified
+ABHA_PROFILE_CREATED           abha_profile_created
+AILMENT_CAPTURED               ailment_captured
+AILMENT_DELETED                ailment_deleted
+ALLERGY_ADDED                  allergy_added
+ATTACHMENT_ADDED               attachment_added
+AUDIO_CAPTURED                 audio_captured
+CASE_QUEUED_FOR_SYNC           case_queued_for_sync
+CASE_SENT_TO_DOCTOR            case_sent_to_doctor
+CONSENT_RECORDED               consent_recorded
+CONSULTATION_LOCKED            consultation_locked
+CONSULTATION_SAVED             consultation_saved
+DIAGNOSIS_FEEDBACK_RECORDED    diagnosis_feedback_recorded
+EMERGENCY_OVERRIDE             emergency_override
+ENCOUNTER_RESUMED              encounter_resumed
+ENCOUNTER_STARTED              encounter_started
+EVALUATE_RESPONSE_FAILED       evaluate_response_failed
+EVALUATE_RESPONSE_RECEIVED     evaluate_response_received
+FAMILY_HISTORY_ADDED           family_history_added
+KERNEL_ASSESSMENT_ACKNOWLEDGED kernel_assessment_acknowledged
+KERNEL_RESPONSE_RECEIVED       kernel_response_received
+MEDICAL_HISTORY_ITEM_ADDED     medical_history_item_added
+MEDICATION_ADDED               medication_added
+PATIENT_REGISTERED             patient_registered
+REFERRAL_CREATED               referral_created
+REFERRAL_STATUS_CHANGED        referral_status_changed   (S3: real DAO method, no caller, kept)
+REPORT_EXPORTED                report_exported
+SOCIAL_HISTORY_SAVED           social_history_saved
+TRANSCRIPTION_COMPLETED        transcription_completed
+VITALS_RECORDED                vitals_recorded
+```
+
+28 of these 29 values are actually emitted today; `REFERRAL_STATUS_CHANGED` is the one exception
+(S3). The next backend session replaces `_DEVICE_AUDIT_ACTION_VALUES` in `app/services/sync.py`
+with this exact list (minus, or including, `REFERRAL_STATUS_CHANGED` is that session's call to
+make, now that its status is documented rather than merely inferred) and adds a test asserting the
+two sets match sourced from both sides, not hand-copied and left to drift again.
+
+### S6: verify
+
+- `testDevDebugUnitTest`: 133 tests before this session's changes, 133 after, 0 failures both times
+  (measured directly via `git stash` / rerun / `git stash pop` / rerun, not assumed — this
+  session's edits change call-site arguments, not test counts, and this confirms it rather than
+  taking that on faith). This is a different number from the `532` this file's own `MIGRATION_12_13`
+  entry reported for the same task; not reconciled this session, flagged here rather than silently
+  overwritten. `app/build/test-results/testDevDebugUnitTest` has exactly one XML per one of the 32
+  `*Test.kt` files under `app/src/test`, so `133` reflects this build's real, current, full test
+  count for this variant, whatever the earlier `532` was counting.
+- `assembleDevDebug`: clean.
+
+### What this unblocks
+
+The backend vocabulary-reconciliation session (`_DEVICE_AUDIT_ACTION_VALUES` in
+`app/services/sync.py`, plus the two-sided assertion test) is now unblocked. The `sync_log` unique
+constraint item logged alongside it is independent and still open.
+
+Test-count reconciliation: MIGRATION_12_13's "532" was the summed test task across all four unit-test variants; this session's "133" is testDevDebugUnitTest alone. 133 x 4 variants ≈ 532. Same suite, different scope, nothing lost. Convention going forward: report testDevDebugUnitTest as the canonical Android unit count.
+

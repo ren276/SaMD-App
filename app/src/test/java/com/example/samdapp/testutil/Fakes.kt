@@ -2,6 +2,7 @@ package com.example.samdapp.testutil
 
 import com.example.samdapp.data.local.dao.AuditLogDao
 import com.example.samdapp.data.local.entity.AuditLogEntity
+import com.example.samdapp.domain.audit.AuditAction
 import com.example.samdapp.domain.audit.AuditLogEntry
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.config.DeviceInfoProvider
@@ -67,8 +68,8 @@ class FakeAuditLogger : AuditLogger {
 
     val logged = mutableListOf<Entry>()
 
-    override suspend fun log(action: String, patientId: String?, caseRecordId: String?, payload: String) {
-        logged += Entry(action, patientId, caseRecordId, payload)
+    override suspend fun log(action: AuditAction, patientId: String?, caseRecordId: String?, payload: String) {
+        logged += Entry(action.value, patientId, caseRecordId, payload)
     }
 }
 

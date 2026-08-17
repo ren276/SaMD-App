@@ -4,46 +4,78 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
 interface AuditLogger {
-    suspend fun log(action: String, patientId: String? = null, caseRecordId: String? = null, payload: String)
+    suspend fun log(action: AuditAction, patientId: String? = null, caseRecordId: String? = null, payload: String)
 }
 
 /**
- * Canonical audit action strings for the overhaul. Constants (not free-text at call sites) keep the
- * event vocabulary greppable and consistent. The DAO stays insert-only (REQ-AUD-02) — these name
- * WHAT happened, they do not add mutation. Pre-existing screen actions remain string literals for
- * now; new Phase 2/2.5/6 actions must use these.
+ * The complete, enforced audit action vocabulary. [AuditLogger.log] takes [AuditAction], not
+ * [String]: that is the enforcement mechanism (S4 of the audit-logging-discipline session that
+ * created this list), not a lint rule or a scanning test on top of it. [RoomAuditLogger] is the
+ * only place that ever constructs an `AuditLogEntity`, so narrowing this one signature closes
+ * every call site at compile time; a free-text literal cannot reach `.log()` again.
+ *
+ * [value] is the wire string, stored verbatim in `AuditLogEntity.action` and read back unchanged
+ * by the backend on sync push. It is written out explicitly per entry rather than derived from
+ * the enum constant's own name, so that renaming a Kotlin identifier for readability can never
+ * silently change a value already sitting in shipped audit rows. Do not rename any [value]: it is
+ * the wire contract this list exists to pin down, and this list is the exact input the backend
+ * sync-push session mirrors into its own accepted-action set next.
  */
-object AuditAction {
-    const val ABHA_PROFILE_CREATED = "abha_profile_created"
-    const val ABHA_LOGIN_VERIFIED = "abha_login_verified"
-    const val AILMENT_CAPTURED = "ailment_captured"
-    const val AILMENT_VISIBILITY_CHANGED = "ailment_visibility_changed"
-    const val AILMENT_DELETED = "ailment_deleted"
-    const val CONSENT_RECORDED = "consent_recorded"
-    const val EMERGENCY_OVERRIDE = "emergency_override"
-    const val REFERRAL_CREATED = "referral_created"
-    const val REFERRAL_STATUS_CHANGED = "referral_status_changed"
-    const val KERNEL_ASSESSMENT_ACKNOWLEDGED = "kernel_assessment_acknowledged"
-    const val KERNEL_RESPONSE_RECEIVED = "kernel_response_received"
+enum class AuditAction(val value: String) {
+    ABHA_PROFILE_CREATED("abha_profile_created"),
+    ABHA_LOGIN_VERIFIED("abha_login_verified"),
+    AILMENT_CAPTURED("ailment_captured"),
+    AILMENT_DELETED("ailment_deleted"),
+    ALLERGY_ADDED("allergy_added"),
+    ATTACHMENT_ADDED("attachment_added"),
+    AUDIO_CAPTURED("audio_captured"),
+    CASE_QUEUED_FOR_SYNC("case_queued_for_sync"),
+    CASE_SENT_TO_DOCTOR("case_sent_to_doctor"),
+    CONSENT_RECORDED("consent_recorded"),
+    CONSULTATION_LOCKED("consultation_locked"),
+    CONSULTATION_SAVED("consultation_saved"),
+    EMERGENCY_OVERRIDE("emergency_override"),
+    ENCOUNTER_STARTED("encounter_started"),
+    FAMILY_HISTORY_ADDED("family_history_added"),
+    MEDICAL_HISTORY_ITEM_ADDED("medical_history_item_added"),
+    MEDICATION_ADDED("medication_added"),
+    PATIENT_REGISTERED("patient_registered"),
+    REFERRAL_CREATED("referral_created"),
+
+    /** [com.example.samdapp.data.local.dao.ReferralDao.updateStatus] exists and is real, but has
+     *  no caller anywhere in this codebase (confirmed by grep, matching MIGRATION_12_13's own
+     *  prior finding that this DAO method is "dormant, not active"). Kept, not deleted, because
+     *  the mutation path it would log is real, deliberately-retained schema/DAO capability, not
+     *  a hypothetical; wiring an actual `.log()` call in requires a live caller to attach it to,
+     *  which does not exist today and is out of scope for an audit-logging-discipline session. */
+    REFERRAL_STATUS_CHANGED("referral_status_changed"),
+
+    REPORT_EXPORTED("report_exported"),
+    SOCIAL_HISTORY_SAVED("social_history_saved"),
+    TRANSCRIPTION_COMPLETED("transcription_completed"),
+    VITALS_RECORDED("vitals_recorded"),
 
     /** Full raw `/api/v1/evaluate` response dump (inference start/end timestamps, diagnostic
      *  summary, NLEM treatment, brand mapping, safety/triage) — the complete backend data, not
      *  just the curated subset shown on the prescription page. Insert-only audit trail per
      *  REQ-AUD-02; the prescription/report only ever shows the curated view. */
-    const val EVALUATE_RESPONSE_RECEIVED = "evaluate_response_received"
+    EVALUATE_RESPONSE_RECEIVED("evaluate_response_received"),
 
     /** The `/api/v1/evaluate` call failed — logged so the audit trail shows why no evaluate
      *  section appears on the report/prescription for this case. */
-    const val EVALUATE_RESPONSE_FAILED = "evaluate_response_failed"
+    EVALUATE_RESPONSE_FAILED("evaluate_response_failed"),
 
     /** Physician AGREE/MODIFY/REJECT decision on the AI's top diagnostic candidate — mirrors
      *  `refine_diagnosis.py`'s `DiagnosisFeedback` schema. See [com.example.samdapp.domain.model.DiagnosisFeedback] KDoc. */
-    const val DIAGNOSIS_FEEDBACK_RECORDED = "diagnosis_feedback_recorded"
+    DIAGNOSIS_FEEDBACK_RECORDED("diagnosis_feedback_recorded"),
 
     /** Crash-recovery resume: the worker was dropped back into an already-`DRAFT` case rather than
      *  [com.example.samdapp.domain.usecase.StartCaseUseCase] minting a new encounter/case record —
-     *  distinct from the pre-existing `"encounter_started"` string literal. */
-    const val ENCOUNTER_RESUMED = "encounter_resumed"
+     *  distinct from [ENCOUNTER_STARTED]. */
+    ENCOUNTER_RESUMED("encounter_resumed"),
+
+    KERNEL_ASSESSMENT_ACKNOWLEDGED("kernel_assessment_acknowledged"),
+    KERNEL_RESPONSE_RECEIVED("kernel_response_received"),
 }
 
 /** Builds the JSON blob stored in AuditLogEntity.payload from a flat set of fields. */

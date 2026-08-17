@@ -4,6 +4,7 @@ import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.samdapp.data.mock.DemoPatientProfile
+import com.example.samdapp.domain.audit.AuditAction
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.repository.AbhaProfileRepository
@@ -203,7 +204,7 @@ class RegisterViewModel @Inject constructor(
                 onSuccess = { patient ->
                     _uiState.update { it.copy(isSubmitting = false) }
                     auditLogger.log(
-                        action = "patient_registered",
+                        action = AuditAction.PATIENT_REGISTERED,
                         patientId = patient.id,
                         payload = auditPayload("fullName" to patient.fullName, "biologicalSex" to current.biologicalSex),
                     )

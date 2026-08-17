@@ -224,7 +224,7 @@ class CompounderViewModel @AssistedInject constructor(
                     return@launch
                 }
                 auditLogger.log(
-                    action = "encounter_started",
+                    action = AuditAction.ENCOUNTER_STARTED,
                     patientId = patientId,
                     caseRecordId = started.caseRecord.id,
                     payload = auditPayload("encounterId" to started.encounter.id),
@@ -433,7 +433,7 @@ class CompounderViewModel @AssistedInject constructor(
                 onSuccess = {
                     _uiState.update { it.copy(isSaving = false) }
                     auditLogger.log(
-                        action = "vitals_recorded",
+                        action = AuditAction.VITALS_RECORDED,
                         patientId = patientId,
                         caseRecordId = caseRecordId,
                         payload = auditPayload("pulseBpm" to current.pulseBpm, "bpSystolic" to current.bpSystolic),

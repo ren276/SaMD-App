@@ -16,10 +16,10 @@ class PatientFacingAuditTest {
     fun `maps known actions to plain language`() {
         val entries = listOf(
             entry("patient_registered"),
-            entry(AuditAction.CONSENT_RECORDED),
-            entry(AuditAction.AILMENT_CAPTURED),
+            entry(AuditAction.CONSENT_RECORDED.value),
+            entry(AuditAction.AILMENT_CAPTURED.value),
             entry("case_sent_to_doctor"),
-            entry(AuditAction.ENCOUNTER_RESUMED),
+            entry(AuditAction.ENCOUNTER_RESUMED.value),
         ).toPatientFacingEntries()
 
         assertEquals(

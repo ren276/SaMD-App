@@ -4,6 +4,7 @@ import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.samdapp.data.mock.DemoPatientProfile
+import com.example.samdapp.domain.audit.AuditAction
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.model.Allergy
@@ -95,7 +96,7 @@ class MedicalBackgroundViewModel @AssistedInject constructor(
         viewModelScope.launch {
             addMedicalHistoryItemUseCase(patientId, category, description, yearOrDate).onSuccess {
                 auditLogger.log(
-                    action = "medical_history_item_added",
+                    action = AuditAction.MEDICAL_HISTORY_ITEM_ADDED,
                     patientId = patientId,
                     payload = auditPayload("category" to category.name, "description" to description),
                 )
@@ -107,7 +108,7 @@ class MedicalBackgroundViewModel @AssistedInject constructor(
         viewModelScope.launch {
             addMedicationUseCase(patientId, encounterId = null, kind, name, dosage, frequency).onSuccess {
                 auditLogger.log(
-                    action = "medication_added",
+                    action = AuditAction.MEDICATION_ADDED,
                     patientId = patientId,
                     payload = auditPayload("kind" to kind.name, "name" to name, "dosage" to dosage),
                 )
@@ -119,7 +120,7 @@ class MedicalBackgroundViewModel @AssistedInject constructor(
         viewModelScope.launch {
             addAllergyUseCase(patientId, category, allergen, reactionType).onSuccess {
                 auditLogger.log(
-                    action = "allergy_added",
+                    action = AuditAction.ALLERGY_ADDED,
                     patientId = patientId,
                     payload = auditPayload("category" to category.name, "allergen" to allergen),
                 )
@@ -131,7 +132,7 @@ class MedicalBackgroundViewModel @AssistedInject constructor(
         viewModelScope.launch {
             addFamilyHistoryEntryUseCase(patientId, condition, relation).onSuccess {
                 auditLogger.log(
-                    action = "family_history_added",
+                    action = AuditAction.FAMILY_HISTORY_ADDED,
                     patientId = patientId,
                     payload = auditPayload("condition" to condition, "relation" to relation),
                 )
@@ -152,7 +153,7 @@ class MedicalBackgroundViewModel @AssistedInject constructor(
                 patientId, occupation, tobaccoUse, alcoholUse, recreationalDrugUse, environmentalExposure, recentTravel,
             ).onSuccess {
                 auditLogger.log(
-                    action = "social_history_saved",
+                    action = AuditAction.SOCIAL_HISTORY_SAVED,
                     patientId = patientId,
                     payload = auditPayload("occupation" to occupation, "tobaccoUse" to tobaccoUse),
                 )

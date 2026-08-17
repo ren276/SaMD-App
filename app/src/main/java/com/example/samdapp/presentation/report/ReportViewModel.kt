@@ -98,7 +98,7 @@ class ReportViewModel @AssistedInject constructor(
                 onSuccess = { uri ->
                     _uiState.update { it.copy(isExporting = false) }
                     auditLogger.log(
-                        action = "report_exported",
+                        action = AuditAction.REPORT_EXPORTED,
                         caseRecordId = caseRecordId,
                         payload = auditPayload("isFinal" to report.isFinal.toString()),
                     )

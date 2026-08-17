@@ -2,6 +2,7 @@ package com.example.samdapp.data.local.audit
 
 import com.example.samdapp.data.local.dao.AuditLogDao
 import com.example.samdapp.data.local.entity.AuditLogEntity
+import com.example.samdapp.domain.audit.AuditAction
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.auth.AuthSession
 import kotlinx.coroutines.flow.first
@@ -17,7 +18,7 @@ class RoomAuditLogger @Inject constructor(
     private val auditLogDao: AuditLogDao,
     private val authSession: AuthSession,
 ) : AuditLogger {
-    override suspend fun log(action: String, patientId: String?, caseRecordId: String?, payload: String) {
+    override suspend fun log(action: AuditAction, patientId: String?, caseRecordId: String?, payload: String) {
         val userId = authSession.currentUser().first()?.userId ?: PLACEHOLDER_USER_ID
         val now = Instant.now()
         auditLogDao.insert(
@@ -27,7 +28,7 @@ class RoomAuditLogger @Inject constructor(
                 userId = userId,
                 patientId = patientId,
                 caseRecordId = caseRecordId,
-                action = action,
+                action = action.value,
                 payload = payload,
                 localModifiedAt = now,
             ),

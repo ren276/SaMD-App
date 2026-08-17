@@ -1,5 +1,6 @@
 package com.example.samdapp.data.local.audit
 
+import com.example.samdapp.domain.audit.AuditAction
 import com.example.samdapp.domain.auth.UserRole
 import com.example.samdapp.domain.auth.UserSession
 import com.example.samdapp.testutil.FakeAuditLogDao
@@ -18,10 +19,10 @@ class RoomAuditLoggerTest {
         val dao = FakeAuditLogDao()
         val logger = RoomAuditLogger(dao, FakeAuthSession())
 
-        logger.log(action = "encounter_started", patientId = "p1", caseRecordId = "c1", payload = "{}")
+        logger.log(action = AuditAction.ENCOUNTER_STARTED, patientId = "p1", caseRecordId = "c1", payload = "{}")
 
         val entry = dao.inserted.single()
-        assertEquals("encounter_started", entry.action)
+        assertEquals(AuditAction.ENCOUNTER_STARTED.value, entry.action)
         assertEquals("p1", entry.patientId)
         assertEquals("c1", entry.caseRecordId)
         assertEquals("{}", entry.payload)
@@ -32,7 +33,7 @@ class RoomAuditLoggerTest {
     @Test
     fun `log tolerates null patient and case ids`() = runTest {
         val dao = FakeAuditLogDao()
-        RoomAuditLogger(dao, FakeAuthSession()).log(action = "transcription_completed", payload = "{}")
+        RoomAuditLogger(dao, FakeAuthSession()).log(action = AuditAction.TRANSCRIPTION_COMPLETED, payload = "{}")
 
         val entry = dao.inserted.single()
         assertEquals(null, entry.patientId)
@@ -44,7 +45,7 @@ class RoomAuditLoggerTest {
         val dao = FakeAuditLogDao()
         val session = FakeAuthSession(UserSession(userId = "real-user-123", name = "Asha Devi", role = UserRole.ASHA_WORKER))
 
-        RoomAuditLogger(dao, session).log(action = "encounter_started", payload = "{}")
+        RoomAuditLogger(dao, session).log(action = AuditAction.ENCOUNTER_STARTED, payload = "{}")
 
         assertEquals("real-user-123", dao.inserted.single().userId)
     }
@@ -53,7 +54,7 @@ class RoomAuditLoggerTest {
     fun `log falls back to the placeholder when no session is active`() = runTest {
         val dao = FakeAuditLogDao()
 
-        RoomAuditLogger(dao, FakeAuthSession(initialSession = null)).log(action = "encounter_started", payload = "{}")
+        RoomAuditLogger(dao, FakeAuthSession(initialSession = null)).log(action = AuditAction.ENCOUNTER_STARTED, payload = "{}")
 
         assertEquals("phc_field_worker", dao.inserted.single().userId)
     }

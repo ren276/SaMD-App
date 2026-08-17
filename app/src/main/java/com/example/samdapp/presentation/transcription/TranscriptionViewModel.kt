@@ -2,6 +2,7 @@ package com.example.samdapp.presentation.transcription
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.samdapp.domain.audit.AuditAction
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.usecase.TranscribeAudioUseCase
@@ -46,7 +47,7 @@ class TranscriptionViewModel @AssistedInject constructor(
                 onSuccess = { text ->
                     _uiState.update { it.copy(isLoading = false, transcription = text) }
                     auditLogger.log(
-                        action = "transcription_completed",
+                        action = AuditAction.TRANSCRIPTION_COMPLETED,
                         payload = auditPayload("consultationId" to consultationId, "audioUri" to audioUri),
                     )
                 },

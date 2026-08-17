@@ -4,6 +4,7 @@ import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.samdapp.data.mock.DemoPatientProfile
+import com.example.samdapp.domain.audit.AuditAction
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.model.AttachmentType
@@ -137,7 +138,7 @@ class ConsultationViewModel @AssistedInject constructor(
                 onSuccess = { captured ->
                     _uiState.update { it.copy(isRecordingVoice = false, chiefComplaint = captured.transcript) }
                     auditLogger.log(
-                        action = "audio_captured",
+                        action = AuditAction.AUDIO_CAPTURED,
                         patientId = patientId,
                         caseRecordId = caseRecordId,
                         payload = auditPayload("uri" to captured.uri, "purpose" to "chief_complaint"),
@@ -162,7 +163,7 @@ class ConsultationViewModel @AssistedInject constructor(
                         )
                     }
                     auditLogger.log(
-                        action = "audio_captured",
+                        action = AuditAction.AUDIO_CAPTURED,
                         patientId = patientId,
                         caseRecordId = caseRecordId,
                         payload = auditPayload("uri" to captured.uri, "purpose" to "attachment"),
@@ -198,7 +199,7 @@ class ConsultationViewModel @AssistedInject constructor(
             current.pendingAttachments.forEach { pending ->
                 addAttachmentUseCase(consultation.id, pending.type, pending.uri).onSuccess {
                     auditLogger.log(
-                        action = "attachment_added",
+                        action = AuditAction.ATTACHMENT_ADDED,
                         patientId = patientId,
                         caseRecordId = caseRecordId,
                         payload = auditPayload("type" to pending.type.name, "uri" to pending.uri),
@@ -206,7 +207,7 @@ class ConsultationViewModel @AssistedInject constructor(
                 }
             }
             auditLogger.log(
-                action = "consultation_saved",
+                action = AuditAction.CONSULTATION_SAVED,
                 patientId = patientId,
                 caseRecordId = caseRecordId,
                 payload = auditPayload("consultationId" to consultation.id, "chiefComplaint" to current.chiefComplaint),

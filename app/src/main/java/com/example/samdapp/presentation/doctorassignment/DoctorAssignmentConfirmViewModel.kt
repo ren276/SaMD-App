@@ -3,6 +3,7 @@ package com.example.samdapp.presentation.doctorassignment
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.samdapp.domain.audit.AuditAction
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.connectivity.ConnectivityController
@@ -107,7 +108,7 @@ class DoctorAssignmentConfirmViewModel @AssistedInject constructor(
             assignDoctorUseCase(caseRecordId, doctor.id, isOnline = isOnline).fold(
                 onSuccess = {
                     auditLogger.log(
-                        action = if (isOnline) "case_sent_to_doctor" else "case_queued_for_sync",
+                        action = if (isOnline) AuditAction.CASE_SENT_TO_DOCTOR else AuditAction.CASE_QUEUED_FOR_SYNC,
                         caseRecordId = caseRecordId,
                         payload = auditPayload("doctorId" to doctor.id, "doctorName" to doctor.name, "continuity" to state.isContinuity.toString()),
                     )
