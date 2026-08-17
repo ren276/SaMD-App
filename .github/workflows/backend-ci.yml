@@ -58,12 +58,23 @@ jobs:
         run: |
           python -m pip install --upgrade pip==25.0
           pip install -e ".[dev]"
+          # backend/abdm-adapter is a sibling package, not a subdirectory of backend/core, and is
+          # not on PyPI: it must be installed explicitly or nothing in this job ever imports it,
+          # lints it, or runs its tests, even though app/main.py imports it at runtime.
+          pip install -e "../abdm-adapter[dev]"
 
       - name: Ruff lint
         run: ruff check .
 
       - name: Ruff format check
         run: ruff format --check .
+
+      # backend/abdm-adapter has its own pyproject.toml and its own ruff config (matching
+      # backend/core's), so it needs its own invocation; ruff does not look outside the directory
+      # it is pointed at.
+      - name: Ruff lint (abdm-adapter)
+        working-directory: backend/abdm-adapter
+        run: ruff check .
 
       - name: Mypy
         run: mypy app
@@ -78,6 +89,14 @@ jobs:
         run: alembic check
 
       - name: Pytest
+        run: pytest -q
+
+      # backend/abdm-adapter/tests/ and backend/core/tests/ are both packages named "tests"; pytest
+      # cannot collect them in one invocation without an import collision, so this is a genuinely
+      # separate step, not a style choice. A failure here fails the build exactly like the step
+      # above: no continue-on-error, no separate non-blocking job.
+      - name: Pytest (abdm-adapter)
+        working-directory: backend/abdm-adapter
         run: pytest -q
 
   docker-build:
