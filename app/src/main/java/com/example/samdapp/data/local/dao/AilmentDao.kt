@@ -18,7 +18,9 @@ interface AilmentDao {
     fun observeForEncounter(encounterId: String): Flow<List<AilmentEntity>>
 
     /** Soft delete (private-entry delete button). Sets [AilmentEntity.deletedAt]; the row is
-     *  retained for the audit trail rather than physically removed. */
-    @Query("UPDATE ailments SET deletedAt = :deletedAt WHERE id = :id")
+     *  retained for the audit trail rather than physically removed. Also stamps
+     *  [AilmentEntity.localModifiedAt] from the same [deletedAt] value, see MIGRATION_12_13's
+     *  KDoc. */
+    @Query("UPDATE ailments SET deletedAt = :deletedAt, localModifiedAt = :deletedAt WHERE id = :id")
     suspend fun markDeleted(id: String, deletedAt: Instant)
 }

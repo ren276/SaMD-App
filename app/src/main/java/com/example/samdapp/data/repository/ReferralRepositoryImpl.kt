@@ -32,6 +32,7 @@ private fun ReferralRequest.toEntity() = ReferralEntity(
     sendingPhcId = sendingPhcId,
     status = status,
     timestamp = timestamp,
+    localModifiedAt = timestamp,
 )
 
 private fun ReferralEntity.toDomain() = ReferralRequest(

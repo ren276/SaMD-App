@@ -4,6 +4,7 @@ import com.example.samdapp.data.local.dao.AbhaProfileDao
 import com.example.samdapp.data.local.entity.AbhaProfileEntity
 import com.example.samdapp.domain.model.AbhaProfile
 import com.example.samdapp.domain.repository.AbhaProfileRepository
+import java.time.Instant
 import javax.inject.Inject
 
 class AbhaProfileRepositoryImpl @Inject constructor(
@@ -33,6 +34,7 @@ private fun AbhaProfile.toEntity() = AbhaProfileEntity(
     photoUrlMock = photoUrlMock,
     kycVerified = kycVerified,
     createdAt = createdAt,
+    localModifiedAt = Instant.now(),
 )
 
 private fun AbhaProfileEntity.toDomain() = AbhaProfile(

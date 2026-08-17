@@ -13,12 +13,14 @@ interface CaseRecordDao {
     @Insert
     suspend fun insert(caseRecord: CaseRecordEntity)
 
-    @Query("UPDATE case_records SET status = :status, updatedAt = :updatedAt WHERE id = :caseRecordId")
+    /** Also stamps `localModifiedAt` from the same [updatedAt] value, see MIGRATION_12_13's
+     *  KDoc for why the two columns are deliberately redundant on entities that have both. */
+    @Query("UPDATE case_records SET status = :status, updatedAt = :updatedAt, localModifiedAt = :updatedAt WHERE id = :caseRecordId")
     suspend fun updateStatus(caseRecordId: String, status: CaseStatus, updatedAt: Instant)
 
     @Query(
-        "UPDATE case_records SET status = :status, assignedDoctorId = :doctorId, updatedAt = :updatedAt " +
-            "WHERE id = :caseRecordId",
+        "UPDATE case_records SET status = :status, assignedDoctorId = :doctorId, updatedAt = :updatedAt, " +
+            "localModifiedAt = :updatedAt WHERE id = :caseRecordId",
     )
     suspend fun assignDoctor(caseRecordId: String, doctorId: String, status: CaseStatus, updatedAt: Instant)
 
@@ -26,12 +28,18 @@ interface CaseRecordDao {
      *  [com.example.samdapp.domain.usecase.StartCaseUseCase]) so an earlier attempt this worker
      *  backed out of mid-flow — still `DRAFT`, never reaching Acknowledgement — can't resurface via
      *  [observeResumableDraftForUser] and get confused with the visit that's actually in progress. */
-    @Query("UPDATE case_records SET status = 'ABANDONED', updatedAt = :updatedAt WHERE patientId = :patientId AND status = 'DRAFT'")
+    @Query(
+        "UPDATE case_records SET status = 'ABANDONED', updatedAt = :updatedAt, localModifiedAt = :updatedAt " +
+            "WHERE patientId = :patientId AND status = 'DRAFT'",
+    )
     suspend fun abandonDraftsForPatient(patientId: String, updatedAt: Instant)
 
     /** "Sync Up": every locally-queued case (doctor already assigned, just waiting for network)
      *  moves to `SENT_TO_DOCTOR` in one round. */
-    @Query("UPDATE case_records SET status = 'SENT_TO_DOCTOR', updatedAt = :updatedAt WHERE status = 'PENDING_SYNC'")
+    @Query(
+        "UPDATE case_records SET status = 'SENT_TO_DOCTOR', updatedAt = :updatedAt, localModifiedAt = :updatedAt " +
+            "WHERE status = 'PENDING_SYNC'",
+    )
     suspend fun sendAllPendingSync(updatedAt: Instant)
 
     @Query("SELECT COUNT(*) FROM case_records WHERE status = 'PENDING_SYNC'")

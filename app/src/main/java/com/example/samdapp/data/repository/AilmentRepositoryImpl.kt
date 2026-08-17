@@ -43,6 +43,7 @@ private fun AilmentEntry.toEntity() = AilmentEntity(
     syncedToCloudAt = syncedToCloudAt,
     deletedAt = deletedAt,
     createdAt = createdAt,
+    localModifiedAt = createdAt,
 )
 
 private fun AilmentEntity.toDomain() = AilmentEntry(

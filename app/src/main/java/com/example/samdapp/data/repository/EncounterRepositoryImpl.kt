@@ -55,6 +55,7 @@ private fun Encounter.toEntity() = EncounterEntity(
     createdAt = createdAt,
     updatedAt = updatedAt,
     followUpOfEncounterId = followUpOfEncounterId,
+    localModifiedAt = updatedAt,
 )
 
 private fun EncounterEntity.toDomain() = Encounter(

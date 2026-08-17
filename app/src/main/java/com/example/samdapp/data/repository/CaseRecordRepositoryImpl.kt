@@ -85,6 +85,7 @@ private fun DoctorTrackerRow.toDomain() = DoctorTrackerEntry(
 private fun CaseRecord.toEntity() = CaseRecordEntity(
     id = id, patientId = patientId, encounterId = encounterId, status = status,
     assignedDoctorId = assignedDoctorId, createdAt = createdAt, updatedAt = updatedAt,
+    localModifiedAt = updatedAt,
 )
 
 private fun CaseRecordEntity.toDomain() = CaseRecord(

@@ -9,10 +9,14 @@
 > refuses to run while offline, and auto-syncs every `PENDING_SYNC` case the instant connectivity
 > returns (real network or the manual toggle flipping back on) via a background watcher on
 > `ConnectivityController.isOnline` — the worker doesn't have to remember to tap Sync Up, though
-> the button still works for "send right now." Still not built: a generic `syncState` convention
-> for other entities (there's nothing else in the app that "leaves" the device yet, so nothing
-> else needs one), `WorkManager`/a real backend, conflict resolution, and purge-on-sync
-> minimisation (§2 items 2–5 below). The seam is still the `SyncStatus` domain interface.
+> the button still works for "send right now." **Update 2026-08-17:** the generic `syncState`
+> convention below (§2 item 1) is now built, `MIGRATION_12_13`, `sync_state`/`server_version`/
+> `sync_error_code`/`last_sync_attempt_at`/`local_modified_at` on all 20 syncable entities per
+> api-contract.md §6.1's Android handling rule. Schema only, nothing reads or writes it yet: no
+> DAO queries over it, no repository sets it, `MockSyncStatus`/`CaseStatus.PENDING_SYNC`/
+> `synced_to_cloud_at` untouched. Still not built: `WorkManager`/a real backend, conflict
+> resolution, and purge-on-sync minimisation (§2 items 2-5 below). The seam is still the
+> `SyncStatus` domain interface.
 
 ## 1. Requirement (as described)
 
@@ -34,15 +38,26 @@ already give **local ACID** via transactions + WAL, so a durable local write is 
 being lost; a separate full-image backup is redundant for that purpose. Use the standard
 **offline-first, row-level** pattern instead:
 
-1. **Per-record sync state.** Add to each syncable entity: `syncState` (`PENDING` | `SYNCED`),
-   `updatedAt`, and a `serverVersion`/etag. Local writes are immediate and marked `PENDING`.
-   This replaces the whole-DB snapshot: the "backup" is simply that durable, transactional
-   rows persist locally until confirmed synced.
+1. **Per-record sync state, DONE 2026-08-17 (schema only, `MIGRATION_12_13`).** Four states,
+   not two, per api-contract.md §6.1's Android handling rule: `syncState` is `PENDING` (local
+   write, not yet acknowledged), `SYNCED` (server acknowledged `applied`/`stale`/`duplicate`),
+   `CONFLICT` (server acknowledged `conflict`, stays queued for review), or `FAILED` (server
+   acknowledged `rejected`, stop retrying a row that will never stop being malformed). Every
+   syncable entity also gets `serverVersion` (nullable, matches `base_version: null` for a
+   record the server has never seen), `syncErrorCode`, `lastSyncAttemptAt`, and
+   `localModifiedAt` (sync metadata distinct from any entity's own clinical `updatedAt`, the
+   uniform column Phase 6's outbox reads regardless of entity). All pre-existing rows are
+   `PENDING` with `serverVersion = NULL`, deliberately: no device has ever pushed anything, so
+   the first sync after Phase 6 drains the full local history and must chunk against the
+   500-record/5 MB batch limit. Local writes will be immediate and marked `PENDING`; this
+   replaces the whole-DB snapshot, since the "backup" is simply that durable, transactional
+   rows persist locally until confirmed synced. Nothing sets or reads these columns yet.
 2. **Outbox / RemoteMediator.** A background `WorkManager` job (connectivity constraint +
    exponential backoff) pushes `PENDING` records when online, idempotently, and marks them
    `SYNCED` on server ack. Room 3 `RemoteMediator` is the idiomatic fit for the read side.
-3. **Conflict resolution.** Start with last-write-wins keyed on `updatedAt` + `serverVersion`;
-   escalate to field-level merge or vector clocks only if real conflicts appear. Sync must be
+3. **Conflict resolution.** Start with last-write-wins keyed on `localModifiedAt` (mapped to
+   `client_updated_at` on the wire) + `serverVersion`; escalate to field-level merge or vector
+   clocks only if real conflicts appear. Sync must be
    **idempotent** (safe to retry after a half-completed round).
 4. **Consistency model — name it honestly.** *Local* operations are ACID (SQLite transactions).
    *Device ↔ server* is **eventual consistency** with conflict resolution, not distributed

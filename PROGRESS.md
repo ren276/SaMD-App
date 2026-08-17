@@ -1420,6 +1420,98 @@ against actual git and database state rather than trusting it.
       `agent_docs/CLAUDE.md` so it is checked first next time, alongside the separate `.venv`
       pointing at a dead session scratchpad python that also blocked this session's start.
 
+## Android MIGRATION_12_13: per-record sync state (2026-08-17)
+
+Schema foundation for Phase 6's outbox (REQ-SYN-02). Adds no behavior: nothing reads or writes
+`sync_state`, no DAO queries over it, `MockSyncStatus`/`CaseStatus.PENDING_SYNC`/
+`synced_to_cloud_at` untouched. Test-first: `MigrationTest12To13.kt` was written and run against
+the migration before the migration's own KDoc was finalized.
+
+### S1 audit findings (before any code was written)
+
+- 20 of 21 Room entities are syncable per api-contract.md §6.1's table list, one-to-one, no
+  unclassified entity found. `DoctorEntity` correctly excluded (server-owned reference data, no
+  push path).
+- The version-number premise handed to this session was wrong twice over, both corrected in
+  `docs/backend/backend-prd.md` §5.2 and its Phase 6 prerequisite note: no `MIGRATION_12_13`
+  existed anywhere in the repo (so this migration owns v12-to-v13 outright), and the ABHA columns
+  that PRD table claimed would land in `MIGRATION_12_13` don't exist on `PatientEntity` at any
+  version, so there was nothing to conflict with.
+- Six entities were mutated after insert with no update-tracking column at all:
+  `AilmentEntity` (soft delete via `AilmentDao.markDeleted`), `ReferralEntity` (status transition,
+  currently unreachable, no caller), `AbhaProfileEntity`/`KernelReportEntity`/
+  `EvaluateReportEntity`/`DiagnosisFeedbackEntity` (all `OnConflictStrategy.REPLACE` upserts).
+  Backfill sources for each are documented in `MIGRATION_12_13`'s own KDoc.
+- Found beyond the original audit, while wiring the fifth column: `CaseRecordDao` (4 queries:
+  `updateStatus`, `assignDoctor`, `abandonDraftsForPatient`, `sendAllPendingSync`) and
+  `ConsultationDao.updateTranscription` also mutate a syncable entity post-insert. They weren't in
+  the original "no update-tracking at all" list because both entities already have a clinical
+  `updatedAt` that those queries correctly bump. But `localModifiedAt` is a separate column with
+  the same "last write" meaning, and would have gone stale on every status change or transcription
+  edit if left alone. All 5 queries now set `localModifiedAt` from the same `updatedAt` bind
+  parameter already in scope, zero new clock reads.
+- `fallbackToDestructiveMigration()`: absent, confirmed by full-repo grep. Not a live bug.
+- `13.json`: did not exist before this session (only `MIGRATION_12` and no version above it were
+  ever present). Now exported and committed.
+
+### `syncState = PENDING`, not `SYNCED`, for every pre-existing row
+
+Deliberate: no device has ever pushed anything, so marking pre-upgrade rows `SYNCED` would
+silently guarantee every record captured before this build never reaches the server. Consequence,
+recorded in `MIGRATION_12_13`'s own KDoc so Phase 6 cannot be surprised by it: the first sync after
+Phase 6 has to drain the full local history and will exceed the 500-record/5 MB batch limit
+(api-contract.md §6.1), chunking that is the outbox's job, out of scope here. `serverVersion` is
+`NULL`, not `0`, matching `base_version: null` for a record the server has never seen.
+
+### `localModifiedAt`, the fifth column beyond the original brief
+
+Sync metadata ("when this row's bytes last changed on this device"), added to all 20 entities
+including the 5 that already have a clinical `updatedAt`, deliberately redundant there, so
+Phase 6 reads one uniform column regardless of entity. Backfilled per entity in the migration
+(`updatedAt` where it exists, `createdAt`/`timestamp` for confirmed insert-only entities,
+`COALESCE(deletedAt, createdAt)` for `ailments`, `COALESCE(inferenceEndedAt, inferenceStartedAt)`
+for `kernel_reports`/`evaluate_reports`, a correlated subquery to the parent `prescriptions.createdAt`
+for `medication_lines` with a final `COALESCE(..., <migration run time>)` fallback for an orphaned
+`prescriptionId` the FK-less schema doesn't prevent). Every backfilled value is an approximation,
+acceptable because `serverVersion = NULL` on every migrated row means it applies unconditionally
+on first push per api-contract.md §6.1, so the backfilled value is never the deciding input to a
+conflict comparison.
+
+### Flagged, not fixed
+
+- `AbhaProfileDao.upsert()`'s `OnConflictStrategy.REPLACE` path: callers are inconsistent about
+  whether `createdAt` is preserved or overwritten across a replace. A real defect, independent of
+  sync, needs its own session. `localModifiedAt` for this entity is deliberately sourced from
+  `Instant.now()` rather than `createdAt`, so it stays correct regardless of that inconsistency.
+- `ReferralEntity` status-transition history predates any timestamp column and is unrecoverable
+  for rows that already exist; `ReferralDao.updateStatus` is unreachable in this build (no caller),
+  so this is dormant, not active, but its signature was still updated to carry `localModifiedAt`
+  so a future caller can't leave it stale.
+
+### Verification
+
+- `MigrationTest12To13.kt`: **instrumented, on-device (`Pixel_9_Pro_3` emulator), SQLCipher-encrypted**
+  end to end. `MigrationTestHelper` built with the same `net.zetetic.database.sqlcipher.
+  SupportOpenHelperFactory` `DatabaseModule.provideAppDatabase()` uses at runtime, not the default
+  plaintext framework factory, the exact gap that let the `DatabasePassphraseProvider` upgrade
+  bug through once already. One row inserted per syncable table at v12 with realistic values
+  (including two `ailments` rows, one soft-deleted, and two `medication_lines` rows, one with a
+  real parent and one deliberately orphaned to exercise the migration-run-time fallback), migrated
+  to v13, every row's survival and every new column's value asserted, including the one row that
+  hits the fallback. A second test confirms a fresh install straight to v13 validates against the
+  same `13.json`. Both pass. Pre-existing `MigrationTest.kt` (migrations 1 through 8, plaintext,
+  not touched) re-run and still passes, unaffected.
+- Full instrumented suite (`connectedDevDebugAndroidTest`): 28 tests, 1 pre-existing failure
+  unrelated to this work (`CompounderScreenTest.typingChiefComplaintReportsTheChange`, a Compose
+  semantics lookup for a "Chief complaint *" text field). Confirmed pre-existing by stashing this
+  entire change set and re-running the same test against unmodified `master`: identical failure.
+  Not investigated further, out of scope for a schema-only migration session.
+- Unit tests (`testDevDebugUnitTest`): 532 passing, unaffected (nothing in this change touches
+  unit-tested code paths).
+- `assembleDevDebug` and `compileDevDebugAndroidTestKotlin`: both clean.
+- One pre-existing test file needed a mechanical fix to keep compiling:
+  `TodaysPatientsDaoTest.kt`'s two entity-construction helpers gained `localModifiedAt`.
+
 ## Not started
 - [ ] Demo-theater additions from agent_docs/hardening.md — complete, pending final review of the
       hardening doc to ensure no secondary "security-theatre" items remain (e.g. security-shield

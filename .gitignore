@@ -38,3 +38,10 @@ backend/**/.ruff_cache/
 backend/**/.venv/
 backend/**/*.egg-info/
 backend/**/.coverage
+
+# --- graphify (knowledge-graph tool) ---
+# Regeneratable from source; graph.json/.graphify_root bake in absolute machine paths.
+graphify-out/
+app/graphify-out/
+backend/graphify-out/
+.claude/settings.json.graphify-bak

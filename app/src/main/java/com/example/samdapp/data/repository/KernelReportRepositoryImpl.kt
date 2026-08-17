@@ -5,6 +5,7 @@ import com.example.samdapp.data.local.entity.KernelReportEntity
 import com.example.samdapp.domain.model.KernelReportOutput
 import com.example.samdapp.domain.repository.KernelReportRepository
 import kotlinx.coroutines.flow.first
+import java.time.Instant
 import javax.inject.Inject
 
 class KernelReportRepositoryImpl @Inject constructor(
@@ -40,6 +41,7 @@ private fun KernelReportOutput.toEntity() = KernelReportEntity(
     inferenceEndedAt = inferenceEndedAt,
     requiredHumanVerification = requiredHumanVerification,
     inferenceSource = inferenceSource,
+    localModifiedAt = Instant.now(),
 )
 
 private fun KernelReportEntity.toDomain() = KernelReportOutput(

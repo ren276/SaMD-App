@@ -38,6 +38,7 @@ class TodaysPatientsDaoTest {
         village = null, block = null, district = null, state = null, pincode = null, category = null,
         maritalStatus = null, bloodGroup = null, emergencyContact = null, primaryCareClinicName = null,
         referringPhysicianName = null, createdAt = Instant.EPOCH, updatedAt = Instant.EPOCH,
+        localModifiedAt = Instant.EPOCH,
     )
 
     private fun encounter(id: String, patientId: String, startedAtMillis: Long) = EncounterEntity(
@@ -47,6 +48,7 @@ class TodaysPatientsDaoTest {
         createdAt = Instant.ofEpochMilli(startedAtMillis),
         updatedAt = Instant.ofEpochMilli(startedAtMillis),
         followUpOfEncounterId = null,
+        localModifiedAt = Instant.ofEpochMilli(startedAtMillis),
     )
 
     @Test

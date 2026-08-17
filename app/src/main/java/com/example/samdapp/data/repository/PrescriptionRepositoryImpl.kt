@@ -7,6 +7,7 @@ import com.example.samdapp.domain.model.MedicationLine
 import com.example.samdapp.domain.model.Prescription
 import com.example.samdapp.domain.repository.PrescriptionRepository
 import kotlinx.coroutines.flow.first
+import java.time.Instant
 import java.util.UUID
 import javax.inject.Inject
 
@@ -17,7 +18,7 @@ class PrescriptionRepositoryImpl @Inject constructor(
     override suspend fun save(prescription: Prescription): Result<Unit> = asDataResult {
         prescriptionDao.insertPrescription(prescription.toEntity())
         prescriptionDao.insertMedicationLines(
-            prescription.medications.mapIndexed { i, line -> line.toEntity(prescription.id, i) },
+            prescription.medications.mapIndexed { i, line -> line.toEntity(prescription.id, i, prescription.createdAt) },
         )
     }
 
@@ -37,9 +38,10 @@ private fun Prescription.toEntity() = PrescriptionEntity(
     diagnosis = diagnosis,
     kernelDecision = kernelDecision,
     createdAt = createdAt,
+    localModifiedAt = createdAt,
 )
 
-private fun MedicationLine.toEntity(prescriptionId: String, position: Int) = MedicationLineEntity(
+private fun MedicationLine.toEntity(prescriptionId: String, position: Int, localModifiedAt: Instant) = MedicationLineEntity(
     id = UUID.randomUUID().toString(),
     prescriptionId = prescriptionId,
     position = position,
@@ -53,6 +55,7 @@ private fun MedicationLine.toEntity(prescriptionId: String, position: Int) = Med
     quantity = quantity,
     foodRelation = foodRelation,
     instructions = instructions,
+    localModifiedAt = localModifiedAt,
 )
 
 private fun PrescriptionEntity.toDomain(lines: List<MedicationLineEntity>) = Prescription(

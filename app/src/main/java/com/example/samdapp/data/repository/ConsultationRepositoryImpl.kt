@@ -59,6 +59,7 @@ private fun Consultation.toEntity() = ConsultationEntity(
     transcription = transcription,
     createdAt = createdAt,
     updatedAt = updatedAt,
+    localModifiedAt = updatedAt,
 )
 
 private fun ConsultationEntity.toDomain(attachments: List<Attachment>) = Consultation(
@@ -85,6 +86,7 @@ private fun Attachment.toEntity() = AttachmentEntity(
     type = type,
     uri = uri,
     createdAt = createdAt,
+    localModifiedAt = createdAt,
 )
 
 private fun AttachmentEntity.toDomain() = Attachment(

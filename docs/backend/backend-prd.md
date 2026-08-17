@@ -263,7 +263,7 @@ Table names are identical. Column names are the `snake_case` form of the Kotlin 
 
 | Room entity | Backend table | Sync direction | Notes and divergences |
 |---|---|---|---|
-| `PatientEntity` | `patients` | push | Identity columns encrypted at rest (§5.4). Adds `facility_id`, `server_version`, `synced_at`. ABHA columns (`abha_address`, `abha_status`, `kyc_status`, `verification_source`, `verified_at`) land on the device in `MIGRATION_12_13` and exist server side from day one. |
+| `PatientEntity` | `patients` | push | Identity columns encrypted at rest (§5.4). Adds `facility_id`, `server_version`, `synced_at`. ABHA columns (`abha_address`, `abha_status`, `kyc_status`, `verification_source`, `verified_at`) exist server side from day one; on the device they still need a migration, and it is **not** `MIGRATION_12_13` (that version now belongs to the per-record sync-state columns below, done 2026-08-17). Whichever session adds them must claim `v13` to `v14` or later. |
 | `EncounterEntity` | `encounters` | push | FK to `patients`. `follow_up_of_encounter_id` self-FK. |
 | `ConsultationEntity` | `consultations` | push | FK to `patients`, `encounters`. |
 | `AttachmentEntity` | `attachments` | push | `uri` stored as `local_uri`, plus `blob_status` (`NOT_UPLOADED` always in v1) and a nullable `object_key` for the future. Renamed deliberately: a `content://` URI means nothing off the device that wrote it, and calling the column `uri` would imply the server can fetch something it cannot. Binaries do not move in v1. |
@@ -765,7 +765,7 @@ Grafana panel.
 | 3-fix | **DONE 2026-08-17.** Correctness and traceability pass over Phase 3, run before Phase 4 because sync push inherits both defects. `risk_category` provenance audit (D-11); the proxy's `kernel_reports` write deleted, making that table device-owned (D-9, D-10); new server-owned `kernel_assessments` holding raw model output only (migration `0004`); read-time versioned derivation in `app/domain/kernel_derivation.py`; success-path records moved into one out-of-band transaction so a call cannot be logged without its assessment | Phase 3 | part of 1 session |
 | 4 | `POST /sync/push`: batch ordering, per-record apply, ack contract, idempotency, `audit_events` hash chain, `/audit/events` and `/audit/verify` | Phase 3 | 1 session |
 | 5 | ABDM adapter: M1 registration flow per `abha-integration-plan.md`, `ABDM_MODE=stub` first | Phase 4 plus sandbox approval | 2 sessions |
-| 6 | Android wiring: `RetrofitAuthService`, `BackendAuthSession`, auth interceptor and `Authenticator`, `RetrofitPatientSource`, real `SyncStatus` plus `WorkManager` worker, rebase the two kernel sources onto `BACKEND_BASE_URL`, delete `KERNEL_BASE_URL` and `ABHA_BACKEND_BASE_URL`, add `DOCTOR` to `UserRole`, Room `MIGRATION_13_14` for sync columns | Phase 3 for the kernel rebase, Phase 4 for sync | 1 session |
+| 6 | Android wiring: `RetrofitAuthService`, `BackendAuthSession`, auth interceptor and `Authenticator`, `RetrofitPatientSource`, real `SyncStatus` plus `WorkManager` worker, rebase the two kernel sources onto `BACKEND_BASE_URL`, delete `KERNEL_BASE_URL` and `ABHA_BACKEND_BASE_URL`, add `DOCTOR` to `UserRole`. Room `MIGRATION_12_13` for the sync columns is **DONE 2026-08-17**, ahead of this phase (schema only, nothing reads or writes `sync_state` yet) | Phase 3 for the kernel rebase, Phase 4 for sync | 1 session |
 | 7 | Admin visibility: read-only page over sessions, sync batches, audit log, kernel calls | Phase 4 | 1 session |
 | 8 | AWS Mumbai staging deployment, RDS, TLS, secret store | Phase 4 | separate session |
 
@@ -773,13 +773,21 @@ Phase 3 is deliberately ahead of Phase 4. The kernel proxy is the smallest slice
 standalone value (server-side inference audit, kernel removed from the client network) and it
 exercises the whole middleware stack against a real downstream before the harder sync work starts.
 
-**Android prerequisite for Phase 6, flagged now because it is a Room migration and those are not
-free.** The device has no generic per-record sync state. Only `ailments` and `observations` carry
-`synced_to_cloud_at`, and only `case_records` carries a sync-ish status (`PENDING_SYNC`). A real
-outbox needs `sync_state` and `server_version` columns on every syncable entity, per
-`docs/sync-design.md` §2 item 1. The database is at v12, and `MIGRATION_12_13` is already spoken for
-by the ABHA fields, so this is **`MIGRATION_13_14`** with a `14.json` schema. It must not be skipped
-or merged into 12 to 13.
+**Android prerequisite for Phase 6, DONE 2026-08-17.** The device previously had no generic
+per-record sync state. Only `ailments` and `observations` carried `synced_to_cloud_at`, and only
+`case_records` carried a sync-ish status (`PENDING_SYNC`). `MIGRATION_12_13` adds `sync_state`,
+`server_version`, `sync_error_code`, `last_sync_attempt_at` and `local_modified_at` to all 20
+syncable entities, `13.json` exported and committed, per `docs/sync-design.md` §2 item 1.
+
+This corrects two false statements this note previously made. First, no `MIGRATION_12_13` existed
+anywhere in the repo when this was written (`git log --all` on the Room migration file returned
+nothing), so "already spoken for by the ABHA fields" was describing a migration that had never
+been built, not one in flight. Second, the ABHA columns in this document's own §5.2 table
+(`PatientEntity`/`patients` row) don't exist on the device at any version. `PatientEntity` carries
+only `abhaNumber`, none of `abha_address`/`abha_status`/`kyc_status`/`verification_source`/
+`verified_at`, so there was nothing at v12-to-v13 for this migration to conflict with. It shipped
+as v12-to-v13 cleanly. Whichever session adds the ABHA columns next must claim v13-to-v14 or later,
+not v12-to-v13, since that version is now taken.
 
 ---
 

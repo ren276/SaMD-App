@@ -5,6 +5,7 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.domain.model.RiskCategory
+import com.example.samdapp.domain.model.SyncState
 import com.example.samdapp.domain.model.UrgencyLevel
 import java.time.Instant
 
@@ -34,4 +35,14 @@ data class KernelReportEntity(
     val inferenceEndedAt: Instant,
     val requiredHumanVerification: Boolean,
     val inferenceSource: InferenceSource,
+    val syncState: SyncState = SyncState.PENDING,
+    val serverVersion: Int? = null,
+    val syncErrorCode: String? = null,
+    val lastSyncAttemptAt: Instant? = null,
+    /** Sync metadata: when this row's bytes last changed on this device. This table has no
+     *  write-time column of its own ([inferenceStartedAt]/[inferenceEndedAt] are clinical
+     *  inference timing, not DB write time), and [com.example.samdapp.data.repository.KernelReportRepositoryImpl]
+     *  upserts one row per case, replacing it wholesale on retry. Maps to `client_updated_at` on
+     *  the wire (Phase 6), see MIGRATION_12_13's KDoc. */
+    val localModifiedAt: Instant,
 )

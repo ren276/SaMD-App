@@ -11,6 +11,7 @@ import com.example.samdapp.domain.model.IndianBrandSuggestion
 import com.example.samdapp.domain.repository.EvaluateReportRepository
 import com.google.gson.Gson
 import kotlinx.coroutines.flow.first
+import java.time.Instant
 import javax.inject.Inject
 
 /** [EvaluateReportPayload] round-trips the deeply-nested diagnosticSummary/nlemTreatment/
@@ -45,6 +46,7 @@ class EvaluateReportRepositoryImpl @Inject constructor(
                 payloadJson = gson.toJson(payload),
                 inferenceStartedAt = report.inferenceStartedAt,
                 inferenceEndedAt = report.inferenceEndedAt,
+                localModifiedAt = Instant.now(),
             ),
         )
     }

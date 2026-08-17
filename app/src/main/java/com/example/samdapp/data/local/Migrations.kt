@@ -3,6 +3,7 @@ package com.example.samdapp.data.local
 import androidx.room.migration.Migration
 import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.execSQL
+import java.time.Instant
 
 val MIGRATION_1_2 = object : Migration(1, 2) {
     override fun migrate(connection: SQLiteConnection) {
@@ -246,5 +247,88 @@ val MIGRATION_11_12 = object : Migration(11, 12) {
         connection.execSQL(insertPrefix + "('doc-gastro-001', 'Dr. Anita Desai', 'Gastroenterology', 1, 'District Hospital, Sitapur', 'NMC/UP/2014/90123')")
         connection.execSQL(insertPrefix + "('doc-crit-001', 'Dr. Sanjay Singh', 'Critical Care', 1, 'District Hospital, Sitapur', 'NMC/UP/2009/56789')")
         connection.execSQL(insertPrefix + "('doc-int-001', 'Dr. Vivek Sharma', 'Internal Medicine', 1, 'Community Health Centre, Bhainsa', 'NMC/TS/2016/12345')")
+    }
+}
+
+/**
+ * Per-record sync-state foundation for Phase 6 (REQ-SYN-02). Five new columns on every one of
+ * the 20 syncable entities in api-contract.md §6.1 (everything except `doctors`, which is
+ * server-owned reference data with no push path):
+ *
+ * - `syncState` (`PENDING`/`SYNCED`/`CONFLICT`/`FAILED`, see [com.example.samdapp.domain.model.SyncState]).
+ *   `PENDING` for every existing row, deliberately: no device has ever pushed anything, so marking
+ *   pre-upgrade rows `SYNCED` would silently guarantee those records never reach the server. The
+ *   consequence is that the first sync after Phase 6 has to drain the full local history and will
+ *   exceed the 500-record/5 MB batch limit (api-contract.md §6.1); that is the outbox's job to
+ *   chunk and is out of scope here.
+ * - `serverVersion`, NULL for every row, matching `base_version: null` (api-contract.md §6.1) for
+ *   a record the server has never seen. Not defaulted to 0, since 0 is a real version.
+ * - `syncErrorCode`, `lastSyncAttemptAt`: both NULL, unused until Phase 6's outbox writes them.
+ * - `localModifiedAt`: sync metadata ("when this row's bytes last changed on this device"),
+ *   distinct from the five entities' existing `updatedAt` (a clinical fact) even where the two
+ *   start equal. The redundancy is deliberate: it buys Phase 6 one uniform column to read
+ *   instead of a per-entity lookup of which timestamp means "last write." Backfilled per entity
+ *   below; every value is an approximation for pre-existing rows, not a forensic reconstruction,
+ *   and that is acceptable because every migrated row also carries `serverVersion = NULL`, so per
+ *   api-contract.md §6.1 it is applied unconditionally on its first push. The backfilled
+ *   `localModifiedAt` is never the deciding input to a conflict comparison.
+ *
+ * Backfill source per entity: `updatedAt` for the five entities that already have it (`patients`,
+ * `encounters`, `consultations`, `social_histories`, `case_records`); `createdAt`/`timestamp` for
+ * entities confirmed insert-only via their DAOs (`attachments`, `medical_history_items`,
+ * `medication_entries`, `allergies`, `family_history_entries`, `observations`, `audit_log`,
+ * `prescriptions`, `abha_profiles`, `diagnosis_feedback`); `COALESCE(deletedAt, createdAt)` for
+ * `ailments` (soft delete via [com.example.samdapp.data.local.dao.AilmentDao.markDeleted] moves
+ * the real last-touch time later than `createdAt`); `timestamp` for `referrals` (status-transition
+ * history predates any timestamp column and is unrecoverable, flagged in PROGRESS.md, not
+ * fixed); `COALESCE(inferenceEndedAt, inferenceStartedAt)` for `kernel_reports` and
+ * `evaluate_reports` (neither has a write-time column of its own); and, for `medication_lines`
+ * (which has no timestamp of its own at all), a correlated subquery to its parent
+ * `prescriptions.createdAt`, with a final `COALESCE(..., <this migration's run time>)` fallback
+ * for the one case the FK-less schema doesn't prevent: a `medication_lines` row whose
+ * `prescriptionId` matches no `prescriptions` row. No row in this migration's own test data hits
+ * that fallback; it exists only so a real orphaned row cannot fail this NOT NULL column.
+ *
+ * Mechanics: SQLite can't `ALTER TABLE ... ADD COLUMN` a NOT NULL column without a constant
+ * default, so `syncState` and `localModifiedAt` are added with a placeholder default and then
+ * backfilled by `UPDATE`, the same two-step pattern [MIGRATION_5_6] already used for
+ * `inferenceStartedAt`. The three nullable columns need no such placeholder.
+ */
+val MIGRATION_12_13 = object : Migration(12, 13) {
+    override fun migrate(connection: SQLiteConnection) {
+        val migrationRunMillis = Instant.now().toEpochMilli()
+
+        fun addSyncColumns(table: String, localModifiedAtBackfillSql: String) {
+            connection.execSQL("ALTER TABLE `$table` ADD COLUMN `syncState` TEXT NOT NULL DEFAULT 'PENDING'")
+            connection.execSQL("ALTER TABLE `$table` ADD COLUMN `serverVersion` INTEGER")
+            connection.execSQL("ALTER TABLE `$table` ADD COLUMN `syncErrorCode` TEXT")
+            connection.execSQL("ALTER TABLE `$table` ADD COLUMN `lastSyncAttemptAt` INTEGER")
+            connection.execSQL("ALTER TABLE `$table` ADD COLUMN `localModifiedAt` INTEGER NOT NULL DEFAULT 0")
+            connection.execSQL("UPDATE `$table` SET `localModifiedAt` = $localModifiedAtBackfillSql")
+        }
+
+        addSyncColumns("patients", "`updatedAt`")
+        addSyncColumns("encounters", "`updatedAt`")
+        addSyncColumns("consultations", "`updatedAt`")
+        addSyncColumns("attachments", "`createdAt`")
+        addSyncColumns("observations", "`createdAt`")
+        addSyncColumns("ailments", "COALESCE(`deletedAt`, `createdAt`)")
+        addSyncColumns("medical_history_items", "`createdAt`")
+        addSyncColumns("allergies", "`createdAt`")
+        addSyncColumns("family_history_entries", "`createdAt`")
+        addSyncColumns("social_histories", "`updatedAt`")
+        addSyncColumns("medication_entries", "`createdAt`")
+        addSyncColumns("case_records", "`updatedAt`")
+        addSyncColumns("kernel_reports", "COALESCE(`inferenceEndedAt`, `inferenceStartedAt`)")
+        addSyncColumns("evaluate_reports", "COALESCE(`inferenceEndedAt`, `inferenceStartedAt`)")
+        addSyncColumns("diagnosis_feedback", "`createdAt`")
+        addSyncColumns("prescriptions", "`createdAt`")
+        addSyncColumns(
+            "medication_lines",
+            "COALESCE((SELECT p.`createdAt` FROM `prescriptions` p WHERE p.`id` = `medication_lines`.`prescriptionId`), $migrationRunMillis)",
+        )
+        addSyncColumns("referrals", "`timestamp`")
+        addSyncColumns("abha_profiles", "`createdAt`")
+        addSyncColumns("audit_log", "`timestamp`")
     }
 }

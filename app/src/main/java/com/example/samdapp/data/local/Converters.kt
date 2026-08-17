@@ -14,6 +14,7 @@ import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.domain.model.KernelDecision
 import com.example.samdapp.domain.model.ReferralStatus
 import com.example.samdapp.domain.model.RiskCategory
+import com.example.samdapp.domain.model.SyncState
 import com.example.samdapp.domain.model.UrgencyLevel
 import com.example.samdapp.domain.model.Visibility
 import com.example.samdapp.domain.model.VitalsCaptureMethod
@@ -80,6 +81,9 @@ class Converters {
 
     @TypeConverter fun physicianDecisionToString(value: PhysicianDecision): String = value.name
     @TypeConverter fun stringToPhysicianDecision(value: String): PhysicianDecision = PhysicianDecision.valueOf(value)
+
+    @TypeConverter fun syncStateToString(value: SyncState): String = value.name
+    @TypeConverter fun stringToSyncState(value: String): SyncState = SyncState.valueOf(value)
 
     @TypeConverter fun stringListToJson(value: List<String>): String =
         Json.encodeToString(ListSerializer(String.serializer()), value)

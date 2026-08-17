@@ -59,6 +59,7 @@ private fun VitalsSnapshot.toObservationEntities(): List<ObservationEntity> {
         painScore?.let { add(ObservationType.PAIN_SCORE to it.toDouble()) }
         bmi?.let { add(ObservationType.BMI to it) }
     }
+    val now = Instant.now()
     val numericRows = entries.map { (type, value) ->
         ObservationEntity(
             id = UUID.randomUUID().toString(),
@@ -72,7 +73,8 @@ private fun VitalsSnapshot.toObservationEntities(): List<ObservationEntity> {
             source = source,
             captureMethod = captureMethod,
             recordedAt = recordedAt,
-            createdAt = Instant.now(),
+            createdAt = now,
+            localModifiedAt = now,
         )
     }
     val urinalysisRow = urinalysisResult?.let {
@@ -88,7 +90,8 @@ private fun VitalsSnapshot.toObservationEntities(): List<ObservationEntity> {
             source = source,
             captureMethod = captureMethod,
             recordedAt = recordedAt,
-            createdAt = Instant.now(),
+            createdAt = now,
+            localModifiedAt = now,
         )
     }
     return numericRows + listOfNotNull(urinalysisRow)

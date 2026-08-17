@@ -6,6 +6,7 @@ import androidx.room.Query
 import com.example.samdapp.data.local.entity.ReferralEntity
 import com.example.samdapp.domain.model.ReferralStatus
 import kotlinx.coroutines.flow.Flow
+import java.time.Instant
 
 @Dao
 interface ReferralDao {
@@ -20,6 +21,10 @@ interface ReferralDao {
     @Query("SELECT * FROM referrals ORDER BY timestamp DESC")
     fun observeAll(): Flow<List<ReferralEntity>>
 
-    @Query("UPDATE referrals SET status = :status WHERE id = :id")
-    suspend fun updateStatus(id: String, status: ReferralStatus)
+    /** Unreachable in this build, no caller sets a referral's status once created (see
+     *  MIGRATION_12_13's PROGRESS.md note: status-transition history predates any timestamp
+     *  column and is unrecoverable for existing rows). Signature updated for when a caller
+     *  exists, so [ReferralEntity.localModifiedAt] is never left stale by a status change. */
+    @Query("UPDATE referrals SET status = :status, localModifiedAt = :localModifiedAt WHERE id = :id")
+    suspend fun updateStatus(id: String, status: ReferralStatus, localModifiedAt: Instant)
 }

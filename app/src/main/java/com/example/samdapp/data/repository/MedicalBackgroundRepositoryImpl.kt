@@ -66,7 +66,7 @@ class MedicalBackgroundRepositoryImpl @Inject constructor(
 
 private fun MedicalHistoryItem.toEntity() = MedicalHistoryItemEntity(
     id = id, patientId = patientId, category = category, description = description,
-    yearOrDate = yearOrDate, createdAt = createdAt,
+    yearOrDate = yearOrDate, createdAt = createdAt, localModifiedAt = createdAt,
 )
 
 private fun MedicalHistoryItemEntity.toDomain() = MedicalHistoryItem(
@@ -77,6 +77,7 @@ private fun MedicalHistoryItemEntity.toDomain() = MedicalHistoryItem(
 private fun MedicationEntry.toEntity() = MedicationEntryEntity(
     id = id, patientId = patientId, encounterId = encounterId, kind = kind, name = name,
     dosage = dosage, frequency = frequency, active = active, createdAt = createdAt,
+    localModifiedAt = createdAt,
 )
 
 private fun MedicationEntryEntity.toDomain() = MedicationEntry(
@@ -86,7 +87,7 @@ private fun MedicationEntryEntity.toDomain() = MedicationEntry(
 
 private fun Allergy.toEntity() = AllergyEntity(
     id = id, patientId = patientId, category = category, allergen = allergen,
-    reactionType = reactionType, createdAt = createdAt,
+    reactionType = reactionType, createdAt = createdAt, localModifiedAt = createdAt,
 )
 
 private fun AllergyEntity.toDomain() = Allergy(
@@ -96,6 +97,7 @@ private fun AllergyEntity.toDomain() = Allergy(
 
 private fun FamilyHistoryEntry.toEntity() = FamilyHistoryEntryEntity(
     id = id, patientId = patientId, condition = condition, relation = relation, createdAt = createdAt,
+    localModifiedAt = createdAt,
 )
 
 private fun FamilyHistoryEntryEntity.toDomain() = FamilyHistoryEntry(
@@ -105,7 +107,7 @@ private fun FamilyHistoryEntryEntity.toDomain() = FamilyHistoryEntry(
 private fun SocialHistory.toEntity() = SocialHistoryEntity(
     patientId = patientId, occupation = occupation, tobaccoUse = tobaccoUse, alcoholUse = alcoholUse,
     recreationalDrugUse = recreationalDrugUse, environmentalExposure = environmentalExposure,
-    recentTravel = recentTravel, updatedAt = updatedAt,
+    recentTravel = recentTravel, updatedAt = updatedAt, localModifiedAt = updatedAt,
 )
 
 private fun SocialHistoryEntity.toDomain() = SocialHistory(

@@ -5,6 +5,7 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.example.samdapp.domain.model.ObservationSource
 import com.example.samdapp.domain.model.ObservationType
+import com.example.samdapp.domain.model.SyncState
 import com.example.samdapp.domain.model.VitalsCaptureMethod
 import java.time.Instant
 
@@ -23,4 +24,11 @@ data class ObservationEntity(
     val recordedAt: Instant,
     val syncedToCloudAt: Instant? = null,
     val createdAt: Instant,
+    val syncState: SyncState = SyncState.PENDING,
+    val serverVersion: Int? = null,
+    val syncErrorCode: String? = null,
+    val lastSyncAttemptAt: Instant? = null,
+    /** Sync metadata: when this row's bytes last changed on this device. Maps to
+     *  `client_updated_at` on the wire (Phase 6), see MIGRATION_12_13's KDoc. */
+    val localModifiedAt: Instant,
 )

@@ -64,6 +64,7 @@ private fun Patient.toEntity() = PatientEntity(
     referringPhysicianName = referringPhysicianName,
     createdAt = createdAt,
     updatedAt = updatedAt,
+    localModifiedAt = updatedAt,
 )
 
 private fun PatientEntity.toDomain() = Patient(

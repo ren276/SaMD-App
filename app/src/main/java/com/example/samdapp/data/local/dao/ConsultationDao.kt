@@ -12,7 +12,12 @@ interface ConsultationDao {
     @Insert
     suspend fun insert(consultation: ConsultationEntity)
 
-    @Query("UPDATE consultations SET transcription = :transcription, updatedAt = :updatedAt WHERE id = :consultationId")
+    /** Also stamps `localModifiedAt` from the same [updatedAt] value, see MIGRATION_12_13's
+     *  KDoc for why the two columns are deliberately redundant on entities that have both. */
+    @Query(
+        "UPDATE consultations SET transcription = :transcription, updatedAt = :updatedAt, " +
+            "localModifiedAt = :updatedAt WHERE id = :consultationId",
+    )
     suspend fun updateTranscription(consultationId: String, transcription: String, updatedAt: Instant)
 
     @Query("SELECT * FROM consultations WHERE encounterId = :encounterId LIMIT 1")

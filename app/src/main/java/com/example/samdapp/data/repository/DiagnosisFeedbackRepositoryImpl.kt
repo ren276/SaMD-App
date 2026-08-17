@@ -5,6 +5,7 @@ import com.example.samdapp.data.local.entity.DiagnosisFeedbackEntity
 import com.example.samdapp.domain.model.DiagnosisFeedback
 import com.example.samdapp.domain.repository.DiagnosisFeedbackRepository
 import kotlinx.coroutines.flow.first
+import java.time.Instant
 import javax.inject.Inject
 
 class DiagnosisFeedbackRepositoryImpl @Inject constructor(
@@ -21,6 +22,7 @@ class DiagnosisFeedbackRepositoryImpl @Inject constructor(
                 physicianFinalDiagnosis = feedback.physicianFinalDiagnosis,
                 clinicalNote = feedback.clinicalNote,
                 createdAt = feedback.createdAt,
+                localModifiedAt = Instant.now(),
             ),
         )
     }
