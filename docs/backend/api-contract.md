@@ -1,9 +1,12 @@
 # SaMD Backend API Contract (v1)
 
-> **Status:** Sections 1 through 4 (health, auth, patients, encounters) are implemented as of
-> 2026-08-17 in `backend/core/`. Section 5 (kernel proxy), section 6 (sync), section 7 (audit
-> read surface), and section 8 (ABHA) are the contract for Phases 3 through 5 and are not
-> implemented yet.
+> **Status:** Sections 1 through 5 (health, auth, patients, encounters, kernel proxy) are
+> implemented as of 2026-08-17 in `backend/core/`. Section 6 (sync), section 7 (audit read
+> surface), and section 8 (ABHA) are the contract for Phases 4 and 5 and are not implemented yet.
+> Section 5's error registry gained two codes during implementation, `SAMD-KERN-5006` and
+> `SAMD-KERN-5007`, not present in the original planning draft; see the registry in section 9.1
+> for what they cover and why the existing 5001 to 5005 assignments were kept rather than
+> renumbered.
 > **Controlled document.** This file is the single source of truth from which both the FastAPI
 > routes (`backend/core/app/api/v1/`) and the Android Retrofit service interfaces
 > (`app/src/main/java/com/example/samdapp/data/remote/api/`) are built. If the two disagree, this
@@ -826,18 +829,35 @@ only an `ApiEnvelope<T>` wrapper class is added. REQ-HAN-01, REQ-HAN-07.
 ```
 
 **Audit record written for every call**, success or failure, to `kernel_call_log` and to the
-hash-chained audit log:
+hash-chained audit log. **On success only**, one further row is written to `kernel_assessments`.
+The two tables have deliberately different jobs, and the difference is the whole point:
 
-| Logged | Not logged |
-|---|---|
-| `request_id`, `worker_id`, `facility_id`, `case_token` | the request body |
-| `input_sha256` (hash of the canonical JSON request body) | any vital value or complaint text |
-| `output_sha256` (hash of the canonical JSON response body) | the response body |
-| `model_version`, `endpoint`, `http_status`, `duration_ms` | |
+| Table | Written on | What it holds | Response body |
+|---|---|---|---|
+| `kernel_call_log` | every call, success and failure | `request_id`, `worker_id`, `facility_id`, `case_record_id`, `case_token`, `endpoint`, `kernel_base_url`, `input_sha256`, `output_sha256`, `model_version`, `outcome`, `error_code`, `http_status`, `started_at`, `completed_at`, `duration_ms` | **hashes only, never the body** |
+| `kernel_assessments` | successful calls that returned parseable JSON | `request_id` (joins to the log row), `case_record_id`, `facility_id`, `worker_id`, `endpoint`, `raw_response`, `model_version`, `inference_time_ms`, `safety_screen_passed`, `triage_urgency`, `response_sha256`, `created_at` | **yes: `raw_response` is the response body verbatim, as `jsonb`** |
 
-Hashes, not payloads. They prove *which* payload produced *which* verdict, for IEC 62304
-traceability, without creating a second copy of the clinical record in a log table. The clinical
-content is already durably stored in `kernel_reports` and `evaluate_reports`.
+Neither table holds the request body. `input_sha256` is the only trace of it, by design.
+
+`kernel_assessments.raw_response` is byte-faithful to what the kernel returned, mixed casing and
+all, with one documented exception: `case_token` inside it still holds the outbound pseudonym.
+The swap back to the real `case_record_id` happens in the HTTP response only, never in what is
+stored. `response_sha256` is the same value as the log row's `output_sha256`, so the two rows are
+provably about the same bytes.
+
+`kernel_assessments` stores **zero derived values**: no `predicted_condition`, no
+`confidence_score`, no `risk_category`, no `required_human_verification`. The four assess-only
+columns above are copied out of the response, never computed from it, and are `NULL` on
+`/evaluate` rows because that endpoint does not carry them. Derived clinical values are computed
+at read time by `app/domain/kernel_derivation.py`, which carries a rule version so a change to
+the rules is distinguishable from a change to the model.
+
+**The proxy does not write `kernel_reports`.** That table is device-owned, arrives through sync
+push (Phase 4), and is the record of what the clinician was actually shown. A server-computed
+value stored beside `model_version` would attribute backend arithmetic to a named model version,
+which breaks IEC 62304 traceability. See D-9 and D-10 in `backend-prd.md` section 9.
+
+Retention for `kernel_assessments` follows `kernel_call_log`: 24 months, decision D-5.
 
 **Error Responses:**
 - 401: `SAMD-AUTH-1002`, `SAMD-AUTH-1003`
@@ -1372,6 +1392,8 @@ autofill changes when the mock is replaced:
 | `SAMD-KERN-5003` | 422 | Kernel rejected the payload |
 | `SAMD-KERN-5004` | 502 | Kernel returned an unparseable response |
 | `SAMD-KERN-5005` | 422 | Identity field detected on the kernel boundary (H-10 guard) |
+| `SAMD-KERN-5006` | 503 | Kernel circuit breaker is open (added in Phase 3 implementation) |
+| `SAMD-KERN-5007` | 502 | Kernel returned an internal error, distinct from being unreachable (added in Phase 3 implementation) |
 | `SAMD-SYNC-6001` | 413 | Batch too large |
 | `SAMD-SYNC-6002` | 422 | Unknown table in batch |
 | `SAMD-SYNC-6003` | (per record) | Record validation failed; appears inside `results[]`, not as an HTTP status |

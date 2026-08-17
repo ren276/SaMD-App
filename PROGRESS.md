@@ -1193,6 +1193,233 @@ can enforce the wrong-patient guard), section 4.7 (the doctor FK exception), and
 Not in this session, by design: kernel proxy (Phase 3), sync push and pull (Phase 4), ABDM
 adapter (Phase 5), Android wiring (Phase 6).
 
+## Backend Phase 3: kernel proxy (2026-08-17)
+
+`/api/v1/assess` and `/api/v1/evaluate` now forward to the XGBoost kernel through the backend
+instead of the Android app calling it directly.
+
+- [x] `app/adapters/kernel/`: httpx client built once in the FastAPI lifespan (not per request),
+      the ASSESS/EVALUATE path asymmetry encoded explicitly (`/v1/assess` has no `/api` prefix on
+      the kernel side, `/api/v1/evaluate` does), no retry anywhere.
+- [x] PHI boundary guard (H-10, REQ-HAN-06), two mechanisms: `extra="forbid"` on the request
+      schemas, plus an explicit denylist (`app/adapters/kernel/phi_guard.py`) checked before every
+      forward, in one named constant with a parametrised test per entry.
+- [x] HMAC case pseudonym closing decision D-7: `case_token = HMAC-SHA256(case_record_id,
+      CASE_TOKEN_KEY)[:16 hex]`, substituted outbound and restored on the response. Verified the
+      derivation by hand against a live call.
+- [x] Per-endpoint in-memory circuit breaker (assess and evaluate fail independently): opens after
+      5 consecutive failures, fails fast with `SAMD-KERN-5006` while open, half-opens after 30s.
+      A 4xx from the kernel does not count as a breaker failure (the kernel answered correctly
+      that the payload was bad). Verified the full lifecycle live: closed, failures accumulate,
+      opens, fast-fails without a network call, half-opens after cooldown, recovers on success.
+- [x] `kernel_call_log` extended (migration 0003): `case_record_id` alongside the pseudonymous
+      `case_token`, `kernel_base_url`, a typed `outcome` (SUCCESS/TIMEOUT/UNREACHABLE/KERNEL_ERROR/
+      PAYLOAD_REJECTED/MALFORMED_RESPONSE/CIRCUIT_OPEN/PHI_REJECTED), `error_code`, and
+      `completed_at` alongside a rename of `created_at` to `started_at`. Written for every call,
+      success or failure, per api-contract.md section 5.3.
+- [x] `evaluate_reports.payload_json` stores the kernel's tree exactly as returned, mixed casing
+      included, verified by whole-tree equality in tests, not spot fields.
+- [x] Facility isolation: a kernel call against another facility's `case_record_id` is 404, not
+      403 (confirming existence would leak across the boundary), matching the pattern already used
+      in patients.py/encounters.py.
+- [x] Two new error codes added rather than reusing an existing assignment (the module's own rule:
+      a code is never reused for a different meaning): `SAMD-KERN-5006` (circuit open, 503) and
+      `SAMD-KERN-5007` (kernel-side 5xx, distinct from unreachable, 502). `SAMD-KERN-5001` through
+      `5005` kept their Phase 1 meanings unchanged.
+- [x] 164 tests passing (48 new). `ruff` and `mypy` strict clean across 58 source files. Verified
+      live: real uvicorn process, real PostgreSQL, and a real (if minimal) second HTTP server
+      standing in for the kernel, not just the mocked test transport.
+
+One real transaction-boundary bug found before it ever ran, by reasoning through Phase 1's own
+session semantics rather than guessing: `session_scope` commits the request's session on success
+and rolls back the WHOLE transaction on any exception. A `kernel_call_log` row for a FAILED call
+cannot be inserted into the request session and left there, because the `SamdError` about to
+propagate would roll it back along with everything else. Fixed the same way Phase 1's
+`_audit_out_of_band` fixed the identical problem for failed logins: failure-path writes (both
+`kernel_call_log` and the `audit_events` row) happen in their own session, committed immediately,
+before raising.
+
+Two deliberate, flagged deviations from the brief's literal error-code table (documented as D-9
+recorded in `docs/backend/backend-prd.md` section 9, not applied silently):
+
+1. The brief's mapping would have reassigned `SAMD-KERN-5001`/`5002` to different meanings than
+   Phase 1 already gave them (`5001` = unreachable/502, `5002` = timeout/504, both already
+   documented and shipped in `errors.py`). Kept the existing assignments and added `5006`/`5007`
+   for the two failure modes the brief wanted distinguished (circuit open, kernel-side 5xx)
+   instead of renumbering anything.
+2. `case_record_id` unknown or wrong facility uses `SAMD-ENC-4002` (`ENC_CASE_NOT_FOUND`), not the
+   brief's suggested `SAMD-ENC-4001` (`ENC_ENCOUNTER_NOT_FOUND`, a different resource already
+   assigned to encounters, not case records).
+
+Also flagged rather than silently invented: `kernel_reports` persistence for `/v1/assess` requires
+a mapping the kernel's raw response does not carry (predicted_condition/confidence_score/
+reasoning_summary/risk_category have no direct source in `differential_diagnosis[]`). Reproduced
+the documented Android rules (REQ-HAN-07/08) where they exist, substituted clearly-labelled
+backend equivalents where they don't (`device_id`, `software_version`), and inserts a new row per
+call rather than upserting per case like the device does (D-9, D-10 in the PRD).
+
+Not in this session, by design: sync push/pull (Phase 4), ABDM adapter (Phase 5), Android wiring
+(Phase 6, including the `KERNEL_BASE_URL` deletion; the app still calls the kernel directly
+until then).
+
+## Backend Phase 3 fix pass (2026-08-17, Part A on Opus)
+
+A correctness and traceability pass over Phase 3, run before Phase 4 rather than after, because
+sync push inherits both defects it fixes. Nothing in Phase 4 was started.
+
+### A0 finding: `risk_category` provenance audit — Case 1, no safety escalation
+
+Run first, before any code. Read `KernelReportEntity`, Room schema `12.json`,
+`GenerateKernelReportUseCase`, `KernelAssessmentViewModel`/`AssessmentDisplay`,
+`ReportCanvasRenderer`, REQ-HAN-07/08, and the Phase 3 backend code.
+
+**Case 1: Android derives it by an explicit mapping** — with three qualifications that matter.
+
+1. The mapping uses `triage_urgency` **and** `confidence_score`, not `triage_urgency` alone
+   (`GenerateKernelReportUseCase.tryRealApi`): `EMERGENCY` maps to `HIGH` outright, otherwise
+   `>= 0.85` is `LOW`, `>= 0.65` is `MODERATE`, below that is `HIGH`. The backend's Phase 3
+   mapping was a **different rule** (`ROUTINE`→`LOW`, `URGENT`→`MODERATE`, `EMERGENCY`→`HIGH`),
+   so device and server disagreed for the same kernel response: `URGENT` at 0.90 confidence was
+   `LOW` on the device and `MODERATE` on the server. The Android mapping is now the only one.
+2. On the MOCK_FALLBACK path it is a hardcoded per-scenario constant in the curated table, not
+   model output at all. That path never reaches the proxy and is not reproduced server side.
+3. `RiskCategory`'s KDoc on the device says the field grades "how serious the predicted condition
+   could be"; outside the EMERGENCY branch the implementation grades **model uncertainty**, so
+   higher confidence maps to lower risk. Documentation and implementation contradict each other
+   on the device. Reproduced unchanged, because a server rule disagreeing with the device would
+   make the stored record differ from the displayed one.
+
+**Escalation check: no fabricated `risk_category` reaches a clinician.** `riskCategory` is
+written by the use case, mapped through `KernelReportRepositoryImpl`, and persisted. It is read
+by no composable, no `toDisplay()`, no `ReportCanvasRenderer` block, and no gating or branching
+logic; a grep across `app/src/main` finds only entity, mapper, converter and migration
+references. Had it been rendered, this would have been a safety finding and the pass would have
+halted before writing code. Recorded as **D-11** in the PRD with two recommendations for the
+founder: reconcile the KDoc with the rule (or change the rule and bump the derivation version),
+and delete the field from the device entity if nothing is ever going to render it.
+
+### A1 — the proxy no longer writes `kernel_reports` (D-9, D-10 resolved)
+
+- [x] `_persist_kernel_report` deleted outright. No flag, no commented branch. `kernel_reports` is
+      now **device-owned**, written only by sync push in Phase 4, and remains the record of what
+      the clinician was actually shown.
+      The defect: the proxy filled `predicted_condition`, `confidence_score`, `risk_category` and
+      `required_human_verification` with backend-computed values and stored them beside
+      `model_version`, which attributes backend arithmetic to a named model version. A docstring
+      saying so does not help, because the docstring is not in the database. It also collided with
+      the device, which upserts one row per case while the proxy inserted one per call, leaving
+      Phase 4 a merge with no correct answer.
+- [x] New server-owned `kernel_assessments`, **migration `0004`** (not `0003` as the brief said:
+      `0003` already exists from Phase 3, extending `kernel_call_log` rather than creating it, so
+      `0003` was taken and later renamed to `0003_extend_kernel_call_log.py` to say so). Raw response body
+      verbatim in `jsonb`, plus `request_id` joining to `kernel_call_log`, real FKs to
+      `case_records` and `facilities`, `facility_id` stamped from the token, and four columns
+      copied out of the response (`model_version`, `inference_time_ms`, `safety_screen_passed`,
+      `triage_urgency`), nullable because `/evaluate` does not carry them. Zero derived values, and
+      a test over the mapped columns fails if one is ever added.
+- [x] Only successful calls returning parseable JSON produce a row. Failures leave a
+      `kernel_call_log` row and an `audit_events` row and nothing here, because there is no model
+      output to store.
+- [x] No data migration. Migration `0004` states that pre-existing proxy-written `kernel_reports`
+      rows in a dev database are orphaned by design and the fix is to recreate the volume.
+- [x] The success path now writes its `kernel_call_log`, `kernel_assessments` and `audit_events`
+      rows in **one out-of-band transaction**, matching the failure path. A call therefore cannot
+      be logged without its assessment or the reverse, and a successful kernel call (a network
+      event that really happened) is recorded whatever the request transaction does afterwards.
+
+### A2 — derivation in one named, versioned module
+
+- [x] `app/domain/kernel_derivation.py` (new `app/domain` package for pure clinical rules: no IO,
+      no ORM, callable from a unit test with a plain dict). One pure function returning a frozen
+      dataclass with `predicted_condition`, `confidence_score`, `risk_category`,
+      `requires_human_verification`, `derivation_rule_version`. Called on READ only, by the report
+      layer and the Phase 7 dashboard. Nothing it returns is persisted.
+- [x] `DERIVATION_RULE_VERSION = "HAN-07/08-v1"`. Its docstring states that any threshold or rule
+      change here requires bumping it, because the 0.90 threshold is a risk control and the ACP
+      under CDSCO/MD/GD/MDSW/01/2026 must distinguish a rule change from a model change.
+- [x] 40 unit tests, direct: normal case, the 0.90 boundary, the full risk mapping including the
+      unreachability of `CRITICAL`, tie on top probability, unsorted list, empty
+      `differential_diagnosis`, malformed differentials, a boolean probability, clamping, and
+      missing `model_metadata`.
+
+Two deviations from the brief, both recorded in the module docstring and in D-11:
+
+1. **Top differential is the kernel's first entry, not max-by-probability.**
+   `RetrofitKernelSource.assess` takes `firstOrNull()` and does not sort. A max-by-probability
+   rule here would name a different top condition than the device displayed if the kernel ever
+   returns an unsorted list, and reconstructing what was displayed is the point of the module.
+   The session rule "if the brief conflicts with the code, the code wins" decided this.
+2. **Empty `differential_diagnosis` derives `None`.** Android substitutes the literal string
+   "Non-specific presentation" and a confidence of 0.50. Reproducing that would fabricate a
+   confidence the model never produced, which is the defect this pass exists to remove. The
+   device does it for a UI that must render something; a read-time analytical function has no
+   such obligation.
+
+### A3 — documentation and the risk file
+
+- [x] `docs/quality/risk-management-file.md`: new hazard **H-12** (backend-derived clinical values
+      stored as model output) recording the raw-only storage control and the versioned read-time
+      derivation, and new **RR-01** under a new section 4.1, accepting the quasi-identifier
+      residual risk on plaintext `village`/`block`/`pincode` with the mitigation named as
+      database-level access control plus the pending AWS KMS envelope encryption, explicitly not
+      column encryption. Cross-referenced to PRD §5.4, which recorded the schema decision but
+      never carried it into the risk file.
+- [x] `docs/backend/backend-prd.md`: D-9 and D-10 marked resolved with the reasoning rather than
+      just the outcome, D-11 added, §5.5 corrected (it said clinical content is durably stored in
+      `kernel_reports` and `evaluate_reports`), phase table gains a `3-fix` row.
+- [x] `docs/backend/api-contract.md` §5.3: `kernel_assessments` documented alongside
+      `kernel_call_log` in a table making the split explicit — the response body **is** stored in
+      `kernel_assessments`, `kernel_call_log` keeps hashes only, and neither stores the request
+      body.
+
+### Open item, flagged rather than folded in
+
+`evaluate_reports` still takes a proxy write on every `/evaluate` call. It is a device-mirrored
+table with the identical ownership collision D-10 describes, and its content is now duplicated in
+`kernel_assessments.raw_response`. Removing that write was **not** in the fix pass brief, which
+scoped the change to `kernel_reports`, so it was left in place and recorded under D-10 with a
+recommendation to remove it in Phase 4.
+
+### Commit status correction
+
+Neither Phase 3 nor the Phase 3 fix pass above had been committed when this section was first
+written. `git log` on `app/services/kernel.py`, `app/api/v1/kernel.py` and `app/domain/` returned
+nothing until the pre-commit verification pass that follows landed them. The `[x]` markers above
+describe work that was done and verified in the working tree, not work that had shipped to
+master. Treat any `[x]` in this file as "done in the working tree" unless a commit sha is quoted
+next to it.
+
+## Backend Phase 3 pre-commit verification (2026-08-17)
+
+A verification pass run before the first Phase 3 commit, checking the fix-pass report above
+against actual git and database state rather than trusting it.
+
+- [x] Confirmed Phase 3 and the fix pass were never committed (git log on the proxy files was
+      empty). All of it, kernel proxy plus both fix-pass parts, lands in one commit together, the
+      first Phase 3 commit rather than a retroactive split.
+- [x] Confirmed `kernel_call_log` was genuinely created in migration `0002`, not `0003`. Migration
+      `0003` only adds columns to it (`case_record_id`, `kernel_base_url`, `outcome`, `error_code`,
+      `completed_at`, plus the `created_at` to `started_at` rename). Its own docstring already said
+      "extend", only the filename implied otherwise, renamed
+      `0003_kernel_call_log.py` to `0003_extend_kernel_call_log.py`, revision id and
+      `down_revision` chain unchanged. `alembic history` still linear, `alembic upgrade head` and
+      `alembic check` both still clean run against a fresh empty database.
+- [x] Confirmed CI green on both prior commits is real, not a misconfigured drift check: `3f937fc`
+      committed migration `0002` together with every model it depends on in the same commit, so
+      `alembic check` had matching metadata at the time it ran.
+- [x] Confirmed the A0 `risk_category` finding (D-11) was already fully recorded with case number
+      and origin before this pass started, contrary to a claim that it was missing.
+- [x] Confirmed `kernel_assessments` (migration `0004`) has zero derived columns, and that no
+      write to `kernel_reports` remains anywhere in `app/services/` or `app/api/`, commented out or
+      otherwise.
+- [x] 214 tests passing (116 pre-existing plus 98 across the 5 kernel test files, all previously
+      uncommitted). `ruff` and `mypy` strict clean. `alembic upgrade head` and `alembic check` clean
+      from an empty database.
+- [x] Root cause of the blocked pytest run from the previous session: not a dead docker container,
+      a stray native `postgresql@14` system service already holding port 5432. Recorded in
+      `agent_docs/CLAUDE.md` so it is checked first next time, alongside the separate `.venv`
+      pointing at a dead session scratchpad python that also blocked this session's start.
+
 ## Not started
 - [ ] Demo-theater additions from agent_docs/hardening.md — complete, pending final review of the
       hardening doc to ensure no secondary "security-theatre" items remain (e.g. security-shield

@@ -6,9 +6,11 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Annotated
 
+import httpx
 from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.adapters.kernel.circuit_breaker import KernelCircuitBreakers
 from app.config import Settings, get_settings
 from app.db.session import session_scope
 from app.errors import ErrorCode, SamdError
@@ -110,3 +112,20 @@ def require_roles(*roles: UserRole) -> Callable[[CurrentWorker], CurrentWorker]:
         return worker
 
     return guard
+
+
+def kernel_client_dep(request: Request) -> httpx.AsyncClient:
+    """The shared httpx client, built once in the lifespan and held on app.state.
+
+    Read off app.state rather than constructed here: a client created per request leaks
+    connections and defeats keep-alive (app/adapters/kernel/client.py).
+    """
+    return request.app.state.kernel_client  # type: ignore[no-any-return]
+
+
+def kernel_breakers_dep(request: Request) -> KernelCircuitBreakers:
+    return request.app.state.kernel_breakers  # type: ignore[no-any-return]
+
+
+KernelClientDep = Annotated[httpx.AsyncClient, Depends(kernel_client_dep)]
+KernelBreakersDep = Annotated[KernelCircuitBreakers, Depends(kernel_breakers_dep)]

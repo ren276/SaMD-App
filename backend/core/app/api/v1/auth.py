@@ -9,7 +9,7 @@ from fastapi import APIRouter, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.session import get_sessionmaker
+from app.db.session import get_sessionmaker, write_out_of_band
 from app.deps import SessionDep, SettingsDep, WorkerDep
 from app.errors import ErrorCode, SamdError
 from app.middleware.request_id import current_request_id, current_timestamp
@@ -51,7 +51,7 @@ async def _audit_out_of_band(
     payload: dict[str, Any],
     device_id: str | None = None,
 ) -> None:
-    """Write an audit row in its own transaction.
+    """Write an audit row in its own transaction, via app.db.session.write_out_of_band.
 
     Used only on paths that are about to raise. The request transaction is going to roll back,
     and a failed login that leaves no trace is the opposite of what an audit log is for.
@@ -60,8 +60,8 @@ async def _audit_out_of_band(
     the worker's own facility chain rather than on a side chain. Only a genuinely unknown
     worker_id falls back to UNKNOWN_FACILITY.
     """
-    factory = get_sessionmaker()
-    async with factory() as session:
+
+    async def _write(session: AsyncSession) -> None:
         account = (
             await session.execute(select(UserAccount).where(UserAccount.worker_id == actor_id))
         ).scalar_one_or_none()
@@ -76,7 +76,8 @@ async def _audit_out_of_band(
             origin=AuditOrigin.SERVER,
             payload=json.dumps(payload, separators=(",", ":"), sort_keys=True),
         )
-        await session.commit()
+
+    await write_out_of_band(_write, context=f"auth.{action}")
 
 
 @router.post("/login", summary="Authenticate a PHC worker and issue a JWT pair")

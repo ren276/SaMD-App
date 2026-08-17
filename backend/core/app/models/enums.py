@@ -243,3 +243,27 @@ class BlobStatus(StrEnum):
 
     NOT_UPLOADED = "NOT_UPLOADED"
     UPLOADED = "UPLOADED"
+
+
+class KernelEndpoint(StrEnum):
+    """Which of the two kernel routes a kernel_call_log row is about."""
+
+    ASSESS = "ASSESS"
+    EVALUATE = "EVALUATE"
+
+
+class KernelCallOutcome(StrEnum):
+    """kernel_call_log.outcome. Finer grained than the minimum the Phase 3 brief asked for
+    (it named SUCCESS, TIMEOUT, KERNEL_ERROR, CIRCUIT_OPEN, PHI_REJECTED as examples), because an
+    operator debugging "is the kernel unreachable" versus "is the kernel's process erroring" is
+    exactly the traceability G-3 exists to provide, and folding both into one KERNEL_ERROR bucket
+    would throw that distinction away at the one place it is cheap to keep."""
+
+    SUCCESS = "SUCCESS"
+    TIMEOUT = "TIMEOUT"
+    UNREACHABLE = "UNREACHABLE"
+    KERNEL_ERROR = "KERNEL_ERROR"
+    PAYLOAD_REJECTED = "PAYLOAD_REJECTED"
+    MALFORMED_RESPONSE = "MALFORMED_RESPONSE"
+    CIRCUIT_OPEN = "CIRCUIT_OPEN"
+    PHI_REJECTED = "PHI_REJECTED"

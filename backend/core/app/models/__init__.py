@@ -26,7 +26,9 @@ from app.models.enums import (
     BlobStatus,
     CaseStatus,
     InferenceSource,
+    KernelCallOutcome,
     KernelDecision,
+    KernelEndpoint,
     MeasurementType,
     MedicalHistoryCategory,
     MedicationKind,
@@ -54,7 +56,7 @@ from app.models.mixins import CLIENT_ID_LENGTH, PATIENT_ID_LENGTH, SyncMixin
 from app.models.patient import Patient
 from app.models.prescription import MedicationLine, Prescription
 from app.models.referral import Referral
-from app.models.sync import KernelCallLog, SyncBatch, SyncLogEntry
+from app.models.sync import KernelAssessment, KernelCallLog, SyncBatch, SyncLogEntry
 from app.models.user import WORKER_ID_LENGTH, Device, RefreshToken, UserAccount
 
 __all__ = [
@@ -86,8 +88,11 @@ __all__ = [
     "Facility",
     "FamilyHistoryEntry",
     "InferenceSource",
+    "KernelAssessment",
     "KernelCallLog",
+    "KernelCallOutcome",
     "KernelDecision",
+    "KernelEndpoint",
     "KernelReport",
     "MeasurementType",
     "MedicalHistoryCategory",

@@ -65,9 +65,19 @@ class Settings(BaseSettings):
     login_max_failed_attempts: int = 5
     login_lockout_seconds: int = 900
 
-    # Kernel (Phase 3)
+    # Kernel (Phase 3). Connect and read timeouts are separate settings deliberately: a hung TCP
+    # connect and a slow model are different failures and must be distinguishable in logs, not
+    # both folded into one "kernel_timeout_seconds".
     kernel_base_url: str = "http://10.16.4.182:8000"
-    kernel_timeout_seconds: int = 30
+    kernel_connect_timeout_seconds: float = 5.0
+    # 30s matches the Android app's existing OkHttp read timeout (di/NetworkModule.kt), so
+    # behaviour under a slow kernel does not change now that the call is proxied.
+    kernel_read_timeout_seconds: float = 30.0
+    # 3, not 5 (Phase 3 fix pass, B3): no retries by design, so this threshold is how many real
+    # clinical submissions must fail before fast-fail engages. 5 meant 5 real submissions eating
+    # the full read timeout before a worker got a fast, honest failure.
+    kernel_circuit_threshold: int = 3
+    kernel_circuit_cooldown_seconds: float = 30.0
 
     # ABDM / ABHA (Phase 5)
     abdm_mode: AbdmMode = "stub"

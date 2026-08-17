@@ -67,6 +67,12 @@ class ErrorCode(StrEnum):
     KERN_PAYLOAD_REJECTED = "SAMD-KERN-5003"
     KERN_MALFORMED_RESPONSE = "SAMD-KERN-5004"
     KERN_IDENTITY_LEAK_BLOCKED = "SAMD-KERN-5005"
+    # Added in Phase 3. 5001-5005 were already registered in Phase 1 with the meanings above;
+    # this module's own rule is that a code is never reused for a different meaning, so these two
+    # new failure modes (an internal kernel error distinct from an unreachable kernel, and the
+    # circuit breaker) get the next free numbers rather than overload an existing one.
+    KERN_INTERNAL_ERROR = "SAMD-KERN-5007"
+    KERN_CIRCUIT_OPEN = "SAMD-KERN-5006"
 
     # SYNC-6xxx
     SYNC_BATCH_TOO_LARGE = "SAMD-SYNC-6001"
@@ -126,6 +132,8 @@ _REGISTRY: dict[ErrorCode, tuple[int, str]] = {
     ErrorCode.KERN_PAYLOAD_REJECTED: (422, "Clinical kernel rejected the payload"),
     ErrorCode.KERN_MALFORMED_RESPONSE: (502, "Clinical kernel returned an unparseable response"),
     ErrorCode.KERN_IDENTITY_LEAK_BLOCKED: (422, "Identity field detected on the kernel boundary"),
+    ErrorCode.KERN_CIRCUIT_OPEN: (503, "Clinical kernel circuit breaker is open"),
+    ErrorCode.KERN_INTERNAL_ERROR: (502, "Clinical kernel returned an internal error"),
     ErrorCode.SYNC_BATCH_TOO_LARGE: (413, "Sync batch too large"),
     ErrorCode.SYNC_UNKNOWN_TABLE: (422, "Unknown table in sync batch"),
     # 6003 is a per-record result inside results[], never an HTTP status. The 422 here is only

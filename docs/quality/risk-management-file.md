@@ -30,6 +30,7 @@ the risk team; **budget for C, do not assume B**, pending CDSCO confirmation.
 | H-07 | Tampered or lost audit trail | Loss of accountability/traceability | Med | Low | **Insert-only** audit DAO (no update/delete at interface level) | Tamper-evidence (hash chain) + export for review |
 | H-08 | Hurried / incomplete data entry | Incomplete clinical picture | Med | Med | **Review-before-submit** dialogs on Consultation & Medical background | Required-field enforcement per clinical rules |
 | H-09 | Kernel unavailable/mocked mistaken for real | False confidence in assessment | High | Low | Kernel behind interface, clearly mocked; no real output shown as validated. `InferenceSource` (`REAL_INFERENCE`/`MOCK_FALLBACK`) traceability marker on every `/v1/assess`-derived result (REQ-HAN-08). **2026-07:** the newer `/api/v1/evaluate` leg (REQ-EVL-01) has deliberately **no mock fallback at all** — a failed call just omits the AI Clinical Evaluation section from the report/prescription rather than silently substituting fabricated treatment data, which removes this hazard's "mocked mistaken for real" failure mode entirely for that leg (there is nothing mocked to mistake). | Gate real kernel behind validation + version field (still applies to the `/v1/assess` leg's mock-fallback path) |
+| H-12 | Backend-derived clinical values stored as if they were model output | Loss of traceability: an auditor, a reviewer, or a future model-change assessment cannot tell which fields the named model is answerable for, so an incorrect result cannot be attributed to a model change or to a rule change | High | Med | **Server-side storage of model output is raw-only.** `kernel_assessments` (backend, migration `0004`) holds the kernel's response body verbatim in `jsonb` plus provenance the server owns, and stores **zero** derived values: no `predicted_condition`, no `confidence_score`, no `risk_category`, no `required_human_verification`. A test over the table's mapped columns fails if a derived column is ever added, so the control does not decay. All derived clinical values are computed at **read time** by `app/domain/kernel_derivation.py`, a pure versioned rule module (`derivation_rule_version = "HAN-07/08-v1"`), persisted nowhere. Bumping that constant is mandatory for any threshold or rule change: the 0.90 human-verification threshold is a risk control (REQ-HAN-08, and load-bearing for H-02), and the Algorithm Change Protocol under CDSCO/MD/GD/MDSW/01/2026 must be able to separate a rule change from a model change. `kernel_reports` is the **device-owned** record of what was displayed to the clinician and is not written by the server; the Phase 3 proxy write that reshaped each response into that table is deleted. | Phase 4 sync push must preserve device ownership of `kernel_reports` (no server-side merge of its clinical columns). The equivalent proxy write into `evaluate_reports` still exists and carries the same hazard at lower severity, since it stores the tree unreshaped; recommended for removal in Phase 4 (D-10). Phase 7's dashboard and the report layer must call the derivation module rather than re-implementing the rules |
 | H-11 | External third-party network call (Gemini API) for brand-name lookup | Availability/latency dependency on a service outside our control; data (generic drug name only, never patient-identifying) leaves the device to a third party | Low | Med | `BrandLookupSource`/`GeminiBrandLookupSource` never throws and never blocks the evaluate pipeline on failure (best-effort enrichment only); only the generic drug name is sent, never patient identity/vitals/symptom text; API key stored in git-ignored `local.properties`, never committed | Formal data-processing-agreement review for sending any data to Gemini (even non-identifying) before production; consider an on-device or India-hosted brand-lookup alternative if this needs to leave demo status |
 | H-10 | Patient identity fields inadvertently included in kernel payload | Privacy harm (DPDP); expands the kernel's data-processing scope beyond clinical need | High | Low | **Structural constructor design**: `KernelPayload` has no field of type `Patient`, and `SendToKernelUseCase`'s signature only accepts `VitalsReading` + `Consultation` + an opaque case token — a `Patient` object cannot reach the kernel boundary even by mistake, not just "by convention." Whitelisted fields only (chief complaint, duration, severity, relevant history, transcription, attachments); `Patient.fullName`/`aadhaarNumber`/`abhaNumber`/`mobileNumber`/`guardianOrSpouseName`/address fields are excluded by construction. Verified on-device: constructed payload for a patient with full identity data contained none of it. **2026-07:** `RetrofitEvaluateSource` builds `EvaluateRequestDto` from the same `KernelPayload` + separately-passed age/sex (never a `Patient`) — same structural guarantee extends to the `/api/v1/evaluate` leg without new code review needed for this specific control. | Extend the same structural pattern when a real network-facing kernel is added; consider a separate opaque token (not the case PK) at that point |
 
@@ -44,3 +45,47 @@ Open controls (auth/RBAC, real sync, kernel validation, threat model) are tracke
 ## 4. Residual risk & benefit-risk
 TODO — after controls are complete and verified (blocker #4), evaluate residual risk against
 clinical benefit per ISO 14971 and record sign-off in the DHF.
+
+### 4.1 Accepted residual risks
+
+Recorded individually as they are accepted, rather than waiting for the full benefit-risk
+evaluation. An entry here means the risk is understood, the mitigation is named, and the decision
+is to live with what remains. It does not mean the risk is zero.
+
+**RR-01 — Quasi-identifier residual risk on `patients.village`, `patients.block`,
+`patients.pincode`. Status: ACCEPTED.**
+
+*The risk.* These three columns are stored in **plaintext** on the backend `patients` table, while
+`full_name`, `guardian_or_spouse_name`, `mobile_number`, `aadhaar_number` and `emergency_contact`
+are encrypted with `pgcrypto` (backend PRD §5.4). None of the three is a direct identifier on its
+own. In combination they are re-identifying: at rural PHC scale, village plus age plus biological
+sex is close to a unique quasi-identifier, and a village of a few hundred people narrows a record
+far more than a district does. Anyone reading a database dump can therefore re-identify patients
+from columns that were left in the clear precisely because they looked non-identifying. This is
+the same class of risk as H-04, differing in that no device is lost: it is reachable from a
+backup, a dump, or an over-broad database grant.
+
+*Why the schema is deliberately unchanged.* Both of the things these columns exist for need them
+queryable in the clear. The day-scoped roster (REQ-ROS-02) filters and groups on them, and the
+epidemiology work is village-level aggregation by definition. Column encryption would force a
+full-table decrypt on every aggregate query, so the cost is not a slower query but an unusable
+one, and a blind index buys only equality lookup, which is not what an aggregate needs. Encrypting
+them would trade a real capability for a partial privacy gain against an attacker who, in the
+threat model that matters here, already has the application host and therefore the key.
+
+*Mitigation, and its honest limit.* Database-level access control (least-privilege grants, no
+shared superuser for the application role) plus the pending move to **AWS KMS envelope
+encryption** at the deployment session, which is what actually separates key custody from host
+compromise. Column encryption is explicitly **not** the mitigation. Layer 1 (RDS/volume
+encryption) protects a stolen disk; nothing today protects against an authorised reader of the
+`patients` table, which is why this is accepted rather than closed.
+
+*Cross-references.* `docs/backend/backend-prd.md` §5.4 already records the plaintext decision for
+`village`/`block`/`pincode` and its reasoning, but records it as a schema choice and does not
+carry it into this file as a risk. This entry is that carry-over. Related: H-04 (PHI breach on a
+lost device), H-10 (identity fields on the kernel boundary). The executable counterpart of this
+entry is the kernel-boundary PHI denylist: `pincode`, `block` and `village` (plus
+`date_of_birth`/`dob`/`birth_date` and `pin_code`/`address_line`) were added to
+`app/adapters/kernel/phi_guard.py::DENYLIST` in the Phase 3 fix pass (B2), closing the executable
+half of this acceptance. `age` deliberately stays allowed: it is a legitimate clinical signal the
+vitals models take and is in the shipped `/assess` contract.

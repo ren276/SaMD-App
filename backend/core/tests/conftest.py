@@ -13,14 +13,15 @@ fails the build if autogenerate still finds a diff.
 from __future__ import annotations
 
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 
 import pytest
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-import app.models  # noqa: F401  registers every model on Base.metadata
+import app.models
 from app.config import Settings, get_settings
 from app.db import session as session_module
 from app.db.base import Base
@@ -136,19 +137,31 @@ async def seeded_account(session: AsyncSession) -> UserAccount:
 
 
 @pytest.fixture
-async def client(test_settings: Settings) -> AsyncIterator[AsyncClient]:
+def app(test_settings: Settings) -> Iterator[FastAPI]:
+    """The FastAPI app, exposed as its own fixture so a test can add further
+    dependency_overrides (kernel client, circuit breakers) before requests are made.
+
+    ASGITransport (used by the client fixture below) never runs FastAPI's lifespan, so
+    app.state.kernel_client is never populated the way it is in production. Kernel tests
+    override the dependency instead of relying on app.state; see tests/test_kernel.py.
+    """
     from app.main import create_app
 
     get_settings.cache_clear()
     application = create_app()
     application.dependency_overrides[settings_dep] = lambda: test_settings
 
-    transport = ASGITransport(app=application)
-    async with AsyncClient(transport=transport, base_url="http://testserver") as http:
-        yield http
+    yield application
 
     application.dependency_overrides.clear()
     get_settings.cache_clear()
+
+
+@pytest.fixture
+async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as http:
+        yield http
 
 
 # ---------------------------------------------------------------------------

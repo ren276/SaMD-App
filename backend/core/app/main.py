@@ -20,9 +20,12 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.adapters.kernel.circuit_breaker import KernelCircuitBreakers
+from app.adapters.kernel.client import build_kernel_client
 from app.api.v1 import auth as auth_routes
 from app.api.v1 import encounters as encounter_routes
 from app.api.v1 import health as health_routes
+from app.api.v1 import kernel as kernel_routes
 from app.api.v1 import patients as patient_routes
 from app.config import get_settings
 from app.db.session import dispose_engine
@@ -47,7 +50,7 @@ logger = get_logger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     configure_logging()
     logger.info(
@@ -57,9 +60,23 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         git_sha=settings.git_sha,
         abdm_mode=settings.abdm_mode,
     )
+
+    # One kernel client for the app's lifetime (app/adapters/kernel/client.py). Created here, not
+    # per request, so connections and keep-alive are actually reused.
+    app.state.kernel_client = build_kernel_client(
+        base_url=settings.kernel_base_url,
+        connect_timeout_seconds=settings.kernel_connect_timeout_seconds,
+        read_timeout_seconds=settings.kernel_read_timeout_seconds,
+    )
+    app.state.kernel_breakers = KernelCircuitBreakers(
+        threshold=settings.kernel_circuit_threshold,
+        cooldown_seconds=settings.kernel_circuit_cooldown_seconds,
+    )
+
     try:
         yield
     finally:
+        await app.state.kernel_client.aclose()
         await dispose_engine()
         logger.info("shutdown")
 
@@ -136,6 +153,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_routes.router)
     app.include_router(patient_routes.router)
     app.include_router(encounter_routes.router)
+    app.include_router(kernel_routes.router)
 
     @app.exception_handler(SamdError)
     async def handle_samd_error(request: Request, exc: SamdError) -> JSONResponse:
