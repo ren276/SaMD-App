@@ -34,6 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import utcnow
 from app.deps import CurrentWorker
+from app.domain.audit_actions_device import DEVICE_AUDIT_ACTIONS
 from app.errors import ErrorCode, SamdError
 from app.models.abha import AbhaProfile
 from app.models.attachment import Attachment
@@ -68,11 +69,13 @@ _AUDIT_LOG_ALLOWED_KEYS = frozenset(
 )
 
 # backend-prd.md section 6.2: actions the server adds for events with no device equivalent. A
-# device-origin audit_log row carrying one of these is rejected, not silently accepted, so the
-# vocabulary cannot rot (REQ-AUD-02's sibling rule for the action field specifically). The true
-# source of truth for what a device CAN send is domain/audit/AuditLogger.kt on the Android side,
-# not read this session; this list is the PRD's own enumeration of the server-only complement,
-# which is the closest available substitute. Flagged in the Phase 4 report.
+# device-origin audit_log row carrying one of these is rejected, not silently accepted, so a
+# device can never inject a server-attributed event through sync (REQ-AUD-02's sibling rule for
+# the action field specifically). This set and _DEVICE_AUDIT_ACTION_VALUES below are kept as two
+# independently defined sets, not one computed as the complement of the other: the accepted
+# device set now has its own source of truth (the Android enum mirror), and deriving one set from
+# the other would make it possible for a future addition to either side to silently change the
+# other's membership.
 _SERVER_ONLY_AUDIT_ACTIONS = frozenset(
     {
         AuditAction.WORKER_LOGIN_SUCCEEDED,
@@ -91,11 +94,23 @@ _SERVER_ONLY_AUDIT_ACTIONS = frozenset(
         AuditAction.ABHA_IDENTITY_LINKED,
     }
 )
-_DEVICE_AUDIT_ACTION_VALUES = frozenset(
-    a.value
-    for a in AuditAction
-    if a not in _SERVER_ONLY_AUDIT_ACTIONS and a is not AuditAction.REQUEST_COMPLETED
-)
+
+# The accepted set for device-origin audit_log rows. Sourced from the checked-in mirror of
+# Android's AuditLogger.kt AuditAction enum (app/domain/audit_actions_device.py), not retyped:
+# this constant existing as a hand-typed 7-value guess, correct at Phase 1 and never updated as
+# the device vocabulary grew, is exactly how 27 of 28 real device actions ended up rejected by
+# Phase 4 (found and fixed 2026-08-17). tests/test_sync.py asserts this equals the mirror file
+# directly, and where reachable also that the mirror equals the Android source, so this cannot
+# rot silently a second time.
+_DEVICE_AUDIT_ACTION_VALUES = DEVICE_AUDIT_ACTIONS
+
+_overlap = _DEVICE_AUDIT_ACTION_VALUES & {a.value for a in _SERVER_ONLY_AUDIT_ACTIONS}
+if _overlap:
+    raise RuntimeError(
+        f"device and server-only audit action sets overlap: {sorted(_overlap)}; REQ-AUD-02 "
+        "requires these two sets to stay disjoint so a device can never inject a "
+        "server-attributed event through sync"
+    )
 
 # sqlstate -> a message that names the failure class without echoing the driver's own text, which
 # often embeds the offending value (errors.py rule: "detail never contains PHI").
@@ -337,14 +352,16 @@ async def _apply_audit_log(
     record_id: str,
     data: dict[str, Any],
     request_id: str,
+    batch_id: str,
 ) -> dict[str, Any]:
     table = AUDIT_LOG_TABLE
 
-    # Dedup backstop (REQ-AUD-02). audit_events mints its own id (the chain rule's "id" field is
-    # server-assigned, app/services/audit.py's compute_entry_hash docstring), so the client's row
-    # id cannot be looked up there. sync_log already indexes (table_name, record_id) for every
-    # record this endpoint has ever processed, so it doubles as the audit_log idempotency store
-    # for free, with no new column and no second chain implementation.
+    # Fast path only (REQ-AUD-02). The correctness guarantee is the partial unique index
+    # uq_sync_log_audit_log_record_id on sync_log(table_name, record_id) WHERE table_name =
+    # 'audit_log' (app/models/sync.py, alembic/versions/0005), enforced below at INSERT time.
+    # This SELECT only avoids that INSERT's round trip in the common, non-racing case: two
+    # concurrent batches carrying the same record_id can both reach here and both see "not
+    # found" before either commits.
     already = (
         await session.execute(
             select(SyncLogEntry.id).where(
@@ -389,6 +406,23 @@ async def _apply_audit_log(
                 table, record_id, ErrorCode.SYNC_RECORD_INVALID, f"{key}: must be a string."
             )
 
+    # Reserve the dedup slot before appending to the chain, not after. If this INSERT loses the
+    # race against a concurrent batch that reserved the same record_id first (the partial unique
+    # index raises IntegrityError), we must not have called audit_service.append yet: otherwise
+    # both sides of the race would each append their own row before either found out it lost,
+    # and the chain would grow by two for one logical device event instead of one. This insert
+    # doubles as this record's own sync_log row; the caller (push()) must not add a second one.
+    try:
+        async with session.begin_nested():
+            session.add(
+                SyncLogEntry(
+                    batch_id=batch_id, table_name=table, record_id=record_id, status="applied"
+                )
+            )
+            await session.flush()
+    except IntegrityError:
+        return {"table": table, "id": record_id, "status": "duplicate"}
+
     await audit_service.append(
         session,
         action=action,
@@ -406,7 +440,12 @@ async def _apply_audit_log(
 
 
 async def _apply_one(
-    session: AsyncSession, worker: CurrentWorker, raw: dict[str, Any], *, request_id: str
+    session: AsyncSession,
+    worker: CurrentWorker,
+    raw: dict[str, Any],
+    *,
+    request_id: str,
+    batch_id: str,
 ) -> dict[str, Any]:
     table = raw.get("table")
     record_id = raw.get("id")
@@ -444,7 +483,12 @@ async def _apply_one(
         async with session.begin_nested():
             if table == AUDIT_LOG_TABLE:
                 result = await _apply_audit_log(
-                    session, worker, record_id=record_id, data=data, request_id=request_id
+                    session,
+                    worker,
+                    record_id=record_id,
+                    data=data,
+                    request_id=request_id,
+                    batch_id=batch_id,
                 )
             else:
                 spec = TABLE_REGISTRY[table]
@@ -546,23 +590,36 @@ async def push(
     }
 
     for raw in ordered:
-        result = await _apply_one(session, worker, raw, request_id=request_id)
+        result = await _apply_one(
+            session, worker, raw, request_id=request_id, batch_id=batch_row.batch_id
+        )
         results.append(result)
         bucket = status_to_count.get(result["status"])
         if bucket is not None:
             counts[bucket] += 1
 
-        session.add(
-            SyncLogEntry(
-                batch_id=batch_row.batch_id,
-                table_name=result["table"],
-                record_id=result["id"],
-                status=result["status"],
-                code=result.get("code"),
-                message=result.get("message"),
-                server_version=result.get("server_version"),
+        # _apply_audit_log already wrote its own sync_log row, inside the same savepoint as the
+        # audit_events append it gates (see its docstring comment): that INSERT, not this one, is
+        # what the partial unique index on sync_log(table_name, record_id) WHERE table_name =
+        # 'audit_log' actually closes the race against. A "duplicate" result never gets a row
+        # here either, whichever of the two paths inside _apply_audit_log produced it (the fast
+        # SELECT or the race-losing INSERT): a row for this record_id already exists, so a second
+        # one here would just fail the same unique index a moment later, for no reason, this
+        # record's outcome is already durable.
+        if not (
+            result["table"] == AUDIT_LOG_TABLE and result["status"] in ("applied", "duplicate")
+        ):
+            session.add(
+                SyncLogEntry(
+                    batch_id=batch_row.batch_id,
+                    table_name=result["table"],
+                    record_id=result["id"],
+                    status=result["status"],
+                    code=result.get("code"),
+                    message=result.get("message"),
+                    server_version=result.get("server_version"),
+                )
             )
-        )
 
     batch_row.applied = counts["applied"]
     batch_row.stale = counts["stale"]

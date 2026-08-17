@@ -657,6 +657,11 @@ device equivalent:
 `kernel_call_failed`, `sync_batch_received`, `sync_record_rejected`, `abha_session_started`,
 `abha_session_failed`, `abha_identity_linked`.
 
+As of 2026-08-17 the accepted device set is enforced from `app/domain/audit_actions_device.py`, a
+checked-in mirror of the 30-entry `AuditAction` enum, not a hand-typed guess; `referral_status_changed`
+is included and accepted even while it is still dormant on the device (PROGRESS.md, "Backend:
+audit-vocabulary reconciliation + sync_log dedup hardening").
+
 ---
 
 ## 7. Deployment model

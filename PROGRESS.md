@@ -1838,3 +1838,137 @@ constraint item logged alongside it is independent and still open.
 
 Test-count reconciliation: MIGRATION_12_13's "532" was the summed test task across all four unit-test variants; this session's "133" is testDevDebugUnitTest alone. 133 x 4 variants ≈ 532. Same suite, different scope, nothing lost. Convention going forward: report testDevDebugUnitTest as the canonical Android unit count.
 
+## Backend: audit-vocabulary reconciliation + sync_log dedup hardening (2026-08-17)
+
+Both Phase 4 review findings, fixed. 231 tests passing (228 pre-existing plus 3 new), ruff and
+mypy strict clean, `alembic upgrade head` clean from empty, `alembic check` clean.
+
+**Correction to the prior Android session's own count**: that session's summary said "29 entries."
+The actual `AuditAction` enum, confirmed by direct count in this session (`grep -c` on
+`AuditLogger.kt`, and independently by the cross-repo parse test below), has **30** entries. The
+underlying data (the grep output printed that session, the mirror file written this session) was
+always correct at 30; only the prose summary undercounted by one. No functional gap, corrected
+here for the record.
+
+### R1: the accepted device set, sourced not retyped
+
+`app/domain/audit_actions_device.py` is a new module holding `DEVICE_AUDIT_ACTIONS`, a frozenset
+mirror of Android's `AuditAction` enum values, with a header comment naming its source and stating
+it must be hand-regenerated when that enum changes. `app/services/sync.py`'s
+`_DEVICE_AUDIT_ACTION_VALUES` is now `DEVICE_AUDIT_ACTIONS` directly, not a locally computed
+complement of anything. The 7-value guess it replaces (`AuditAction` minus the 14 server-only
+actions minus `REQUEST_COMPLETED`) was correct in shape at Phase 1 and never updated as the real
+device vocabulary grew to 30 entries across four phases; that drift, not a design flaw, is what
+produced the 27-of-28-rejected finding. `_SERVER_ONLY_AUDIT_ACTIONS` (backend-prd.md section 6.2's
+14 server-only actions) stays a second, independently defined set, never derived from or subtracted
+against the device set. A module-level check at import time (`app/services/sync.py`) raises if the
+two sets ever overlap, so a device could never inject a server-attributed action through sync
+merely because someone edited one list without checking the other.
+
+`referral_status_changed` is accepted even though it is still dormant on the device (no live
+caller, per the Android session's own S3 finding). Operator decision, recorded here as the
+brief asked: the accepted set is a superset that never has to shrink, so accepting a
+not-yet-emitted value now is cheap, and accepting it only once a caller exists later would be a
+coordinated field migration instead.
+
+### R2: the test that stops this rotting a second time
+
+Two tests in `tests/test_audit_actions_device.py`:
+- `test_backend_accepted_device_set_matches_the_checked_in_mirror`: asserts
+  `sync_service._DEVICE_AUDIT_ACTION_VALUES == DEVICE_AUDIT_ACTIONS`, reading the backend's actual
+  runtime set, not a literal typed into the test.
+- `test_mirror_matches_the_android_source_when_reachable`: parses
+  `app/src/main/java/com/example/samdapp/domain/audit/AuditLogger.kt` directly (path resolved from
+  the test file's own location, four `.parents[]` up to the repo root, then down into `app/`) and
+  asserts the parsed set equals the mirror. **This runs for real in this environment, it does not
+  skip**: the backend and Android trees are the same monorepo checkout, so the path exists and the
+  assertion is a genuine cross-repo check, not a placebo. It only skips (with an explicit reason
+  naming the manual regeneration step) if the Android source is absent, which is the honest
+  fallback for a backend-only clone or CI job, not a way to avoid running the check here.
+
+### R3: closing the check-then-act race, correctly scoped
+
+The brief asked for `UniqueConstraint("table_name", "record_id")` on the whole `sync_log` table.
+**This was not done, and the deviation is deliberate**: `sync_log` is a history log for every
+table other than `audit_log`, and a record legitimately gets a second row there on a later
+stale/conflict retry (`test_stale_is_acked_as_success_and_not_applied`,
+`test_counts_equal_results_tallies`, both already-passing tests that push the same non-audit
+record_id twice on purpose and assert a different-status row each time). A table-wide unique
+constraint would have turned that second, correct push into an `IntegrityError`, breaking both
+tests. Implemented instead as a **partial unique index**,
+`uq_sync_log_audit_log_record_id` on `sync_log(table_name, record_id)` `WHERE table_name =
+'audit_log'` (migration `0005`, mirrored in `app/models/sync.py`'s `SyncLogEntry.__table_args__`
+so `Base.metadata.create_all` in tests creates the same constraint Alembic does in real
+deployments). Only `audit_log` is constrained to one row per `record_id` ever; every other table's
+history-logging behaviour is untouched. Checked before writing the migration: zero duplicate
+`(table_name, record_id)` rows for `table_name = 'audit_log'` in the dev database.
+
+The INSERT is the actual race-closer, per the brief, and per the existing `IntegrityError` catch
+pattern in `app/services/sync.py`'s `_apply_one` (matched, not reinvented): `_apply_audit_log` now
+reserves the dedup slot (its own `sync_log` row, under its own `session.begin_nested()` savepoint,
+nested inside `_apply_one`'s) **before** calling `audit_service.append`, not after. This ordering
+is what makes "the chain grows by exactly one" true under real contention: if the reservation
+INSERT loses the race (a concurrent batch's row committed first, unique-violation), the function
+returns `duplicate` immediately and never reaches the chain append at all, so the loser cannot
+have appended anything for the winner to have "duplicated" retroactively. `push()`'s own
+per-record `sync_log` insert is skipped for `audit_log` records whose status came back `applied`
+or `duplicate`, since `_apply_audit_log` already wrote (or found) that row itself; a `rejected`
+audit_log record (validation failed before the reservation point, e.g. an unknown action) still
+gets `push()`'s normal row, and deliberately does not reserve the slot, so a client that resends
+the same `record_id` with corrected data later is not permanently locked out by one bad attempt.
+
+Test-before-fix, as the brief required: the concurrent test in R4 was written and run against the
+pre-fix code first (`git stash push -- app/models/sync.py app/services/sync.py`, run, `git stash
+pop`), and it failed exactly as predicted: both concurrent requests came back `applied`, proving
+the race is real before the constraint existed. Re-run after restoring the fix, it passes.
+
+### R4: the concurrent test
+
+`tests/test_sync.py::test_concurrent_batches_racing_the_same_audit_id_append_exactly_once`. Two
+different `batch_id`s, same `audit_log` `record_id`, pushed via `asyncio.gather` so the two HTTP
+requests genuinely overlap (same pattern already established and proven working in
+`test_audit_chain_intact_under_device_and_server_contention`). Asserts: both requests return `200`
+(neither the whole batch nor the request itself fails, only the one record's per-row status
+differs), the two results are exactly `["applied", "duplicate"]`, `audit_events` rows with
+`origin = "DEVICE"` and this action grew by exactly `1` (not `0`, not `2`), and
+`audit_service.verify_chain` reports `verified = True` with no broken sequence afterward.
+
+Also confirmed against a real `uvicorn` process and the real dev database (not only the test
+transport, per R5): two genuinely concurrent `curl` processes backgrounded against the same
+running server, same `record_id`, different `batch_id`s. One came back `"status":"applied"`, the
+other `"status":"duplicate"`, both `HTTP 200`, and `SELECT count(*) FROM audit_events WHERE
+action = 'encounter_started' AND facility_id = '<smoke facility>'` returned exactly `1` afterward.
+Smoke-test facility, worker, device, tokens, and sync rows deleted afterward; the one
+`audit_events` row is append-only and was left in place, same as every prior session's smoke test.
+
+### A real bug this session's own R2 tests caught immediately
+
+`tests/test_sync.py`'s `audit_record()` helper (written last session, before `AuditAction` was
+type-narrowed on the Android side) defaulted to `action="encounter_created"`, which was only ever
+valid because the *old*, wrong 7-value backend set happened to include it. The real device
+vocabulary has no `encounter_created`; it has `encounter_started`. The moment R1 landed the real
+30-value set, three of this session's own new/existing test assertions started failing with
+`SAMD-SYNC-6003 action: unknown audit action`, in the R4 concurrent test's own first run. Fixed by
+changing the default (and the two other call sites still using the old string) to
+`"encounter_started"`, the real value. Left here as a concrete demonstration of exactly what R2's
+tests are for: this class of drift is now caught in seconds instead of surviving four phases.
+
+### Divergences from this brief
+
+- R3's `UniqueConstraint` instruction was not followed literally; a partial unique `Index` was
+  used instead. Explained above. This is the one place this brief's literal wording would have
+  broken already-passing, correct behaviour; the repo (and the passing tests) won, per this
+  brief's own rule.
+- The "29 device values" count in this brief (inherited from the prior Android session's own
+  summary) is corrected to 30 here; the value *list* in the brief was already complete and
+  correct (it has 30 entries when counted), only the stated total was off by one.
+
+### api-contract.md and backend-prd.md
+
+`api-contract.md` section 7.1 was not touched: its description ("accepted actions are the union of
+the string literals in `AuditLogger.kt` plus the server-only actions") is still accurate; only the
+*implementation*, not the contract, had drifted. `backend-prd.md` section 6.2 gained one line
+noting the accepted device set is now enforced from the checked-in 30-entry mirror and that
+`referral_status_changed` is accepted while dormant; the section's existing description of intent
+was not rewritten, since it was already correct.
+

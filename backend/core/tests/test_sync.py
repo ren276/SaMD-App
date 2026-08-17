@@ -177,7 +177,7 @@ def ailment_record(
 def audit_record(
     record_id: str,
     *,
-    action: str = "encounter_created",
+    action: str = "encounter_started",
     client_updated_at: str = "2026-08-16T09:44:02.000Z",
     user_id: str = TEST_WORKER_ID,
     patient_id: str | None = PATIENT_ID,
@@ -361,7 +361,7 @@ async def test_rejected_record_does_not_fail_the_batch(
         client,
         auth_headers,
         [
-            audit_record("al-good", action="encounter_created"),
+            audit_record("al-good", action="encounter_started"),
             audit_record("al-bad", action="not_a_real_action"),
         ],
     )
@@ -472,6 +472,59 @@ async def test_audit_chain_intact_under_device_and_server_contention(
 
     origins = set((await session.execute(select(AuditEvent.origin))).scalars())
     assert origins == {"DEVICE", "SERVER"}
+
+
+async def test_concurrent_batches_racing_the_same_audit_id_append_exactly_once(
+    client: AsyncClient, auth_headers: dict[str, str], session: AsyncSession
+) -> None:
+    """Two different batch_ids, same audit_log record_id, pushed concurrently via asyncio.gather
+    so the requests genuinely overlap. Before the partial unique index on
+    sync_log(table_name, record_id) WHERE table_name = 'audit_log' (app/models/sync.py,
+    alembic/versions/0005), the SELECT-then-INSERT dedup in _apply_audit_log could let both
+    requests pass the SELECT "not found" before either committed, and both would append. The
+    fix moves the sync_log INSERT before the audit_events append and lets its IntegrityError
+    close the race: this test fails (two appends, chain grows by two) without that fix.
+    """
+    record_id = "al-race-1"
+
+    before = len(
+        list(
+            (
+                await session.execute(
+                    select(AuditEvent.id).where(
+                        AuditEvent.origin == "DEVICE", AuditEvent.action == "encounter_started"
+                    )
+                )
+            ).scalars()
+        )
+    )
+
+    first = push(client, auth_headers, [audit_record(record_id)])
+    second = push(client, auth_headers, [audit_record(record_id)])
+    response_a, response_b = await asyncio.gather(first, second)
+
+    assert response_a.status_code == 200
+    assert response_b.status_code == 200
+
+    statuses = sorted(r.json()["data"]["results"][0]["status"] for r in (response_a, response_b))
+    assert statuses == ["applied", "duplicate"]
+
+    after = len(
+        list(
+            (
+                await session.execute(
+                    select(AuditEvent.id).where(
+                        AuditEvent.origin == "DEVICE", AuditEvent.action == "encounter_started"
+                    )
+                )
+            ).scalars()
+        )
+    )
+    assert after - before == 1
+
+    result = await audit_service.verify_chain(session, facility_id=TEST_FACILITY_ID)
+    assert result.verified is True
+    assert result.first_broken_sequence is None
 
 
 async def test_duplicate_audit_id_is_acked_without_growing_the_chain(

@@ -25,6 +25,7 @@ from sqlalchemy import (
     String,
     Text,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -72,6 +73,19 @@ class SyncLogEntry(Base):
     __table_args__ = (
         Index("ix_sync_log_batch_id", "batch_id"),
         Index("ix_sync_log_table_record", "table_name", "record_id"),
+        # Partial, not table-wide: sync_log is a history log for every other table (a record
+        # legitimately gets a second row on a later stale/conflict retry), but audit_log is
+        # append-only and REQ-AUD-02 requires exactly one row per record_id ever. This is the
+        # real dedup guarantee behind app/services/sync.py's audit_log INSERT-then-catch path;
+        # the SELECT there is only the fast path. See alembic/versions/0005 for the full
+        # reasoning on why this could not be a plain UniqueConstraint.
+        Index(
+            "uq_sync_log_audit_log_record_id",
+            "table_name",
+            "record_id",
+            unique=True,
+            postgresql_where=text("table_name = 'audit_log'"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=False), primary_key=True)
