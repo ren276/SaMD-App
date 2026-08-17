@@ -1660,6 +1660,34 @@ real device-origin/server-origin contention (`asyncio.gather` against the shared
 verified via the Phase 1 `verify_chain` path), duplicate audit id acked without growing the chain,
 counts-equal-tallies invariant, one `sync_log` row per record.
 
+### Blocking items before Phase 6, found in post-commit review of this phase
+
+Both confirmed by direct investigation, not theoretical. Neither is fixed here.
+
+- **Audit-action vocabulary is divergent: 27 of 28 real device actions are currently rejected.**
+  Read `app/src/main/java/com/example/samdapp/domain/audit/AuditLogger.kt` and every
+  `auditLogger.log(...)` call site directly (28 distinct action strings actually emitted, 13 via
+  the `AuditAction` object plus 15 as free-text literals at call sites; two `AuditAction` constants,
+  `AILMENT_VISIBILITY_CHANGED` and `REFERRAL_STATUS_CHANGED`, are defined but never called). Diffed
+  against `app/services/sync.py`'s `_DEVICE_AUDIT_ACTION_VALUES` (backend `AuditAction` enum minus
+  backend-prd.md §6.2's server-only list minus `request_completed`, 7 values). Exactly one string
+  overlaps: `patient_registered`. Every other real device action, including the one this session
+  guessed was a doc typo (`encounter_started`, actually the real production literal at
+  `CompounderViewModel.kt:227` — `encounter_created` is never emitted by Android at all), is rejected
+  `SAMD-SYNC-6003`. A real device syncing its actual `audit_log` table today gets every row rejected
+  except patient-registration ones. Fixing this is two sessions, Android first: the device side
+  (`AuditLogger.kt`) is the root cause and the source of truth, so its vocabulary has to be settled
+  before the backend's accepted-set can be corrected to match it, not the other way round.
+- **`sync_log` audit_log dedup (REQ-AUD-02) is check-then-act, not DB-enforced.** The lookup in
+  `_apply_audit_log` (`select(...).where(SyncLogEntry.table_name == table, SyncLogEntry.record_id
+  == record_id)`) runs against `ix_sync_log_table_record`, which is a plain index, not a unique
+  constraint. Proven correct for the tested case (a retried batch, sequential). Not proven, and not
+  actually guaranteed, if two batches carrying the same client-generated `audit_log` record id can
+  ever be in flight concurrently: both could `SELECT` "not found" before either `INSERT`s, and both
+  would append. Needs `UniqueConstraint("table_name", "record_id")` on `sync_log` plus catching the
+  resulting `IntegrityError` the same way every other table's constraint violation already is,
+  rather than trusting the `SELECT` alone.
+
 ## Not started
 - [ ] Demo-theater additions from agent_docs/hardening.md — complete, pending final review of the
       hardening doc to ensure no secondary "security-theatre" items remain (e.g. security-shield
