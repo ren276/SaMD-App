@@ -62,7 +62,7 @@ class RosterPage:
     next_cursor: str | None
 
 
-def _apply_blind_indexes(patient: Patient) -> None:
+def apply_blind_indexes(patient: Patient) -> None:
     """Recompute every blind index from the current plaintext.
 
     Called on every write. An index left stale after an update is worse than no index: the
@@ -146,7 +146,7 @@ async def create_patient(
 
     values = body.model_dump()
     patient = Patient(**values, facility_id=worker.facility_id, server_version=1)
-    _apply_blind_indexes(patient)
+    apply_blind_indexes(patient)
     session.add(patient)
     await session.flush()
     return patient, True
@@ -184,7 +184,7 @@ async def update_patient(
             )
         setattr(patient, field, value)
 
-    _apply_blind_indexes(patient)
+    apply_blind_indexes(patient)
     patient.server_version += 1
     await session.flush()
     return patient

@@ -1512,6 +1512,154 @@ conflict comparison.
 - One pre-existing test file needed a mechanical fix to keep compiling:
   `TodaysPatientsDaoTest.kt`'s two entity-construction helpers gained `localModifiedAt`.
 
+## Backend Phase 4: sync push (2026-08-17)
+
+`POST /api/v1/sync/push`, the last and hardest backend v1 endpoint. api-contract.md §6.1 and §7.
+228 tests passing (214 pre-existing plus 14 new), ruff and mypy strict clean, `alembic check`
+clean against the dev database (no new migration: `sync_batches`/`sync_log` already existed from
+migration `0002`, so this phase is route and service work only, as that table's own docstring
+already said it would be).
+
+### Design: one schema-driven table registry, not nineteen hand-written validators
+
+`app/services/sync.py`'s `TABLE_REGISTRY` reads each of the nineteen generic tables' client-writable
+columns off the SQLAlchemy mapper at import time. A required field comes from the column's own
+`NOT NULL`; a bad enum value comes from the column's own `CHECK` constraint. Both surface as
+`IntegrityError`/`DataError` under that record's own `SAVEPOINT` (`session.begin_nested()`) and
+become a generic `SAMD-SYNC-6003`, rather than being re-declared by hand per table. What genuinely
+cannot come from the schema is written out explicitly and only there: the one renamed field
+(`attachments.uri` → `local_uri`), the one forbidden field (`ailments.audio_local_uri`,
+`SAMD-SYNC-6006`), the two server-stamped timestamps (`observations`/`ailments.synced_to_cloud_at`),
+the one cross-check the database cannot express (`referrals.sending_phc_id` against the caller's
+own `facility_id`), and patient blind-index recomputation (reused from `app/services/patient.py`,
+made public as `apply_blind_indexes` rather than forked, since a patient row's `full_name` /
+`mobile_number` / `aadhaar_number` can now change through sync push too and the blind indexes have
+to track them or the row silently stops being findable by exact match).
+
+Explicit type coercion (`_coerce_value`) converts JSON's ISO-8601 date/time strings to Python
+`date`/`datetime` before binding, because asyncpg does not coerce these itself; without it, a
+date/timestamp column would fail client-side during parameter encoding as a `StatementError`, which
+neither `IntegrityError` nor `DataError` catches, and would have aborted the whole batch instead of
+rejecting one record. This is not a hypothetical: it was caught and fixed during this session's own
+test-writing, before any handler code shipped.
+
+`audit_log` is not in `TABLE_REGISTRY`. It does not go through the generic upsert path: it calls
+`app.services.audit.append`, the one Phase 1 chain appender, unchanged. **One appender, confirmed.**
+Reusing it required one addition described below (idempotency), not a fork.
+
+### The audit_log dedup problem, and how it was solved without touching the chain
+
+REQ-AUD-02 needs "has this device-generated audit row already been applied" per row. But
+`audit_events.id` is server-assigned (the chain rule's `id` field, `app/services/audit.py`
+`compute_entry_hash`'s docstring), never the client's id, so the client's audit-log row id cannot be
+looked up in `audit_events` directly. The fix reuses `sync_log`, which already exists and already
+indexes `(table_name, record_id)`: a duplicate `audit_log` record id is detected by checking whether
+`sync_log` already has a row for `('audit_log', <that id>)`, and if so it is acked `duplicate`
+without calling `audit_service.append` at all. No new column, no second chain implementation.
+
+### Idempotency and the two writes that had to happen in the right order
+
+Per §6.1, `POST /sync/push` must return the stored response verbatim on a `batch_id` replay,
+touching nothing else. `push()` in `app/services/sync.py` does the `sync_batches` lookup first,
+before any other whole-batch precondition (device match, size, unknown table) is even checked — a
+replay is not "processing that happens to be a no-op," it is a different code path taken before
+processing begins.
+
+`sync_log.batch_id` is a real, non-deferrable foreign key to `sync_batches.batch_id`. That means the
+`sync_batches` row has to exist (flushed) *before* the first per-record `sync_log` insert, so a new
+batch writes an initial `SyncBatch` row with zeroed counts immediately after the whole-batch
+preconditions pass, then updates its `applied`/`stale`/`conflicted`/`rejected` counts and
+`response_json` once every record has been processed, all inside the same transaction. This was
+not obvious going in and is recorded here so the next session does not "simplify" it back into a
+single insert and hit the FK violation.
+
+### Which writes are in the request transaction, and which are out of band
+
+**Everything is in the request transaction. Nothing calls `app.db.session.write_out_of_band`.**
+This was reasoned through explicitly, per the brief's instruction not to pattern-match Phase 3's
+kernel proxy: `write_out_of_band` exists because a kernel call is a network event that already
+happened out in the world before the recording write runs, so whether it is recorded must not
+depend on the request transaction surviving afterward. Applying a sync batch has no equivalent
+external event — it is pure database work, sequenced entirely by this function, with no failure
+mode where "the thing already happened but the transaction might still roll back" can arise. The
+`sync_batches` row, every `sync_log` row, every applied clinical row, the one `sync_batch_received`
+audit row, and every per-record `audit_log` append all commit together or roll back together, which
+is also exactly what makes the idempotency guarantee sound: a stored response can never exist for a
+batch whose rows did not really land.
+
+### Per-record status counts vs. the `duplicate` status
+
+The response's numeric counts are `applied`, `stale`, `conflicted`, `rejected` — api-contract.md's
+own example response has no `duplicate` bucket. `duplicate` results are real per-record outcomes
+(present in `results[]`, logged to `sync_log`) but are not tallied into any of the four counts.
+`received` still equals the total record count; the four named counts plus the number of
+`duplicate` results in `results[]` sum to `received`. Tested explicitly
+(`test_counts_equal_results_tallies`).
+
+### Deliberately skipped: per-rejected-record audit chain entries
+
+`AuditAction.SYNC_RECORD_REJECTED` already existed in the vocabulary (Phase 1) and is not called.
+Only one `sync_batch_received` summary audit row is written per batch, with the rejected count in
+its payload. Appending one `audit_events` row per rejected record, inside the same per-facility
+`pg_advisory_xact_lock` as everything else, would add up to 500 additional serialised appends to
+the slowest, highest-stakes endpoint in the service for a granularity `sync_log` already provides
+per record (`table_name`, `record_id`, `status`, `code`). Not in the brief's test list either. Add
+it if Phase 7's admin surface later needs chain-level (not just `sync_log`-level) visibility into
+individual rejections specifically.
+
+### Contract-vs-repo divergences found and flagged, not silently resolved
+
+- **api-contract.md §6.1's own example payload uses `"action": "encounter_started"`, which is not
+  a member of `app.models.enums.AuditAction`.** The closest real value is `encounter_created`. The
+  repo's enum wins (per this session's brief); the example in the contract is wrong and should be
+  corrected by whoever owns that doc next. Caught because the test suite is written against the
+  real enum, not the doc's own prose.
+- **The device-vocabulary/server-only-vocabulary split for `action` is inferred, not verified
+  against ground truth.** `_SERVER_ONLY_AUDIT_ACTIONS` in `app/services/sync.py` is backend-prd.md
+  §6.2's own list of "actions with no device equivalent"; everything else in `AuditAction` (minus
+  the generic `request_completed` fallback) is treated as device-submittable. The actual source of
+  truth is `domain/audit/AuditLogger.kt` on the Android side, not read this session. If that enum
+  ever adds a value with no backend counterpart, or the backend enum drifts from it, a legitimate
+  device action could be wrongly rejected with `SAMD-SYNC-6003`. Flagged, not fixed, because fixing
+  it means reading Android source this backend-only session didn't touch.
+- **api-contract.md §8's phase table lists `GET /api/v1/audit/events` and `GET /api/v1/audit/verify`
+  under Phase 4.** This session's brief scoped Phase 4 to `POST /sync/push` only and explicitly
+  listed pull and later phases as out of scope; the two audit read endpoints were not built. Not an
+  oversight — flagging the mismatch between the phase table and this session's actual brief so
+  whoever picks up the audit read surface next knows it is still open, not silently done.
+- **`abha_profiles.mobile_blind_idx` is not computed during sync push.** It is excluded from the
+  client-writable set (same reasoning as `patients`' three blind indexes) but nothing calls an
+  equivalent of `apply_blind_indexes` for it, so it stays `NULL` on every device-synced profile.
+  No `CHECK` constraint requires it and Phase 5 (ABDM) owns this table's real usage, so this is a
+  minor, flagged gap rather than a blocker.
+
+### Verification run against a real `uvicorn` process, not only the test transport
+
+Per the brief's instruction, in addition to the 14 new tests in `tests/test_sync.py` (real
+PostgreSQL via `tests/conftest.py`, same as every other phase), this session started the actual
+app with `uvicorn app.main:app` against the real dev database (`samd`, migrated to head), seeded a
+real facility and worker with `app.scripts.seed_accounts`, and drove a real login, forced PIN
+change, sync push happy path, idempotent replay, an unknown-table 422, and a device-mismatch 403,
+all over real HTTP to `127.0.0.1:8123`. The replayed response came back with the identical
+`request_id`/`timestamp`/`server_time` as the first response, byte-for-byte, confirming the stored
+envelope is really what gets replayed rather than something regenerated that merely looks the same.
+The smoke-test facility, worker, device, tokens, and patient row were deleted afterward; six
+`sync_batch_received`/`worker_login_succeeded`/audit rows for the smoke facility remain in the dev
+database and cannot be deleted (the append-only trigger correctly refused, `SAMD-AUDIT-7002`) —
+expected and harmless, left in place rather than worked around.
+
+### Test list
+
+`tests/test_sync.py`, 14 tests: happy path (mixed batch across patients / encounters / case_records
+/ observations / ailments / audit_log), reordered batch (child before parent, server reorders),
+idempotent replay (verbatim response, no double write, chain does not grow), stale (acked success,
+not applied), conflict (`base_version` mismatch, `server_state` returned, not applied), one rejected
+record does not fail the batch, forbidden field rejected / private ailment accepted, device mismatch
+(403, whole batch), unknown table (422, whole batch), oversize batch (413), audit chain intact under
+real device-origin/server-origin contention (`asyncio.gather` against the shared advisory lock,
+verified via the Phase 1 `verify_chain` path), duplicate audit id acked without growing the chain,
+counts-equal-tallies invariant, one `sync_log` row per record.
+
 ## Not started
 - [ ] Demo-theater additions from agent_docs/hardening.md — complete, pending final review of the
       hardening doc to ensure no secondary "security-theatre" items remain (e.g. security-shield
