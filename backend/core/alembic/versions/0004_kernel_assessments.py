@@ -55,7 +55,10 @@ def upgrade() -> None:
         sa.Column("triage_urgency", sa.String(length=40), nullable=True),
         sa.Column("response_sha256", sa.String(length=64), nullable=False),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         sa.CheckConstraint(
             "endpoint IN ('ASSESS', 'EVALUATE')", name="ck_kernel_assessments_endpoint"
