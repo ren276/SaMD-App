@@ -81,7 +81,7 @@ class CompounderScreenTest {
             CompounderContent(uiState = uiState, actions = actions)
         }
 
-        composeRule.onNodeWithText("Chief complaint *").performTextInput("Fever for 2 days")
+        composeRule.onNodeWithText("Main concern *").performTextInput("Fever for 2 days")
 
         assert(actions.chiefComplaint == "Fever for 2 days")
     }
