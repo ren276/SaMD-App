@@ -13,14 +13,19 @@ class KernelReportRepositoryImpl @Inject constructor(
 ) : KernelReportRepository {
 
     override suspend fun save(report: KernelReportOutput): Result<Unit> = asDataResult {
-        kernelReportDao.upsert(report.toEntity())
+        // upsert() is REPLACE: without this read, a re-saved report would silently wipe
+        // serverVersion (syncstate-reset session). syncState needs no explicit reset —
+        // KernelReportEntity's default is already PENDING, and REPLACE always writes the full
+        // default set.
+        val existingServerVersion = kernelReportDao.getServerVersion(report.id)
+        kernelReportDao.upsert(report.toEntity(serverVersion = existingServerVersion))
     }
 
     override suspend fun getForCase(caseRecordId: String): KernelReportOutput? =
         kernelReportDao.observeForCase(caseRecordId).first()?.toDomain()
 }
 
-private fun KernelReportOutput.toEntity() = KernelReportEntity(
+private fun KernelReportOutput.toEntity(serverVersion: Int?) = KernelReportEntity(
     id = id,
     caseRecordId = caseRecordId,
     predictedCondition = predictedCondition,
@@ -42,6 +47,7 @@ private fun KernelReportOutput.toEntity() = KernelReportEntity(
     requiredHumanVerification = requiredHumanVerification,
     inferenceSource = inferenceSource,
     localModifiedAt = Instant.now(),
+    serverVersion = serverVersion,
 )
 
 private fun KernelReportEntity.toDomain() = KernelReportOutput(

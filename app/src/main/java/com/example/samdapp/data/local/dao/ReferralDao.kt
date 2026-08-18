@@ -40,7 +40,9 @@ interface ReferralDao {
     /** Unreachable in this build, no caller sets a referral's status once created (see
      *  MIGRATION_12_13's PROGRESS.md note: status-transition history predates any timestamp
      *  column and is unrecoverable for existing rows). Signature updated for when a caller
-     *  exists, so [ReferralEntity.localModifiedAt] is never left stale by a status change. */
-    @Query("UPDATE referrals SET status = :status, localModifiedAt = :localModifiedAt WHERE id = :id")
+     *  exists, so [ReferralEntity.localModifiedAt] is never left stale by a status change, and
+     *  `syncState` resets to `PENDING` in the same statement (syncstate-reset session) so a
+     *  status change on an already-`SYNCED` referral re-drains. */
+    @Query("UPDATE referrals SET status = :status, localModifiedAt = :localModifiedAt, syncState = 'PENDING' WHERE id = :id")
     suspend fun updateStatus(id: String, status: ReferralStatus, localModifiedAt: Instant)
 }
