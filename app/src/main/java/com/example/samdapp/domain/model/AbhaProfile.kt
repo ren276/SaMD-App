@@ -52,3 +52,16 @@ fun maskAbhaId(rawAbhaId: String): String =
         val visible = 4
         formatted.mapIndexed { i, c -> if (c != '-' && i < formatted.length - visible) 'X' else c }.joinToString("")
     }
+
+/**
+ * True when [mobileNumber] is a masked value (e.g. `"XXXXXX3210"`, `"******0903"`) rather than a
+ * usable, complete phone number. The real ABDM `/profile` response never returns a full mobile
+ * number, only a masked one — the mock's fabricated full number is what let the old autofill
+ * silently satisfy REQ-REG-01's contact-method rule; see
+ * `docs/requirements/abha-field-mapping.md`'s `mobileNumber` row. A real 10-digit Indian mobile
+ * number is all digits, so any non-digit character (the mask character, whatever ABDM uses for
+ * it) is sufficient to detect a masked value — no need to hardcode `X` vs `*`. Blank/null is not
+ * "masked," it is simply absent.
+ */
+fun isMaskedAbhaMobile(mobileNumber: String?): Boolean =
+    !mobileNumber.isNullOrBlank() && !mobileNumber.all(Char::isDigit)

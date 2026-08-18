@@ -139,7 +139,15 @@ Conventions: `REQ-<AREA>-NN`. Status: **DONE** (implemented + manually verified)
   `RegisterViewModel.loadAbhaProfile` autofills registration from the stored `AbhaProfile`;
   autofilled fields tagged "From ABHA" (text fields) / "(from ABHA)" (biological sex), tag clears
   on manual edit. Fully separate from the worker mock login (REQ-SEC-04) — different route graph,
-  different session concept, no shared state (Phase 1).
+  different session concept, no shared state (Phase 1). **2026-08-18, Phase 6c W2:** a masked ABHA
+  mobile (the real ABDM `/profile` shape) is never autofilled into the submittable field and never
+  satisfies the ≥1 contact-method rule on its own — see `abha-field-mapping.md`'s `mobileNumber`
+  row.
+- **Phase 6c infra (2026-08-18), not a requirement change:** `AbdmAbhaSource`/`RetrofitAbhaSource`/
+  `AbhaApiService` wired for the real backend (`POST/GET /api/v1/abha/registration-sessions*`), but
+  `CreateAbhaProfileUseCase`/`VerifyAbhaLoginUseCase` remain on the mock above — see the
+  `abha-integration-plan.md` "Use cases" entry for why (Aadhaar/OTP UI gap; P1 login endpoint not
+  built). REQ-ABH-01/02 stay DONE against the mock; the real cutover is a future session.
 - Schema foundation (DONE): `AbhaProfile` model + `abha_profiles` table; ABHA↔registration field
   map in `docs/requirements/abha-field-mapping.md`. Link key is `Patient.abhaNumber` (no duplicate
   id column) — both hold the same canonical 14-digit string.

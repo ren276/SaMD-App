@@ -16,6 +16,12 @@ import kotlin.random.Random
  * is no real ABDM directory to look up against in the mock, so "existing-patient" here means
  * "existing on this install," not "existing nationally." That's an honest limit of the mock, not a
  * bug.
+ *
+ * **Phase 6c (2026-08-18): still on the mock, and will stay there.** The real ABDM
+ * existing-ABHA-login flow (`POST /api/v1/abha/verification-sessions`, api-contract.md §8) is
+ * explicitly P1 — not built server-side (`docs/requirements/abha-internal-contract.md`'s "what
+ * Phase B must not build" list names it directly). There is no live endpoint for this use case
+ * to call yet, independent of any UI question. Revisit once that P1 work lands.
  */
 class VerifyAbhaLoginUseCase @Inject constructor(
     private val repository: AbhaProfileRepository,
