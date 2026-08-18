@@ -3241,3 +3241,68 @@ same three ways for the next reader. `docs/requirements/abha-field-mapping.md`,
 ================================================================
 ```
 
+## Fix: CompounderScreenTest.typingChiefComplaintReportsTheChange (2026-08-18)
+
+Branch: fix-compounder-test, off master (PR #9 merged). Closes the tracked defect from the
+HARD GATE section above — `typingChiefComplaintReportsTheChange` had failed on every on-device
+run since the gate first ran it (syncstate-reset, 6c, PR #8 review), 3 sessions in a row.
+
+**Which side was wrong: test drift, not a screen regression.** The Compounder screen's chief-
+complaint field label was deliberately reworded from "Chief complaint" to "Main concern" back
+in the "UI terminology" session (2026-07-20, see that entry above) — a real, intentional,
+already-documented product decision. `CompounderScreen.kt` line 126 has said `"Main concern *"`
+ever since. The test's `onNodeWithText("Chief complaint *")` matcher was simply never updated to
+match, because this file could not run on-device (no emulator) until the syncstate-reset
+session, by which point the reword was three weeks old and long forgotten as a test-affecting
+change. Confirmed by reading both sides before touching either: `CompounderScreen.kt` (screen)
+and `CompounderScreenTest.kt` (test) — the screen is correct and shipped as intended, the test
+had rotted behind a `androidTest` suite nobody could execute.
+
+**Fix:** one-line matcher change, `"Chief complaint *"` -> `"Main concern *"`.
+
+**Did not add a testTag.** Checked the repo's actual convention before choosing: neither
+`CompounderScreen.kt` nor `RegisterScreen.kt` tags text fields — both tag only their submit/
+continue buttons (`"continue_button"`, `"submit_button"`) and match every text field by its
+exact visible label in tests (`RegisterScreenTest`'s own `onNodeWithText("Full name *")` is the
+same pattern). Adding a tag to just this one field would have been inventing a new convention
+this session, which the brief explicitly said not to do. The fragility CodeRabbit-style tooling
+would flag here (a label reword breaks the test again, including for Hindi localization) is a
+real, pre-existing property of every text-field test in this codebase, not something unique to
+this file — a repo-wide tagging convention change is a deliberate, separate decision for the
+operator, not something to slip into a one-line test fix.
+
+**Verify:**
+- `connectedDevDebugAndroidTest`, full suite, same emulator: **30/30 pass** (was 29/30). No
+  other latent failure surfaced now that the suite runs clean and attentively.
+- `testDevDebugUnitTest`: 174 -> 174, unchanged, 0 failures (this is a UI-test-only fix).
+- All three flavors (`assembleDevDebug`/`assembleStagingDebug`/`assembleProdDebug`) build clean.
+
+This is a real instance of the HARD GATE section's own thesis: a test that had been green by
+never running, since the label reword three sessions/weeks ago. The device-test gate caught it
+the first time it could, which is exactly what it was built to do. No other UI/DAO test drift
+was found once the suite could finally be watched run to completion.
+
+```text
+================================================================
+  CHECKPOINT: Compounder test fix COMPLETE
+================================================================
+  Report:
+    - which side was wrong: test drift. The screen's "Chief complaint" ->
+      "Main concern" reword (2026-07-20, already documented) was correct
+      and intentional; the test's matcher was never updated because this
+      androidTest suite could not run on any device until three sessions
+      later.
+    - the fix: one-line matcher change in CompounderScreenTest.kt,
+      "Chief complaint *" -> "Main concern *". No testTag added -- checked
+      the repo convention first (text fields are matched by label
+      everywhere, including RegisterScreenTest; only buttons are tagged),
+      adding one here would have been a new, unrequested convention.
+    - full androidTest suite on emulator: 30/30 pass (was 29/30).
+    - no other latent androidTest failure found.
+    - testDevDebugUnitTest: 174 -> 174 unchanged, 0 failures. All three
+      flavors build clean.
+
+  NEXT: operator's call. DO NOT PROCEED. Wait.
+================================================================
+```
+
