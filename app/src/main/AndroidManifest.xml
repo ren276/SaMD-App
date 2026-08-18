@@ -45,6 +45,22 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- Phase 6b: WorkManager's default androidx-startup initializer is removed so
+             SaMDApplication's own Configuration.Provider (Hilt-injected WorkerFactory,
+             see SaMDApplication.kt) is what actually initializes WorkManager. Without this,
+             WorkManager self-initializes with the stock WorkerFactory first, which cannot
+             construct @HiltWorker SyncPushWorker (no Hilt-provided dependencies) and crashes. -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
     </application>
 
 </manifest>

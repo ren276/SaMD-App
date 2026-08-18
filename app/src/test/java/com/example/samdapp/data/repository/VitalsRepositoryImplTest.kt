@@ -26,6 +26,27 @@ class FakeObservationDao : ObservationDao {
 
     override fun observeForEncounter(encounterId: String): Flow<List<ObservationEntity>> =
         store.map { rows -> rows.filter { it.encounterId == encounterId } }
+
+    override suspend fun getPendingForSync(): List<ObservationEntity> =
+        store.value.filter { it.syncState == com.example.samdapp.domain.model.SyncState.PENDING }
+
+    override suspend fun applySyncResult(
+        id: String,
+        syncState: com.example.samdapp.domain.model.SyncState,
+        serverVersion: Int?,
+        syncErrorCode: String?,
+        attemptAt: java.time.Instant,
+        sentLocalModifiedAt: java.time.Instant,
+    ) {
+        store.value = store.value.map {
+            if (it.id == id && it.localModifiedAt == sentLocalModifiedAt) {
+                it.copy(syncState = syncState, serverVersion = serverVersion ?: it.serverVersion, syncErrorCode = syncErrorCode, lastSyncAttemptAt = attemptAt)
+            } else it
+        }
+    }
+
+    override fun observeFailedSyncCount(): Flow<Int> =
+        store.map { rows -> rows.count { it.syncState == com.example.samdapp.domain.model.SyncState.FAILED } }
 }
 
 class VitalsRepositoryImplTest {

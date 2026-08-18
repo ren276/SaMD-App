@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.Query
 import com.example.samdapp.data.local.entity.ReferralEntity
 import com.example.samdapp.domain.model.ReferralStatus
+import com.example.samdapp.domain.model.SyncState
 import kotlinx.coroutines.flow.Flow
 import java.time.Instant
 
@@ -12,6 +13,21 @@ import java.time.Instant
 interface ReferralDao {
     @Insert
     suspend fun insert(referral: ReferralEntity)
+
+    /** Phase 6b outbox — see PatientDao.getPendingForSync's KDoc. */
+    @Query("SELECT * FROM referrals WHERE syncState = 'PENDING' ORDER BY localModifiedAt ASC")
+    suspend fun getPendingForSync(): List<ReferralEntity>
+
+    @Query(
+        "UPDATE referrals SET syncState = :syncState, " +
+            "serverVersion = COALESCE(:serverVersion, serverVersion), " +
+            "syncErrorCode = :syncErrorCode, lastSyncAttemptAt = :attemptAt " +
+            "WHERE id = :id AND localModifiedAt = :sentLocalModifiedAt",
+    )
+    suspend fun applySyncResult(id: String, syncState: SyncState, serverVersion: Int?, syncErrorCode: String?, attemptAt: Instant, sentLocalModifiedAt: Instant)
+
+    @Query("SELECT COUNT(*) FROM referrals WHERE syncState = 'FAILED'")
+    fun observeFailedSyncCount(): Flow<Int>
 
     @Query("SELECT * FROM referrals WHERE caseRecordId = :caseRecordId ORDER BY timestamp DESC")
     fun observeForCase(caseRecordId: String): Flow<List<ReferralEntity>>

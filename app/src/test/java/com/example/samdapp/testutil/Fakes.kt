@@ -436,9 +436,15 @@ class FakeAuthSession(initialSession: UserSession? = null, initialMustChangePin:
 
 class FakeAuditLogDao : AuditLogDao {
     val inserted = mutableListOf<AuditLogEntity>()
+    private val _failedSyncCount = MutableStateFlow(0)
+
+    private fun refreshFailedSyncCount() {
+        _failedSyncCount.value = inserted.count { it.syncState == com.example.samdapp.domain.model.SyncState.FAILED }
+    }
 
     override suspend fun insert(entry: AuditLogEntity) {
         inserted += entry
+        refreshFailedSyncCount()
     }
 
     override fun observeAll(): Flow<List<AuditLogEntity>> = flowOf(inserted.toList())
@@ -448,6 +454,27 @@ class FakeAuditLogDao : AuditLogDao {
 
     override fun observeByUserId(userId: String, limit: Int): Flow<List<AuditLogEntity>> =
         flowOf(inserted.filter { it.userId == userId }.take(limit))
+
+    override suspend fun getPendingForSync(): List<AuditLogEntity> =
+        inserted.filter { it.syncState == com.example.samdapp.domain.model.SyncState.PENDING }
+
+    override suspend fun applySyncResult(
+        id: String,
+        syncState: com.example.samdapp.domain.model.SyncState,
+        serverVersion: Int?,
+        syncErrorCode: String?,
+        attemptAt: java.time.Instant,
+        sentLocalModifiedAt: java.time.Instant,
+    ) {
+        val index = inserted.indexOfFirst { it.id == id && it.localModifiedAt == sentLocalModifiedAt }
+        if (index >= 0) {
+            val entry = inserted[index]
+            inserted[index] = entry.copy(syncState = syncState, serverVersion = serverVersion ?: entry.serverVersion, syncErrorCode = syncErrorCode, lastSyncAttemptAt = attemptAt)
+            refreshFailedSyncCount()
+        }
+    }
+
+    override fun observeFailedSyncCount(): Flow<Int> = _failedSyncCount.asStateFlow()
 }
 
 class FakeAuditLogRepository(

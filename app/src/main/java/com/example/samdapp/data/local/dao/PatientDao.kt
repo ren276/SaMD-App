@@ -4,12 +4,32 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
 import com.example.samdapp.data.local.entity.PatientEntity
+import com.example.samdapp.domain.model.SyncState
 import kotlinx.coroutines.flow.Flow
+import java.time.Instant
 
 @Dao
 interface PatientDao {
     @Insert
     suspend fun insert(patient: PatientEntity)
+
+    /** Phase 6b outbox: rows this device has never pushed, or has locally re-modified since its
+     *  last push. Never `CONFLICT`/`FAILED`/`SYNCED` — see SyncOutboxRepository's KDoc. */
+    @Query("SELECT * FROM patients WHERE syncState = 'PENDING' ORDER BY localModifiedAt ASC")
+    suspend fun getPendingForSync(): List<PatientEntity>
+
+    /** [serverVersion] is `COALESCE`d against the existing value so a `conflict`/`rejected` ack
+     *  (which carries no fresh version) never wipes the version from a prior successful sync. */
+    @Query(
+        "UPDATE patients SET syncState = :syncState, " +
+            "serverVersion = COALESCE(:serverVersion, serverVersion), " +
+            "syncErrorCode = :syncErrorCode, lastSyncAttemptAt = :attemptAt " +
+            "WHERE id = :id AND localModifiedAt = :sentLocalModifiedAt",
+    )
+    suspend fun applySyncResult(id: String, syncState: SyncState, serverVersion: Int?, syncErrorCode: String?, attemptAt: Instant, sentLocalModifiedAt: Instant)
+
+    @Query("SELECT COUNT(*) FROM patients WHERE syncState = 'FAILED'")
+    fun observeFailedSyncCount(): Flow<Int>
 
     @Query("SELECT * FROM patients WHERE id = :patientId")
     fun observeById(patientId: String): Flow<PatientEntity?>

@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
 import com.example.samdapp.data.local.entity.ConsultationEntity
+import com.example.samdapp.domain.model.SyncState
 import kotlinx.coroutines.flow.Flow
 import java.time.Instant
 
@@ -11,6 +12,21 @@ import java.time.Instant
 interface ConsultationDao {
     @Insert
     suspend fun insert(consultation: ConsultationEntity)
+
+    /** Phase 6b outbox — see PatientDao.getPendingForSync's KDoc. */
+    @Query("SELECT * FROM consultations WHERE syncState = 'PENDING' ORDER BY localModifiedAt ASC")
+    suspend fun getPendingForSync(): List<ConsultationEntity>
+
+    @Query(
+        "UPDATE consultations SET syncState = :syncState, " +
+            "serverVersion = COALESCE(:serverVersion, serverVersion), " +
+            "syncErrorCode = :syncErrorCode, lastSyncAttemptAt = :attemptAt " +
+            "WHERE id = :id AND localModifiedAt = :sentLocalModifiedAt",
+    )
+    suspend fun applySyncResult(id: String, syncState: SyncState, serverVersion: Int?, syncErrorCode: String?, attemptAt: Instant, sentLocalModifiedAt: Instant)
+
+    @Query("SELECT COUNT(*) FROM consultations WHERE syncState = 'FAILED'")
+    fun observeFailedSyncCount(): Flow<Int>
 
     /** Also stamps `localModifiedAt` from the same [updatedAt] value, see MIGRATION_12_13's
      *  KDoc for why the two columns are deliberately redundant on entities that have both. */

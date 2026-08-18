@@ -4,12 +4,16 @@ import android.util.Log
 import com.example.samdapp.data.remote.BearerInterceptor
 import com.example.samdapp.data.remote.RetrofitEvaluateSource
 import com.example.samdapp.data.remote.RetrofitKernelSource
+import com.example.samdapp.data.remote.RetrofitSyncPushService
+import com.example.samdapp.data.remote.SyncPushService
 import com.example.samdapp.data.remote.TokenAuthenticator
 import com.example.samdapp.data.remote.api.AuthApiService
 import com.example.samdapp.data.remote.api.ClinicalApiService
 import com.example.samdapp.data.remote.api.KernelApiService
+import com.example.samdapp.data.remote.api.SyncPushApiService
 import com.example.samdapp.domain.kernel.EvaluateKernelSource
 import com.example.samdapp.domain.kernel.RemoteKernelSource
+import com.google.gson.Gson
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -77,13 +81,22 @@ object NetworkModule {
             .addInterceptor(loggingInterceptor)
             .build()
 
+    /** No other DTO in this app carries `java.time.Instant`/`LocalDate` (grep confirmed, Phase
+     *  6b) — [PatientEntity]/etc.'s Room columns go through [com.example.samdapp.data.local.Converters]
+     *  instead, a separate converter for a separate boundary. Registering these two adapters here
+     *  is therefore additive, not a risk to any existing DTO's serialization. The sync payload
+     *  DTOs (SyncPayloadDto.kt) are the only current users. */
     @Provides
     @Singleton
-    fun provideRetrofit(okHttpClient: OkHttpClient): Retrofit =
+    fun provideGson(): Gson = com.example.samdapp.data.remote.SyncGson.create()
+
+    @Provides
+    @Singleton
+    fun provideRetrofit(okHttpClient: OkHttpClient, gson: Gson): Retrofit =
         Retrofit.Builder()
             .baseUrl(com.example.samdapp.BuildConfig.BACKEND_BASE_URL)
             .client(okHttpClient)
-            .addConverterFactory(GsonConverterFactory.create())
+            .addConverterFactory(GsonConverterFactory.create(gson))
             .build()
 
     @Provides
@@ -101,6 +114,11 @@ object NetworkModule {
     fun provideClinicalApiService(retrofit: Retrofit): ClinicalApiService =
         retrofit.create(ClinicalApiService::class.java)
 
+    @Provides
+    @Singleton
+    fun provideSyncPushApiService(retrofit: Retrofit): SyncPushApiService =
+        retrofit.create(SyncPushApiService::class.java)
+
     /** Separate abstract class to host @Binds methods (Hilt requirement). */
     @Module
     @InstallIn(SingletonComponent::class)
@@ -112,5 +130,9 @@ object NetworkModule {
         @Binds
         @Singleton
         abstract fun bindEvaluateKernelSource(impl: RetrofitEvaluateSource): EvaluateKernelSource
+
+        @Binds
+        @Singleton
+        abstract fun bindSyncPushService(impl: RetrofitSyncPushService): SyncPushService
     }
 }
