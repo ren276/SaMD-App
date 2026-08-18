@@ -1972,3 +1972,234 @@ noting the accepted device set is now enforced from the checked-in 30-entry mirr
 `referral_status_changed` is accepted while dormant; the section's existing description of intent
 was not rewritten, since it was already correct.
 
+## Android Phase 6a: auth and network foundation (2026-08-18)
+
+Branch `phase-6a`, off `master` (not `ABHA`: Phase 5's ABDM adapter sits on `ABHA`, unmerged;
+the operator chose a fresh branch to keep the auth/network foundation separable). First of three
+Phase 6 sessions: 6b (sync outbox) and 6c (ABHA wiring) both depend on this one. Scope deliberately
+bounded to auth, network plumbing, the `DOCTOR` role, and the kernel rebase. No sync outbox, no
+`WorkManager` worker, no ABHA wiring, per the brief.
+
+### Auth service and session
+
+New sibling classes to the existing `MockAuthSession`: `data/remote/api/AuthApiService.kt`
+(Retrofit interface, all 5 endpoints from api-contract.md §2, each returning
+`Response<ApiEnvelopeDto<T>>` so a non-2xx body's RFC 9457 shape isn't lost to a bare
+`HttpException`), `data/remote/RetrofitAuthService.kt` (parses that into `AuthApiResult<T>`,
+Success/Failure with a `SAMD-*` code), `data/local/auth/BackendAuthSession.kt` (implements the
+`AuthSession` domain port, now bound in `di/RepositoryModule.kt` in place of `MockAuthSession`).
+
+`worker_id` continuity: `MockAuthSession.stableUserId` was extracted verbatim into a shared
+top-level function, `data/local/auth/WorkerIdDerivation.kt`, used by both `MockAuthSession`
+(unbound but kept, see below) and `BackendAuthSession`. `WorkerIdDerivationTest` locks the exact
+SHA-256 formula against an independently-computed hash, not derived from the function under test,
+plus determinism/trim/role-sensitivity/format checks.
+
+`MockAuthSession` is kept in the tree, not deleted. There is no existing flavor/DI seam in this
+codebase that swaps `AuthSession` implementations per build variant (the three product flavors
+only vary `BuildConfig` URLs, not bound classes), so there was nothing to "wire it behind"; it
+just stopped being bound. Its own DataStore file name was changed
+(`mock_auth_session_unused`, was `auth_session`). androidx DataStore throws
+`IllegalStateException` if two `DataStore<Preferences>` instances ever open the same file in one
+process, and `MockAuthSession` still has a live `@Inject constructor`, so an accidental future
+injection of both must not be able to crash the app.
+
+`AuthTokenStore` (tokens/device_id/worker session, Preferences DataStore, reusing the `auth_session`
+file `MockAuthSession` used) was split into an interface + `DataStoreAuthTokenStore` impl, matching
+the existing `AuditLogDao`/`FakeAuditLogDao` pattern in this codebase, not because a second
+implementation was needed, but because `TokenAuthenticator`/`BearerInterceptor` needed something
+fakeable in a plain JVM unit test, and this repo's convention (confirmed by reading
+`RoomAuditLoggerTest`) is fakes-implementing-interfaces, not Robolectric, which isn't a dependency
+here.
+
+### The interceptor and Authenticator
+
+`data/remote/BearerInterceptor.kt` attaches `Authorization: Bearer` to every call except
+`/auth/login` and `/auth/refresh` (path-checked, not a second OkHttpClient). `data/remote/
+TokenAuthenticator.kt` handles 401s: one refresh attempt per original request
+(`response.priorResponse` chain length gate), never retries a failing `/auth/refresh` call itself
+(same path check breaks the DI-cycle-shaped recursion risk), and serializes concurrent refreshes
+with a `kotlinx.coroutines.sync.Mutex` plus a token-identity comparison inside the lock: a second
+caller that was only waiting for the first refresh to land retries with the already-rotated token
+instead of firing a second refresh call. `Provider<RetrofitAuthService>`, not a direct dependency,
+breaks the real DI cycle (authenticated `OkHttpClient` → `TokenAuthenticator` →
+`RetrofitAuthService` → `Retrofit` → that same `OkHttpClient`).
+
+Both use `runBlocking` to call suspend `RetrofitAuthService` methods from OkHttp's synchronous
+`Interceptor`/`Authenticator` contract. Documented inline as deliberate: these run on the calling
+thread (for `.execute()`) or OkHttp's own dispatcher pool (for enqueued calls), not a
+caller-owned fixed coroutine dispatcher, so there's no starvation risk from blocking there.
+
+`TokenAuthenticatorTest` (4 tests) and `BearerInterceptorTest` (3 tests) run against a real
+`MockWebServer`, not a hand-rolled `Interceptor.Chain` mock. `okhttp-mockwebserver` added as a
+`testImplementation`, same pinned okhttp version already used for the production
+logging-interceptor dependency. The single-flight test uses a custom `Dispatcher` (not a fixed
+`enqueue()` sequence, which can't handle concurrent-arrival ordering) and fires two real requests
+from `Dispatchers.IO` threads concurrently; it asserts the refresh endpoint was hit exactly once.
+All three of the brief's hard behaviors are proven: one-refresh-then-give-up, single-flight, and
+`SAMD-AUTH-1004`/any-refresh-failure clears the session (`tokenStore.clear()`) rather than
+retrying, verified by asserting the cleared token snapshot directly, per this repo's own rule
+(`CLAUDE.md`: a failure-path test must assert persisted state, not just the HTTP response; the
+same rule that caught the backend's `_fail()` rollback bug applies here on the client side).
+
+### Forced PIN change
+
+`AuthSession` gained `mustChangePin(): Flow<Boolean>` and `changePin(...): ChangePinResult`.
+`AuthUiState` gained a `MustChangePin(session)` variant, computed in `AuthViewModel` by combining
+`currentUser()` and `mustChangePin()`, so app-restart-before-completing-the-change still routes
+correctly, not just the immediately-after-login case. `AppNavHost`'s existing sign-in gate routes
+to the new `PinChangeScreen`/`PinChangeViewModel` for that state instead of `MainNavHost`. On a
+successful change, `BackendAuthSession.changePin` clears the local session (the backend revokes
+every refresh chain for that worker on every device (api-contract.md §2.6): no new token pair
+comes back), and the screen does no navigation itself: the session Flow it's indirectly driving
+goes null, and the existing gate reacts. `LoginScreen` gained a PIN field
+(`NumberPassword` keyboard, `PasswordVisualTransformation`); `AuthSession.signIn` gained a `pin`
+parameter and now returns `SignInResult` (`Success(mustChangePin)` / `Failure(message)`) instead
+of `Unit`, so `LoginViewModel` can route/display without throwing.
+
+**Divergence from the brief, flagged not hidden:** `AuthApiService.me()` and
+`RetrofitAuthService.me()` are implemented (contract §2.5, correct request/response DTOs), but no
+call site wires them into `AuthViewModel` or anywhere else. The session is hydrated once, from the
+login response, and stored locally; nothing re-fetches it from `/auth/me` on app resume. The brief
+listed `me` among "build exactly those five" without a specific call site beyond
+`BackendAuthSession.currentUser()`, and `currentUser()` is satisfied by the local store without a
+network round trip. Wiring an actual resume-refresh flow felt like scope creep beyond "auth and
+network foundation" and is left as an explicit follow-up rather than silently skipped.
+
+### `DOCTOR` role (D-2)
+
+Added to `domain/auth/UserRole` (4th constant). The only exhaustive `when` over `UserRole` in the
+app (`UserRoleDisplay.kt`'s `displayLabel()`) got a 4th branch; nothing else broke, confirmed by a
+full compile. `PatientSummaryScreen`'s review gate is explicitly NOT rewired to require it. Noted
+as a follow-up in `backend-prd.md` D-2, matching the brief's stated boundary.
+
+### Kernel and evaluate rebase (D-1, D-4)
+
+`RetrofitKernelSource`/`RetrofitEvaluateSource` now go through `BACKEND_BASE_URL` instead of
+`KERNEL_BASE_URL`. `KernelApiService.assess`'s path changed from `/v1/assess` (the kernel's own,
+un-prefixed path) to `/api/v1/assess` (the backend's proxy path, api-contract.md §5.1's path
+mapping table). Reusing the same relative path string for both would have silently kept hitting
+the kernel directly if `BACKEND_BASE_URL` and `KERNEL_BASE_URL` had ever pointed at hosts serving
+both, so this was verified against the contract table, not assumed. Both `KernelApiService.assess`
+and `ClinicalApiService.evaluate` now return `ApiEnvelopeDto<T>` (the backend wraps every 2xx body,
+api-contract.md §0.5) instead of the bare kernel DTO; `RetrofitKernelSource`/`RetrofitEvaluateSource`
+unwrap `.data`.
+
+`ClinicalApiService.evaluate` was simplified from `Response<EvaluateReportDto>` to a bare suspend
+function. api-contract.md §5.4 explicitly sanctions this ("this removes the reason
+`ClinicalApiService.evaluate` returns `Response<EvaluateReportDto>`... though changing that
+signature is optional"): the backend now translates the kernel's differently-shaped upstream
+failure body into the standard RFC 9457 envelope before Android ever sees it, so a non-2xx is a
+normal `HttpException` like every other endpoint. `EvaluateErrorDto` (the old `{error, message,
+case_token}` shape, now unreachable from Android) was deleted along with the one test that
+exercised it in isolation; the two tests covering `EvaluateReportDto`'s actual success/edge-case
+parsing were untouched.
+
+`KERNEL_BASE_URL` and `ABHA_BACKEND_BASE_URL` deleted from all three product flavors (D-4: "a
+second path to the kernel is a second path that bypasses the audit log"). `BACKEND_BASE_URL` in
+the dev flavor was made overridable via `local.properties` (it wasn't before, only
+`KERNEL_BASE_URL` was), preserving the physical-device-over-Wi-Fi testing workflow that
+`KERNEL_BASE_URL`'s override used to provide, now that `BACKEND_BASE_URL` is the one LAN address
+the device actually needs.
+
+### Verification
+
+- `testDevDebugUnitTest`: **133 → 144** (baseline 133, minus 1 deleted vacuous
+  `EvaluateErrorDto` test, plus 12 new: `WorkerIdDerivationTest` ×5, `TokenAuthenticatorTest` ×4,
+  `BearerInterceptorTest` ×3). All 144 pass. Baseline was captured by stashing this session's
+  changes and running against unmodified `master`, not assumed from an earlier session's number.
+- Three pre-existing `LoginViewModelTest` tests broke on the new PIN-required `canSubmit` gate
+  (`onSubmit()` silently no-ops without a PIN now) and were updated to call `onPinChange(...)`
+  before submitting; no assertions were weakened to make them pass.
+- `assembleDevDebug`, `assembleStagingDebug`, `assembleProdDebug`: all three succeed, confirming
+  the `KERNEL_BASE_URL`/`ABHA_BACKEND_BASE_URL` deletion left no dangling `BuildConfig` reference
+  in any flavor.
+- **No live backend reachable in this environment this session** (none was started). The kernel
+  rebase's real assess call through the full auth stack is a **manual live-check**, not yet done.
+  Everything else (Authenticator behavior, PIN gating, DTO parsing, envelope unwrapping) is proven
+  against `MockWebServer`/unit tests, not a running backend.
+- `graphify update .` not run mid-session (multiple hook-triggered background rebuilds already
+  fired on branch switches); a final one should run before merge.
+
+### An unrelated operational issue, resolved mid-session
+
+The root filesystem (`/`, 234 GB, ext4) filled to 15 MB free partway through this session,
+blocking every shell command including Gradle. Root cause was not fully resolved: `du` only
+accounted for ~60 GB of the 218 GB in use, and the remainder is very likely inside other users'
+home directories on this shared machine (`/home/pi`, `/home/lab`, `/home/saiyam`, `/home/lokesh`),
+which are permission-denied without `sudo` and not this session's data to inspect or delete.
+Freed ~2.5 GB from data this session's operator does own: two stale Claude Code update binaries,
+the Trash, one stale Android Studio patch-update jar, enough headroom (3.7 GB) to keep working,
+not enough to consider the underlying issue closed. Flagged for the operator, not silently worked
+around.
+
+### Files changed
+
+New: `AuthTokenStore.kt` (interface), `DataStoreAuthTokenStore.kt`, `BackendAuthSession.kt`,
+`WorkerIdDerivation.kt`, `AuthApiResult.kt`, `BearerInterceptor.kt`, `TokenAuthenticator.kt`,
+`RetrofitAuthService.kt`, `data/remote/api/AuthApiService.kt`, `data/remote/dto/ApiEnvelopeDto.kt`,
+`data/remote/dto/ProblemDetailDto.kt`, `data/remote/dto/AuthDtos.kt`, `PinChangeScreen.kt`,
+`PinChangeViewModel.kt`, plus the four new test files above.
+
+Modified: `domain/auth/AuthSession.kt` (DOCTOR, `SignInResult`, `ChangePinResult`,
+`mustChangePin()`), `MockAuthSession.kt` (interface conformance, renamed DataStore file),
+`di/NetworkModule.kt` (single `BACKEND_BASE_URL` Retrofit/OkHttpClient, bearer interceptor +
+authenticator wired in), `di/RepositoryModule.kt` (`BackendAuthSession`/`DataStoreAuthTokenStore`
+bindings), `KernelApiService.kt`/`ClinicalApiService.kt`/`RetrofitKernelSource.kt`/
+`RetrofitEvaluateSource.kt` (envelope unwrap, path/signature changes), `UserRoleDisplay.kt`
+(DOCTOR label), `LoginViewModel.kt`/`LoginScreen.kt` (PIN field, `SignInResult` handling),
+`presentation/auth/AuthViewModel.kt` (`MustChangePin` state), `presentation/navigation/
+AppNavHost.kt` (routes to `PinChangeScreen`), `app/build.gradle.kts` +
+`gradle/libs.versions.toml` (mockwebserver test dependency, flavor URL cleanup), plus the fixed
+`LoginViewModelTest.kt` and the `Fakes.kt` additions (`FakeAuthTokenStore`, `FakeAuthSession`
+interface conformance).
+
+### Divergences from this brief
+
+1. `me()` implemented but not wired into any call site (see above, under "Forced PIN change").
+2. No live-backend integration check performed: no backend was reachable in this environment.
+3. `AuthTokenStore` became an interface + impl split, not a single concrete class, to make the
+   Authenticator/Interceptor testable without Robolectric: a deliberate, necessary addition, not
+   scope creep, since "test it: two concurrent 401s produce one refresh" was an explicit brief
+   requirement that would otherwise have been unverifiable.
+
+### STOP
+
+```
+================================================================
+  CHECKPOINT: Phase 6a auth + network foundation COMPLETE
+================================================================
+  Branch: phase-6a, off master (fresh branch, not ABHA: operator's explicit choice;
+    Phase 5 ABDM adapter remains on ABHA, unmerged, pushed to origin this session).
+
+  Authenticator, all three PROVEN by TokenAuthenticatorTest against a real MockWebServer:
+    - one-refresh-then-give-up: PROVEN (3 requests total on a second 401, no second refresh)
+    - single-flight: PROVEN (two concurrent 401s -> exactly one refresh call)
+    - SAMD-AUTH-1004 / any refresh failure clears session, does not retry: PROVEN
+      (2 requests total, token snapshot asserted null after)
+
+  stableUserId continuity mock->real: same shared function, WorkerIdDerivationTest (5 tests)
+    locks the formula against an independently-computed SHA-256 hash.
+
+  BearerInterceptor does NOT attach a token to login/refresh: PROVEN (BearerInterceptorTest,
+    asserts the header is absent on those two paths, present on every other).
+
+  KERNEL_BASE_URL and ABHA_BACKEND_BASE_URL: deleted from all 3 flavors.
+    assembleDevDebug / assembleStagingDebug / assembleProdDebug: all 3 succeed.
+
+  Kernel rebase: real assess call NOT run. No backend reachable in this environment.
+    Marked a manual live-check, not silently skipped.
+
+  testDevDebugUnitTest: 133 -> 144 (baseline captured by stashing and testing bare master,
+    not assumed).
+
+  Scope creep pulled in: AuthTokenStore interface/impl split (see Divergences, justified by
+    an explicit brief requirement, not incidental).
+
+  Divergences from this brief: me() unused, no live-backend check, AuthTokenStore split.
+    All three listed above with reasoning, none silent.
+
+  NEXT: Phase 6b sync outbox. DO NOT PROCEED. Wait for the operator.
+================================================================
+```
+

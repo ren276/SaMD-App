@@ -143,13 +143,4 @@ class EvaluateReportDtoTest {
             dto.safetyAndTriage.failureReason,
         )
     }
-
-    @Test
-    fun `error body shape parses independently of the success schema`() {
-        val errorJson = """{"error":"internal_error","message":"model load failed","case_token":"abc-123"}"""
-        val error = gson.fromJson(errorJson, EvaluateErrorDto::class.java)
-
-        assertEquals("internal_error", error.error)
-        assertEquals("abc-123", error.caseToken)
-    }
 }

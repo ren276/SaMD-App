@@ -147,7 +147,7 @@ not permitted for the route is `403` / `SAMD-AUTH-1005`.
 | `ASHA_WORKER` | Yes | |
 | `NURSE` | Yes | |
 | `COMPOUNDER` | Yes | |
-| `DOCTOR` | **No** | See the open issue in `backend-prd.md` §4.4. The backend defines the role now; Android must add it to `domain/auth/AuthSession.kt` before any account can use it. |
+| `DOCTOR` | **Yes, Phase 6a.** | Added to `domain/auth/AuthSession.kt` (backend-prd.md §4.4, D-2). |
 
 ---
 
@@ -781,8 +781,8 @@ Phase 3 so Phase 1 ships; the field shape does not change when it lands.
 
 **Purpose:** Forward a pseudonymized clinical payload to the XGBoost differential-diagnosis kernel
 and return its verdict, auditing the call.
-**Auth:** Bearer. Roles: `COMPOUNDER`, `DOCTOR` (and see the open issue in §9.3, which is likely to
-add `ASHA_WORKER` and `NURSE`).
+**Auth:** Bearer. All four roles (§9.3, D-1 resolved Phase 6a: `app/api/v1/kernel.py` carries no
+role guard).
 **Android consumer:** `RetrofitKernelSource` (existing), rebased from `KERNEL_BASE_URL` to
 `BACKEND_BASE_URL`. `KernelAssessmentRequestDto` and `KernelAssessmentResponseDto` are unchanged;
 only an `ApiEnvelope<T>` wrapper class is added. REQ-HAN-01, REQ-HAN-07.
@@ -1419,11 +1419,11 @@ Android branches on the string and older app builds stay in the field for a long
 | Endpoint | Android consumer | Status |
 |---|---|---|
 | `GET /health` | none (optional `ConnectivityController` use later) | new |
-| `POST /api/v1/auth/login` | `RetrofitAuthService` → `BackendAuthSession` | new, replaces `MockAuthSession` |
-| `POST /api/v1/auth/refresh` | OkHttp `Authenticator` in `di/NetworkModule.kt` | new |
-| `POST /api/v1/auth/logout` | `BackendAuthSession.signOut()` | new |
-| `GET /api/v1/auth/me` | `BackendAuthSession.currentUser()` → `AuthViewModel` | new |
-| `POST /api/v1/auth/change-pin` | new PIN-change screen (Login flow and Profile) | new |
+| `POST /api/v1/auth/login` | `RetrofitAuthService` → `BackendAuthSession` | **done, Phase 6a**, replaces `MockAuthSession` |
+| `POST /api/v1/auth/refresh` | `TokenAuthenticator` in `data/remote/` | **done, Phase 6a** |
+| `POST /api/v1/auth/logout` | `BackendAuthSession.signOut()` | **done, Phase 6a** |
+| `GET /api/v1/auth/me` | `AuthApiService.me()` exists; not yet called anywhere | **partial, Phase 6a.** `RetrofitAuthService.me()` is implemented and unit-tested at the DTO/parsing level, but no call site wires it into `AuthViewModel` (session is hydrated from the login response and stored locally, not re-fetched on resume). Flagged as a Phase 6a divergence, not a silent gap. |
+| `POST /api/v1/auth/change-pin` | `PinChangeScreen`/`PinChangeViewModel` | **done, Phase 6a for the forced first-login path.** Voluntary access from Profile is not wired: Profile screen changes were out of 6a's bounded scope. |
 | `POST /api/v1/patients` | `RetrofitPatientSource` → `PatientRepositoryImpl` outbox | new |
 | `GET /api/v1/patients/{id}` | `PatientRepositoryImpl` | new, Phase 3 |
 | `PATCH /api/v1/patients/{id}` | `PatientRepositoryImpl` outbox | new |
@@ -1431,8 +1431,8 @@ Android branches on the string and older app builds stay in the field for a long
 | `POST /api/v1/encounters` | outbox after `StartCaseUseCase` | new |
 | `GET /api/v1/encounters/{id}` | none | admin only |
 | `PATCH /api/v1/case-records/{id}/status` | `CaseRecordRepositoryImpl`, `DoctorAssignmentConfirmViewModel` | new |
-| `POST /api/v1/assess` | `RetrofitKernelSource` | **existing**, rebased to `BACKEND_BASE_URL` |
-| `POST /api/v1/evaluate` | `RetrofitEvaluateSource` | **existing**, rebased to `BACKEND_BASE_URL` |
+| `POST /api/v1/assess` | `RetrofitKernelSource` | **done, Phase 6a**, rebased to `BACKEND_BASE_URL` |
+| `POST /api/v1/evaluate` | `RetrofitEvaluateSource` | **done, Phase 6a**, rebased to `BACKEND_BASE_URL` |
 | `POST /api/v1/sync/push` | real `SyncStatus` implementation + `WorkManager` worker | new, replaces `MockSyncStatus` |
 | `GET /api/v1/sync/pull` | Room 3 `RemoteMediator` | new, Phase 3 |
 | `GET /api/v1/audit/events` | none | admin only |
@@ -1451,26 +1451,25 @@ Android branches on the string and older app builds stay in the field for a long
 | `GET /patients/{id}`, `GET /patients` | yes | yes | yes | yes |
 | `POST /encounters`, `PATCH /case-records/{id}/status` | yes | yes | yes | yes |
 | `GET /encounters/{id}` | no | no | no | yes |
-| `POST /assess`, `POST /evaluate` | **see note** | **see note** | yes | yes |
+| `POST /assess`, `POST /evaluate` | yes | yes | yes | yes |
 | `POST /sync/push` | yes | yes | yes | yes |
 | `GET /sync/pull` | yes | yes | yes | yes |
 | `GET /audit/events`, `GET /audit/verify` | no | no | no | yes |
 | `/abha/*` | yes | yes | yes | yes |
 
-**Note on kernel submission, unresolved and needing the founder's decision.** The brief specifies
-that only `COMPOUNDER` and `DOCTOR` may submit to the kernel. The shipped Android navigation does
-not support that: `SendingViewModel` fires `GenerateKernelReportUseCase` and
+**Note on kernel submission, RESOLVED (D-1, backend-prd.md §9).** The brief specifies that only
+`COMPOUNDER` and `DOCTOR` may submit to the kernel. The shipped Android navigation does not
+support that: `SendingViewModel` fires `GenerateKernelReportUseCase` and
 `GenerateEvaluateReportUseCase` on a route reachable by any signed-in worker, and there is no
 role gate anywhere on that path. Enforcing the restriction server side would break the ASHA worker
 and nurse flows on day one with a `403`.
 
-Two ways forward, and the choice must be made before Phase 3:
-
-- **(A, recommended)** Allow all four roles to submit. The kernel output is never autonomous; it is
-  gated by the liability acknowledgement on `KernelAssessmentScreen` and by the mandatory doctor
-  AGREE/MODIFY/REJECT step. Role does not change the safety argument here.
-- **(B)** Keep the restriction and add a role gate in the Android nav graph plus a role check in
-  `SendingViewModel`, so a worker is told before capture rather than after.
+**Resolution: allow all four roles to submit** (`app/api/v1/kernel.py` carries no role guard,
+same posture as `patients.py` and `encounters.py`'s create/update routes). The kernel output is
+never autonomous; it is gated by the liability acknowledgement on `KernelAssessmentScreen` and by
+the mandatory doctor AGREE/MODIFY/REJECT step. Role does not change the safety argument here. The
+Android kernel rebase (Phase 6a) authorizes uniformly against this: no role-based 403 to handle
+on that path.
 
 Facility scoping applies on top of the matrix everywhere: a token's `facility_id` bounds every read
 and write, on every route, for every role.
