@@ -17,6 +17,15 @@ import kotlin.random.Random
  *
  * [kycVerified] is true for a freshly created mock profile — the real Aadhaar-OTP flow this
  * mimics *is* the KYC step, so a successfully created profile is, by construction, verified.
+ *
+ * **Phase 6c (2026-08-18): still on the mock, deliberately.** The real backend flow this mimics
+ * ([com.example.samdapp.domain.abha.AbdmAbhaSource], wired and DI-ready) needs an Aadhaar number
+ * and an OTP round-trip; this use case's params (name/DOB/gender/mobile) and its caller
+ * ([com.example.samdapp.presentation.abha.AbhaSignUpScreen]) collect neither and have no OTP
+ * step at all. Wiring this to the real flow needs a UI change, which was explicitly out of
+ * scope for the 6c brief's "do not rebuild these screens" instruction — see PROGRESS.md's Phase
+ * 6c Part 2 entry for the full decision record. Not a silent gap: reported and deferred on
+ * purpose, waiting on a product decision about collecting Aadhaar in this flow.
  */
 class CreateAbhaProfileUseCase @Inject constructor(
     private val repository: AbhaProfileRepository,

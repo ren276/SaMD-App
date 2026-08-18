@@ -7,6 +7,7 @@ import com.example.samdapp.data.mock.DemoPatientProfile
 import com.example.samdapp.domain.audit.AuditAction
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
+import com.example.samdapp.domain.model.isMaskedAbhaMobile
 import com.example.samdapp.domain.repository.AbhaProfileRepository
 import com.example.samdapp.domain.usecase.RegisterPatientUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -46,6 +47,13 @@ data class RegisterUiState(
     val abhaId: String? = null,
     val autofilledFields: Set<RegisterField> = emptySet(),
     val sexAutofilledFromAbha: Boolean = false,
+    /** Non-null when the loaded ABHA profile's mobile is masked (e.g. `"XXXXXX3210"`) — the real
+     *  ABDM `/profile` shape, never the mock's fabricated full number. Deliberately never written
+     *  into [fields]`[MOBILE_NUMBER]`: a masked value isn't a valid, submittable phone number
+     *  (it would trip [fieldError]'s digit-length check), and it must not silently satisfy
+     *  [canSubmit]'s contact-method rule the way an autofilled full number would. Display-only —
+     *  the worker still has to type a real number below it. */
+    val maskedAbhaMobile: String? = null,
 ) {
     fun fieldError(field: RegisterField): String? {
         val expectedLength = DIGIT_LENGTH_RULES[field] ?: return null
@@ -63,7 +71,12 @@ data class RegisterUiState(
     val canSubmit: Boolean
         get() {
             val fullName = fields[RegisterField.FULL_NAME].orEmpty()
-            val hasContact = fields[RegisterField.MOBILE_NUMBER].orEmpty().isNotBlank() ||
+            val mobile = fields[RegisterField.MOBILE_NUMBER].orEmpty()
+            // Defense in depth: maskedAbhaMobile already keeps a masked value out of `fields`,
+            // but a masked-shaped string reaching MOBILE_NUMBER by any other path (REQ-REG-01)
+            // still must not count as a contact method — see AbhaProfile.kt's isMaskedAbhaMobile.
+            val hasUsableMobile = mobile.isNotBlank() && !isMaskedAbhaMobile(mobile)
+            val hasContact = hasUsableMobile ||
                 fields[RegisterField.VILLAGE].orEmpty().isNotBlank() ||
                 fields[RegisterField.DISTRICT].orEmpty().isNotBlank()
             return fullName.isNotBlank() && hasContact && !isSubmitting && !hasValidationErrors
@@ -112,10 +125,14 @@ class RegisterViewModel @Inject constructor(
                 autofilled += field
                 return fields + (field to value)
             }
+            val mobileIsMasked = isMaskedAbhaMobile(profile.mobileNumber)
             _uiState.update { state ->
                 var fields = state.fields
                 fields = autofill(fields, RegisterField.FULL_NAME, profile.name)
-                fields = autofill(fields, RegisterField.MOBILE_NUMBER, profile.mobileNumber)
+                // A masked mobile (the real ABDM shape) is never written into the submittable
+                // field — see RegisterUiState.maskedAbhaMobile's KDoc. Only a full, usable
+                // number (today, only ever from the mock) autofills MOBILE_NUMBER.
+                if (!mobileIsMasked) fields = autofill(fields, RegisterField.MOBILE_NUMBER, profile.mobileNumber)
                 fields = autofill(fields, RegisterField.VILLAGE, profile.address)
                 fields = autofill(fields, RegisterField.DISTRICT, profile.district)
                 fields = autofill(fields, RegisterField.STATE, profile.state)
@@ -129,6 +146,7 @@ class RegisterViewModel @Inject constructor(
                     abhaId = abhaId,
                     autofilledFields = autofilled,
                     sexAutofilledFromAbha = sexAutofilled,
+                    maskedAbhaMobile = if (mobileIsMasked) profile.mobileNumber else null,
                 )
             }
         }

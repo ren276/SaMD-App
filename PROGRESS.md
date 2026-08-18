@@ -2918,3 +2918,326 @@ from and in addition to the file list above.
 Discharge this gate in one deliberate on-device pass (real device or emulator), not
 piecemeal - the value of listing it here is that the whole backlog is visible in one place.
 
+## Android Phase 6c, Part 1: ABHA provenance migration (2026-08-18)
+
+Branch: phase-6c, off master at 8d8effb (syncstate-reset already merged). Migration only, per
+the brief's own phased checkpoint — Part 2 (RetrofitAbhaSource cutover, masked-mobile fix,
+audit vocabulary) is explicitly gated on operator sign-off and NOT started.
+
+### M1: the real migration number, verified against the schema directory
+
+The integration plan's "MIGRATION_12_13" for these columns was already wrong (that number is
+the sync-columns migration, merged in the syncstate-reset session's parent). Checked
+`app/schemas/com.example.samdapp.data.local.AppDatabase/` directly: schemas run `1.json`
+through `13.json`, `AppDatabase.version = 13`. Real current version: **13**. Migration used:
+**`MIGRATION_13_14`**, exported schema **`14.json`**. Matches the brief's own guess, but
+verified against the schema directory, not assumed from the doc.
+
+### M2: the columns, and a divergence from the brief's own field list
+
+Added to `PatientEntity` / `patients`, all nullable, matching `MIGRATION_2_3`'s "no
+placeholder-then-backfill needed for nullable columns" pattern (unlike `MIGRATION_12_13`'s NOT
+NULL sync columns): `abhaAddress`, `kycVerified`, `verificationSource`, `verifiedAt`.
+
+**Divergence, reported not silently applied:** the brief's M2 list also named `abhaStatus` and
+`kycStatus`. Checked `docs/requirements/abha-internal-contract.md`'s field-by-field diff (Phase
+5's own verification of the pinned `AbhaIdentity` shape against the real ABDM response) before
+adding either:
+
+- **`abhaStatus`: dropped, not added.** That doc's own "Fields the real response carries that
+  the pinned `AbhaIdentity` shape has no slot for at all" list explicitly names `status`
+  (`"ACTIVE"`/etc., the real ABHA account status) as "dropped, not mapped, confirmed
+  deliberately." The `AbhaIdentity` object the backend actually returns
+  (`docs/backend/api-contract.md` §8) carries no status field. An `abhaStatus` column would sit
+  permanently `NULL` — no future session can wire it without inventing a source field the
+  backend contract deliberately does not have. Adding it now would be dead schema.
+- **`kycStatus` renamed to `kycVerified`, matching the actual field.** `AbhaIdentity.kyc_verified`
+  is a boolean (`true`/`false`), not a multi-state status, and `AbhaProfileEntity.kycVerified`
+  already exists with exactly this name and type. A `kycStatus` column would need an invented
+  string vocabulary with no backend source; `kycVerified: Boolean?` is a direct field-for-field
+  match and stays consistent with the existing entity.
+
+This is exactly the class of error the brief flagged for the integration plan's other three
+items (migration number, mobile mapping, audit list) — a fourth one, found by checking the
+Phase 5 contract-verification doc rather than the integration plan. Per the brief's own rule
+("repo/contract/adapter win... where they conflict"), the contract wins here too.
+
+Not touched in Part 1, deliberately: the `Patient` domain model, the entity<->domain mapper,
+and `RegisterViewModel`'s autofill path. The brief's Part 1 scope is the migration and entity
+only; wiring these columns into the actual registration flow is Part 2's job (or a decision
+the operator makes explicitly when clearing Part 1), not something to reach for here.
+
+### M3: migration test, RUN on device
+
+`app/src/androidTest/java/com/example/samdapp/data/local/MigrationTest13To14.kt` — new file,
+following `MigrationTest12To13`'s exact pattern: real SQLCipher-encrypted database via
+`MigrationTestHelper` + `SupportOpenHelperFactory`, not plaintext. Two rows seeded at v13 (one
+with no ABHA involvement, one with a pre-existing `abhaNumber` to prove the migration doesn't
+touch it), migrated to v14, asserts every column survives and all four new columns default
+`NULL`. Plus the `freshInstallAtV14MatchesTheMigratedSchema` companion test, matching
+`MigrationTest12To13`'s own convention.
+
+An emulator became available partway through this session (`emulator-5554`, `adb devices`
+confirms `device` state) — **RUN, not just compiled**:
+`./gradlew :app:connectedDevDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.example.samdapp.data.local.MigrationTest13To14`.
+Both tests pass (2/2, 0 failures) against the real encrypted database, not a JVM-adjacent
+stand-in. This closes what would otherwise have been another entry on the HARD GATE list
+above.
+
+### Verify
+
+- `testDevDebugUnitTest`: 171 -> 171, 0 failures (unaffected — this session touched no JVM-
+  testable production code, only the entity/migration/DI-wiring and a new androidTest file).
+- `compileDevDebugKotlin`, `compileDevDebugAndroidTestKotlin`: 0 errors.
+- `MigrationTest13To14`: 2/2 pass on device (`emulator-5554`).
+
+```text
+================================================================
+  CHECKPOINT: Phase 6c PART 1 (migration) COMPLETE
+================================================================
+  Report:
+    - real current DB version: 13. Migration used: MIGRATION_13_14 (not the
+      doc's stale MIGRATION_12_13), verified against app/schemas/, not assumed.
+    - migration test: RAN on device (emulator-5554), 2/2 pass, 0 failures.
+      Real SQLCipher-encrypted database via MigrationTestHelper, not plaintext.
+    - all seeded rows survive with values intact; all four new columns
+      (abhaAddress, kycVerified, verificationSource, verifiedAt) default NULL.
+      PROVEN on device, not compiled-only.
+    - divergence from the brief: abhaStatus dropped (no source field exists
+      in the pinned AbhaIdentity shape per abha-internal-contract.md's own
+      field-by-field diff against the real ABDM response - would be dead
+      schema); kycStatus renamed to kycVerified (Boolean, matching the real
+      AbhaIdentity.kyc_verified field and the existing AbhaProfileEntity
+      convention, instead of inventing a string vocabulary with no source).
+      Reported here, not silently applied or silently dropped.
+    - Patient domain model / mapper / RegisterViewModel autofill: NOT
+      touched, out of Part 1's scope per the brief's own phasing.
+
+  ACTION: operator confirms the migration is clean before wiring cutover.
+  DO NOT PROCEED to Part 2. Wait.
+================================================================
+```
+
+## Android Phase 6c, Part 2: ABHA infra, masked-mobile fix, vocabulary check (2026-08-18)
+
+Same branch, phase-6c. Part 1's migration confirmed clean by the operator before this started.
+
+### The blocker found before touching W1's use-case bodies
+
+W1's instruction was "rewire `CreateAbhaProfileUseCase` and `VerifyAbhaLoginUseCase` to drive the
+backend session state machine." Before writing any code, read the actual current shape of both
+use cases and their callers, and found two independent, hard blockers:
+
+1. **`CreateAbhaProfileUseCase`'s real backend equivalent needs an Aadhaar number and an OTP
+   round-trip; the UI it's wired to has neither.** `AbhaSignUpScreen`/`AbhaSignUpViewModel`
+   collect name/DOB/gender/mobile only, no Aadhaar field anywhere, and go straight from form to
+   "redirecting" to done — no OTP step in that flow at all. The OTP screen that does exist
+   (`AbhaOtpScreen`/`AbhaOtpViewModel`) is wired to the *separate* login flow
+   (`VerifyAbhaLoginUseCase`), not signup. Wiring the real `registration-sessions` state machine
+   in without a UI change is not possible; adding that UI change contradicts the brief's own "do
+   not rebuild these screens" instruction.
+2. **`VerifyAbhaLoginUseCase`'s real backend equivalent doesn't exist.** The existing-ABHA login
+   flow (`POST /api/v1/abha/verification-sessions`) is explicitly P1 — confirmed in both
+   `api-contract.md` §8 and `abha-internal-contract.md`'s own "what Phase B must not build" list.
+   There is no live endpoint to call, independent of any UI question.
+
+Asked the operator directly rather than guessing forward (`AskUserQuestion`). Decision: build the
+Retrofit/DI infrastructure now (pure plumbing, no UI touch), leave both use cases on their mocks
+with the blocker documented inline, and proceed with W2/W3/W4 this session. Real use-case wiring
+is deferred to a future session, pending either a UI decision (Aadhaar input) or the P1 login
+endpoint being built.
+
+**Concrete ABDM enrollment mechanics, for the deferred session — recorded here so it starts from
+facts, not rediscovery.** The real create-ABHA flow is enrollment-by-Aadhaar, verified working
+end-to-end in the M1 sandbox (`docs/requirements/abha-internal-contract.md`):
+
+- Gateway session token first (`POST https://dev.abdm.gov.in/api/hiecm/gateway/v3/sessions`),
+  then `GET https://abhasbx.abdm.gov.in/abha/api/v3/profile/public/certificate` for the RSA
+  public cert, authenticated with that session token.
+- `POST https://abhasbx.abdm.gov.in/abha/api/v3/enrollment/request/otp` with the Aadhaar number
+  RSA-encrypted client-side (`loginId` field, base64). `txnId` is empty string on this first
+  call; ABDM returns the real `txnId` in the response.
+- `POST https://abhasbx.abdm.gov.in/abha/api/v3/enrollment/enrol/byAadhaar` with the OTP
+  encrypted the same way, chained via that `txnId`; body includes `consent: { "code":
+  "abha-enrollment", "version": "1.4" }` (already matches `config.py`'s
+  `abdm_consent_code`/`abdm_consent_version`, no backend change needed there).
+
+**Cipher: `RSA/ECB/OAEPWithSHA-1AndMGF1Padding`.** SHA-1 is ABDM's own mandated OAEP padding
+hash for this API family, confirmed against the ABDM API docs — not a security downgrade this
+codebase chose, and must not be "corrected" to SHA-256 by a future session that doesn't know
+this is intentional.
+
+**Encryption placement: the backend adapter, never Android.** Consistent with the locked
+all-API-calls-route-through-backend rule (api-contract.md), the RSA-OAEP step happens in
+`backend/abdm-adapter/`'s crypto code, not on-device. Android's job in the deferred cutover is
+only to collect the Aadhaar number and POST it plaintext to the SaMD backend over the existing
+authenticated HTTPS channel; the backend encrypts and does the ABDM round-trip. This is already
+how `AbdmAbhaSource`/`AbhaApiService` (built this session) are shaped — `AbhaIdentityRequestDto.aadhaarNumber`
+is a plain string, no client-side crypto anywhere in the Android DTOs or `RetrofitAbhaSource`.
+
+**Host split — do not conflate.** `enrollment/*` and `profile/*` calls use
+`abhasbx.abdm.gov.in` (the ABDM V3 host); the gateway `sessions` call alone uses the different
+`dev.abdm.gov.in` host. Same class of stale-host mistake as Phase 5's cert-URL fix (D1) — worth
+flagging explicitly again here since it is exactly the kind of detail a fresh session gets wrong
+by pattern-matching one endpoint's host onto another.
+
+**Login stays a separate, independently-gated piece.** Existing-ABHA login
+(`verification-sessions`) is P1 and not built server-side — this is a second, independent
+blocker from the create-flow's UI gap, not the same one. The create cutover and the login
+cutover unblock on two different things and should not be bundled into one "wire ABHA" task.
+
+**What is actually open vs. already known.** The flow shape and the crypto placement above are
+settled facts, not open questions. What remains open and needs a product decision is narrow: an
+Aadhaar-number input field somewhere in the signup flow, and an OTP step — most likely reusing
+`AbhaOtpScreen`'s existing machinery rather than building a second OTP screen, but where the
+Aadhaar field itself lives in the UI is the actual undecided part. The deferred session's job is
+to resolve that UI placement question and then wire `CreateAbhaProfileUseCase` through
+`AbdmAbhaSource`'s already-built `startRegistrationSession`/`submitIdentity`/`verifyOtp` methods
+— the state machine and its Kotlin types already exist.
+
+**Aadhaar handling, restated for the deferred session:** never logged, never audited, never
+part of the ML payload — same rule already enforced for the fields that do exist today
+(`backend/core/app/config.py`'s `REDACTED_KEYS` already contains `aadhaar`/`aadhaar_number`;
+`KernelPayload`'s KDoc already excludes it from the ML boundary), extend that same posture to
+wherever the Aadhaar field lands in the UI, don't relax it because the field is new.
+
+### W1: infrastructure built, use cases deliberately not rewired
+
+New files, mirroring the existing `AuthApiResult`/`RetrofitAuthService` pattern (chosen
+deliberately over blindly copying `GenerateKernelReportUseCase`'s "catch every exception, fall
+back to mock" shape — see `AbhaApiResult`'s KDoc for why: a wrong OTP is a real, actionable error
+a worker should retry, not grounds to fabricate a fake verified identity the way a low-confidence
+ML inference is harmless to fall back on):
+
+- `domain/abha/AbdmAbhaSource.kt` — domain port (6 methods: start session, submit identity,
+  verify OTP, verify mobile OTP, poll state, get profile), `AbhaApiResult<T>` sealed result
+  (`code = null` means unreachable backend, safe to fall back on later; `code != null` means the
+  backend was reached and structurally rejected the call, must surface to the user later),
+  `AbhaTransactionState` enum (mirrors the backend's 11-state machine), `AbhaSessionSnapshot`,
+  `AbhaIdentity` domain types.
+- `data/remote/dto/AbhaDto.kt` — wire DTOs for the 6 endpoints. Request-body shapes are not
+  pinned exactly in api-contract.md §8 (only success `data` shapes are); inferred from each
+  endpoint's stated Purpose column, flagged in the file's own KDoc as "verify against a real
+  backend call before first use," not already round-tripped.
+- `data/remote/api/AbhaApiService.kt` — Retrofit interface, same `Response<ApiEnvelopeDto<T>>` +
+  RFC 9457 error-body shape as `AuthApiService`.
+- `data/remote/RetrofitAbhaSource.kt` — impl, same `call { }` parsing shape as
+  `RetrofitAuthService`.
+- `di/NetworkModule.kt` — `@Provides` for `AbhaApiService`, `@Binds` for `AbdmAbhaSource`, rides
+  the same authenticated `OkHttpClient` (Bearer + `TokenAuthenticator`) as every other
+  `backend/core` call — confirmed, no separate unauthenticated client.
+- `CreateAbhaProfileUseCase.kt` / `VerifyAbhaLoginUseCase.kt` — KDoc updated in place recording
+  exactly why each is still on its mock, so a future session doesn't have to re-derive this.
+
+### W2: the masked-mobile fix
+
+`domain/model/AbhaProfile.kt` gained `isMaskedAbhaMobile(mobileNumber: String?): Boolean` — any
+non-digit character in an otherwise-mobile-shaped value means masked (no need to hardcode `X` vs
+`*`, whatever ABDM's actual mask character turns out to be).
+
+`RegisterViewModel.loadAbhaProfile` no longer writes a masked mobile into the submittable
+`MOBILE_NUMBER` field at all (it would trip the digit-length validator and confuse a worker who
+never typed into that field) — it surfaces via a new `RegisterUiState.maskedAbhaMobile: String?`
+display-only field instead. `RegisterScreen` shows it as a warning-colored hint under the mobile
+field when present. `canSubmit`'s contact-method check independently guards against a
+masked-shaped value reaching `MOBILE_NUMBER` by any other path too (defense in depth, not the
+only guard).
+
+Tests added to `RegisterViewModelTest.kt`: a masked mobile is not autofilled into the field and
+does not satisfy `canSubmit` on its own (even with village/district cleared); a manually-entered
+real number does. `docs/requirements/abha-field-mapping.md`'s `mobileNumber` row updated to
+record the fix.
+
+### W3: audit vocabulary — no changes needed, verified not guessed
+
+Read `docs/backend/backend-prd.md` §6.2 (current as of the 2026-08-17 D7 update, which post-dates
+`abha-integration-plan.md`): **every** ABHA state-machine transition action — session
+started/failed, identity linked, identity submitted, OTP verified, enrolled, mobile verified,
+profile retrieved — is **server-only**. The device's existing `ABHA_PROFILE_CREATED`/
+`ABHA_LOGIN_VERIFIED` already cover the device-side lifecycle and need no additions. Since W1's
+use-case rewiring was deferred, this cutover also emits nothing new that could need a device-side
+action anyway — two independent reasons the plan doc's proposed 7-constant addition
+(`ABHA_REGISTRATION_STARTED` etc.) would have been wrong, not just premature.
+
+Verified, not assumed: wrote a standalone script running the exact same regex/comparison
+`backend/core/tests/test_audit_actions_device.py` uses, comparing `AuditLogger.kt`'s `AuditAction`
+enum against `backend/core/app/domain/audit_actions_device.py`'s mirror directly (pytest itself
+couldn't run here — no Postgres reachable from this sandbox, a pre-existing environment
+limitation, not something this session introduced or could fix). Result: 30/30 match, zero
+divergence. Also confirmed `backend/core/app/config.py`'s `REDACTED_KEYS` already covers
+`aadhaar`/`aadhaar_number`/`abha_number`/`otp`/`token`/`client_secret` — the "never log
+Aadhaar/OTP/token/secret" rule has real backend-side enforcement already in place.
+
+### W4: no-auto-link rule — confirmed intact, not re-implemented
+
+Nothing this session touches patient linkage. `KernelPayload`'s own KDoc already excludes
+`abhaNumber` from the ML boundary (unchanged). Registration still requires the worker to review
+and explicitly submit the autofilled form (`RegisterViewModel`/`RegisterPatientUseCase`) before
+any `Patient` row is written — inherently not an auto-link, and neither this session's
+`AbdmAbhaSource` infra (unused by any use case yet, wired but dormant) nor the W2 masked-mobile
+fix (form validation only) introduces a new code path that could silently link. Confirmed by
+inspection, no code change needed here.
+
+### Docs corrected
+
+`ABHA planning/abha-integration-plan.md` — all three named errors fixed in place (migration
+number, mobile mapping, audit constant list), plus a fourth found this session (a stale separate
+`ABHA_BACKEND_BASE_URL` reference the doc still carried, collapsed in Phase 6a). Every correction
+also records the current real status (done/not-done/blocked) so the doc stops being stale in the
+same three ways for the next reader. `docs/requirements/abha-field-mapping.md`,
+`docs/requirements/software-requirements.md`, `docs/requirements/traceability-matrix.md`,
+`docs/quality/risk-management-file.md` all updated with the Part 1 + Part 2 status.
+
+### Verify
+
+- `compileDevDebugKotlin`, `compileDevDebugUnitTestKotlin`, `compileDevDebugAndroidTestKotlin`:
+  0 errors.
+- `testDevDebugUnitTest`: 171 -> 173, 0 failures (2 new: the two W2 masked-mobile tests).
+- All three flavors (`assembleDevDebug`/`assembleStagingDebug`/`assembleProdDebug`) build clean.
+- Full `connectedDevDebugAndroidTest` run (emulator still attached from Part 1): 29/30 pass. The
+  one failure, `CompounderScreenTest.typingChiefComplaintReportsTheChange`, is the same
+  pre-existing, unrelated failure already flagged in this branch's earlier HARD GATE entry —
+  nothing in this session's changes touches the Compounder screen. `MigrationTest13To14` (2/2),
+  `SyncStateResetTest` (14/14, unaffected), and `RegisterScreenTest` (3/3, confirms the
+  `RegisterScreen.kt` masked-mobile hint change didn't break the UI test) all pass clean.
+
+```text
+================================================================
+  CHECKPOINT: Phase 6c COMPLETE (ABHA cutover infra + deferred gaps closed)
+================================================================
+  Report:
+    - migration number used: MIGRATION_13_14, device-run result: 2/2 pass
+      (Part 1, operator-confirmed).
+    - RetrofitAbhaSource cutover: infrastructure built and DI-wired
+      (AbdmAbhaSource/RetrofitAbhaSource/AbhaApiService/AbhaDto), uses the
+      authenticated OkHttp client (confirmed, same as every other
+      backend/core call). Use-case rewiring itself deliberately NOT done —
+      blocked on a UI gap (Aadhaar/OTP collection) and a P1 backend
+      dependency (verification-sessions), both reported and operator-
+      confirmed via AskUserQuestion before proceeding, not silently
+      skipped or silently forced.
+    - masked-mobile: masked value does NOT satisfy REQ-REG-01, PROVEN by
+      RegisterViewModelTest (2 new tests).
+    - audit: device ABHA actions match backend set, verified by direct
+      comparison against the real test's own regex (30/30, zero
+      divergence) since pytest itself could not run here (no Postgres).
+      No new device actions added -- confirmed none are needed, all
+      state-machine transitions are server-only per backend-prd.md §6.2.
+    - no-auto-link rule preserved -- confirmed by inspection, no code
+      touches linkage this session.
+    - stub end-to-end walk: NOT done -- no real backend/ABDM stub reachable
+      from this sandbox, and the use cases aren't wired to it yet anyway.
+      Marked manual live-check for whenever the use-case rewiring happens.
+    - testDevDebugUnitTest: 171 -> 173, 0 failures.
+    - divergence from this brief: W1's use-case rewiring deferred (reported
+      and operator-approved, see AskUserQuestion decision above); a fourth
+      integration-plan error found and fixed beyond the three the brief
+      named (stale ABHA_BACKEND_BASE_URL reference).
+
+  This completes Phase 6 to the extent this session could, given the two
+  W1 blockers. NEXT: live ABDM activation is credential-gated, AND a
+  product decision on Aadhaar/OTP UI collection is needed before the real
+  use-case cutover can complete. DO NOT PROCEED. Wait for the operator.
+================================================================
+```
+
