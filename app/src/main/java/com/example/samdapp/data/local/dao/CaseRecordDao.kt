@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.Query
 import com.example.samdapp.data.local.entity.CaseRecordEntity
 import com.example.samdapp.domain.model.CaseStatus
+import com.example.samdapp.domain.model.SyncState
 import kotlinx.coroutines.flow.Flow
 import java.time.Instant
 
@@ -12,6 +13,25 @@ import java.time.Instant
 interface CaseRecordDao {
     @Insert
     suspend fun insert(caseRecord: CaseRecordEntity)
+
+    /** Phase 6b outbox: this table's generic transport `syncState`, wholly distinct from the
+     *  clinical `status` column (`PENDING_SYNC`/`SENT_TO_DOCTOR`/etc, see [observePendingSyncCount]
+     *  above) this same table also carries. Draining a row here touches only `syncState`/
+     *  `serverVersion`/`syncErrorCode`/`lastSyncAttemptAt` via [applySyncResult] below — never
+     *  `status`. See PatientDao.getPendingForSync's KDoc for the general shape. */
+    @Query("SELECT * FROM case_records WHERE syncState = 'PENDING' ORDER BY localModifiedAt ASC")
+    suspend fun getPendingForSync(): List<CaseRecordEntity>
+
+    @Query(
+        "UPDATE case_records SET syncState = :syncState, " +
+            "serverVersion = COALESCE(:serverVersion, serverVersion), " +
+            "syncErrorCode = :syncErrorCode, lastSyncAttemptAt = :attemptAt " +
+            "WHERE id = :id AND localModifiedAt = :sentLocalModifiedAt",
+    )
+    suspend fun applySyncResult(id: String, syncState: SyncState, serverVersion: Int?, syncErrorCode: String?, attemptAt: Instant, sentLocalModifiedAt: Instant)
+
+    @Query("SELECT COUNT(*) FROM case_records WHERE syncState = 'FAILED'")
+    fun observeFailedSyncCount(): Flow<Int>
 
     /** Also stamps `localModifiedAt` from the same [updatedAt] value, see MIGRATION_12_13's
      *  KDoc for why the two columns are deliberately redundant on entities that have both. */

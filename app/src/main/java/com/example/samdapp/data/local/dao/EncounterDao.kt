@@ -4,12 +4,29 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
 import com.example.samdapp.data.local.entity.EncounterEntity
+import com.example.samdapp.domain.model.SyncState
 import kotlinx.coroutines.flow.Flow
+import java.time.Instant
 
 @Dao
 interface EncounterDao {
     @Insert
     suspend fun insert(encounter: EncounterEntity)
+
+    /** Phase 6b outbox — see PatientDao.getPendingForSync's KDoc. */
+    @Query("SELECT * FROM encounters WHERE syncState = 'PENDING' ORDER BY localModifiedAt ASC")
+    suspend fun getPendingForSync(): List<EncounterEntity>
+
+    @Query(
+        "UPDATE encounters SET syncState = :syncState, " +
+            "serverVersion = COALESCE(:serverVersion, serverVersion), " +
+            "syncErrorCode = :syncErrorCode, lastSyncAttemptAt = :attemptAt " +
+            "WHERE id = :id AND localModifiedAt = :sentLocalModifiedAt",
+    )
+    suspend fun applySyncResult(id: String, syncState: SyncState, serverVersion: Int?, syncErrorCode: String?, attemptAt: Instant, sentLocalModifiedAt: Instant)
+
+    @Query("SELECT COUNT(*) FROM encounters WHERE syncState = 'FAILED'")
+    fun observeFailedSyncCount(): Flow<Int>
 
     @Query("SELECT * FROM encounters WHERE id = :encounterId")
     fun observeById(encounterId: String): Flow<EncounterEntity?>
