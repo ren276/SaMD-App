@@ -7,4 +7,5 @@ fun UserRole.displayLabel(): String = when (this) {
     UserRole.ASHA_WORKER -> "ASHA worker"
     UserRole.NURSE -> "Nurse"
     UserRole.COMPOUNDER -> "Compounder"
+    UserRole.DOCTOR -> "Doctor"
 }

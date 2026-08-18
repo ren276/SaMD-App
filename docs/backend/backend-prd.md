@@ -315,13 +315,11 @@ tests and its own ABDM-facing code. Consequence: `ABHA_BACKEND_BASE_URL` collaps
 
 `user_accounts.role` accepts `ASHA_WORKER`, `NURSE`, `COMPOUNDER`, `DOCTOR`.
 
-**Open item.** `DOCTOR` does not exist in the Android `UserRole` enum today
-(`domain/auth/AuthSession.kt` declares exactly three constants: `ASHA_WORKER`, `NURSE`,
-`COMPOUNDER`). The in-app physician review on `PatientSummaryScreen` currently runs under whatever
-field role is signed in, which means the AGREE/MODIFY/REJECT decision that carries the entire
-Class B or C risk-control argument (H-02) is not attributable to a doctor in the audit trail.
-Adding `DOCTOR` to the enum is an Android change, is a prerequisite for Phase 6 wiring, and is
-worth doing regardless of the backend because the traceability gap exists today.
+**RESOLVED 2026-08-18, Phase 6a.** `DOCTOR` is now a constant in the Android `UserRole` enum
+(`domain/auth/AuthSession.kt`). Adding the constant is done; rewiring `PatientSummaryScreen`'s
+review gate to require it is not, and remains a follow-up: the AGREE/MODIFY/REJECT decision
+(H-02) still runs under whatever field role is signed in today, it is just now possible to
+attribute it to a doctor once that gate exists.
 
 `worker_id` is 16 lowercase hex characters, computed identically to `MockAuthSession.stableUserId`:
 `sha256(name.trim().lowercase() + "|" + role.name)` hex encoded, truncated to 16 characters.
@@ -811,8 +809,8 @@ Every one of these needs the founder's answer. None of them blocks Phase 1.
 
 | ID | Decision | Recommendation |
 |---|---|---|
-| D-1 | Which roles may submit to the kernel? The brief says `COMPOUNDER` and `DOCTOR`; the shipped Android navigation lets any signed-in worker reach `SendingViewModel`, so enforcing that returns `403` to ASHA workers and nurses on day one. | Allow all four. The kernel output is never autonomous: it is gated by the liability acknowledgement and the mandatory doctor review. Role does not change that safety argument. |
-| D-2 | Add `DOCTOR` to the Android `UserRole` enum? | Yes. The physician AGREE/MODIFY/REJECT decision carries the whole H-02 risk-control argument and is currently attributed to a field role in the audit trail. This is worth fixing independently of the backend. |
+| D-1 | Which roles may submit to the kernel? The brief says `COMPOUNDER` and `DOCTOR`; the shipped Android navigation lets any signed-in worker reach `SendingViewModel`, so enforcing that returns `403` to ASHA workers and nurses on day one. | **RESOLVED, Phase 6a. Allow all four.** The kernel output is never autonomous: it is gated by the liability acknowledgement and the mandatory doctor review. Role does not change that safety argument. api-contract.md §9.3's `/assess`/`/evaluate` row is now `yes` for all four roles; the kernel rebase (§5.1) authorizes uniformly, no role-based 403 to handle. |
+| D-2 | Add `DOCTOR` to the Android `UserRole` enum? | **RESOLVED, Phase 6a. Yes**, the constant now exists (§4.4). The physician AGREE/MODIFY/REJECT decision carries the whole H-02 risk-control argument and is currently attributed to a field role in the audit trail. Rewiring `PatientSummaryScreen`'s review gate to require the constant is a separate, not-yet-done follow-up. |
 | D-3 | How are PINs distributed to workers on day one? | **Resolved and implemented.** Facility administrator provisions accounts via `python -m app.scripts.seed_accounts` and hands out an initial PIN in person. `user_accounts.must_change_pin` forces a change at first login: until then every endpoint except `/auth/me`, `/auth/change-pin`, and `/auth/logout` returns `SAMD-AUTH-1008`. No self-service reset endpoint in v1. |
 | D-4 | Does `KERNEL_BASE_URL` get deleted in Phase 6, or kept as an emergency direct-call fallback? | Delete it. A second path to the kernel is a second path that bypasses the audit log, which defeats the point of G-3. |
 | D-5 | Retention policy for `kernel_call_log` and `sync_log`. | 24 months, matching whatever `docs/data-retention.md` settles on for clinical rows. `audit_events` is never deleted. Needs the regulatory answer, not an engineering one. |

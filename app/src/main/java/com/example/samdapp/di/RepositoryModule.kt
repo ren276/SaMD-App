@@ -1,7 +1,9 @@
 package com.example.samdapp.di
 
 import com.example.samdapp.data.local.audit.RoomAuditLogger
-import com.example.samdapp.data.local.auth.MockAuthSession
+import com.example.samdapp.data.local.auth.AuthTokenStore
+import com.example.samdapp.data.local.auth.BackendAuthSession
+import com.example.samdapp.data.local.auth.DataStoreAuthTokenStore
 import com.example.samdapp.data.sync.MockSyncStatus
 import com.example.samdapp.data.repository.AbhaProfileRepositoryImpl
 import com.example.samdapp.data.repository.AilmentRepositoryImpl
@@ -77,7 +79,10 @@ abstract class RepositoryModule {
     abstract fun bindSyncStatus(impl: MockSyncStatus): SyncStatus
 
     @Binds @Singleton
-    abstract fun bindAuthSession(impl: MockAuthSession): AuthSession
+    abstract fun bindAuthSession(impl: BackendAuthSession): AuthSession
+
+    @Binds @Singleton
+    abstract fun bindAuthTokenStore(impl: DataStoreAuthTokenStore): AuthTokenStore
 
     @Binds @Singleton
     abstract fun bindAbhaProfileRepository(impl: AbhaProfileRepositoryImpl): AbhaProfileRepository

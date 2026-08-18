@@ -1,8 +1,11 @@
 package com.example.samdapp.di
 
 import android.util.Log
+import com.example.samdapp.data.remote.BearerInterceptor
 import com.example.samdapp.data.remote.RetrofitEvaluateSource
 import com.example.samdapp.data.remote.RetrofitKernelSource
+import com.example.samdapp.data.remote.TokenAuthenticator
+import com.example.samdapp.data.remote.api.AuthApiService
 import com.example.samdapp.data.remote.api.ClinicalApiService
 import com.example.samdapp.data.remote.api.KernelApiService
 import com.example.samdapp.domain.kernel.EvaluateKernelSource
@@ -20,12 +23,14 @@ import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 
 /**
- * Provides the Retrofit + OkHttp stack for the local FastAPI kernel endpoint.
+ * Provides the Retrofit + OkHttp stack for `backend/core`. One `OkHttpClient`/`Retrofit` pair
+ * serves auth, kernel-proxy, and clinical-evaluation calls. As of Phase 6a the kernel is no
+ * longer reachable directly (`KERNEL_BASE_URL` is deleted, see api-contract.md §5.1); every call
+ * goes through the backend, authenticated.
  *
- * Base URL: Dynamically loaded from local.properties via BuildConfig.KERNEL_BASE_URL
- * for physical-device testing over Wi-Fi. Requires `android:usesCleartextTraffic="true"` in the manifest
- * (plain HTTP, not TLS — acceptable for a local dev/demo server; production would use HTTPS
- * behind an internal VPN or a real backend URL).
+ * Base URL: `BuildConfig.BACKEND_BASE_URL`, dev flavor loaded from local.properties for
+ * physical-device testing over Wi-Fi. Requires `android:usesCleartextTraffic="true"` in the
+ * manifest for the dev flavor (plain HTTP on the LAN; staging/prod are HTTPS).
  *
  * Timeouts are deliberately conservative (connect 10s, read/write 30s) to give the ML
  * inference time to complete while still surfacing failures quickly enough for the graceful
@@ -40,7 +45,7 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object NetworkModule {
 
-    private const val TAG = "KernelNetwork"
+    private const val TAG = "BackendNetwork"
 
     @Provides
     @Singleton
@@ -58,11 +63,17 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideOkHttpClient(loggingInterceptor: HttpLoggingInterceptor): OkHttpClient =
+    fun provideOkHttpClient(
+        loggingInterceptor: HttpLoggingInterceptor,
+        bearerInterceptor: BearerInterceptor,
+        tokenAuthenticator: TokenAuthenticator,
+    ): OkHttpClient =
         OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
+            .addInterceptor(bearerInterceptor)
+            .authenticator(tokenAuthenticator)
             .addInterceptor(loggingInterceptor)
             .build()
 
@@ -70,10 +81,15 @@ object NetworkModule {
     @Singleton
     fun provideRetrofit(okHttpClient: OkHttpClient): Retrofit =
         Retrofit.Builder()
-            .baseUrl(com.example.samdapp.BuildConfig.KERNEL_BASE_URL)
+            .baseUrl(com.example.samdapp.BuildConfig.BACKEND_BASE_URL)
             .client(okHttpClient)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
+
+    @Provides
+    @Singleton
+    fun provideAuthApiService(retrofit: Retrofit): AuthApiService =
+        retrofit.create(AuthApiService::class.java)
 
     @Provides
     @Singleton

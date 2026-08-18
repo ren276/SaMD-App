@@ -8,6 +8,8 @@ import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.config.DeviceInfoProvider
 import com.example.samdapp.domain.connectivity.NetworkMonitor
 import com.example.samdapp.domain.auth.AuthSession
+import com.example.samdapp.domain.auth.ChangePinResult
+import com.example.samdapp.domain.auth.SignInResult
 import com.example.samdapp.domain.auth.UserRole
 import com.example.samdapp.domain.auth.UserSession
 import com.example.samdapp.domain.model.AbhaProfile
@@ -356,13 +358,75 @@ class FakeNetworkMonitor(initial: Boolean = true) : NetworkMonitor {
     }
 }
 
-class FakeAuthSession(initialSession: UserSession? = null) : AuthSession {
+class FakeAuthTokenStore(
+    deviceId: String = "fake-device-id",
+    accessToken: String? = null,
+    refreshToken: String? = null,
+) : com.example.samdapp.data.local.auth.AuthTokenStore {
+    private var deviceId = deviceId
+    private var accessToken = accessToken
+    private var refreshToken = refreshToken
+    private val _session = MutableStateFlow<UserSession?>(null)
+    private val _mustChangePin = MutableStateFlow(false)
+
+    override val session: Flow<UserSession?> = _session.asStateFlow()
+    override val mustChangePin: Flow<Boolean> = _mustChangePin.asStateFlow()
+
+    override suspend fun deviceId(): String = deviceId
+
+    override suspend fun snapshot() =
+        com.example.samdapp.data.local.auth.TokenSnapshot(deviceId = deviceId, accessToken = accessToken, refreshToken = refreshToken)
+
+    override suspend fun saveLogin(
+        accessToken: String,
+        refreshToken: String,
+        expiresInSeconds: Long,
+        mustChangePin: Boolean,
+        workerId: String,
+        displayName: String,
+        role: String,
+        facilityId: String,
+        facilityName: String,
+    ) {
+        this.accessToken = accessToken
+        this.refreshToken = refreshToken
+        _mustChangePin.value = mustChangePin
+        _session.value = UserSession(userId = workerId, name = displayName, role = UserRole.valueOf(role))
+    }
+
+    override suspend fun saveTokens(accessToken: String, refreshToken: String, expiresInSeconds: Long) {
+        this.accessToken = accessToken
+        this.refreshToken = refreshToken
+    }
+
+    override suspend fun setMustChangePin(value: Boolean) {
+        _mustChangePin.value = value
+    }
+
+    override suspend fun clear() {
+        accessToken = null
+        refreshToken = null
+        _mustChangePin.value = false
+        _session.value = null
+    }
+}
+
+class FakeAuthSession(initialSession: UserSession? = null, initialMustChangePin: Boolean = false) : AuthSession {
     private val _session = MutableStateFlow(initialSession)
+    private val _mustChangePin = MutableStateFlow(initialMustChangePin)
 
     override fun currentUser(): Flow<UserSession?> = _session.asStateFlow()
 
-    override suspend fun signIn(name: String, role: UserRole) {
+    override fun mustChangePin(): Flow<Boolean> = _mustChangePin.asStateFlow()
+
+    override suspend fun signIn(name: String, role: UserRole, pin: String): SignInResult {
         _session.value = UserSession(userId = "fake-user-id", name = name, role = role)
+        return SignInResult.Success(mustChangePin = _mustChangePin.value)
+    }
+
+    override suspend fun changePin(currentPin: String, newPin: String): ChangePinResult {
+        _mustChangePin.value = false
+        return ChangePinResult.Success
     }
 
     override suspend fun signOut() {

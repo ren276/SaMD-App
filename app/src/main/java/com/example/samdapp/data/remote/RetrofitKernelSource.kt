@@ -52,7 +52,7 @@ class RetrofitKernelSource @Inject constructor(
             spo2 = vitals.spo2Percent?.toDouble() ?: 98.0,
         )
 
-        val response = kernelApiService.assess(request)
+        val response = kernelApiService.assess(request).data
 
         // Map DTO → domain result. Field bindings (as specified):
         // top differential's condition_tier  → predictedCondition

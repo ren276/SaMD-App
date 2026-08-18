@@ -48,6 +48,7 @@ import com.example.samdapp.presentation.emergency.EmergencyOverrideScreen
 import com.example.samdapp.presentation.kernelassessment.KernelAssessmentScreen
 import com.example.samdapp.presentation.home.HomeScreen
 import com.example.samdapp.presentation.login.LoginScreen
+import com.example.samdapp.presentation.login.PinChangeScreen
 import com.example.samdapp.presentation.medicalbackground.MedicalBackgroundScreen
 import com.example.samdapp.presentation.patients.PatientsScreen
 import com.example.samdapp.presentation.patientsummary.PatientAuditScreen
@@ -74,6 +75,7 @@ fun AppNavHost() {
     when (val state = authState) {
         AuthUiState.Loading -> Unit
         AuthUiState.SignedOut -> LoginScreen()
+        is AuthUiState.MustChangePin -> PinChangeScreen()
         is AuthUiState.SignedIn -> MainNavHost(session = state.session, onSignOut = authViewModel::signOut)
     }
 }

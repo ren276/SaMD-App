@@ -45,9 +45,10 @@ android {
         create("dev") {
             dimension = "environment"
             applicationIdSuffix = ".dev"
-            buildConfigField("String", "KERNEL_BASE_URL", "\"${localProperties.getProperty("KERNEL_BASE_URL", "http://10.16.4.182:8000/")}\"")
-            buildConfigField("String", "BACKEND_BASE_URL", "\"http://10.16.4.182:8080/\"")
-            buildConfigField("String", "ABHA_BACKEND_BASE_URL", "\"http://10.16.4.182:8081/\"")
+            // Overridable via local.properties for physical-device testing over Wi-Fi: the
+            // kernel is no longer reachable directly (KERNEL_BASE_URL deleted, Phase 6a,
+            // api-contract.md §5.1); this is the one LAN address the device now needs.
+            buildConfigField("String", "BACKEND_BASE_URL", "\"${localProperties.getProperty("BACKEND_BASE_URL", "http://10.16.4.182:8080/")}\"")
             buildConfigField("String", "ENVIRONMENT", "\"dev\"")
             // FLAG_SECURE off in dev so investor/demo screen recordings work; staging/prod enforce it.
             buildConfigField("boolean", "SCREEN_SECURITY_ENABLED", "false")
@@ -55,17 +56,13 @@ android {
         create("staging") {
             dimension = "environment"
             applicationIdSuffix = ".staging"
-            buildConfigField("String", "KERNEL_BASE_URL", "\"https://staging.samd.example.com/\"")
             buildConfigField("String", "BACKEND_BASE_URL", "\"https://staging.samd.example.com/backend/\"")
-            buildConfigField("String", "ABHA_BACKEND_BASE_URL", "\"https://staging.samd.example.com/abha/\"")
             buildConfigField("String", "ENVIRONMENT", "\"staging\"")
             buildConfigField("boolean", "SCREEN_SECURITY_ENABLED", "true")
         }
         create("prod") {
             dimension = "environment"
-            buildConfigField("String", "KERNEL_BASE_URL", "\"https://api.samd.example.com/\"")
             buildConfigField("String", "BACKEND_BASE_URL", "\"https://api.samd.example.com/backend/\"")
-            buildConfigField("String", "ABHA_BACKEND_BASE_URL", "\"https://api.samd.example.com/abha/\"")
             buildConfigField("String", "ENVIRONMENT", "\"prod\"")
             buildConfigField("boolean", "SCREEN_SECURITY_ENABLED", "true")
         }
@@ -154,6 +151,11 @@ dependencies {
     implementation(libs.okhttp.logging.interceptor)
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    // Fakes the backend HTTP surface for TokenAuthenticator/BearerInterceptor/RetrofitAuthService
+    // tests (single-flight refresh, one-refresh-then-give-up, SAMD-AUTH-1004 handling): real
+    // OkHttp request/response semantics, not a hand-rolled Interceptor.Chain mock. Same okhttp
+    // version already pinned for the production logging-interceptor dependency.
+    testImplementation(libs.okhttp.mockwebserver)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)

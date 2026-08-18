@@ -4,6 +4,7 @@ import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.samdapp.domain.auth.AuthSession
+import com.example.samdapp.domain.auth.SignInResult
 import com.example.samdapp.domain.auth.UserRole
 import com.example.samdapp.presentation.common.isEmulator
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -19,11 +20,17 @@ import javax.inject.Inject
 data class LoginUiState(
     val name: String = "",
     val role: UserRole? = null,
+    val pin: String = "",
     val isSubmitting: Boolean = false,
     val errorMessage: String? = null,
 ) {
-    val canSubmit: Boolean get() = name.isNotBlank() && role != null && !isSubmitting
+    val canSubmit: Boolean get() = name.isNotBlank() && role != null && pin.length in PIN_MIN_LENGTH..PIN_MAX_LENGTH && !isSubmitting
 }
+
+// Mirrors backend/core/app/schemas/auth.py's PIN_MIN_LENGTH/PIN_MAX_LENGTH: early client-side
+// feedback only, the server enforces this again (it is not a trust boundary here).
+private const val PIN_MIN_LENGTH = 6
+private const val PIN_MAX_LENGTH = 12
 
 /** [RequestBiometricAuth] — tapping Sign in doesn't create a session directly; it asks the screen
  *  to run the system biometric/device-credential prompt first (REQ-SEC-03: verified, not just
@@ -37,6 +44,7 @@ sealed interface LoginEffect {
 interface LoginActions {
     fun onNameChange(value: String)
     fun onRoleSelect(role: UserRole)
+    fun onPinChange(value: String)
     fun onSubmit()
 }
 
@@ -59,6 +67,12 @@ class LoginViewModel @Inject constructor(
 
     override fun onRoleSelect(role: UserRole) = _uiState.update { it.copy(role = role, errorMessage = null) }
 
+    override fun onPinChange(value: String) {
+        if (value.length <= PIN_MAX_LENGTH && value.all { it.isDigit() }) {
+            _uiState.update { it.copy(pin = value, errorMessage = null) }
+        }
+    }
+
     override fun onSubmit() {
         val current = _uiState.value
         if (!current.canSubmit) return
@@ -72,12 +86,18 @@ class LoginViewModel @Inject constructor(
         val current = _uiState.value
         val role = current.role ?: return
         viewModelScope.launch {
-            authSession.signIn(current.name.trim(), role)
-            // Reset for the next sign-in: this ViewModel is Activity-scoped (obtained outside
-            // any NavEntry in AppNavHost), so it survives sign-out and would otherwise leave
-            // isSubmitting stuck true — and the previous user's name/role prefilled — for
-            // whoever signs in next.
-            _uiState.value = LoginUiState()
+            when (val result = authSession.signIn(current.name.trim(), role, current.pin)) {
+                is SignInResult.Success ->
+                    // Reset for the next sign-in: this ViewModel is Activity-scoped (obtained
+                    // outside any NavEntry in AppNavHost), so it survives sign-out and would
+                    // otherwise leave isSubmitting stuck true, and the previous user's
+                    // name/role/pin prefilled, for whoever signs in next. Routing to
+                    // Home vs. the PIN-change screen is AppNavHost's job, driven by
+                    // AuthViewModel's session + must-change-pin state, not this ViewModel's.
+                    _uiState.value = LoginUiState()
+                is SignInResult.Failure ->
+                    _uiState.update { it.copy(isSubmitting = false, errorMessage = result.message, pin = "") }
+            }
         }
     }
 
