@@ -112,6 +112,33 @@ class RegisterViewModelTest {
             assertTrue("a masked mobile alone must not satisfy the contact-method rule", !viewModel.uiState.value.canSubmit)
         }
 
+    /** A stale full mobile from a PRIOR profile load must not survive a later load of a
+     *  masked-mobile profile — otherwise it keeps silently satisfying canSubmit for a profile
+     *  that no longer has a usable mobile at all. Only clears while still ABHA-autofilled. */
+    @Test
+    fun `loading a masked-mobile profile clears a stale full mobile from a prior ABHA load`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val repo = FakePatientRepository()
+            val audit = FakeAuditLogger()
+            val fullMobileProfile = testAbhaProfile(abhaId = "11111111111111", name = "First Patient", mobileNumber = "9876543210")
+            val maskedMobileProfile = testAbhaProfile(abhaId = "22222222222222", name = "Second Patient", mobileNumber = "XXXXXX3210")
+            val abhaRepo = FakeAbhaProfileRepository(listOf(fullMobileProfile, maskedMobileProfile))
+            val viewModel = RegisterViewModel(RegisterPatientUseCase(repo), audit, abhaRepo)
+
+            viewModel.loadAbhaProfile(fullMobileProfile.abhaId)
+            advanceUntilIdle()
+            assertEquals("9876543210", viewModel.uiState.value.fields[RegisterField.MOBILE_NUMBER])
+            assertTrue(RegisterField.MOBILE_NUMBER in viewModel.uiState.value.autofilledFields)
+
+            viewModel.loadAbhaProfile(maskedMobileProfile.abhaId)
+            advanceUntilIdle()
+
+            val state = viewModel.uiState.value
+            assertEquals(null, state.fields[RegisterField.MOBILE_NUMBER])
+            assertTrue(RegisterField.MOBILE_NUMBER !in state.autofilledFields)
+            assertEquals("XXXXXX3210", state.maskedAbhaMobile)
+        }
+
     /** The other half of the same rule: once the worker types a real, usable number over the
      *  masked one, it counts normally. */
     @Test

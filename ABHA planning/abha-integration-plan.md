@@ -165,8 +165,12 @@ adapter + state machine (real crypto/token code still exercised where safe). `AB
   **`MIGRATION_13_14`** (DB is at **v13**, not v12 — this doc's earlier "v12"/`MIGRATION_12_13`
   guess was already stale by the time Phase 6c started: v12→v13 was consumed by the syncstate-reset
   session's sync-columns migration. Verify against `app/schemas/.../` directly, never assume from
-  this doc), registered `14.json` schema. **Done, 2026-08-18, Phase 6c Part 1**, migration test run
-  on device (2/2 pass, real SQLCipher-encrypted database).
+  this doc), registered `14.json` schema. **Split completion status by layer, corrected
+  2026-08-18:** `PatientEntity.kt` and `MIGRATION_13_14` are **done**, migration test run on device
+  (2/2 pass, real SQLCipher-encrypted database). `domain/model/Patient.kt` and both entity<->domain
+  mapper functions were deliberately NOT touched in Part 1 (out of that phase's scope, see
+  PROGRESS.md) and remain **not done** — a future session wiring the real use cases (or anything
+  that reads these columns back out as a domain object) needs to add them there too.
 - **UI:** `presentation/abha/` screens keep their MVI shape; add an explicit registration-state enum
   in `AbhaSignUpViewModel` mapping backend states → UI (Idle/IdentityInput/OtpPending/Enrolling/
   MobileVerify/ProfileConfirm/Completed/Failed/Expired). No new nav graph. **Not done** — blocked on

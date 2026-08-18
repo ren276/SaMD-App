@@ -35,40 +35,52 @@ class RetrofitAbhaSource @Inject constructor(
     private val gson = Gson()
 
     override suspend fun startRegistrationSession(): AbhaApiResult<AbhaSessionSnapshot> =
-        call { abhaApiService.startRegistrationSession() }.map { dto ->
-            AbhaSessionSnapshot(sessionId = dto.sessionId, state = parseState(dto.state), expiresAt = dto.expiresAt)
+        call { abhaApiService.startRegistrationSession() }.flatMap { dto ->
+            snapshotOrProtocolViolation(dto.sessionId, dto.state, expiresAt = dto.expiresAt)
         }
 
     override suspend fun submitIdentity(sessionId: String, aadhaarNumber: String): AbhaApiResult<AbhaSessionSnapshot> =
-        call { abhaApiService.submitIdentity(sessionId, AbhaIdentityRequestDto(aadhaarNumber)) }.map { dto ->
-            AbhaSessionSnapshot(sessionId = dto.sessionId, state = parseState(dto.state), maskedMobile = dto.maskedMobile)
+        call { abhaApiService.submitIdentity(sessionId, AbhaIdentityRequestDto(aadhaarNumber)) }.flatMap { dto ->
+            snapshotOrProtocolViolation(dto.sessionId, dto.state, maskedMobile = dto.maskedMobile)
         }
 
-    override suspend fun verifyOtp(sessionId: String, otp: String): AbhaApiResult<AbhaSessionSnapshot> =
-        call { abhaApiService.verifyOtp(sessionId, AbhaOtpRequestDto(otp)) }.map { dto ->
-            AbhaSessionSnapshot(sessionId = dto.sessionId, state = parseState(dto.state))
+    override suspend fun verifyOtp(sessionId: String, otp: String, mobileNumber: String): AbhaApiResult<AbhaSessionSnapshot> =
+        call { abhaApiService.verifyOtp(sessionId, AbhaOtpRequestDto(otp, mobileNumber)) }.flatMap { dto ->
+            snapshotOrProtocolViolation(dto.sessionId, dto.state)
         }
 
     override suspend fun verifyMobileOtp(sessionId: String, otp: String): AbhaApiResult<AbhaSessionSnapshot> =
-        call { abhaApiService.verifyMobileOtp(sessionId, AbhaMobileOtpRequestDto(otp)) }.map { dto ->
-            AbhaSessionSnapshot(sessionId = dto.sessionId, state = parseState(dto.state))
+        call { abhaApiService.verifyMobileOtp(sessionId, AbhaMobileOtpRequestDto(otp)) }.flatMap { dto ->
+            snapshotOrProtocolViolation(dto.sessionId, dto.state)
         }
 
     override suspend fun getSessionState(sessionId: String): AbhaApiResult<AbhaSessionSnapshot> =
-        call { abhaApiService.getSessionState(sessionId) }.map { dto ->
-            AbhaSessionSnapshot(sessionId = dto.sessionId, state = parseState(dto.state), lastError = dto.lastError)
+        call { abhaApiService.getSessionState(sessionId) }.flatMap { dto ->
+            snapshotOrProtocolViolation(dto.sessionId, dto.state, lastError = dto.lastError)
         }
 
     override suspend fun getProfile(sessionId: String): AbhaApiResult<AbhaIdentity> =
         call { abhaApiService.getProfile(sessionId) }.map { it.toDomain() }
 
     /** Backend states are always one of [AbhaTransactionState]'s eleven values
-     *  (`abha-internal-contract.md`'s state machine, confirmed unchanged from the plan doc) — an
-     *  unrecognized string is a contract drift, not a value to silently coerce into some default
-     *  state a caller might mistake for real progress. */
-    private fun parseState(raw: String): AbhaTransactionState =
-        AbhaTransactionState.entries.firstOrNull { it.name == raw }
-            ?: error("Unknown ABHA session state \"$raw\" from backend")
+     *  (`abha-internal-contract.md`'s state machine, confirmed unchanged from the plan doc). An
+     *  unrecognized string is a contract drift — returned as [AbhaApiResult.ProtocolViolation],
+     *  never thrown: throwing here would escape uncaught (this runs inside [flatMap], past
+     *  [call]'s own try/catch), and folding it into a plain [AbhaApiResult.Failure] would blur it
+     *  with a connectivity failure a future caller is allowed to fall back to mock on. */
+    private fun snapshotOrProtocolViolation(
+        sessionId: String,
+        rawState: String,
+        maskedMobile: String? = null,
+        expiresAt: java.time.Instant? = null,
+        lastError: String? = null,
+    ): AbhaApiResult<AbhaSessionSnapshot> {
+        val state = AbhaTransactionState.entries.firstOrNull { it.name == rawState }
+            ?: return AbhaApiResult.ProtocolViolation("Unknown ABHA session state \"$rawState\" from backend")
+        return AbhaApiResult.Success(
+            AbhaSessionSnapshot(sessionId = sessionId, state = state, maskedMobile = maskedMobile, expiresAt = expiresAt, lastError = lastError),
+        )
+    }
 
     private fun AbhaIdentityDto.toDomain() = AbhaIdentity(
         abhaNumber = abhaNumber,
@@ -91,6 +103,13 @@ class RetrofitAbhaSource @Inject constructor(
     private inline fun <T, R> AbhaApiResult<T>.map(transform: (T) -> R): AbhaApiResult<R> = when (this) {
         is AbhaApiResult.Success -> AbhaApiResult.Success(transform(data))
         is AbhaApiResult.Failure -> this
+        is AbhaApiResult.ProtocolViolation -> this
+    }
+
+    private inline fun <T, R> AbhaApiResult<T>.flatMap(transform: (T) -> AbhaApiResult<R>): AbhaApiResult<R> = when (this) {
+        is AbhaApiResult.Success -> transform(data)
+        is AbhaApiResult.Failure -> this
+        is AbhaApiResult.ProtocolViolation -> this
     }
 
     private suspend inline fun <T> call(block: suspend () -> Response<ApiEnvelopeDto<T>>): AbhaApiResult<T> {
