@@ -25,7 +25,7 @@ class BearerInterceptor @Inject constructor(
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
         val path = request.url.encodedPath
-        if (path == LOGIN_PATH || path == REFRESH_PATH) {
+        if (path.endsWith(LOGIN_PATH) || path.endsWith(REFRESH_PATH)) {
             return chain.proceed(request)
         }
 

@@ -19,6 +19,6 @@ import retrofit2.http.POST
  */
 interface KernelApiService {
 
-    @POST("/api/v1/assess")
+    @POST("api/v1/assess")
     suspend fun assess(@Body request: KernelAssessmentRequestDto): ApiEnvelopeDto<KernelAssessmentResponseDto>
 }

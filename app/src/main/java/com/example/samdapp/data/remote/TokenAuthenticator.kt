@@ -38,7 +38,7 @@ class TokenAuthenticator @Inject constructor(
 
     override fun authenticate(route: Route?, response: Response): Request? {
         val path = response.request.url.encodedPath
-        if (path == BearerInterceptor.LOGIN_PATH || path == BearerInterceptor.REFRESH_PATH) return null
+        if (path.endsWith(BearerInterceptor.LOGIN_PATH) || path.endsWith(BearerInterceptor.REFRESH_PATH)) return null
         if (responseCount(response) >= 2) return null
 
         val failedAccessToken = response.request.header("Authorization")?.removePrefix("Bearer ")
