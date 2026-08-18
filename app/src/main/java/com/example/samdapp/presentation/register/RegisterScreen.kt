@@ -158,6 +158,16 @@ internal fun RegisterContent(uiState: RegisterUiState, actions: RegisterActions)
                 )
             }
             items(CORE_FIELDS.drop(1)) { spec -> FieldRow(spec, uiState, actions) }
+            uiState.maskedAbhaMobile?.let { masked ->
+                item {
+                    Text(
+                        text = "ABHA has a masked mobile on file ($masked) — it can't be used as a " +
+                            "contact number. Enter a reachable mobile number above.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
             item {
                 BiologicalSexRow(
                     selected = uiState.biologicalSex,

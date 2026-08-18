@@ -84,6 +84,55 @@ class RegisterViewModelTest {
             assertTrue(RegisterField.MOBILE_NUMBER in state.autofilledFields)
         }
 
+    /** Phase 6c, W2: a masked ABHA mobile (the real ABDM `/profile` shape, `docs/requirements/
+     *  abha-field-mapping.md`) must never satisfy REQ-REG-01's contact-method rule on its own —
+     *  the mock's old fabricated full number was the only reason autofill "satisfied" it before. */
+    @Test
+    fun `a masked ABHA mobile is not autofilled into the field and does not satisfy REQ-REG-01`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val repo = FakePatientRepository()
+            val audit = FakeAuditLogger()
+            val profile = testAbhaProfile(abhaId = "43422151056749", name = "Anita Kumari", mobileNumber = "XXXXXX3210")
+            val abhaRepo = FakeAbhaProfileRepository(listOf(profile))
+            val viewModel = RegisterViewModel(RegisterPatientUseCase(repo), audit, abhaRepo)
+
+            viewModel.loadAbhaProfile(profile.abhaId)
+            advanceUntilIdle()
+
+            val state = viewModel.uiState.value
+            assertEquals(null, state.fields[RegisterField.MOBILE_NUMBER])
+            assertTrue(RegisterField.MOBILE_NUMBER !in state.autofilledFields)
+            assertEquals("XXXXXX3210", state.maskedAbhaMobile)
+
+            // No village/district either (testAbhaProfile's other address fields fill those), so
+            // isolate: clear them to prove the masked mobile alone cannot satisfy canSubmit.
+            viewModel.onFieldChange(RegisterField.VILLAGE, "")
+            viewModel.onFieldChange(RegisterField.DISTRICT, "")
+            viewModel.onFieldChange(RegisterField.FULL_NAME, "Anita Kumari")
+            assertTrue("a masked mobile alone must not satisfy the contact-method rule", !viewModel.uiState.value.canSubmit)
+        }
+
+    /** The other half of the same rule: once the worker types a real, usable number over the
+     *  masked one, it counts normally. */
+    @Test
+    fun `a manually entered real mobile number satisfies REQ-REG-01 after a masked autofill`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val repo = FakePatientRepository()
+            val audit = FakeAuditLogger()
+            val profile = testAbhaProfile(abhaId = "43422151056749", name = "Anita Kumari", mobileNumber = "XXXXXX3210")
+            val abhaRepo = FakeAbhaProfileRepository(listOf(profile))
+            val viewModel = RegisterViewModel(RegisterPatientUseCase(repo), audit, abhaRepo)
+
+            viewModel.loadAbhaProfile(profile.abhaId)
+            advanceUntilIdle()
+            viewModel.onFieldChange(RegisterField.VILLAGE, "")
+            viewModel.onFieldChange(RegisterField.DISTRICT, "")
+            viewModel.onFieldChange(RegisterField.FULL_NAME, "Anita Kumari")
+            viewModel.onFieldChange(RegisterField.MOBILE_NUMBER, "9876543210")
+
+            assertTrue(viewModel.uiState.value.canSubmit)
+        }
+
     @Test
     fun `loadAbhaProfile with unknown abhaId leaves state unchanged`() =
         runTest(mainDispatcherRule.dispatcher) {
