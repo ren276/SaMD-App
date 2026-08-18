@@ -117,6 +117,13 @@ interface SocialHistoryDao {
     @Query("SELECT * FROM social_histories WHERE patientId = :patientId")
     fun observeForPatient(patientId: String): Flow<SocialHistoryEntity?>
 
+    /** `syncstate-reset` session: [upsert] is `REPLACE`, which overwrites the whole row including
+     *  `serverVersion` with whatever the caller's fresh [SocialHistoryEntity] carries (default
+     *  `null`). The caller must read this first and thread it through the replacement entity, or
+     *  a re-edit silently makes an already-synced row look never-synced. */
+    @Query("SELECT serverVersion FROM social_histories WHERE patientId = :patientId")
+    suspend fun getServerVersion(patientId: String): Int?
+
     /** Phase 6b outbox — see PatientDao.getPendingForSync's KDoc. `patientId` IS this table's
      *  primary key (one row per patient), so it doubles as the sync record id. */
     @Query("SELECT * FROM social_histories WHERE syncState = 'PENDING' ORDER BY localModifiedAt ASC")

@@ -2652,3 +2652,269 @@ already-large session.
 ================================================================
 ```
 
+## Android: syncState reset on syncable clinical mutations (2026-08-18)
+
+Branch: syncstate-reset, off master at 0deb5ce (phase-6b already merged). Closes the
+"Known gap" flagged at the end of the Phase 6b entry above: 6b's outbox drains only
+`WHERE syncState = 'PENDING'`, so any mutation path that bumps `localModifiedAt` without
+also resetting `syncState` leaves an already-`SYNCED` row's edit stuck on-device forever.
+
+### S1: exhaustive audit, all 20 syncable tables
+
+Every DAO in `app/src/main/java/com/example/samdapp/data/local/dao/` was read in full — not
+grepped — looking for `@Query` UPDATE statements, `@Update` methods, and
+`@Insert(onConflict = REPLACE)` upserts against an existing row, across all 20 tables from
+MIGRATION_12_13.
+
+| Entity | DAO method | Touches localModifiedAt | Resets syncState (before) | Classification | Action |
+|---|---|---|---|---|---|
+| patients | insert | n/a (new row) | n/a | new-row insert | none |
+| patients | applySyncResult | no | sets from ack | **sync-machinery, leave alone** | none |
+| encounters | insert | n/a | n/a | new-row insert | none |
+| encounters | applySyncResult | no | sets from ack | **sync-machinery, leave alone** | none |
+| consultations | insert | n/a | n/a | new-row insert | none |
+| consultations | applySyncResult | no | sets from ack | **sync-machinery, leave alone** | none |
+| consultations | updateTranscription | yes | **no** | syncable clinical mutation | **fixed** |
+| attachments | insert | n/a | n/a | new-row insert | none |
+| attachments | applySyncResult | no | sets from ack | **sync-machinery, leave alone** | none |
+| observations | insertAll | n/a | n/a | new-row insert | none |
+| observations | applySyncResult | no | sets from ack | **sync-machinery, leave alone** | none |
+| ailments | insert | n/a | n/a | new-row insert | none |
+| ailments | applySyncResult | no | sets from ack | **sync-machinery, leave alone** | none |
+| ailments | markDeleted (soft delete) | yes | **no** | syncable clinical mutation | **fixed** |
+| medical_history_items | insert / applySyncResult | n/a / no | n/a / sets from ack | new-row / **sync-machinery** | none |
+| medication_entries | insert / applySyncResult | n/a / no | n/a / sets from ack | new-row / **sync-machinery** | none |
+| allergies | insert / applySyncResult | n/a / no | n/a / sets from ack | new-row / **sync-machinery** | none |
+| family_history_entries | insert / applySyncResult | n/a / no | n/a / sets from ack | new-row / **sync-machinery** | none |
+| social_histories | upsert (REPLACE) | yes | yes (entity default, incidental) | syncable clinical mutation, **REPLACE wrinkle** | **fixed** (serverVersion preserved) |
+| social_histories | applySyncResult | no | sets from ack | **sync-machinery, leave alone** | none |
+| case_records | insert | n/a | n/a | new-row insert | none |
+| case_records | applySyncResult | no | sets from ack | **sync-machinery, leave alone** | none |
+| case_records | updateStatus | yes | **no** | syncable clinical mutation | **fixed** |
+| case_records | assignDoctor | yes | **no** | syncable clinical mutation | **fixed** |
+| case_records | abandonDraftsForPatient | yes | **no** | syncable clinical mutation (not named by 6b's report) | **fixed** |
+| case_records | sendAllPendingSync | yes | **no** | syncable clinical mutation | **fixed** |
+| kernel_reports | upsert (REPLACE) | yes | yes (entity default, incidental) | syncable clinical mutation, **REPLACE wrinkle** | **fixed** (serverVersion preserved) |
+| kernel_reports | applySyncResult | no | sets from ack | **sync-machinery, leave alone** | none |
+| evaluate_reports | upsert (REPLACE) | yes | yes (entity default, incidental) | syncable clinical mutation, **REPLACE wrinkle** | **fixed** (serverVersion preserved) |
+| evaluate_reports | applySyncResult | no | sets from ack | **sync-machinery, leave alone** | none |
+| diagnosis_feedback | upsert (REPLACE) | yes | yes (entity default, incidental) | syncable clinical mutation, **REPLACE wrinkle** | **fixed** (serverVersion preserved) |
+| diagnosis_feedback | applySyncResult | no | sets from ack | **sync-machinery, leave alone** | none |
+| prescriptions | insertPrescription / applyPrescriptionSyncResult | n/a / no | n/a / sets from ack | new-row / **sync-machinery** | none |
+| medication_lines | insertMedicationLines / applyMedicationLineSyncResult | n/a / no | n/a / sets from ack | new-row / **sync-machinery** | none |
+| referrals | insert / applySyncResult | n/a / no | n/a / sets from ack | new-row / **sync-machinery** | none |
+| referrals | updateStatus | yes | **no** | syncable clinical mutation (currently unreachable — no caller yet, per its own KDoc) | **fixed** |
+| abha_profiles | upsert (REPLACE) | yes | yes (entity default, incidental) | syncable clinical mutation, **REPLACE wrinkle** | **fixed** (serverVersion preserved) |
+| abha_profiles | applySyncResult | no | sets from ack | **sync-machinery, leave alone** | none |
+| audit_log | insert / applySyncResult | n/a / no | n/a / sets from ack | append-only, no mutation ever / **sync-machinery** | none |
+
+Totals: 39 mutating-or-ack methods audited across 20 tables. 20 are `applySyncResult`
+(sync-machinery, verified untouched — see guard test below). 12 are syncable clinical
+mutations that needed the fix: 7 were plain `UPDATE`s missing the reset outright (only 5 of
+these were named by the 6b report — `abandonDraftsForPatient` and `ailments.markDeleted`
+were not), and 5 are `REPLACE`-upsert paths where `syncState` already reset correctly by
+accident (the fresh entity's `syncState` default is `PENDING`) but silently wiped
+`serverVersion` to `null` on every re-save, which is the same class of bug from the other
+direction. No mutation was found where resetting `syncState` was NOT the right call — every
+syncable clinical mutation found does change synced payload content.
+
+### S2: the fix
+
+**Plain UPDATE paths** (`ConsultationDao.updateTranscription`, `AilmentDao.markDeleted`,
+`CaseRecordDao.updateStatus`/`assignDoctor`/`abandonDraftsForPatient`/`sendAllPendingSync`,
+`ReferralDao.updateStatus`): `syncState = 'PENDING'` added to the same `UPDATE` statement that
+already sets `localModifiedAt`, one atomic write. `serverVersion` is never mentioned in these
+statements, so it's untouched by construction — no COALESCE needed, there's nothing here to
+overwrite it.
+
+**REPLACE-upsert paths** (`SocialHistoryDao`, `KernelReportDao`, `EvaluateReportDao`,
+`DiagnosisFeedbackDao`, `AbhaProfileDao`): `@Insert(onConflict = REPLACE)` replaces the whole
+row with whatever entity the caller passes. `syncState` already came out `PENDING` by luck
+(the entity classes' own default), but `serverVersion` needed an explicit carry-forward or
+REPLACE would null it on every re-save — an already-synced row would look never-synced to
+the backend's conflict logic. Each of the 5 DAOs gained a small `getServerVersion(key): Int?`
+query (`AbhaProfileDao` reused its existing `getByAbhaId` instead of adding a new query, since
+it already returns the full row). Each repository (`MedicalBackgroundRepositoryImpl`,
+`KernelReportRepositoryImpl`, `EvaluateReportRepositoryImpl`, `DiagnosisFeedbackRepositoryImpl`,
+`AbhaProfileRepositoryImpl`) now reads the existing `serverVersion` before building the
+replacement entity and threads it through. This was fixable cleanly (one extra suspend read
+per save, no schema change), not the "cannot preserve cleanly" case the brief said to stop
+and report on.
+
+`serverVersion` is preserved, never reset, on every one of the 12 fixed paths — proven per
+path by the S3 tests below (the plain-UPDATE paths never touch the column at all; the
+REPLACE paths assert the pre-edit value survives the round trip).
+
+### S3: tests
+
+`app/src/androidTest/java/com/example/samdapp/data/local/SyncStateResetTest.kt` — new file,
+`Room.inMemoryDatabaseBuilder` (unencrypted in-memory DB, matching `TodaysPatientsDaoTest`'s
+existing convention; SQLCipher is only needed for `MigrationTest12To13`'s real-encryption
+migration path, not plain DAO round-trips). One test per syncable clinical mutation path (12),
+each: insert a row already `SYNCED` with a `serverVersion` set, call the mutation, assert
+`syncState == PENDING`, `localModifiedAt` advanced to the new value, and `serverVersion`
+unchanged from its pre-edit value. Plus one guard test,
+`caseRecordDao_applySyncResult_neverSetsPending_guardAgainstTheInfiniteDrainBug`, proving the
+sync-machinery ack path never writes `PENDING` — representative of all 20 `applySyncResult`
+methods, which share the exact same `UPDATE ... SET syncState = :syncState, ...` shape (6b's
+own convention), so one guard test covers the pattern rather than 20 near-identical repeats.
+
+Plus one composition test,
+`aClinicalEditDuringAnInFlightSync_isNeverLost_lateAckForTheStaleRevisionLeavesRowPending`,
+proving the two mechanisms actually work *together*, not just individually: sync a row to
+`SYNCED`, apply a clinical mutation (reset fires, row -> `PENDING` with a fresh
+`localModifiedAt`), then deliver a late ack still carrying the OLD `sentLocalModifiedAt` —
+PR#6's revision guard (CodeRabbit finding #1) rejects it as a stale-revision no-op, so the row
+stays `PENDING` rather than getting stamped `SYNCED` for content the server never received.
+This is the one test that proves "a clinical edit during sync is never lost" end to end,
+separate from the plain guard test above (which only proves an ack never *introduces* PENDING,
+not that a stale ack can't wrongly *clear* it).
+
+14 tests total in the file: 12 round-trip + 1 guard + 1 composition.
+
+Per-DAO, not table-driven: the 12 round-trip paths differ too much in entity shape (REPLACE vs plain
+UPDATE, different primary keys, different clinical fields) for one parameterized test to stay
+readable — matches `TodaysPatientsDaoTest`'s one-test-per-scenario shape rather than forcing a
+table.
+
+**Not executed**: `adb devices` returns empty in this sandbox — no emulator/device attached
+(same environment limitation the Phase 6b entry above already noted for its own androidTest
+gap). The file compiles clean (`compileDevDebugAndroidTestKotlin`, 0 errors) and follows the
+exact same Room in-memory pattern `TodaysPatientsDaoTest` already runs under in this repo's
+CI/dev-emulator path, but was not runtime-verified locally.
+
+### S4: verify
+
+- `testDevDebugUnitTest`: 171 -> 171, 0 failures (unaffected — the fix and its tests are all
+  DAO/androidTest-layer; no JVM-testable production code changed shape besides the five
+  repositories, which stayed source-compatible everywhere except the four small helper
+  functions that needed a new `serverVersion` parameter, already updated).
+- All three flavors build clean: `assembleDevDebug`, `assembleStagingDebug`,
+  `assembleProdDebug`.
+- `serverVersion` preservation: PROVEN per REPLACE path by the S3 tests (asserted unchanged
+  across the upsert), and by construction for the 7 plain-UPDATE paths (the column never
+  appears in those `SET` clauses).
+- `applySyncResult` sync-machinery paths: left byte-for-byte as 6b/PR#6 built them (no diff to
+  any `applySyncResult` method in this session), PROVEN by the guard test.
+- REPLACE-upsert paths needing special handling: all 5 (`social_histories`, `kernel_reports`,
+  `evaluate_reports`, `diagnosis_feedback`, `abha_profiles`) — all fixed cleanly, none needed a
+  "stop and report" schema change.
+- Paths where the reset was NOT obviously correct: none found. Every syncable clinical
+  mutation audited does change content that's part of the synced payload.
+- Divergence from the brief: none. The audit found 7 more paths than the 5 the 6b report
+  named (`abandonDraftsForPatient`, `markDeleted`, and the 5 REPLACE-upsert serverVersion
+  wrinkles) — that's the "and likely others" count made exact, not a divergence.
+
+`docs/sync-design.md` and `docs/requirements/traceability-matrix.md` updated (see their own
+diffs) to note the producer-side reset is complete: REQ-SYN-02's push side is now genuinely
+end-to-end — a synced row that is clinically re-edited re-drains on the next outbox run.
+
+```text
+================================================================
+  CHECKPOINT: syncState-reset producer-side fix COMPLETE
+================================================================
+  S1 audit: 39 mutating-or-ack methods across 20 syncable tables. 12 needed
+    the fix (7 plain-UPDATE resets, 5 REPLACE-upsert serverVersion-preservation
+    fixes) against the 5 the 6b report named — "and likely others" is now
+    exactly 7 more, not a guess.
+  Every syncable clinical mutation now resets syncState=PENDING in the same
+    statement as localModifiedAt (plain-UPDATE paths) or inherits it correctly
+    from the REPLACE entity's own default (REPLACE paths) — PROVEN per-path
+    by SyncStateResetTest.kt (12 tests).
+  serverVersion PRESERVED on every re-edit, never nulled — PROVEN by the same
+    12 tests (REPLACE paths assert it survives the round trip; plain-UPDATE
+    paths never touch the column).
+  applySyncResult sync-machinery paths left untouched — PROVEN by one guard
+    test (all 20 share one UPDATE shape from 6b/PR#6).
+  REPLACE-upsert paths needing special handling: social_histories,
+    kernel_reports, evaluate_reports, diagnosis_feedback, abha_profiles — all
+    fixed cleanly (serverVersion read-before-replace), none needed to stop
+    and report a schema change.
+  Paths where the reset was NOT obviously correct: none.
+  testDevDebugUnitTest: 171 -> 171, 0 failures. All three flavors build clean.
+  androidTest (SyncStateResetTest.kt, 14 tests incl. the reset+ack-guard
+    composition test): written, compiles clean, NOT
+    run — no device/emulator attached (adb devices: empty), same limitation
+    as Phase 6b's own androidTest gap.
+  Divergence from this brief: none.
+
+  NEXT: Phase 6c ABHA wiring. DO NOT PROCEED. Wait for the operator.
+================================================================
+```
+
+## HARD GATE: instrumented tests never executed - run before ANY deployment
+
+**UPDATE 2026-08-18, same day: discharged.** An emulator became available in this session
+and every suite below was run via `./gradlew :app:connectedDevDebugAndroidTest`.
+27 of 28 tests passed. Full per-suite results:
+
+- `SyncStateResetTest`: 14/14 pass. Both correctness-critical assertions flagged below are
+  now PROVEN on a real SQLCipher-encrypted Room database, not just JVM-adjacent: serverVersion
+  survives the REPLACE-upsert read-before-write on all 5 DAOs, and the composition test proves
+  a clinical edit during an in-flight sync is never lost.
+- `MigrationTest12To13`: 2/2 pass.
+- `MigrationTest`: 4/4 pass.
+- `TodaysPatientsDaoTest`: 2/2 pass.
+- `RegisterScreenTest`: 3/3 pass.
+- `CompounderScreenTest`: **2/3 pass, 1 FAILED** —
+  `typingChiefComplaintReportsTheChange`: `performTextInput` cannot find a node matching
+  "Chief complaint *" (`EditableText`/`InputText` semantics). This is the exact failure mode
+  this gate existed to catch: a test that compiled clean and never ran, and was broken the
+  first time it actually did. Unrelated to the syncstate-reset branch (nothing here touches
+  the Compounder screen) — not fixed as part of this session, left for the operator to
+  triage as its own item, not silently patched under an unrelated branch.
+
+Original gate text (why this was unverified) kept below for context.
+
+Every `androidTest` suite in this repo is written and compiles clean, but NONE of them have
+ever run, in this session or any prior one. This build environment has no device or
+emulator (`adb devices` returns empty). The repo's DAO tests need `androidx-room-testing`
+(`Room.inMemoryDatabaseBuilder`, `MigrationTestHelper`), which is `androidTestImplementation`-
+only, and `AppDatabase` itself is built through SQLCipher's `SupportOpenHelperFactory`, which
+loads a native `.so` via `System.loadLibrary("sqlcipher")` that only exists on a real device or
+emulator, never on the JVM `testDevDebugUnitTest` process. Moving any of this to a JVM unit
+test would mean adding Robolectric or a bundled-SQLite driver as new test infrastructure, a
+decision for the operator, not something to slip into any of these branches unasked.
+
+Every one of the following MUST pass on a real device or emulator before this system is
+trusted with clinical data and before any deployment. A failure in any of them on first real
+run is a latent bug that has been sitting behind a green-looking history the whole time -
+`testDevDebugUnitTest` passing has never meant these were exercised.
+
+| File | Tests | What it proves | Why non-execution matters |
+|---|---|---|---|
+| `data/local/SyncStateResetTest.kt` | 14 (12 round-trip, 1 `applySyncResult` guard, 1 composition) | syncstate-reset session (this branch): every syncable clinical mutation resets `syncState` to `PENDING` with `serverVersion` preserved; the sync-machinery ack path never sets `PENDING`; a clinical edit during an in-flight sync is never silently lost | The two correctness-critical assertions below are entirely unverified. This is the single highest-value suite to run first. |
+| `data/local/MigrationTest12To13.kt` | 2 | `MIGRATION_12_13` backfills `localModifiedAt`/defaults `syncState` correctly across all 20 syncable tables against a real SQLCipher-encrypted database, and a fresh v13 install matches the same exported schema | If this migration is wrong on a real encrypted DB (as opposed to the plaintext-only coverage `MigrationTest` gives migrations 1-8), every existing installed device silently corrupts its sync bookkeeping on upgrade. This is the exact failure mode the file's own KDoc says already happened once (`DatabasePassphraseProvider` upgrade bug). |
+| `data/local/MigrationTest.kt` | 4 | Migrations 1 through 8 apply cleanly against a plaintext test database | Plaintext-only coverage; still never run against the app's actual encrypted on-device schema for these versions either. |
+| `data/local/TodaysPatientsDaoTest.kt` | 2 | REQ-ROS-01/02: the only patient-list query is date-bounded, dedupes multi-encounter patients, orders by most recent, excludes out-of-window/encounter-less patients | This is the data-minimisation guarantee (no code path can pull the full patient table). Unverified means the roster's privacy boundary is unverified. |
+| `presentation/compounder/CompounderScreenTest.kt` | 3 | Compounder screen's Compose UI: field interactions, scroll-to-node, submit flow | UI-layer only, lower clinical-data risk than the DAO suites above, but still zero real-device execution. |
+| `presentation/register/RegisterScreenTest.kt` | 3 | Register screen's Compose UI: field interactions, scroll-to-node, submit flow | Same as above. |
+
+Total: 6 files, 28 tests, 0 executions. This also includes Phase 6b's WorkManager/
+`SyncPushWorker` wiring: it has no dedicated androidTest file of its own (compiled and
+Hilt-DI-graph-validated only, per the Phase 6b entry above), so its real-device gap is not a
+missing test to write but a missing *run* of the whole flow end to end on a device, separate
+from and in addition to the file list above.
+
+**Two assertions in `SyncStateResetTest` are correctness-critical and unverified:**
+
+1. **`serverVersion` preservation across the 5 REPLACE-upsert DAOs** (`SocialHistoryDao`,
+   `KernelReportDao`, `EvaluateReportDao`, `DiagnosisFeedbackDao`, `AbhaProfileDao`): each
+   repository now reads the existing `serverVersion` before building the replacement row that
+   `@Insert(onConflict = REPLACE)` writes. If that read-before-write is wrong in a way the
+   in-memory JVM-adjacent Room engine doesn't surface but the real on-device SQLCipher engine
+   does, a nulled `serverVersion` silently mis-drives the conflict path on the next push. This
+   would not surface until a real re-edit-then-sync in the field, past the point PROGRESS.md
+   tracking would still catch it.
+2. **The composition test** (`aClinicalEditDuringAnInFlightSync_isNeverLost_...`): a row synced
+   to `SYNCED`, then clinically edited (reset fires, row -> `PENDING`, new `localModifiedAt`),
+   then hit with a late ack still carrying the OLD `sentLocalModifiedAt`, must stay `PENDING`.
+   This is the one test proving PR#6's ack-revision guard (CodeRabbit finding #1) and this
+   session's syncState reset compose into "a clinical edit during sync is never lost" -
+   the single most important unrun test in the repo. Everything else in this branch is
+   validated by SQL review and JVM-adjacent behavior; this specific interaction has never
+   actually executed against Room/SQLite.
+
+Discharge this gate in one deliberate on-device pass (real device or emulator), not
+piecemeal - the value of listing it here is that the whole backlog is visible in one place.
+

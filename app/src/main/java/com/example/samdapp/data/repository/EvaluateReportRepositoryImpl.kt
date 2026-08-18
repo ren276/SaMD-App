@@ -39,6 +39,11 @@ class EvaluateReportRepositoryImpl @Inject constructor(
             safetyAndTriage = report.safetyAndTriage,
             topIndianBrand = report.topIndianBrand,
         )
+        // upsert() is REPLACE: without this read, a re-saved report would silently wipe
+        // serverVersion (syncstate-reset session). syncState needs no explicit reset —
+        // EvaluateReportEntity's default is already PENDING, and REPLACE always writes the full
+        // default set.
+        val existingServerVersion = evaluateReportDao.getServerVersion(report.id)
         evaluateReportDao.upsert(
             EvaluateReportEntity(
                 id = report.id,
@@ -47,6 +52,7 @@ class EvaluateReportRepositoryImpl @Inject constructor(
                 inferenceStartedAt = report.inferenceStartedAt,
                 inferenceEndedAt = report.inferenceEndedAt,
                 localModifiedAt = Instant.now(),
+                serverVersion = existingServerVersion,
             ),
         )
     }

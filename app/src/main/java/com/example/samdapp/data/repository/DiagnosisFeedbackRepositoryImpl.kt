@@ -13,6 +13,11 @@ class DiagnosisFeedbackRepositoryImpl @Inject constructor(
 ) : DiagnosisFeedbackRepository {
 
     override suspend fun save(feedback: DiagnosisFeedback): Result<Unit> = asDataResult {
+        // upsert() is REPLACE: without this read, a re-saved feedback would silently wipe
+        // serverVersion (syncstate-reset session). syncState needs no explicit reset —
+        // DiagnosisFeedbackEntity's default is already PENDING, and REPLACE always writes the
+        // full default set.
+        val existingServerVersion = diagnosisFeedbackDao.getServerVersion(feedback.id)
         diagnosisFeedbackDao.upsert(
             DiagnosisFeedbackEntity(
                 id = feedback.id,
@@ -23,6 +28,7 @@ class DiagnosisFeedbackRepositoryImpl @Inject constructor(
                 clinicalNote = feedback.clinicalNote,
                 createdAt = feedback.createdAt,
                 localModifiedAt = Instant.now(),
+                serverVersion = existingServerVersion,
             ),
         )
     }
