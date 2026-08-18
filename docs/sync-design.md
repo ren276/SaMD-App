@@ -14,9 +14,25 @@
 > `sync_error_code`/`last_sync_attempt_at`/`local_modified_at` on all 20 syncable entities per
 > api-contract.md §6.1's Android handling rule. Schema only, nothing reads or writes it yet: no
 > DAO queries over it, no repository sets it, `MockSyncStatus`/`CaseStatus.PENDING_SYNC`/
-> `synced_to_cloud_at` untouched. Still not built: `WorkManager`/a real backend, conflict
-> resolution, and purge-on-sync minimisation (§2 items 2-5 below). The seam is still the
-> `SyncStatus` domain interface.
+> `synced_to_cloud_at` untouched. **Update 2026-08-18 (Phase 6b):** §2 item 2 (outbox/WorkManager)
+> is now built — `MockSyncStatus` is gone, replaced by `SyncStatusImpl` driving a real
+> `SyncPushWorker` (`@HiltWorker` `CoroutineWorker`, connectivity constraint + exponential
+> backoff) that drains every table's `PENDING` rows to `POST /api/v1/sync/push`, batched under a 400-
+> record/4.5 MB budget (headroom under the backend's 500/5 MB ceiling, so the first-sync drain —
+> months of `PENDING` history across 20 tables — can never trip a 413). Crash-safety: an
+> in-flight batch's `batch_id` and member rows are persisted before sending
+> (`InFlightBatchStore`) and only cleared once its ack is applied, so a process death between
+> "backend applied" and "ack recorded" resumes under the *same* batch_id next run and the
+> backend's idempotent replay leaves exactly one applied copy. `conflict` acks move a row to a
+> new `CONFLICT` state (surfaced, not silently overwritten, not auto-retried); `rejected` acks
+> move it to `FAILED` with the SAMD-SYNC-6xxx code stored, and `SyncState.failedCount` makes that
+> count queryable (no Phase 7 UI yet). `CaseStatus.PENDING_SYNC`'s own doctor-assignment queue is
+> untouched — a wholly separate concern sharing `case_records` with the generic `syncState`
+> transport column, confirmed not to fight (draining touches only `syncState`/`serverVersion`/
+> `syncErrorCode`/`lastSyncAttemptAt`, never `status`). Still not built: §2 items 3-5 (conflict
+> *field-level* merge, `RemoteMediator`/pull, purge-on-sync) and `RetrofitPatientSource` (no
+> patient POST/PATCH path yet — the outbox drains what `MIGRATION_12_13` already created, not a
+> new write path). The seam is still the `SyncStatus` domain interface, unchanged.
 
 ## 1. Requirement (as described)
 
@@ -52,9 +68,11 @@ being lost; a separate full-image backup is redundant for that purpose. Use the 
    500-record/5 MB batch limit. Local writes will be immediate and marked `PENDING`; this
    replaces the whole-DB snapshot, since the "backup" is simply that durable, transactional
    rows persist locally until confirmed synced. Nothing sets or reads these columns yet.
-2. **Outbox / RemoteMediator.** A background `WorkManager` job (connectivity constraint +
-   exponential backoff) pushes `PENDING` records when online, idempotently, and marks them
-   `SYNCED` on server ack. Room 3 `RemoteMediator` is the idiomatic fit for the read side.
+2. **Outbox, DONE 2026-08-18 (push side only, Phase 6b).** A background `WorkManager` job
+   (connectivity constraint + exponential backoff, `SyncPushWorker`) packs and pushes `PENDING`
+   records when online, idempotently (persisted in-flight `batch_id`, reused on crash-resume),
+   and marks them `SYNCED`/`CONFLICT`/`FAILED` per api-contract.md §6.1's Android handling rule.
+   `RemoteMediator` (the pull/read side) is still not built — Phase 3 of the sync roadmap.
 3. **Conflict resolution.** Start with last-write-wins keyed on `localModifiedAt` (mapped to
    `client_updated_at` on the wire) + `serverVersion`; escalate to field-level merge or vector
    clocks only if real conflicts appear. Sync must be

@@ -2374,3 +2374,281 @@ ABDM activation (separately gated on sandbox credentials) needs D1's cert URL an
 regex re-verified against real ABDM responses before being trusted, per `backend-prd.md`'s phase
 table.
 
+## Android Phase 6b: sync outbox (2026-08-18)
+
+Branch `phase-6b`, off `master` at `d748ec7` (PR #5's merge commit) — `phase-6a` was already
+merged to `master` before this session started (`git merge-base --is-ancestor phase-6a master`
+confirmed), and `phase-6b` sat at the exact same commit as `master` with zero drift, so no
+restacking onto `phase-6a` directly was needed; the auth/network foundation it depends on is
+already present. Second of three Phase 6 sessions; 6c (ABHA wiring) is next.
+
+### The outbox query layer
+
+Per-entity, matching the repo's existing per-DAO-file convention (confirmed no unified/raw-SQL
+query exists anywhere in this codebase before this session — genuinely new ground). Each of the
+19 DAOs covering the 20 syncable tables (`PrescriptionDao` covers two: `prescriptions` and
+`medication_lines`) gets three new methods: `getPendingForSync()` (`WHERE syncState = 'PENDING'
+ORDER BY localModifiedAt ASC`), `applySyncResult(...)` (an `UPDATE` touching only `syncState`/
+`serverVersion`/`syncErrorCode`/`lastSyncAttemptAt`, with `serverVersion = COALESCE(:new,
+serverVersion)` so a `conflict`/`rejected` ack — which carries no fresh version — never wipes one
+from a prior successful sync), and `observeFailedSyncCount()`. `RoomSyncOutboxRepository`
+aggregates all 19 DAOs behind one `SyncOutboxRepository` seam (`collectPendingRecords`/
+`applyAck`/`observeFailedCount`), deliberately a `data`-layer interface, not `domain/repository`:
+its shape is the wire record, not a domain model.
+
+Each entity gets a `toXyz().toSyncRecord(): SyncRecordDto` mapper (`SyncRecordMappers.kt`) into a
+hand-written per-table payload DTO (`SyncPayloadDto.kt`, 20 classes, explicit `@SerializedName`
+per field — matching this package's existing convention, `EvaluateReportDto.kt`'s own "do not
+replace with a `FieldNamingPolicy`" warning is why a generic Gson-reflected-off-the-entity payload
+was rejected as the lazier option). Every field name and exclusion was cross-checked directly
+against `backend/core/app/services/sync.py`'s `TABLE_REGISTRY` and the SQLAlchemy models under
+`backend/core/app/models/`, not just api-contract.md's one illustrative example — this is what
+caught the divergence below.
+
+### Divergence found: the brief's forbidden-field list was wrong about `attachments.uri`
+
+The brief says `attachments.uri` "must NOT be sent; the backend rejects them (SAMD-SYNC-6006)",
+same as `ailments.audio_local_uri`. Reading the actual backend boundary
+(`backend/core/app/services/sync.py`'s `TABLE_REGISTRY`) shows this is false:
+`"attachments": TableSpec(4, Attachment, aliases={"uri": "local_uri"})` — the backend *aliases*
+the wire key `uri` to its own `local_uri` column and accepts it normally. Only
+`ailments.audio_local_uri` is genuinely forbidden (`forbidden={"audio_local_uri":
+ErrorCode.SYNC_FORBIDDEN_FIELD}`). api-contract.md §6.1 itself agrees with the code, not the
+brief: its own forbidden-field table lists only `audio_local_uri`, and its attachments note
+explains the `uri` -> `local_uri` alias directly. Built per the verified repo truth (api-contract
++ backend code): `AttachmentSyncPayloadDto.uri` is sent under the wire key `uri`, not excluded.
+Flagging loudly per this brief's own instruction ("api-contract.md: only if implementation
+revealed the contract wrong; if so, flag loudly") — except here it was the *session brief* that
+was wrong, not api-contract.md, which was already correct. `SyncRecordMappersTest` locks this in
+(`attachment uri is sent under the wire key uri, not renamed to local_uri`).
+
+### The batch packer
+
+`SyncBatchPacker` (pure, `@Inject`-able, no I/O): packs a `List<SyncRecordDto>` into
+`SyncBatch(batchId, records)`, closing a batch and minting a fresh UUID whenever the next record
+would push it past 400 records or 4.5 MB of *actual* serialized bytes (summed via the same
+[Gson] instance — `SyncGson.create()` — the real Retrofit call uses, not an estimate; the 0.5 MB
+gap to the backend's real 5 MB ceiling is deliberate headroom for the request envelope's own
+`batch_id`/`device_id`/`client_time` overhead, which the per-record sum doesn't include). Headroom
+under the backend's real 500-record/5 MB ceiling (`SyncBatchPacker.init` asserts this at class-load
+time) makes the first-sync drain structurally incapable of tripping a 413 — no
+retry-with-smaller-batch fallback exists anywhere, because none is needed.
+
+### Crash-resume: the subtlest correctness point, built as designed
+
+`InFlightBatchStore` (a new, separate Preferences DataStore file, `sync_outbox` — not sharing
+`DataStoreAuthTokenStore`'s `auth_session` file, unrelated concern) persists a batch's `batch_id`
+and its member `(table, id)` list *before* that batch is sent, and clears it only once that
+batch's ack has been applied locally. `SyncOutboxDrainer.drain()` checks this first on every run:
+if a batch is still marked in-flight, it re-fetches those specific rows (still `PENDING`, since
+they're only marked otherwise after a recorded ack) and resends them under the *same* persisted
+`batch_id` — never minting a fresh one on retry. The backend's idempotency store
+(api-contract.md §6.1, unconditional in the actual code —
+`backend/core/app/services/sync.py`'s `push()` returns `existing_batch.response_json` verbatim on
+a `batch_id` hit with no time-bound check in the code path, despite the doc's "within 24 hours"
+wording; worth the backend team re-confirming that's intentional) answers the replay with the
+original stored response rather than re-applying, so the row ends up applied exactly once.
+
+### Malformed rows (`rejected`) and the FAILED surface
+
+`SyncAckMapping.kt`'s `toLocalSyncState()` is the one place api-contract.md §6.1's Android
+handling rule lives, table-driven: `applied`/`stale`/`duplicate` -> `SYNCED` (serverVersion
+updated when present); `conflict` -> a new `CONFLICT` `SyncState` value (surfaced, never silently
+overwritten, never auto-retried — `collectPendingRecords()` only ever selects `PENDING`);
+`rejected` -> `FAILED`, with the returned SAMD-SYNC-6xxx code stored in `syncErrorCode`. A
+`FAILED` row is structurally excluded from the next `getPendingForSync()` call, which *is* "stop
+retrying" — no separate retry-count column needed. `domain/sync/SyncStatus.kt`'s `SyncState` data
+class gained one additive field, `failedCount: Int = 0` (default-valued, so this isn't a breaking
+change to the two-member `SyncStatus` interface itself, which is unchanged), sourced from
+`SyncOutboxRepository.observeFailedCount()` (a `combine` over all 19 DAOs' per-table FAILED
+counts). No Phase 7 UI built — this only makes the count queryable, per the brief.
+
+### The WorkManager worker and SyncStatusImpl
+
+`androidx.work:work-runtime-ktx` + `androidx.hilt:hilt-work` added fresh (`gradle/libs.versions.
+toml`, `app/build.gradle.kts`) — no `@HiltWorker` existed anywhere in this codebase before this
+session, genuinely new plumbing. `SyncPushWorker` (`@HiltWorker` `CoroutineWorker`) is
+deliberately thin: it calls `SyncOutboxDrainer.drain()` (which has no WorkManager/Android
+dependency itself) and translates the `Result<Unit>` to WorkManager's own `Result` vocabulary.
+`WorkManagerSyncOutboxScheduler` enqueues a connectivity-constrained, exponential-backoff periodic
+job (`ensurePeriodicWork`, `KEEP` policy, called from `SyncStatusImpl.init`) and a one-time job for
+"sync now" (`runNowAndAwait`) that awaits only the *first attempt's* outcome rather than
+WorkManager's full backoff-retry schedule (`WorkInfo.State` has no bound on retry count, so a
+naive await-until-terminal could block through several backoff cycles) — the underlying request
+keeps retrying under WorkManager's own backoff afterward regardless of whether `syncNow()`'s
+caller is still listening. `SaMDApplication` now implements `Configuration.Provider` (injects
+`HiltWorkerFactory`), and `AndroidManifest.xml` removes WorkManager's default androidx-startup
+self-initialization (which would otherwise construct WorkManager with the stock factory first and
+crash on the first `@HiltWorker`).
+
+`MockSyncStatus`/`MockSyncStatusTest` deleted outright, replaced by `SyncStatusImpl`/
+`SyncStatusImplTest`. The six original behaviors are ported unchanged in substance (offline
+refusal, auto-sync-on-online-transition with the same `drop(1)` startup guard, pendingCount
+reading the real doctor-assignment queue) with a `FakeSyncOutboxScheduler`/
+`FakeSyncOutboxRepository` standing in for the two new dependencies so these stay plain-JVM, not
+instrumented. `syncNow()` now also triggers the generic outbox drain
+(`syncOutboxScheduler.runNowAndAwait()`) alongside the untouched `caseRecordRepository.
+sendAllPendingCases()` call — both run every time, and both are proven not to fight: draining a
+`case_records` row's transport `syncState` (`RoomSyncOutboxRepository.applyAck` ->
+`CaseRecordDao.applySyncResult`) touches only `syncState`/`serverVersion`/`syncErrorCode`/
+`lastSyncAttemptAt`, never the clinical `status` column `assignDoctor`/`sendAllPendingCases`/
+`updateStatus` own.
+
+### First-sync drain and crash-resume, PROVEN (JVM, not instrumented — see below)
+
+`SyncOutboxDrainerTest`'s three cases, run against `FakeSyncPushService` (models the backend's
+own idempotency store closely enough to prove "exactly one applied copy" for real, not assert a
+mock was called once) and `FakeSyncOutboxRepository`:
+- **Large backlog:** 1200 synthetic records (well over the 400-record budget) drain in multiple
+  HTTP calls, every one ends up in `syncedIds` (1200/1200, `toSet()` size also 1200 — none
+  doubled, none dropped), every call's record count `<= MAX_RECORDS`, and the in-flight marker is
+  cleared at the end. `SyncBatchPackerTest` separately proves the byte-budget boundary (a 100-
+  record backlog padded past 4.5 MB splits purely on bytes, under 400 records) and the
+  exactly-at-limit/one-over/single-oversized-record/empty edge cases the brief named explicitly.
+- **Crash-resume:** first `SyncOutboxDrainer` instance sends a batch, the fake records it as
+  backend-applied (so a same-`batch_id` replay is answered from its stored-response map) and then
+  throws — simulating the process dying between "backend applied" and "ack recorded". A second,
+  fresh `SyncOutboxDrainer` instance ("process restarted") resumes: `store.stored?.batchId` is
+  asserted to match what the fake actually saw, `push()` is called twice for that one `batch_id`
+  (crashed once, replayed once), and `repository.syncedIds.size == 3` — not 6 — proves the replay
+  didn't double-apply.
+- **Malformed row:** one of three records is configured to come back `rejected` (`SAMD-SYNC-
+  6003`); the batch still succeeds overall (`result.isSuccess`), the bad row lands in
+  `repository.failedIds` with its code in `failedCodes`, and a second `drain()` call with the
+  push-call list cleared proves it is never resent.
+
+### Testing: JVM only, no device or emulator in this environment
+
+`adb devices` returns no attached device in this sandbox, so no `androidTest` (instrumented) run
+was possible — the `SyncPushWorker`/`WorkManagerSyncOutboxScheduler`/`SaMDApplication.
+Configuration.Provider` wiring is built and compiles (`hiltJavaCompileDevDebug` succeeded, which
+validates the full Hilt dependency graph including `@HiltWorker`) but is not runtime-verified
+against real WorkManager or a real device. Every other Phase 6b claim above — packer boundaries,
+ack-status mapping, forbidden-field/wire-shape exclusion, large-backlog drain, crash-resume
+batch_id reuse, malformed-row handling, and all six ported `SyncStatus` behavioral parities — runs
+as a plain JVM test (`testDevDebugUnitTest`), deliberately designed that way (`SyncOutboxDrainer`
+and `SyncStatusImpl` both take interface-typed dependencies — `SyncPushService`,
+`SyncOutboxScheduler`, `SyncOutboxRepository`, `InFlightBatchStore` — precisely so the correctness
+logic doesn't require Robolectric or a device to prove). No `MockWebServer`/real-backend
+integration run either: no local backend was reachable in this environment (same limitation Phase
+6a's kernel-rebase section hit). `testDevDebugUnitTest`: 144 -> 168 (30 new: 7 `SyncBatchPackerTest`
++ 6 `SyncAckMappingTest` + 5 `SyncRecordMappersTest` + 3 `SyncOutboxDrainerTest` + 9
+`SyncStatusImplTest`, minus 6 deleted `MockSyncStatusTest`), 0 failures.
+
+### Files changed
+
+New: `data/remote/dto/SyncPushDto.kt`, `data/remote/dto/SyncPayloadDto.kt` (20 payload classes),
+`data/remote/SyncGsonAdapters.kt` (`Instant`/`LocalDate` adapters + `SyncGson.create()`, the one
+place this Gson config is built, shared by `NetworkModule.provideGson()` and every test that
+needs to assert the real wire shape), `data/remote/SyncPushResult.kt`, `data/remote/
+SyncPushService.kt` + `RetrofitSyncPushService.kt`, `data/remote/api/SyncPushApiService.kt`,
+`data/sync/SyncRecordMappers.kt`, `data/sync/SyncBatchPacker.kt`, `data/sync/InFlightBatchStore.kt`,
+`data/sync/SyncOutboxRepository.kt` + `RoomSyncOutboxRepository.kt`, `data/sync/
+SyncAckMapping.kt`, `data/sync/SyncOutboxDrainer.kt`, `data/sync/SyncPushWorker.kt`, `data/sync/
+SyncOutboxScheduler.kt` + `WorkManagerSyncOutboxScheduler.kt`, `data/sync/SyncStatusImpl.kt`
+(replaces deleted `MockSyncStatus.kt`). Modified: `domain/sync/SyncStatus.kt` (`failedCount`
+field), `di/NetworkModule.kt` (`provideGson`, `SyncPushApiService`, `SyncPushService` binding),
+`di/RepositoryModule.kt` (`SyncStatusImpl`/`SyncOutboxScheduler`/`SyncOutboxRepository`/
+`InFlightBatchStore` bindings, `MockSyncStatus` binding removed), `SaMDApplication.kt`
+(`Configuration.Provider`), `AndroidManifest.xml` (WorkManager self-init removed), 19 DAO files
+(3 new methods each, 20 tables), `gradle/libs.versions.toml` + `app/build.gradle.kts` (WorkManager/
+hilt-work deps). Tests: `SyncBatchPackerTest.kt`, `SyncAckMappingTest.kt`,
+`SyncRecordMappersTest.kt`, `SyncOutboxDrainerTest.kt`, `SyncStatusImplTest.kt`, `testutil/
+SyncFakes.kt` (new); `testutil/Fakes.kt` + `VitalsRepositoryImplTest.kt`'s `FakeObservationDao`
+(3 new interface methods each, to keep compiling against the widened DAO interfaces); deleted
+`MockSyncStatus.kt` + `MockSyncStatusTest.kt`.
+
+### Known gap found, not fixed (out of this brief's stated scope)
+
+Several existing `UPDATE`-style DAO mutations across the app (`CaseRecordDao.updateStatus`/
+`assignDoctor`/`sendAllPendingSync`, `ConsultationDao.updateTranscription`, `ReferralDao.
+updateStatus`, and likely others) stamp `localModifiedAt` on a clinical mutation but do **not**
+reset `syncState` back to `PENDING`. For a row that has never synced this is harmless (it's
+already `PENDING`), but for a row that syncs once and is mutated again afterward, it would stay
+`SYNCED` forever and never re-drain — silently stale server data, not corrupted data, but a real
+gap. This predates Phase 6b (`MIGRATION_12_13`'s own KDoc already noted "nothing reads or writes
+sync_state yet") and this brief's explicit scope is draining what is already `PENDING`, not
+auditing every mutation path across the app for a missing reset. Flagging per "stop and report
+rather than pulling it in" instead of silently fixing an unbounded number of call sites under an
+already-large session.
+
+### Divergences from this brief
+
+1. `attachments.uri` forbidden-field claim was wrong (see the dedicated section above) — built
+   per the verified backend/api-contract truth instead.
+2. No instrumented/`androidTest`/`MockWebServer`/real-backend run: no device, emulator, or
+   reachable local backend in this environment. All correctness claims proven as plain JVM tests
+   against fakes designed to be behaviorally equivalent (see "Testing" above); the WorkManager/
+   Hilt-worker wiring itself compiles and is DI-graph-validated but not runtime-exercised.
+3. The pre-existing "clinical mutation doesn't reset syncState" gap (above) is reported, not
+   fixed — genuinely out of this brief's stated scope.
+4. No scope creep beyond what's listed above (the `AuthTokenStore`-shaped interface/impl splits
+   for `SyncOutboxRepository`/`SyncOutboxScheduler`/`InFlightBatchStore`/`SyncPushService` mirror
+   Phase 6a's own justified precedent: each exists because the drainer/SyncStatusImpl needed to
+   be JVM-fakeable, not because a second production implementation was ever wanted.
+
+### STOP
+
+```text
+================================================================
+  CHECKPOINT: Phase 6b sync outbox COMPLETE
+================================================================
+  Branch: phase-6b, off master at d748ec7 (phase-6a already merged into master
+    before this session started; phase-6b had zero drift from master, confirmed
+    via merge-base, so no restack was needed).
+
+  First-sync drain: 1200-record backlog (>400) drains in multiple correctly-bounded
+    batches, all SYNCED, none dropped/doubled — PROVEN (SyncOutboxDrainerTest).
+    Byte-budget boundary (>4.5MB via padded records) separately PROVEN
+    (SyncBatchPackerTest), plus exactly-at-limit/one-over/oversized-single-record/
+    empty edge cases.
+
+  Crash-resume: batch_id reused on retry, backend verbatim-replay leaves exactly
+    one applied copy (3, not 6, after a simulated crash+resume) — PROVEN
+    (SyncOutboxDrainerTest). This is the subtle one; built as designed, no
+    shortcuts taken.
+
+  Malformed row -> FAILED, SAMD-SYNC-6003 code stored, not retried on next drain,
+    count observable via SyncState.failedCount — PROVEN.
+
+  Conflict -> new CONFLICT SyncState, kept for review, never auto-retried or
+    silently clobbered — PROVEN (SyncAckMappingTest, table-driven).
+
+  Forbidden fields: ailments.audio_local_uri excluded (PROVEN). attachments.uri is
+    NOT excluded — the brief's claim was wrong, verified against backend code and
+    api-contract.md itself; sent under wire key "uri", backend aliases it to
+    local_uri. Flagged loudly (see Divergences).
+
+  SyncStatus six behavioral parities: all PROVEN (SyncStatusImplTest, ported from
+    MockSyncStatusTest with a fake outbox scheduler/repository substituted in).
+
+  Worker uses the authenticated OkHttp/Retrofit client from 6a: PROVEN by
+  construction (SyncPushApiService is created off the same shared Retrofit
+    instance NetworkModule.provideRetrofit builds with bearerInterceptor +
+    tokenAuthenticator attached — no second client exists).
+
+  testDevDebugUnitTest: 144 -> 168 (30 new, 6 deleted MockSyncStatusTest), 0 failures.
+
+  Tests: all JVM (testDevDebugUnitTest). No androidTest/instrumented run — no
+    device or emulator available in this sandbox (adb devices: empty). No
+    MockWebServer/real-backend integration run either — no local backend reachable.
+    The WorkManager/@HiltWorker wiring compiles and is Hilt-DI-graph-validated
+    (hiltJavaCompileDevDebug succeeded) but is not runtime-exercised.
+
+  Scope creep: none beyond Phase 6a's own already-justified fakeable-interface
+    pattern (see Divergences #4).
+
+  Known gap found, NOT fixed (out of scope): several pre-existing DAO UPDATE
+    methods don't reset syncState back to PENDING on a post-sync clinical
+    mutation — a row that synced once and was edited again would never re-drain.
+    Reported in PROGRESS.md's "Known gap" section above, not silently patched.
+
+  Divergences from this brief: attachments.uri (wrong in the brief, fixed per
+    verified truth), no instrumented/MockWebServer run (environment limitation),
+    the syncState-reset gap (reported, not fixed). All three listed with reasoning,
+    none silent.
+
+  NEXT: Phase 6c ABHA wiring. DO NOT PROCEED. Wait for the operator.
+================================================================
+```
+

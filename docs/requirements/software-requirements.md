@@ -102,12 +102,17 @@ Conventions: `REQ-<AREA>-NN`. Status: **DONE** (implemented + manually verified)
 - **REQ-SYN-01** (DONE) Show last-sync status and a manual Sync action on Home; indicate
   offline that data is saved locally and will sync later. Real for the one place data crosses a
   boundary today (doctor assignment): offline confirm queues `CaseStatus.PENDING_SYNC` instead of
-  sending, `MockSyncStatus` refuses to run offline, and auto-syncs every queued case the moment
-  connectivity returns (real network or the manual toggle) without waiting for the button.
-- **REQ-SYN-02** (PARTIAL) Per-record pending/synced state now exists for the doctor-assignment
-  leg (`CaseStatus.PENDING_SYNC`/`SENT_TO_DOCTOR`); still open: a generic `syncState` convention
-  across other syncable entities, real background sync (WorkManager) against a real backend,
-  conflict resolution, and purge-on-sync minimisation (`docs/sync-design.md`; risk H-05).
+  sending, `SyncStatusImpl` (Phase 6b, replacing the earlier simulated `MockSyncStatus`) refuses
+  to run offline, and auto-syncs every queued case the moment connectivity returns (real network
+  or the manual toggle) without waiting for the button.
+- **REQ-SYN-02** (DONE for the push side, 2026-08-18, Phase 6b) The generic `syncState`
+  convention now has a live consumer: `SyncPushWorker`, a connectivity-constrained, backoff-
+  retried `WorkManager` job, drains every syncable table's `PENDING` rows to a real backend
+  (`POST /api/v1/sync/push`), batched under the 400-record/4.5 MB budget, with per-record acks
+  mapped to `SYNCED`/`CONFLICT`/`FAILED` and crash-safe batch_id reuse on resume. `CaseStatus.
+  PENDING_SYNC`/`SENT_TO_DOCTOR` (the doctor-assignment leg) is untouched and coexists with this
+  generic transport state. Still open: conflict *field-level* merge, `RemoteMediator`/pull, and
+  purge-on-sync minimisation (`docs/sync-design.md` §2 items 3-5; risk H-05).
 
 ---
 

@@ -5,6 +5,8 @@ import com.example.samdapp.domain.model.CaseRecord
 import com.example.samdapp.domain.model.CaseStatus
 import com.example.samdapp.testutil.FakeCaseRecordRepository
 import com.example.samdapp.testutil.FakeNetworkMonitor
+import com.example.samdapp.testutil.FakeSyncOutboxRepository
+import com.example.samdapp.testutil.FakeSyncOutboxScheduler
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -17,26 +19,38 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
 
-/** REQ-SYN-01: sync starts un-synced; a sync round stamps lastSyncedAt and clears pending. Also
- *  covers the offline-first fix: syncing must refuse to run offline, and only queued cases move. */
-class MockSyncStatusTest {
+/**
+ * Ports `MockSyncStatusTest`'s six behaviors to [SyncStatusImpl] unchanged in substance — same
+ * assertions, same [FakeCaseRecordRepository]/[FakeNetworkMonitor], only a
+ * [FakeSyncOutboxScheduler]/[FakeSyncOutboxRepository] added so the two new dependencies never
+ * touch WorkManager/Android framework in these cases. Also covers the new [failedCount] surface.
+ */
+class SyncStatusImplTest {
+
+    private fun sync(
+        caseRecordRepository: FakeCaseRecordRepository = FakeCaseRecordRepository(),
+        networkMonitor: FakeNetworkMonitor = FakeNetworkMonitor(),
+        outboxScheduler: FakeSyncOutboxScheduler = FakeSyncOutboxScheduler(),
+        outboxRepository: FakeSyncOutboxRepository = FakeSyncOutboxRepository(),
+    ) = SyncStatusImpl(caseRecordRepository, ConnectivityController(networkMonitor), outboxScheduler, outboxRepository)
 
     @Test
     fun `initial state is not synced`() = runTest {
-        val state = MockSyncStatus(FakeCaseRecordRepository(), ConnectivityController(FakeNetworkMonitor())).state.first()
+        val state = sync().state.first()
         assertNull(state.lastSyncedAt)
         assertFalse(state.isSyncing)
         assertEquals(0, state.pendingCount)
+        assertEquals(0, state.failedCount)
     }
 
     @Test
     fun `syncNow stamps lastSyncedAt and settles not syncing`() = runTest {
-        val sync = MockSyncStatus(FakeCaseRecordRepository(), ConnectivityController(FakeNetworkMonitor()))
+        val syncStatus = sync()
 
-        val result = sync.syncNow()
+        val result = syncStatus.syncNow()
 
         assertEquals(Result.success(Unit), result)
-        val state = sync.state.first()
+        val state = syncStatus.state.first()
         assertFalse(state.isSyncing)
         assertEquals(0, state.pendingCount)
         assert(state.lastSyncedAt != null) { "lastSyncedAt should be set after sync" }
@@ -44,12 +58,12 @@ class MockSyncStatusTest {
 
     @Test
     fun `syncNow refuses to run while offline`() = runTest {
-        val sync = MockSyncStatus(FakeCaseRecordRepository(), ConnectivityController(FakeNetworkMonitor(initial = false)))
+        val syncStatus = sync(networkMonitor = FakeNetworkMonitor(initial = false))
 
-        val result = sync.syncNow()
+        val result = syncStatus.syncNow()
 
         assertTrue(result.isFailure)
-        assertNull(sync.state.first().lastSyncedAt)
+        assertNull(syncStatus.state.first().lastSyncedAt)
     }
 
     @Test
@@ -59,12 +73,12 @@ class MockSyncStatusTest {
             assignedDoctorId = "doc-1", createdAt = Instant.EPOCH, updatedAt = Instant.EPOCH,
         )
         val repository = FakeCaseRecordRepository(initial = listOf(queued))
-        val sync = MockSyncStatus(repository, ConnectivityController(FakeNetworkMonitor()))
+        val syncStatus = sync(caseRecordRepository = repository)
 
-        assertEquals(1, sync.state.first().pendingCount)
-        sync.syncNow()
+        assertEquals(1, syncStatus.state.first().pendingCount)
+        syncStatus.syncNow()
 
-        assertEquals(0, sync.state.first().pendingCount)
+        assertEquals(0, syncStatus.state.first().pendingCount)
         assertEquals(CaseStatus.SENT_TO_DOCTOR, repository.records["case-1"]?.status)
     }
 
@@ -78,10 +92,8 @@ class MockSyncStatusTest {
         )
         val repository = FakeCaseRecordRepository(initial = listOf(queued))
         val networkMonitor = FakeNetworkMonitor(initial = false)
-        MockSyncStatus(repository, ConnectivityController(networkMonitor))
+        sync(caseRecordRepository = repository, networkMonitor = networkMonitor)
 
-        // Give the auto-sync watcher's background collector a moment to attach and observe the
-        // initial offline snapshot before flipping — otherwise this transition could race it.
         delay(300)
         networkMonitor.setAvailable(true)
 
@@ -98,10 +110,42 @@ class MockSyncStatusTest {
             assignedDoctorId = "doc-1", createdAt = Instant.EPOCH, updatedAt = Instant.EPOCH,
         )
         val repository = FakeCaseRecordRepository(initial = listOf(queued))
-        MockSyncStatus(repository, ConnectivityController(FakeNetworkMonitor(initial = true)))
+        sync(caseRecordRepository = repository, networkMonitor = FakeNetworkMonitor(initial = true))
 
         delay(500)
 
         assertEquals(CaseStatus.PENDING_SYNC, repository.records["case-1"]?.status)
+    }
+
+    @Test
+    fun `ensures the periodic outbox worker is scheduled on construction`() = runTest {
+        val scheduler = FakeSyncOutboxScheduler()
+        sync(outboxScheduler = scheduler)
+
+        assertEquals(1, scheduler.ensurePeriodicWorkCallCount)
+    }
+
+    @Test
+    fun `syncNow also runs the generic outbox drain, not just the case-assignment queue`() = runTest {
+        val scheduler = FakeSyncOutboxScheduler()
+        val syncStatus = sync(outboxScheduler = scheduler)
+
+        syncStatus.syncNow()
+
+        assertEquals(1, scheduler.runNowAndAwaitCallCount)
+    }
+
+    @Test
+    fun `FAILED outbox rows are surfaced through state failedCount`() = runTest {
+        val outboxRepository = FakeSyncOutboxRepository()
+        val syncStatus = sync(outboxRepository = outboxRepository)
+        outboxRepository.applyAck(
+            com.example.samdapp.data.remote.dto.SyncResultDto(
+                table = "patients", id = "p1", status = "rejected", code = "SAMD-SYNC-6003",
+            ),
+            sentLocalModifiedAt = java.time.Instant.EPOCH,
+        )
+
+        assertEquals(1, syncStatus.state.first().failedCount)
     }
 }

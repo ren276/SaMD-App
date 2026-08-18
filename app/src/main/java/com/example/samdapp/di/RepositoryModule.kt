@@ -4,7 +4,13 @@ import com.example.samdapp.data.local.audit.RoomAuditLogger
 import com.example.samdapp.data.local.auth.AuthTokenStore
 import com.example.samdapp.data.local.auth.BackendAuthSession
 import com.example.samdapp.data.local.auth.DataStoreAuthTokenStore
-import com.example.samdapp.data.sync.MockSyncStatus
+import com.example.samdapp.data.sync.DataStoreInFlightBatchStore
+import com.example.samdapp.data.sync.InFlightBatchStore
+import com.example.samdapp.data.sync.RoomSyncOutboxRepository
+import com.example.samdapp.data.sync.SyncOutboxRepository
+import com.example.samdapp.data.sync.SyncOutboxScheduler
+import com.example.samdapp.data.sync.SyncStatusImpl
+import com.example.samdapp.data.sync.WorkManagerSyncOutboxScheduler
 import com.example.samdapp.data.repository.AbhaProfileRepositoryImpl
 import com.example.samdapp.data.repository.AilmentRepositoryImpl
 import com.example.samdapp.data.repository.AuditLogRepositoryImpl
@@ -76,7 +82,16 @@ abstract class RepositoryModule {
     abstract fun bindAuditLogRepository(impl: AuditLogRepositoryImpl): AuditLogRepository
 
     @Binds @Singleton
-    abstract fun bindSyncStatus(impl: MockSyncStatus): SyncStatus
+    abstract fun bindSyncStatus(impl: SyncStatusImpl): SyncStatus
+
+    @Binds @Singleton
+    abstract fun bindSyncOutboxScheduler(impl: WorkManagerSyncOutboxScheduler): SyncOutboxScheduler
+
+    @Binds @Singleton
+    abstract fun bindSyncOutboxRepository(impl: RoomSyncOutboxRepository): SyncOutboxRepository
+
+    @Binds @Singleton
+    abstract fun bindInFlightBatchStore(impl: DataStoreInFlightBatchStore): InFlightBatchStore
 
     @Binds @Singleton
     abstract fun bindAuthSession(impl: BackendAuthSession): AuthSession

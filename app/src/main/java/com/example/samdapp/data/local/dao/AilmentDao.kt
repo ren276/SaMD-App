@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
 import com.example.samdapp.data.local.entity.AilmentEntity
+import com.example.samdapp.domain.model.SyncState
 import kotlinx.coroutines.flow.Flow
 import java.time.Instant
 
@@ -11,6 +12,23 @@ import java.time.Instant
 interface AilmentDao {
     @Insert
     suspend fun insert(ailment: AilmentEntity)
+
+    /** Phase 6b outbox — see PatientDao.getPendingForSync's KDoc. `audioLocalUri` is excluded
+     *  from the wire payload (SyncRecordMappers.kt / SAMD-SYNC-6006), not from this query: a
+     *  soft-deleted row still syncs its `deletedAt`. */
+    @Query("SELECT * FROM ailments WHERE syncState = 'PENDING' ORDER BY localModifiedAt ASC")
+    suspend fun getPendingForSync(): List<AilmentEntity>
+
+    @Query(
+        "UPDATE ailments SET syncState = :syncState, " +
+            "serverVersion = COALESCE(:serverVersion, serverVersion), " +
+            "syncErrorCode = :syncErrorCode, lastSyncAttemptAt = :attemptAt " +
+            "WHERE id = :id AND localModifiedAt = :sentLocalModifiedAt",
+    )
+    suspend fun applySyncResult(id: String, syncState: SyncState, serverVersion: Int?, syncErrorCode: String?, attemptAt: Instant, sentLocalModifiedAt: Instant)
+
+    @Query("SELECT COUNT(*) FROM ailments WHERE syncState = 'FAILED'")
+    fun observeFailedSyncCount(): Flow<Int>
 
     /** All non-deleted ailments for an encounter. Private-vs-public filtering for the worker UI is
      *  applied above this layer (Phase 2) — the kernel path reads all of them regardless. */
