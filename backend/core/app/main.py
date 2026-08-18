@@ -14,6 +14,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
+from abdm_adapter.router import router as abha_routes
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -156,6 +157,7 @@ def create_app() -> FastAPI:
     app.include_router(encounter_routes.router)
     app.include_router(kernel_routes.router)
     app.include_router(sync_routes.router)
+    app.include_router(abha_routes)
 
     @app.exception_handler(SamdError)
     async def handle_samd_error(request: Request, exc: SamdError) -> JSONResponse:

@@ -653,7 +653,16 @@ device equivalent:
 `worker_login_succeeded`, `worker_login_failed`, `worker_logout`, `token_refreshed`,
 `refresh_reuse_detected`, `patient_record_read`, `audit_log_read`, `kernel_call_forwarded`,
 `kernel_call_failed`, `sync_batch_received`, `sync_record_rejected`, `abha_session_started`,
-`abha_session_failed`, `abha_identity_linked`.
+`abha_session_failed`, `abha_identity_linked`, `abha_identity_submitted`, `abha_otp_verified`,
+`abha_enrolled`, `abha_mobile_verified`, `abha_profile_retrieved`.
+
+The last five (2026-08-17, ABDM M1 adapter Phase B, D7) close a gap the intermediate state
+machine transitions left in the chain: previously only session start, terminal failure, and
+patient-linkage were audited, with nothing recording that identity was submitted, an OTP was
+verified, enrollment completed, mobile verification completed, or a profile was retrieved. Added
+to this list first, then to `app/models/enums.py`'s `AuditAction`, per this codebase's own rule
+that a new server-only action is defined in the vocabulary before it is used, never invented ad
+hoc at a call site.
 
 As of 2026-08-17 the accepted device set is enforced from `app/domain/audit_actions_device.py`, a
 checked-in mirror of the 30-entry `AuditAction` enum, not a hand-typed guess; `referral_status_changed`
@@ -767,7 +776,7 @@ Grafana panel.
 | 3 | **DONE 2026-08-17.** Kernel proxy: `/assess` and `/evaluate`, PHI-boundary guard (schema `extra="forbid"` plus an explicit denylist checked before every forward), HMAC case pseudonym (D-7, closed), a per-endpoint in-memory circuit breaker, `kernel_call_log` extended with `case_record_id`/`outcome`/`error_code`, upstream error translation, and persistence into `evaluate_reports` | Phase 2 | 1 session |
 | 3-fix | **DONE 2026-08-17.** Correctness and traceability pass over Phase 3, run before Phase 4 because sync push inherits both defects. `risk_category` provenance audit (D-11); the proxy's `kernel_reports` write deleted, making that table device-owned (D-9, D-10); new server-owned `kernel_assessments` holding raw model output only (migration `0004`); read-time versioned derivation in `app/domain/kernel_derivation.py`; success-path records moved into one out-of-band transaction so a call cannot be logged without its assessment | Phase 3 | part of 1 session |
 | 4 | **DONE 2026-08-17 (`POST /sync/push` only).** Batch ordering, per-record apply, ack contract, idempotency, `audit_events` hash chain via the one Phase 1 appender. `/audit/events` and `/audit/verify` were **not** built this session: the session brief scoped Phase 4 to the push endpoint alone and this row's own "and" is now known to overreach that brief; still open for a future session. | Phase 3 | 1 session |
-| 5 | ABDM adapter: M1 registration flow per `abha-integration-plan.md`, `ABDM_MODE=stub` first | Phase 4 plus sandbox approval | 2 sessions |
+| 5 | **DONE 2026-08-17 (`ABDM_MODE=stub` only; live activation is a separate, credential-gated step).** ABDM V3 M1 adapter, Create ABHA via Aadhaar OTP (the P0 vertical slice): `backend/abdm-adapter/`, sibling package mounted as a router into `backend/core`'s FastAPI process, per section 4.3. State machine, RSA-OAEP-SHA1 crypto, per-endpoint response classification (never HTTP status alone), and the audit trail all built and tested against real PostgreSQL and real `uvicorn`. Live activation checklist: correct `abdm_cert_url` against the real ABDM cert (D1, corrected this session from a stale prose default but never exercised against the real host), and re-verify the masked-mobile regex still matches ABDM's message wording (D4, free-text parsing, fragile by construction) before trusting it against live sandbox responses. | Phase 4 plus sandbox approval for live activation | 1 session for the stub adapter (done); live activation is separate |
 | 6 | Android wiring: `RetrofitAuthService`, `BackendAuthSession`, auth interceptor and `Authenticator`, `RetrofitPatientSource`, real `SyncStatus` plus `WorkManager` worker, rebase the two kernel sources onto `BACKEND_BASE_URL`, delete `KERNEL_BASE_URL` and `ABHA_BACKEND_BASE_URL`, add `DOCTOR` to `UserRole`. Room `MIGRATION_12_13` for the sync columns is **DONE 2026-08-17**, ahead of this phase (schema only, nothing reads or writes `sync_state` yet) | Phase 3 for the kernel rebase, Phase 4 for sync | 1 session |
 | 7 | Admin visibility: read-only page over sessions, sync batches, audit log, kernel calls | Phase 4 | 1 session |
 | 8 | AWS Mumbai staging deployment, RDS, TLS, secret store | Phase 4 | separate session |

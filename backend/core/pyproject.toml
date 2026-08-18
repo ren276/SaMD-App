@@ -70,6 +70,9 @@ strict = true
 warn_unreachable = true
 plugins = []
 exclude = ["alembic/versions/"]
+# backend/abdm-adapter is installed editable via a PEP 660 finder-based .pth (uv/setuptools),
+# which mypy's import discovery does not execute; it needs the real source path directly.
+mypy_path = ["../abdm-adapter"]
 
 [[tool.mypy.overrides]]
 module = ["jose.*"]

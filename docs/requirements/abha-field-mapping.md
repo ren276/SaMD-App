@@ -20,7 +20,7 @@ set (mocked) so nothing about the autofill shape has to change when the real gat
 | `name`              | `Patient.fullName`                | Tag "from ABHA" in UI. |
 | `dateOfBirth`       | `Patient.dateOfBirth` (+ derive `age`) | |
 | `gender`            | `Patient.biologicalSex`           | Map ABDM gender code → app value. |
-| `mobileNumber`      | `Patient.mobileNumber`            | Satisfies the ≥1 contact-method rule (REQ-REG-01). |
+| `mobileNumber`      | `Patient.mobileNumber`            | Satisfies the ≥1 contact-method rule (REQ-REG-01) **in the mock only**. **2026-08-17, real backend adapter (D4, `docs/requirements/abha-internal-contract.md`):** ABDM's real `profile/account` response never returns a full mobile number, only a masked one (e.g. `"******0903"`), by design, not a gap. The real `AbhaIdentity.mobile_number` the backend returns will carry that masked value or `null`, never a fabricated full number. A masked number cannot satisfy REQ-REG-01's contact-method rule. **Phase 6 consequence, not fixed here:** when the Android side is wired to the real backend, `mobileNumber` autofill must stop being treated as satisfying the contact-method requirement on its own; the worker still has to collect a real, usable contact number manually (or confirm the already-known one) as part of registration, the same as any patient with no ABHA-sourced mobile at all. |
 | `address`           | `Patient.village`/free address    | ABDM address line. |
 | `district`          | `Patient.district`                | |
 | `state`             | `Patient.state`                   | |

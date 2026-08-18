@@ -2202,4 +2202,175 @@ interface conformance).
   NEXT: Phase 6b sync outbox. DO NOT PROCEED. Wait for the operator.
 ================================================================
 ```
+## Backend Phase 5: ABDM M1 adapter, stub mode (2026-08-17)
+
+Branch `ABHA`. Create ABHA via Aadhaar OTP, the P0 vertical slice, built stub-only per the
+brief: `ABDM_MODE=stub` throughout, no live ABDM call, no credential wiring. Phase A's contract
+doc (`docs/requirements/abha-internal-contract.md`) was extracted and operator-reviewed in a
+prior session; this session built against it and folded six operator-decided corrections (D1-D7,
+including D6's packaging clarification and D7's audit-vocabulary addition) back into that same
+document as resolved decisions, not left as open questions.
+
+290 tests passing across the two packages this session touches (was 241 in `backend/core` alone
+before this session; now 241 there plus 49 new pure-unit tests in `backend/abdm-adapter/tests/`
+= 290 total; the two `tests` packages cannot be run in one `pytest` invocation together, both
+literally named `tests`, colliding on import, so they are run as two separate invocations, matching
+how they will run in CI). ruff and mypy strict clean across both packages. `alembic upgrade head`
+clean from empty, `alembic check` clean; no new migration (checked directly against a fresh
+database, not assumed).
+
+### R0 / D6: packaging, confirmed built as the authoritative docs specify
+
+`backend/abdm-adapter/` is a real sibling package: its own `pyproject.toml`, its own top-level
+import name `abdm_adapter` (deliberately not `app`, which would collide with `backend/core`'s own
+top-level package name in the same virtualenv), its own `tests/`. Installed editable into
+`backend/core`'s venv (`uv pip install -e ../abdm-adapter`) and imported by `app/main.py`, which
+mounts `abdm_adapter.router.router` the same way every other router in that file is mounted. One
+FastAPI process, confirmed by a real `uvicorn` run in this session answering both `GET /health`
+and all six `/api/v1/abha/*` routes from the same process. One PostgreSQL database, one Alembic
+history (no new migration). One audit chain: every ABHA lifecycle event goes through
+`app.services.audit.append`, the unchanged Phase 4 appender.
+
+Mypy needed one addition to see across the package boundary: `backend/core/pyproject.toml` gained
+`mypy_path = ["../abdm-adapter"]`, because `abdm_adapter` is installed via a PEP 660
+finder-based editable install (the modern `uv`/setuptools mechanism), which mypy's own import
+resolution does not execute; it needs the real source path directly. A `py.typed` marker was also
+added to `abdm_adapter/` so the package is treated as typed at all once found.
+
+### The full session STARTED -> COMPLETED walk
+
+Both branches walked, in `backend/core/tests/test_abha.py` and by hand against real `uvicorn` +
+the real dev database:
+
+- No mobile verification needed (communication mobile matches the Aadhaar-linked mobile's visible
+  suffix): `STARTED -> OTP_REQUESTED -> ENROLLED -> COMPLETED`, four HTTP calls
+  (start, identity, otp, profile).
+- Mobile verification needed: `STARTED -> OTP_REQUESTED -> MOBILE_VERIFICATION_REQUIRED ->
+  MOBILE_VERIFIED -> COMPLETED`, five HTTP calls (adds mobile-otp).
+
+Every illegal transition tested returns `409 SAMD-ABHA-2002`: skipping identity submission,
+repeating identity submission, fetching the profile before enrollment, and (in
+`backend/abdm-adapter/tests/test_state_machine.py`) every other non-adjacent or backward edge in
+the table, checked exhaustively against `ALLOWED_TRANSITIONS`, not sampled.
+
+### D2, proven end to end, not just at the classifier
+
+`enrollment/auth/byAbdm` (mobile OTP verify) returns HTTP 200 for both a correct and an
+incorrect/expired OTP; the discriminator is `body["authResult"]`. `abdm_adapter/errors.py`'s
+`classify_otp_verify` reads the body first, HTTP status second. Proven with the operator's own
+confirmed example body at the classifier level
+(`test_error_mapping.py::test_d2_a_200_with_authresult_failed_is_not_success`) and end to end
+through the real router and a real database
+(`test_abha.py::test_d2_mobile_otp_expired_200_does_not_advance_state`, which asserts the
+persisted transaction state is `FAILED`, not just that the HTTP response was an error).
+
+### D5, proven, not assumed
+
+`backend/core/tests/test_abha.py::test_d5_no_phi_in_persisted_row_or_logs` walks a full session,
+then checks three places at once for the Aadhaar number used, the OTP used, the plaintext X-token
+string, and a base64-JPEG magic-byte prefix (`/9j/`, proving no photo bytes leaked, not just that
+Aadhaar/OTP didn't): a raw-SQL read of the `abha_transactions` row (deliberately bypassing the
+ORM's `EncryptedText` decrypt hook, which would otherwise mask a plaintext-token bug by decrypting
+it back to nothing-looks-wrong on the way out), every `audit_events.payload` and `sync_log.message`
+row, and `capsys`-captured stdout/stderr for the whole test. `abdm_adapter/mapping.py`'s
+`profile_to_abha_identity` never assigns the photo fields to anything it returns; `photo_url` is
+always `null`.
+
+**Correction, pre-commit review:** that test alone checks `external_token_encrypted` only after
+the session reaches `COMPLETED`, where `service.py` has already cleared the column to `NULL`. A
+column that is always `NULL` when checked is encrypted at rest vacuously; the test never actually
+exercised the encryption boundary while a token was present. Added
+`test_d5_token_is_encrypted_at_rest_while_present`, which stops mid-flow (after enrollment, before
+the `/profile` call that clears the token), reads the raw column, and asserts both that it does
+not contain the plaintext `stub-x-token-...` string and that the ORM's `EncryptedText` decrypt path
+reads back exactly that plaintext, closing the loop from "different-looking bytes" to "genuinely
+round-trippable pgcrypto ciphertext."
+
+### Two real bugs this session's own tests caught before they shipped
+
+- **The failure-path trap shipped a third time, caught before commit.** `_fail`'s first draft
+  flushed `txn.state = FAILED` on the request session, then raised `SamdError`. `session_scope`
+  rolls back the whole request transaction on any propagating exception, so that write silently
+  vanished every time: a failed session stayed stuck at its prior state forever, never actually
+  marked `FAILED`. This is the exact trap `app.db.session.write_out_of_band`'s own docstring names
+  as having shipped twice already (Phase 1's failed-login row, Phase 3's kernel call-log rows).
+  Caught by `test_invalid_otp_on_enrol_by_aadhaar_fails_the_session` and the D2 test above, both of
+  which assert the *persisted* state, not only the HTTP response. Fixed by moving `_fail` onto
+  `write_out_of_band` (re-fetching the row inside the out-of-band session, never reusing the
+  request-session-bound ORM object) and by removing an early flush in `submit_identity` that would
+  otherwise have deadlocked against it, per `write_out_of_band`'s own documented deadlock rule.
+- **`dob.from_ddmmyyyy` crashed on a malformed value.** An unguarded `int()` call raised
+  `ValueError` instead of returning `None`. Caught by
+  `test_from_ddmmyyyy_malformed_is_none_not_a_crash`, written because D3's "represent honestly, do
+  not fabricate" instruction implies "do not crash," which the first draft did not actually
+  guarantee.
+
+### Which writes are in the request transaction, and which are out of band
+
+Every success path (session start, identity submission, OTP verification, enrollment, mobile
+verification, profile retrieval, and the resulting `COMPLETED` transition) runs on the caller's
+request-scoped session, matching `app/services/sync.py`'s own reasoning: none of these is an
+external event that already happened before the recording write runs, so there is no failure-path
+trap to guard against on the success side. Only the failure path (`_fail`) uses
+`write_out_of_band`, and only because of the bug above: once a `SamdError` is about to propagate,
+the row that must survive it cannot live in the session that is about to roll back.
+
+### abha_transactions: used as-is, no migration, one column type corrected
+
+Every column the brief asked for already existed from Phase 1 (`local_transaction_id`,
+`external_txn_id`, `state`, `facility_id`, `worker_id`, `correlation_id`,
+`external_token_encrypted`/`external_token_expires_at`, `abha_number`/`abha_address`/
+`abha_status`/`abha_type`, `linked_patient_id`, `last_error_code`/`last_error_detail`,
+`retry_count`/`otp_request_count`, `created_at`/`updated_at`/`expires_at`). No migration needed,
+confirmed against a fresh database both before and after this session's one model change.
+
+That one change: `external_token_encrypted` was `Mapped[bytes | None] = mapped_column(LargeBinary)`
+with a comment saying "pgcrypto-encrypted when written," resting on whichever code writes to it
+remembering to encrypt first, call-site discipline this codebase avoids everywhere else (see
+`app/logging.py`'s redaction-processor docstring for the same argument made about logging). Changed
+to `Mapped[str | None] = mapped_column(EncryptedText)`, the same decorator `Patient`'s identity
+columns already use. The underlying Postgres column stays `bytea` either way
+(`EncryptedText.impl` is `LargeBinary` too), so this was a Python-side type correction, not a
+migration; confirmed by running `alembic check` clean against a fresh database both before and
+after the change.
+
+### Pre-commit review, two real gaps found and fixed before this landed
+
+- **C1: the adapter's 49 tests were not gating.** `backend-ci.yml` only installed and tested
+  `backend/core`; `backend/abdm-adapter` was never installed, never linted, never tested in CI,
+  despite `app/main.py` importing it at runtime. Fixed: the Install step now also
+  `pip install -e "../abdm-adapter[dev]"`, and two new steps (`Ruff lint (abdm-adapter)`,
+  `Pytest (abdm-adapter)`) run from `backend/abdm-adapter`'s own directory, same as every other
+  step in that job, no `continue-on-error`. Confirmed locally against the same venv CI would use:
+  both the adapter's own `pytest -q` and `ruff check .` succeed run from its own directory with no
+  extra flags.
+- **C2: the D5 safety test's `external_token_encrypted` check was checking a column that is
+  always `NULL` at the point it looks, which proves nothing about encryption.** See the correction
+  in the D5 section above; `test_d5_token_is_encrypted_at_rest_while_present` now checks the
+  column while a real value is present.
+
+### Divergences from this brief
+
+- None beyond what Phase A already flagged and this session resolved as D1-D7. R0's packaging
+  question (sibling package, not literally inside `backend/core/app/`) was the one live ambiguity
+  and is now built, tested, and confirmed against a real running process.
+
+### Docs touched this session
+
+`docs/requirements/abha-internal-contract.md` (D1-D7 resolved, plus the two bugs section above),
+`docs/requirements/software-requirements.md` (REQ-ABH-03/04/05), `docs/requirements/
+traceability-matrix.md` (same three rows), `docs/requirements/abha-field-mapping.md` (D4's Android
+Phase 6 consequence, noted not fixed), `docs/quality/risk-management-file.md` (H-03's row extended
+with the 2026-08 ABDM-adapter note: no patient linkage happens in this backend, linkage itself
+stays open for Phase 6), `docs/backend/backend-prd.md` (section 6.2's five new actions, Phase 5
+marked done in the phase table with the live-activation checklist inline).
+
+### What Phase 6 inherits
+
+Android wiring: a real `AbdmAbhaSource`/Retrofit implementation of the six internal endpoints, the
+`mobileNumber` contact-method consequence noted in `abha-field-mapping.md` (D4), and the explicit,
+worker-confirmed patient-linkage flow that H-03's risk-management-file row now tracks as open. Live
+ABDM activation (separately gated on sandbox credentials) needs D1's cert URL and D4's masked-mobile
+regex re-verified against real ABDM responses before being trusted, per `backend-prd.md`'s phase
+table.
 
