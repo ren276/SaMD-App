@@ -137,24 +137,52 @@ adapter + state machine (real crypto/token code still exercised where safe). `AB
 
 - **New internal-API source (mirrors the kernel Retrofit pattern):** `AbhaApiService` (Retrofit,
   points at the SaMD backend — NOT ABDM), domain port `AbdmAbhaSource`, impl `RetrofitAbhaSource`.
-  New base URL `BuildConfig.ABHA_BACKEND_BASE_URL` (separate from `KERNEL_BASE_URL`), wired in
-  `di/NetworkModule.kt` with the existing `@Binds Bindings` shape.
+  Base URL `BuildConfig.BACKEND_BASE_URL` — **not** a separate `ABHA_BACKEND_BASE_URL`. That
+  separate base URL was collapsed into `BACKEND_BASE_URL` in Phase 6a (one FastAPI process, one
+  container, `backend-prd.md` §4.3) and no longer exists as a build config field. **Corrected
+  2026-08-18, Phase 6c Part 2** — do not re-add it. Wired in `di/NetworkModule.kt` with the
+  existing `@Binds Bindings` shape (done: `AbhaApiService`/`AbdmAbhaSource`/`RetrofitAbhaSource`).
 - **Use cases:** rewire `CreateAbhaProfileUseCase` (and later `VerifyAbhaLoginUseCase`) to drive the
   session state machine via `AbdmAbhaSource`. Keep the mock body behind a flag using the existing
   `tryRealApi() ?: generateMock()` pattern from `GenerateKernelReportUseCase.kt`, so contract-only
   builds keep working until the backend goes live. Keep `AbhaProfile` + Room DAO as the local cache.
-- **Patient model:** add `abhaAddress`, `abhaStatus`, `kycStatus`, `verificationSource`, `verifiedAt`
-  to `domain/model/Patient.kt` + `PatientEntity.kt` (registration state does NOT go on Patient — that
-  lives in the backend transaction). Additive Room migration **`MIGRATION_12_13`** (DB is at **v12** —
-  note: `agent_docs/CLAUDE.md` says v11, it is stale; verify against `app/schemas/.../12.json`), and
-  register a `13.json` schema.
+  **Status, 2026-08-18, Phase 6c Part 2: NOT done, deliberately.** `AbdmAbhaSource`/`RetrofitAbhaSource`/
+  `AbhaApiService` are wired and DI-ready, but the use case rewiring is blocked: `CreateAbhaProfileUseCase`'s
+  real backend equivalent needs an Aadhaar number and an OTP round-trip, and the existing
+  `AbhaSignUpScreen` collects neither (name/DOB/gender/mobile only, no OTP step) — wiring it needs a
+  UI change, out of scope for "do not rebuild these screens." `VerifyAbhaLoginUseCase`'s real
+  equivalent (`verification-sessions`) is separately P1, not built server-side at all. See
+  PROGRESS.md's Phase 6c Part 2 entry for the full decision record.
+- **Patient model:** add `abhaAddress`, `verificationSource`, `verifiedAt`, and **`kycVerified`**
+  (not `kycStatus`) to `domain/model/Patient.kt` + `PatientEntity.kt` (registration state does NOT
+  go on Patient — that lives in the backend transaction). **`abhaStatus` is dropped — corrected
+  2026-08-18, Phase 6c Part 1:** the pinned `AbhaIdentity` shape (api-contract.md §8) has no ABHA
+  account-status field; `docs/requirements/abha-internal-contract.md`'s own field-by-field diff
+  against the real ABDM response confirms `status`/`"ACTIVE"` is deliberately dropped, never mapped.
+  An `abhaStatus` column would sit permanently `NULL` — dead schema. `kycStatus` is `kycVerified`
+  instead: `AbhaIdentity.kyc_verified` is a boolean, matching `AbhaProfileEntity.kycVerified`'s
+  existing name/type, not a multi-state string with no backend source. Additive Room migration
+  **`MIGRATION_13_14`** (DB is at **v13**, not v12 — this doc's earlier "v12"/`MIGRATION_12_13`
+  guess was already stale by the time Phase 6c started: v12→v13 was consumed by the syncstate-reset
+  session's sync-columns migration. Verify against `app/schemas/.../` directly, never assume from
+  this doc), registered `14.json` schema. **Done, 2026-08-18, Phase 6c Part 1**, migration test run
+  on device (2/2 pass, real SQLCipher-encrypted database).
 - **UI:** `presentation/abha/` screens keep their MVI shape; add an explicit registration-state enum
   in `AbhaSignUpViewModel` mapping backend states → UI (Idle/IdentityInput/OtpPending/Enrolling/
-  MobileVerify/ProfileConfirm/Completed/Failed/Expired). No new nav graph.
-- **Audit:** add constants to `domain/audit/AuditLogger.kt` — `ABHA_REGISTRATION_STARTED`,
-  `ABHA_IDENTITY_VERIFICATION_REQUESTED`, `ABHA_OTP_VERIFIED`, `ABHA_ENROLLMENT_COMPLETED`,
-  `ABHA_PROFILE_RETRIEVED`, `ABHA_LINKED_TO_PATIENT`, `ABHA_VERIFICATION_FAILED` (keep existing
-  `ABHA_PROFILE_CREATED`, `ABHA_LOGIN_VERIFIED`). Never log Aadhaar/OTP/token/secret.
+  MobileVerify/ProfileConfirm/Completed/Failed/Expired). No new nav graph. **Not done** — blocked on
+  the same use-case-rewiring decision above.
+- **Audit:** **corrected 2026-08-18, Phase 6c Part 2 — do not add these constants to
+  `domain/audit/AuditLogger.kt`.** `backend-prd.md` §6.2 (current as of the 2026-08-17 ABDM M1
+  adapter Phase B/D7 update, which post-dates this plan doc) settles that every one of the state-
+  machine transition actions — session started/failed, identity linked, identity submitted, OTP
+  verified, enrolled, mobile verified, profile retrieved — is **server-only**, logged by the
+  backend as it processes each transition, never emitted by the device. The device's existing
+  `ABHA_PROFILE_CREATED`/`ABHA_LOGIN_VERIFIED` already cover the device-side lifecycle (local
+  profile creation, local login verification) and need no additions. Verified by direct comparison
+  against `backend/core/app/domain/audit_actions_device.py` (the checked-in mirror) and the
+  `test_audit_actions_device.py` set-equality test it exists to guard: still 30/30 matching, no
+  divergence introduced. Never log Aadhaar/OTP/token/secret — confirmed already covered by
+  `backend/core/app/config.py`'s `REDACTED_KEYS`.
 
 ---
 
@@ -187,9 +215,10 @@ ABDM family just because it exists in the docs (Benefit/Child ABHA/Govt-Find are
   `curl` the internal endpoints and walk a full session `STARTED → … → COMPLETED`, asserting each
   state transition and the final `AbhaIdentity` shape against the Phase-A contract.
 - **Android:** unit-test `RetrofitAbhaSource`/use case against a fake backend (existing testing
-  pattern). Build + run the app pointing `ABHA_BACKEND_BASE_URL` at the local stub backend; drive the
-  Create-ABHA screen end to end; confirm state transitions, Register autofill, `MIGRATION_12_13` opens
-  a v12 DB clean, and the new audit rows are written (no Aadhaar/OTP in them).
+  pattern). Build + run the app pointing `BACKEND_BASE_URL` (not a separate ABHA base URL, see
+  above) at the local stub backend; drive the Create-ABHA screen end to end; confirm state
+  transitions, Register autofill, `MIGRATION_13_14` opens a v13 DB clean, and that no device-side
+  audit constants were invented for the (server-only) state-machine transitions.
 - **Live activation checklist (when creds arrive):** set `ABDM_MODE=live` + client_id/secret + HIP_ID
   + X-CM-ID, register the sandbox HIP, run the same session against `abhasbx`, verify sandbox/prod
   isolation. Acceptance is behavioural (full lifecycle + audit + no secret leakage), not "HTTP 200".

@@ -2,15 +2,18 @@ package com.example.samdapp.di
 
 import android.util.Log
 import com.example.samdapp.data.remote.BearerInterceptor
+import com.example.samdapp.data.remote.RetrofitAbhaSource
 import com.example.samdapp.data.remote.RetrofitEvaluateSource
 import com.example.samdapp.data.remote.RetrofitKernelSource
 import com.example.samdapp.data.remote.RetrofitSyncPushService
 import com.example.samdapp.data.remote.SyncPushService
 import com.example.samdapp.data.remote.TokenAuthenticator
+import com.example.samdapp.data.remote.api.AbhaApiService
 import com.example.samdapp.data.remote.api.AuthApiService
 import com.example.samdapp.data.remote.api.ClinicalApiService
 import com.example.samdapp.data.remote.api.KernelApiService
 import com.example.samdapp.data.remote.api.SyncPushApiService
+import com.example.samdapp.domain.abha.AbdmAbhaSource
 import com.example.samdapp.domain.kernel.EvaluateKernelSource
 import com.example.samdapp.domain.kernel.RemoteKernelSource
 import com.google.gson.Gson
@@ -81,11 +84,10 @@ object NetworkModule {
             .addInterceptor(loggingInterceptor)
             .build()
 
-    /** No other DTO in this app carries `java.time.Instant`/`LocalDate` (grep confirmed, Phase
-     *  6b) — [PatientEntity]/etc.'s Room columns go through [com.example.samdapp.data.local.Converters]
-     *  instead, a separate converter for a separate boundary. Registering these two adapters here
-     *  is therefore additive, not a risk to any existing DTO's serialization. The sync payload
-     *  DTOs (SyncPayloadDto.kt) are the only current users. */
+    /** `PatientEntity`/etc.'s Room columns go through [com.example.samdapp.data.local.Converters]
+     *  instead, a separate converter for a separate boundary — registering these two adapters
+     *  here is additive, not a risk to any existing DTO's serialization. Phase 6b's sync payload
+     *  DTOs (SyncPayloadDto.kt) were the first users; AbhaDto.kt (Phase 6c) is the second. */
     @Provides
     @Singleton
     fun provideGson(): Gson = com.example.samdapp.data.remote.SyncGson.create()
@@ -119,6 +121,11 @@ object NetworkModule {
     fun provideSyncPushApiService(retrofit: Retrofit): SyncPushApiService =
         retrofit.create(SyncPushApiService::class.java)
 
+    @Provides
+    @Singleton
+    fun provideAbhaApiService(retrofit: Retrofit): AbhaApiService =
+        retrofit.create(AbhaApiService::class.java)
+
     /** Separate abstract class to host @Binds methods (Hilt requirement). */
     @Module
     @InstallIn(SingletonComponent::class)
@@ -134,5 +141,9 @@ object NetworkModule {
         @Binds
         @Singleton
         abstract fun bindSyncPushService(impl: RetrofitSyncPushService): SyncPushService
+
+        @Binds
+        @Singleton
+        abstract fun bindAbdmAbhaSource(impl: RetrofitAbhaSource): AbdmAbhaSource
     }
 }

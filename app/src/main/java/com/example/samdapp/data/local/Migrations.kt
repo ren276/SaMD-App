@@ -332,3 +332,33 @@ val MIGRATION_12_13 = object : Migration(12, 13) {
         addSyncColumns("audit_log", "`timestamp`")
     }
 }
+
+/**
+ * Phase 6c: ABDM-verified identity provenance on `patients` (REQ-ABH-01/02), so a real
+ * `AbhaIdentity` response's verification fields (api-contract.md §8) survive autofill instead
+ * of being silently dropped. Four new nullable columns, all default to SQLite's implicit
+ * `NULL` (no placeholder-then-backfill two-step needed, unlike MIGRATION_12_13's NOT NULL
+ * columns) — a manually-registered patient with no ABHA has none of them:
+ *
+ * - `abhaAddress` (`AbhaIdentity.abha_address`, e.g. `"sunita.devi@sbx"`).
+ * - `kycVerified` (`AbhaIdentity.kyc_verified`, `INTEGER` boolean). Deliberately not a
+ *   multi-state "status" column: `docs/requirements/abha-internal-contract.md`'s field-by-field
+ *   diff against the real ABDM response confirms the pinned `AbhaIdentity` shape has no ABHA
+ *   account-status field at all (the real `status`/`"ACTIVE"` value is confirmed dropped, never
+ *   mapped) — an `abhaStatus` column here would sit permanently unpopulated. See PROGRESS.md.
+ * - `verificationSource` (`AbhaIdentity.verification_source`, a backend-assigned workflow
+ *   constant like `"ABDM_AADHAAR_OTP"`, not derived from any single ABDM field).
+ * - `verifiedAt` (`AbhaIdentity.verified_at`, the SaMD backend's own verification-transaction
+ *   timestamp, distinct from the ABHA account's own creation date).
+ *
+ * Registration STATE (session id, in-progress step) never lands here — it lives in the
+ * backend's `abha_transactions` table; only the final verified provenance does.
+ */
+val MIGRATION_13_14 = object : Migration(13, 14) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL("ALTER TABLE `patients` ADD COLUMN `abhaAddress` TEXT")
+        connection.execSQL("ALTER TABLE `patients` ADD COLUMN `kycVerified` INTEGER")
+        connection.execSQL("ALTER TABLE `patients` ADD COLUMN `verificationSource` TEXT")
+        connection.execSQL("ALTER TABLE `patients` ADD COLUMN `verifiedAt` INTEGER")
+    }
+}
