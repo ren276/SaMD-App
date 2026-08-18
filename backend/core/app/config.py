@@ -82,7 +82,11 @@ class Settings(BaseSettings):
     # ABDM / ABHA (Phase 5)
     abdm_mode: AbdmMode = "stub"
     abdm_base_url: str = "https://abhasbx.abdm.gov.in"
-    abdm_cert_url: str = "https://healthidsbx.abdm.gov.in/api/v1/auth/cert"
+    # D1 (Phase 5 Phase B, 2026-08-17): corrected from the Phase 1 default
+    # "https://healthidsbx.abdm.gov.in/api/v1/auth/cert", which was copied from stale prose in
+    # "abha api docs/get started/encodingndrsaencryption.md". The real Postman "Cert API" request
+    # (the ground truth) uses this URL instead. See docs/requirements/abha-internal-contract.md.
+    abdm_cert_url: str = "https://abhasbx.abdm.gov.in/abha/api/v3/profile/public/certificate"
     abdm_client_id: str = ""
     abdm_client_secret: str = ""
     abdm_hip_id: str = ""
