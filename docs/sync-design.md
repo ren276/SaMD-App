@@ -33,6 +33,20 @@
 > *field-level* merge, `RemoteMediator`/pull, purge-on-sync) and `RetrofitPatientSource` (no
 > patient POST/PATCH path yet — the outbox drains what `MIGRATION_12_13` already created, not a
 > new write path). The seam is still the `SyncStatus` domain interface, unchanged.
+> **Update 2026-08-18 (syncstate-reset):** the producer side of REQ-SYN-02 is now genuinely
+> end-to-end. 6b built the consumer (drain `WHERE syncState = 'PENDING'`) but 7 clinical
+> mutation paths (`ConsultationDao.updateTranscription`, `AilmentDao.markDeleted`,
+> `CaseRecordDao.updateStatus`/`assignDoctor`/`abandonDraftsForPatient`/`sendAllPendingSync`,
+> `ReferralDao.updateStatus`) bumped `localModifiedAt` without resetting `syncState`, so an
+> already-`SYNCED` row's re-edit never re-drained. Fixed: `syncState = 'PENDING'` now lands in
+> the same statement as the `localModifiedAt` bump. Separately, the 5 tables whose repository
+> upserts via `@Insert(onConflict = REPLACE)` (`social_histories`, `kernel_reports`,
+> `evaluate_reports`, `diagnosis_feedback`, `abha_profiles`) already reset `syncState` correctly
+> by accident (the entity's own default), but silently nulled `serverVersion` on every re-save —
+> fixed by reading the existing `serverVersion` before building the replacement row. All 12
+> fixes preserve `serverVersion` (never reset it), mirroring 6b's own `COALESCE` guard on the
+> ack side. See PROGRESS.md's "Android: syncState reset on syncable clinical mutations" entry
+> for the full audit table.
 
 ## 1. Requirement (as described)
 

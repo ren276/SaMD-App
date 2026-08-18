@@ -34,31 +34,37 @@ interface CaseRecordDao {
     fun observeFailedSyncCount(): Flow<Int>
 
     /** Also stamps `localModifiedAt` from the same [updatedAt] value, see MIGRATION_12_13's
-     *  KDoc for why the two columns are deliberately redundant on entities that have both. */
-    @Query("UPDATE case_records SET status = :status, updatedAt = :updatedAt, localModifiedAt = :updatedAt WHERE id = :caseRecordId")
+     *  KDoc for why the two columns are deliberately redundant on entities that have both, and
+     *  resets the transport `syncState` to `PENDING` in the same statement (syncstate-reset
+     *  session) — `status` is part of the synced payload (CaseRecordSyncPayloadDto), so a status
+     *  change on an already-`SYNCED` row must re-drain. `serverVersion` is left untouched. */
+    @Query("UPDATE case_records SET status = :status, updatedAt = :updatedAt, localModifiedAt = :updatedAt, syncState = 'PENDING' WHERE id = :caseRecordId")
     suspend fun updateStatus(caseRecordId: String, status: CaseStatus, updatedAt: Instant)
 
     @Query(
         "UPDATE case_records SET status = :status, assignedDoctorId = :doctorId, updatedAt = :updatedAt, " +
-            "localModifiedAt = :updatedAt WHERE id = :caseRecordId",
+            "localModifiedAt = :updatedAt, syncState = 'PENDING' WHERE id = :caseRecordId",
     )
     suspend fun assignDoctor(caseRecordId: String, doctorId: String, status: CaseStatus, updatedAt: Instant)
 
     /** Called right before a fresh [CaseRecordEntity] is inserted for [patientId] (see
      *  [com.example.samdapp.domain.usecase.StartCaseUseCase]) so an earlier attempt this worker
      *  backed out of mid-flow — still `DRAFT`, never reaching Acknowledgement — can't resurface via
-     *  [observeResumableDraftForUser] and get confused with the visit that's actually in progress. */
+     *  [observeResumableDraftForUser] and get confused with the visit that's actually in progress.
+     *  Resets `syncState` to `PENDING` too (syncstate-reset session): the `ABANDONED` status is
+     *  itself a synced field, and this bulk update can hit an already-`SYNCED` DRAFT row. */
     @Query(
-        "UPDATE case_records SET status = 'ABANDONED', updatedAt = :updatedAt, localModifiedAt = :updatedAt " +
-            "WHERE patientId = :patientId AND status = 'DRAFT'",
+        "UPDATE case_records SET status = 'ABANDONED', updatedAt = :updatedAt, localModifiedAt = :updatedAt, " +
+            "syncState = 'PENDING' WHERE patientId = :patientId AND status = 'DRAFT'",
     )
     suspend fun abandonDraftsForPatient(patientId: String, updatedAt: Instant)
 
     /** "Sync Up": every locally-queued case (doctor already assigned, just waiting for network)
-     *  moves to `SENT_TO_DOCTOR` in one round. */
+     *  moves to `SENT_TO_DOCTOR` in one round. Resets `syncState` to `PENDING` too
+     *  (syncstate-reset session), for the same reason as [updateStatus]. */
     @Query(
-        "UPDATE case_records SET status = 'SENT_TO_DOCTOR', updatedAt = :updatedAt, localModifiedAt = :updatedAt " +
-            "WHERE status = 'PENDING_SYNC'",
+        "UPDATE case_records SET status = 'SENT_TO_DOCTOR', updatedAt = :updatedAt, localModifiedAt = :updatedAt, " +
+            "syncState = 'PENDING' WHERE status = 'PENDING_SYNC'",
     )
     suspend fun sendAllPendingSync(updatedAt: Instant)
 

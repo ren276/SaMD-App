@@ -12,14 +12,19 @@ class AbhaProfileRepositoryImpl @Inject constructor(
 ) : AbhaProfileRepository {
 
     override suspend fun saveProfile(profile: AbhaProfile): Result<Unit> = asDataResult {
-        abhaProfileDao.upsert(profile.toEntity())
+        // upsert() is REPLACE: without this read, a re-saved profile would silently wipe
+        // serverVersion (syncstate-reset session). syncState needs no explicit reset —
+        // AbhaProfileEntity's default is already PENDING, and REPLACE always writes the full
+        // default set.
+        val existingServerVersion = abhaProfileDao.getByAbhaId(profile.abhaId)?.serverVersion
+        abhaProfileDao.upsert(profile.toEntity(serverVersion = existingServerVersion))
     }
 
     override suspend fun getProfile(abhaId: String): AbhaProfile? =
         abhaProfileDao.getByAbhaId(abhaId)?.toDomain()
 }
 
-private fun AbhaProfile.toEntity() = AbhaProfileEntity(
+private fun AbhaProfile.toEntity(serverVersion: Int?) = AbhaProfileEntity(
     abhaId = abhaId,
     abhaAddress = abhaAddress,
     name = name,
@@ -35,6 +40,7 @@ private fun AbhaProfile.toEntity() = AbhaProfileEntity(
     kycVerified = kycVerified,
     createdAt = createdAt,
     localModifiedAt = Instant.now(),
+    serverVersion = serverVersion,
 )
 
 private fun AbhaProfileEntity.toDomain() = AbhaProfile(
