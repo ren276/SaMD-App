@@ -29,18 +29,18 @@ import retrofit2.http.POST
  */
 interface AuthApiService {
 
-    @POST("/api/v1/auth/login")
+    @POST("api/v1/auth/login")
     suspend fun login(@Body request: LoginRequestDto): Response<ApiEnvelopeDto<LoginResponseDto>>
 
-    @POST("/api/v1/auth/refresh")
+    @POST("api/v1/auth/refresh")
     suspend fun refresh(@Body request: RefreshRequestDto): Response<ApiEnvelopeDto<TokenPairDto>>
 
-    @POST("/api/v1/auth/logout")
+    @POST("api/v1/auth/logout")
     suspend fun logout(@Body request: LogoutRequestDto): Response<ApiEnvelopeDto<LogoutResponseDto>>
 
-    @GET("/api/v1/auth/me")
+    @GET("api/v1/auth/me")
     suspend fun me(): Response<ApiEnvelopeDto<MeResponseDto>>
 
-    @POST("/api/v1/auth/change-pin")
+    @POST("api/v1/auth/change-pin")
     suspend fun changePin(@Body request: ChangePinRequestDto): Response<ApiEnvelopeDto<ChangePinResponseDto>>
 }
