@@ -32,8 +32,10 @@ interface AbdmAbhaSource {
     suspend fun submitIdentity(sessionId: String, aadhaarNumber: String): AbhaApiResult<AbhaSessionSnapshot>
 
     /** `POST registration-sessions/{id}/otp` — verifies the Aadhaar OTP and enrols. Resulting
-     *  state is either `ENROLLED` or `MOBILE_VERIFICATION_REQUIRED` (api-contract.md §8). */
-    suspend fun verifyOtp(sessionId: String, otp: String): AbhaApiResult<AbhaSessionSnapshot>
+     *  state is either `ENROLLED` or `MOBILE_VERIFICATION_REQUIRED` (api-contract.md §8).
+     *  [mobileNumber] is required by the backend's `OtpVerify` schema alongside the OTP itself —
+     *  the account's communication mobile, not part of the encrypted Aadhaar/OTP pair. */
+    suspend fun verifyOtp(sessionId: String, otp: String, mobileNumber: String): AbhaApiResult<AbhaSessionSnapshot>
 
     /** `POST registration-sessions/{id}/mobile-otp` — the conditional second OTP step, only
      *  reachable from `MOBILE_VERIFICATION_REQUIRED`. */
@@ -62,6 +64,15 @@ interface AbdmAbhaSource {
 sealed interface AbhaApiResult<out T> {
     data class Success<T>(val data: T) : AbhaApiResult<T>
     data class Failure(val code: String?, val message: String) : AbhaApiResult<Nothing>
+
+    /** The backend was reached and returned a 2xx, but the payload itself violates the contract
+     *  (for example a session-state string outside [AbhaTransactionState]'s eleven values) — a
+     *  backend bug or a version-skew contract drift, never something a wrong OTP or an expired
+     *  session would produce. Deliberately NOT folded into `Failure(code = null)`: that code is
+     *  reserved for "backend unreachable," and collapsing contract drift into it would let a
+     *  caller's "code == null -> safe to fall back to mock" branch (see this interface's own
+     *  KDoc) wrongly treat a live, broken backend response as if nothing had answered at all. */
+    data class ProtocolViolation(val message: String) : AbhaApiResult<Nothing>
 }
 
 /** Mirrors the backend's `AbhaTransactionState` (`app/models/enums.py`, confirmed unchanged by

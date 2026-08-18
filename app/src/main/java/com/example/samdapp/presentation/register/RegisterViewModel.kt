@@ -131,8 +131,18 @@ class RegisterViewModel @Inject constructor(
                 fields = autofill(fields, RegisterField.FULL_NAME, profile.name)
                 // A masked mobile (the real ABDM shape) is never written into the submittable
                 // field — see RegisterUiState.maskedAbhaMobile's KDoc. Only a full, usable
-                // number (today, only ever from the mock) autofills MOBILE_NUMBER.
-                if (!mobileIsMasked) fields = autofill(fields, RegisterField.MOBILE_NUMBER, profile.mobileNumber)
+                // number (today, only ever from the mock) autofills MOBILE_NUMBER. If a PRIOR
+                // profile load already autofilled a full number and this one is masked, that
+                // stale value must be cleared too — otherwise it silently keeps satisfying
+                // canSubmit's contact-method rule for a profile that no longer has a usable
+                // mobile. Only clears it while still ABHA-autofilled, so a manual edit survives.
+                if (mobileIsMasked) {
+                    if (RegisterField.MOBILE_NUMBER in state.autofilledFields) {
+                        fields = fields - RegisterField.MOBILE_NUMBER
+                    }
+                } else {
+                    fields = autofill(fields, RegisterField.MOBILE_NUMBER, profile.mobileNumber)
+                }
                 fields = autofill(fields, RegisterField.VILLAGE, profile.address)
                 fields = autofill(fields, RegisterField.DISTRICT, profile.district)
                 fields = autofill(fields, RegisterField.STATE, profile.state)
