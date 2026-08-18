@@ -138,6 +138,10 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
+    // WorkManager — sync-push outbox worker (Phase 6b), Hilt-injected per HiltWorkerFactory
+    implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.hilt.work)
+    ksp(libs.androidx.hilt.compiler)
     implementation(libs.sqlcipher.android)
     implementation(libs.androidx.sqlite)
     implementation(libs.androidx.datastore.preferences)
@@ -156,6 +160,7 @@ dependencies {
     // OkHttp request/response semantics, not a hand-rolled Interceptor.Chain mock. Same okhttp
     // version already pinned for the production logging-interceptor dependency.
     testImplementation(libs.okhttp.mockwebserver)
+    androidTestImplementation(libs.androidx.work.testing)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)
