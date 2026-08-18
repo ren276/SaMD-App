@@ -42,7 +42,7 @@ data class PatientEntity(
     /** ABDM-verified provenance (Phase 6c, MIGRATION_13_14) — the final, verified identity
      *  fields from a real `AbhaIdentity` response (api-contract.md §8), distinct from
      *  [abhaNumber]: registration STATE (session id, in-progress step) never lands on Patient,
-     *  it lives in the backend transaction; only this proof-of-verification does. All five
+     *  it lives in the backend transaction; only this proof-of-verification does. All four
      *  nullable: a manually-registered patient with no ABHA has none of them. */
     val abhaAddress: String? = null,
     /** Mirrors `AbhaIdentity.kyc_verified`/[com.example.samdapp.domain.model.AbhaProfile.kycVerified]

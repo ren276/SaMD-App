@@ -27,7 +27,15 @@ import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.util.concurrent.TimeUnit
+import javax.inject.Qualifier
 import javax.inject.Singleton
+
+/** Marks the ABHA-only [OkHttpClient]/[Retrofit] pair — see [NetworkModule.provideAbhaOkHttpClient]'s
+ *  KDoc for why ABHA traffic cannot share the general-purpose client that
+ *  [NetworkModule.provideHttpLoggingInterceptor] can put in `BODY` logging mode. */
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class AbhaHttpStack
 
 /**
  * Provides the Retrofit + OkHttp stack for `backend/core`. One `OkHttpClient`/`Retrofit` pair
@@ -84,6 +92,41 @@ object NetworkModule {
             .addInterceptor(loggingInterceptor)
             .build()
 
+    /** ABHA traffic never shares [provideOkHttpClient]: that client's [HttpLoggingInterceptor]
+     *  can be put in `Level.BODY` by [BuildConfig.ENABLE_NETWORK_LOGGING], a `local.properties`
+     *  flag read into `defaultConfig` — so it can end up on for any flavor or build type,
+     *  including a local `ProdRelease` build, not just `dev`. ABHA request/response bodies carry
+     *  Aadhaar numbers and OTPs in the clear on the wire to this backend (RSA-OAEP encryption
+     *  happens server-side in `backend/abdm-adapter/`, never on Android — see
+     *  [com.example.samdapp.domain.abha.AbdmAbhaSource]'s KDoc); logging those bodies to logcat
+     *  would defeat that encryption boundary regardless of what the backend does with them. This
+     *  client has no [HttpLoggingInterceptor] at all — not gated off, structurally absent — while
+     *  keeping the same Bearer/refresh authentication as every other `backend/core` call. */
+    @Provides
+    @Singleton
+    @AbhaHttpStack
+    fun provideAbhaOkHttpClient(
+        bearerInterceptor: BearerInterceptor,
+        tokenAuthenticator: TokenAuthenticator,
+    ): OkHttpClient =
+        OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .addInterceptor(bearerInterceptor)
+            .authenticator(tokenAuthenticator)
+            .build()
+
+    @Provides
+    @Singleton
+    @AbhaHttpStack
+    fun provideAbhaRetrofit(@AbhaHttpStack okHttpClient: OkHttpClient, gson: Gson): Retrofit =
+        Retrofit.Builder()
+            .baseUrl(com.example.samdapp.BuildConfig.BACKEND_BASE_URL)
+            .client(okHttpClient)
+            .addConverterFactory(GsonConverterFactory.create(gson))
+            .build()
+
     /** `PatientEntity`/etc.'s Room columns go through [com.example.samdapp.data.local.Converters]
      *  instead, a separate converter for a separate boundary — registering these two adapters
      *  here is additive, not a risk to any existing DTO's serialization. Phase 6b's sync payload
@@ -123,7 +166,7 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideAbhaApiService(retrofit: Retrofit): AbhaApiService =
+    fun provideAbhaApiService(@AbhaHttpStack retrofit: Retrofit): AbhaApiService =
         retrofit.create(AbhaApiService::class.java)
 
     /** Separate abstract class to host @Binds methods (Hilt requirement). */
