@@ -1,7 +1,6 @@
 package com.example.samdapp.data.remote
 
 import com.example.samdapp.data.remote.api.ClinicalApiService
-import com.example.samdapp.data.remote.dto.EvaluateErrorDto
 import com.example.samdapp.data.remote.dto.EvaluateReportDto
 import com.example.samdapp.data.remote.dto.EvaluateRequestDto
 import com.example.samdapp.domain.kernel.EvaluateKernelSource
@@ -15,23 +14,18 @@ import com.example.samdapp.domain.model.EvaluateRankedCandidate
 import com.example.samdapp.domain.model.EvaluateSafetyAndTriage
 import com.example.samdapp.domain.model.EvaluateVitalsTriage
 import com.example.samdapp.domain.model.KernelPayload
-import com.google.gson.Gson
-import java.io.IOException
 import javax.inject.Inject
 
 /**
- * Retrofit-backed implementation of [EvaluateKernelSource]. Talks to the FastAPI backend at the
- * LAN IP configured in [com.example.samdapp.di.NetworkModule] via `POST /api/v1/evaluate`.
- *
- * On a non-2xx response, [ClinicalApiService.evaluate]'s `Response<EvaluateReportDto>` return type
- * lets this class inspect the error body (shaped as [EvaluateErrorDto], NOT [EvaluateReportDto] —
- * see that class's KDoc) rather than losing it to a bare `HttpException`.
+ * Retrofit-backed implementation of [EvaluateKernelSource]. Talks to the backend's evaluate proxy
+ * at `BuildConfig.BACKEND_BASE_URL` via `POST /api/v1/evaluate` (api-contract.md §5.4). Throws on
+ * any non-2xx response: the backend normalizes upstream kernel errors into the standard RFC 9457
+ * envelope before they reach here, so there is no longer a second error schema to parse (see
+ * [ClinicalApiService.evaluate]'s KDoc).
  */
 class RetrofitEvaluateSource @Inject constructor(
     private val clinicalApiService: ClinicalApiService,
 ) : EvaluateKernelSource {
-
-    private val gson = Gson()
 
     override suspend fun evaluate(
         payload: KernelPayload,
@@ -74,17 +68,7 @@ class RetrofitEvaluateSource @Inject constructor(
             temperature = vitals.temperatureCelsius,
         )
 
-        val response = clinicalApiService.evaluate(request)
-
-        if (!response.isSuccessful) {
-            val parsedError = response.errorBody()?.charStream()?.use { reader ->
-                runCatching { gson.fromJson(reader, EvaluateErrorDto::class.java) }.getOrNull()
-            }
-            throw IOException(parsedError?.message ?: "Evaluate endpoint returned HTTP ${response.code()}")
-        }
-
-        val body = response.body() ?: throw IOException("Evaluate endpoint returned an empty body")
-        return body.toEvaluateResult()
+        return clinicalApiService.evaluate(request).data.toEvaluateResult()
     }
 }
 

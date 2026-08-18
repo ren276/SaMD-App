@@ -31,6 +31,7 @@ class LoginViewModelTest {
 
         viewModel.onNameChange("Asha")
         viewModel.onRoleSelect(UserRole.ASHA_WORKER)
+        viewModel.onPinChange("482915")
         viewModel.onSubmit()
         advanceUntilIdle()
 
@@ -48,6 +49,7 @@ class LoginViewModelTest {
 
         viewModel.onNameChange("Asha")
         viewModel.onRoleSelect(UserRole.ASHA_WORKER)
+        viewModel.onPinChange("482915")
         viewModel.onSubmit()
         advanceUntilIdle()
         viewModel.onBiometricSucceeded()
@@ -65,6 +67,7 @@ class LoginViewModelTest {
 
             viewModel.onNameChange("Asha")
             viewModel.onRoleSelect(UserRole.ASHA_WORKER)
+            viewModel.onPinChange("482915")
             viewModel.onSubmit()
             advanceUntilIdle()
             viewModel.onBiometricFailed("fingerprint did not match")
