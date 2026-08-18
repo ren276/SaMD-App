@@ -85,6 +85,14 @@ class AuditAction(StrEnum):
     ABHA_SESSION_STARTED = "abha_session_started"
     ABHA_SESSION_FAILED = "abha_session_failed"
     ABHA_IDENTITY_LINKED = "abha_identity_linked"
+    # Phase 5 Phase B (D7): the intermediate state-machine successes. Without these the chain
+    # only had start/failed/linked, a gap exactly where a wrong-patient linkage would need to be
+    # reconstructed from. backend-prd.md section 6.2 is the source list; these mirror it exactly.
+    ABHA_IDENTITY_SUBMITTED = "abha_identity_submitted"
+    ABHA_OTP_VERIFIED = "abha_otp_verified"
+    ABHA_ENROLLED = "abha_enrolled"
+    ABHA_MOBILE_VERIFIED = "abha_mobile_verified"
+    ABHA_PROFILE_RETRIEVED = "abha_profile_retrieved"
     # Generic fallback written by the audit middleware for a mutating request whose handler did
     # not declare a specific action. Its presence in the log is a hint that the handler should.
     REQUEST_COMPLETED = "request_completed"
