@@ -29,10 +29,14 @@ interface ConsultationDao {
     fun observeFailedSyncCount(): Flow<Int>
 
     /** Also stamps `localModifiedAt` from the same [updatedAt] value, see MIGRATION_12_13's
-     *  KDoc for why the two columns are deliberately redundant on entities that have both. */
+     *  KDoc for why the two columns are deliberately redundant on entities that have both, and
+     *  resets `syncState` to `PENDING` in the same statement so a re-edited transcription
+     *  re-drains even if this row was already `SYNCED` (syncstate-reset session). `serverVersion`
+     *  is untouched: the next push sends it as `base_version`, letting the backend's
+     *  last-write-wins logic run normally rather than looking like a never-synced row. */
     @Query(
         "UPDATE consultations SET transcription = :transcription, updatedAt = :updatedAt, " +
-            "localModifiedAt = :updatedAt WHERE id = :consultationId",
+            "localModifiedAt = :updatedAt, syncState = 'PENDING' WHERE id = :consultationId",
     )
     suspend fun updateTranscription(consultationId: String, transcription: String, updatedAt: Instant)
 

@@ -38,7 +38,9 @@ interface AilmentDao {
     /** Soft delete (private-entry delete button). Sets [AilmentEntity.deletedAt]; the row is
      *  retained for the audit trail rather than physically removed. Also stamps
      *  [AilmentEntity.localModifiedAt] from the same [deletedAt] value, see MIGRATION_12_13's
-     *  KDoc. */
-    @Query("UPDATE ailments SET deletedAt = :deletedAt, localModifiedAt = :deletedAt WHERE id = :id")
+     *  KDoc, and resets `syncState` to `PENDING` in the same statement (syncstate-reset session):
+     *  `deletedAt` is part of the synced payload (this DAO's own KDoc above), so a soft delete on
+     *  an already-`SYNCED` row must re-drain like any other clinical edit. */
+    @Query("UPDATE ailments SET deletedAt = :deletedAt, localModifiedAt = :deletedAt, syncState = 'PENDING' WHERE id = :id")
     suspend fun markDeleted(id: String, deletedAt: Instant)
 }

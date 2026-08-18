@@ -45,7 +45,11 @@ class MedicalBackgroundRepositoryImpl @Inject constructor(
     }
 
     override suspend fun upsertSocialHistory(socialHistory: SocialHistory): Result<Unit> = asDataResult {
-        socialHistoryDao.upsert(socialHistory.toEntity())
+        // upsert() is REPLACE: without this read, a re-edit would silently wipe serverVersion
+        // (syncstate-reset session). syncState needs no explicit reset — SocialHistoryEntity's
+        // default is already PENDING, and REPLACE always writes the full default set.
+        val existingServerVersion = socialHistoryDao.getServerVersion(socialHistory.patientId)
+        socialHistoryDao.upsert(socialHistory.toEntity(serverVersion = existingServerVersion))
     }
 
     override fun observeMedicalHistory(patientId: String): Flow<List<MedicalHistoryItem>> =
@@ -104,10 +108,11 @@ private fun FamilyHistoryEntryEntity.toDomain() = FamilyHistoryEntry(
     id = id, patientId = patientId, condition = condition, relation = relation, createdAt = createdAt,
 )
 
-private fun SocialHistory.toEntity() = SocialHistoryEntity(
+private fun SocialHistory.toEntity(serverVersion: Int?) = SocialHistoryEntity(
     patientId = patientId, occupation = occupation, tobaccoUse = tobaccoUse, alcoholUse = alcoholUse,
     recreationalDrugUse = recreationalDrugUse, environmentalExposure = environmentalExposure,
     recentTravel = recentTravel, updatedAt = updatedAt, localModifiedAt = updatedAt,
+    serverVersion = serverVersion,
 )
 
 private fun SocialHistoryEntity.toDomain() = SocialHistory(

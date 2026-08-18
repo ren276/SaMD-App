@@ -17,6 +17,13 @@ interface DiagnosisFeedbackDao {
     @Query("SELECT * FROM diagnosis_feedback WHERE caseRecordId = :caseRecordId")
     fun observeForCase(caseRecordId: String): Flow<DiagnosisFeedbackEntity?>
 
+    /** `syncstate-reset` session: [upsert] is `REPLACE`, which overwrites the whole row including
+     *  `serverVersion` with whatever the caller's fresh [DiagnosisFeedbackEntity] carries (default
+     *  `null`). The caller must read this first and thread it through the replacement entity, or
+     *  a re-saved feedback silently makes an already-synced row look never-synced. */
+    @Query("SELECT serverVersion FROM diagnosis_feedback WHERE id = :id")
+    suspend fun getServerVersion(id: String): Int?
+
     /** Phase 6b outbox — see PatientDao.getPendingForSync's KDoc. A doctor's clinical REJECT
      *  (`PhysicianDecision.REJECT`) is a normal row here that must sync successfully like any
      *  other — "sync-rejected" (the outbox's `FAILED` state below) is a transport concept and

@@ -17,6 +17,13 @@ interface KernelReportDao {
     @Query("SELECT * FROM kernel_reports WHERE caseRecordId = :caseRecordId")
     fun observeForCase(caseRecordId: String): Flow<KernelReportEntity?>
 
+    /** `syncstate-reset` session: [upsert] is `REPLACE`, which overwrites the whole row including
+     *  `serverVersion` with whatever the caller's fresh [KernelReportEntity] carries (default
+     *  `null`). The caller must read this first and thread it through the replacement entity, or
+     *  a re-saved report silently makes an already-synced row look never-synced. */
+    @Query("SELECT serverVersion FROM kernel_reports WHERE id = :id")
+    suspend fun getServerVersion(id: String): Int?
+
     /** Phase 6b outbox — see PatientDao.getPendingForSync's KDoc. */
     @Query("SELECT * FROM kernel_reports WHERE syncState = 'PENDING' ORDER BY localModifiedAt ASC")
     suspend fun getPendingForSync(): List<KernelReportEntity>
