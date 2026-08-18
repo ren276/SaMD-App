@@ -19,6 +19,6 @@ import retrofit2.http.POST
  */
 interface ClinicalApiService {
 
-    @POST("/api/v1/evaluate")
+    @POST("api/v1/evaluate")
     suspend fun evaluate(@Body request: EvaluateRequestDto): ApiEnvelopeDto<EvaluateReportDto>
 }

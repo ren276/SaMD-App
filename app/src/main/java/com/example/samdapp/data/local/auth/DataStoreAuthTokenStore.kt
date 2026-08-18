@@ -62,8 +62,15 @@ class DataStoreAuthTokenStore @Inject constructor(
             .catch { e -> if (e is IOException) emit(emptyPreferences()) else throw e }
             .map { prefs -> prefs[Keys.MUST_CHANGE_PIN] ?: false }
 
+    private suspend fun safePrefs(): Preferences =
+        try {
+            dataStore.data.first()
+        } catch (e: IOException) {
+            emptyPreferences()
+        }
+
     override suspend fun deviceId(): String {
-        val existing = dataStore.data.first()[Keys.DEVICE_ID]
+        val existing = safePrefs()[Keys.DEVICE_ID]
         if (existing != null) return existing
         val generated = UUID.randomUUID().toString()
         dataStore.edit { prefs -> prefs[Keys.DEVICE_ID] = generated }
@@ -71,7 +78,7 @@ class DataStoreAuthTokenStore @Inject constructor(
     }
 
     override suspend fun snapshot(): TokenSnapshot {
-        val prefs = dataStore.data.first()
+        val prefs = safePrefs()
         return TokenSnapshot(
             deviceId = prefs[Keys.DEVICE_ID] ?: deviceId(),
             accessToken = prefs[Keys.ACCESS_TOKEN],
