@@ -5,19 +5,23 @@ import java.time.Instant
 import java.time.LocalDate
 
 /** Wire shapes for `POST/GET /api/v1/abha/registration-sessions*` (api-contract.md §8). Request
- *  bodies are not pinned exactly in that doc (only the success `data` shapes are) — inferred from
- *  each endpoint's stated Purpose column, the same "Submit Aadhaar"/"Verify OTP" language the
- *  table itself uses. Not yet exercised by any real request (see
- *  [com.example.samdapp.domain.abha.AbdmAbhaSource]'s KDoc for why), so treat these request shapes
- *  as a documented best guess to verify against a real backend call before first use, not as
- *  something already round-tripped. */
+ *  bodies matched directly against `backend/abdm-adapter/abdm_adapter/schemas.py`'s
+ *  `IdentitySubmit`/`OtpVerify`/`MobileOtpVerify` (all `StrictModel`, `extra="forbid"` — an
+ *  unexpected or missing field is a 422, not a silent pass-through), not guessed from the table's
+ *  Purpose column. Not yet exercised by any real request (see
+ *  [com.example.samdapp.domain.abha.AbdmAbhaSource]'s KDoc for why). */
 
 data class AbhaIdentityRequestDto(
     @SerializedName("aadhaar_number") val aadhaarNumber: String,
 )
 
+/** `OtpVerify` requires both fields: `mobile_number` is the account's communication mobile, sent
+ *  in the clear in this request per `abdm_adapter/schemas.py`'s own note (never RSA-encrypted
+ *  like the Aadhaar/OTP values, still never logged — `REDACTED_KEYS` covers `mobile_number`).
+ *  Distinct from [AbhaMobileOtpRequestDto], which needs only the OTP itself. */
 data class AbhaOtpRequestDto(
     val otp: String,
+    @SerializedName("mobile_number") val mobileNumber: String,
 )
 
 data class AbhaMobileOtpRequestDto(
