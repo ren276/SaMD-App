@@ -22,7 +22,6 @@ from sqlalchemy import (
     DateTime,
     Index,
     Integer,
-    LargeBinary,
     String,
     Text,
     func,
@@ -75,8 +74,12 @@ class AbhaTransaction(Base):
 
     # The enrollment token ABDM returns alongside the profile (expiresIn 1800 in the V3 spec).
     # Short lived and pgcrypto-encrypted when written; cleared the moment the session reaches a
-    # terminal state. Nullable and unused until Phase 5.
-    external_token_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary)
+    # terminal state. EncryptedText (Phase 5 fix, was a bare LargeBinary column here since Phase
+    # 1, "encrypted when written" resting on call-site discipline alone, the exact pattern this
+    # codebase avoids everywhere else, see app/logging.py's redaction processor docstring). The
+    # underlying column stays bytea either way (EncryptedText.impl is LargeBinary too), so this
+    # is a Python-side type change, not a migration.
+    external_token_encrypted: Mapped[str | None] = mapped_column(EncryptedText)
     external_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Result of a completed session. abha_number is stored as 14 bare digits, never the

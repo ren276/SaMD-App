@@ -140,6 +140,26 @@ Conventions: `REQ-<AREA>-NN`. Status: **DONE** (implemented + manually verified)
   id column) — both hold the same canonical 14-digit string.
 - Known mock limit (by design, not a bug): ABHA login only resolves an id previously created via
   `CreateAbhaProfileUseCase` **on this device** — there is no real ABDM directory to query offline.
+- **REQ-ABH-03** (DONE, backend, `ABDM_MODE=stub` only) Real ABDM V3 M1 adapter, Create ABHA via
+  Aadhaar OTP, the P0 vertical slice: session start (`POST /api/v1/abha/registration-sessions`),
+  Aadhaar submission and RSA-OAEP-SHA1 encryption (`.../identity`), OTP verification and
+  enrollment (`.../otp`), conditional communication-mobile verification (`.../mobile-otp`), state
+  polling (`GET .../{id}`), and final verified identity retrieval (`GET .../{id}/profile`).
+  `backend/abdm-adapter/` (sibling package, docs/backend/api-contract.md section 8,
+  backend-prd.md section 4.3), mounted as a router into the same `backend/core` FastAPI process.
+  State machine server-enforced against `abha_transactions` (Phase 1 schema, unchanged this
+  session except the `external_token_encrypted` column becoming genuinely pgcrypto-encrypted).
+  Not wired to Android; that is Phase 6.
+- **REQ-ABH-04** (DONE, backend) Every ABDM response is classified by a parsed body field, never
+  by HTTP status alone (D2): `enrollment/auth/byAbdm` returns HTTP 200 for both a correct and an
+  incorrect/expired OTP, discriminated only by `authResult`. Proven by a test that feeds a 200
+  with `authResult: "failed"` and asserts the session moves to a failed state, not forward.
+- **REQ-ABH-05** (DONE, backend) Aadhaar numbers, OTP values, ABDM tokens, and inline base64
+  identity photos never appear in a response, a log line, an audit payload, or (for the photo
+  specifically) any persisted row; the X-token is encrypted at rest and cleared once a session
+  reaches a terminal state. Proven by a dedicated test
+  (`backend/core/tests/test_abha.py::test_d5_no_phi_in_persisted_row_or_logs`), not assumed from
+  the redaction processor covering fields this feature happens to introduce.
 
 ### Ailments (AIL) — supersedes free-text Complaints/Symptom
 - **REQ-AIL-01** (DONE) Ailment entries typed measurable vs non-measurable, captured on the

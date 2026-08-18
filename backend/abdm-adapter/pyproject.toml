@@ -1,0 +1,42 @@
+[project]
+name = "samd-abdm-adapter"
+version = "0.1.0"
+description = "ABDM V3 adapter for the SaMD backend. Sibling package to backend/core, mounted as a router into the same FastAPI process (docs/backend/api-contract.md section 8, backend-prd.md section 4.3). Not a standalone service."
+requires-python = "==3.12.*"
+
+# No dependency pin list of its own: this package runs inside backend/core's venv (editable
+# install, see backend/core/pyproject.toml's own dev extras) and uses backend/core's fastapi,
+# httpx, pydantic, sqlalchemy, and cryptography (pulled in transitively by python-jose[cryptography]
+# already). Duplicating version pins here would be a second place for them to drift from
+# backend/core's, for a package that is never built or shipped separately from it.
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.4",
+    "pytest-asyncio==0.25.2",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[build-system]
+requires = ["setuptools==75.8.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["abdm_adapter*"]
+
+[tool.setuptools.package-data]
+abdm_adapter = ["py.typed"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "S", "A", "C4", "RUF"]
+ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "S105", "S106"]

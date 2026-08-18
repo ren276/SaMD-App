@@ -1,0 +1,60 @@
+"""Real ABDM response body -> the pinned `AbhaIdentity` shape. See
+docs/requirements/abha-internal-contract.md's field diff for the full reasoning behind every line
+here; this module is that table turned into code, nothing more.
+
+D5, non-negotiable: `profilePhoto`/`kycPhoto` (inline base64 image bytes) are read out of the raw
+ABDM body and never touch anything past this function. They are not assigned to any attribute, not
+passed to any logger, not written to any dict this module returns. There is nothing to redact
+because the value never exists past this function's local scope.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from app.db.base import utcnow
+
+from abdm_adapter.dob import from_split_fields
+
+VERIFICATION_SOURCE = "ABDM_AADHAAR_OTP"
+
+
+def strip_abha_number_dashes(value: str) -> str:
+    """`"91-7561-4088-0001"` -> `"91756140880001"`. `AbhaProfile.abha_id` is documented as
+    "14 bare digits, never the dash-formatted display form"; ABDM always returns the dashed form.
+    """
+    return value.replace("-", "")
+
+
+def profile_to_abha_identity(body: dict[str, Any]) -> dict[str, Any]:
+    """Build the `AbhaIdentity` dict from a real `profile/account` response body.
+
+    Deliberately returns a plain dict, not the pydantic model: the caller constructs
+    `AbhaIdentity(**this)`, which is where `photo_url`/etc get their final validation. Keeping the
+    boundary here as a dict keeps this function's only job "extract and normalise fields off a raw
+    ABDM body," not "know about the pydantic schema too."
+    """
+    date_of_birth = from_split_fields(
+        year=body.get("yearOfBirth"), month=body.get("monthOfBirth"), day=body.get("dayOfBirth")
+    )
+    return {
+        "abha_number": strip_abha_number_dashes(str(body["ABHANumber"])),
+        "abha_address": body.get("preferredAbhaAddress"),
+        "name": str(body.get("name", "")),
+        "date_of_birth": date_of_birth,
+        "gender": str(body.get("gender", "")),
+        "address": body.get("address"),
+        "district": body.get("districtName"),
+        "state": body.get("stateName"),
+        "pincode": body.get("pincode"),
+        # Masked at source (D4); never the full number. See mobile_number's own note in
+        # docs/requirements/abha-field-mapping.md for the Android-side REQ-REG-01 consequence.
+        "mobile_number": body.get("mobile"),
+        "email_address": None,
+        # D5: always null. The real response's profilePhoto/kycPhoto bytes are read above (via
+        # body.get, never assigned here) and go out of scope with this function's return.
+        "photo_url": None,
+        "kyc_verified": bool(body.get("kycVerified", False)),
+        "verification_source": VERIFICATION_SOURCE,
+        "verified_at": utcnow(),
+    }

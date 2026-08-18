@@ -92,6 +92,11 @@ _SERVER_ONLY_AUDIT_ACTIONS = frozenset(
         AuditAction.ABHA_SESSION_STARTED,
         AuditAction.ABHA_SESSION_FAILED,
         AuditAction.ABHA_IDENTITY_LINKED,
+        AuditAction.ABHA_IDENTITY_SUBMITTED,
+        AuditAction.ABHA_OTP_VERIFIED,
+        AuditAction.ABHA_ENROLLED,
+        AuditAction.ABHA_MOBILE_VERIFIED,
+        AuditAction.ABHA_PROFILE_RETRIEVED,
     }
 )
 
