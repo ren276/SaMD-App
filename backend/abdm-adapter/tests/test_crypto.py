@@ -104,10 +104,77 @@ async def test_fetch_public_key_pem_stub_mode_returns_the_fixed_test_key() -> No
     assert pem == STUB_PUBLIC_KEY_PEM
 
 
-async def test_fetch_public_key_pem_live_mode_is_not_implemented() -> None:
-    """Live mode is not built this session (the brief: no live ABDM call, no credential wiring).
-    This asserts that boundary is a loud failure, not a silent stub fallback."""
-    with pytest.raises(NotImplementedError):
-        await fetch_public_key_pem(
-            mode="live", cert_url="https://example.invalid", gateway_token="x"
+def _patch_transport(monkeypatch: pytest.MonkeyPatch, handler: object) -> dict:  # type: ignore[type-arg]
+    import httpx
+
+    captured: dict[str, httpx.Request] = {}
+
+    def wrapped_handler(request: httpx.Request) -> httpx.Response:
+        captured["request"] = request
+        return handler(request)  # type: ignore[operator]
+
+    real_client_init = httpx.AsyncClient.__init__
+
+    def patched_init(self: httpx.AsyncClient, *args: object, **kwargs: object) -> None:
+        kwargs["transport"] = httpx.MockTransport(wrapped_handler)
+        real_client_init(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", patched_init)
+    return captured
+
+
+async def test_fetch_public_key_pem_live_mode_parses_json_wrapped_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Live mode GETs `cert_url` with the gateway token as a Bearer header and parses the real
+    ABDM response shape: JSON with `publicKey` and `encryptionAlgorithm` fields (D6, confirmed
+    against a real sandbox call), not raw PEM text. Confirmed against a local httpx MockTransport
+    rather than a real ABDM call."""
+    import httpx
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "publicKey": STUB_PUBLIC_KEY_PEM,
+                "encryptionAlgorithm": "RSA/ECB/OAEPWithSHA-1AndMGF1Padding",
+            },
         )
+
+    captured = _patch_transport(monkeypatch, handler)
+
+    pem = await fetch_public_key_pem(
+        mode="live", cert_url="https://example.invalid/cert", gateway_token="gw-token-123"
+    )
+    assert pem == STUB_PUBLIC_KEY_PEM
+    request = captured["request"]
+    assert request.headers["Authorization"] == "Bearer gw-token-123"
+    assert "REQUEST-ID" in request.headers
+    assert "TIMESTAMP" in request.headers
+
+
+async def test_fetch_public_key_pem_live_mode_rejects_unexpected_encryption_algorithm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If ABDM ever changes `encryptionAlgorithm` away from the one cipher this module
+    implements, fetch_public_key_pem must fail loudly at fetch time, before any Aadhaar/OTP value
+    is encrypted against a scheme this module no longer matches."""
+    import httpx
+    from app.errors import ErrorCode, SamdError
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "publicKey": STUB_PUBLIC_KEY_PEM,
+                "encryptionAlgorithm": "RSA/ECB/PKCS1Padding",
+            },
+        )
+
+    _patch_transport(monkeypatch, handler)
+
+    with pytest.raises(SamdError) as exc_info:
+        await fetch_public_key_pem(
+            mode="live", cert_url="https://example.invalid/cert", gateway_token="gw-token-123"
+        )
+    assert exc_info.value.code == ErrorCode.ABHA_UPSTREAM_ERROR

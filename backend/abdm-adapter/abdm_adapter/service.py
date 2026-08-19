@@ -33,11 +33,13 @@ import uuid
 from datetime import timedelta
 from typing import Any, NoReturn
 
+import httpx
 from app.config import Settings, abdm_consent_block
 from app.db.base import utcnow
 from app.db.session import write_out_of_band
 from app.deps import CurrentWorker
 from app.errors import ErrorCode, SamdError
+from app.logging import get_logger
 from app.middleware.request_id import current_request_id
 from app.models.abha import AbhaTransaction
 from app.models.enums import AbhaTransactionKind, AuditAction, AuditOrigin
@@ -47,13 +49,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from abdm_adapter import client, mapping
 from abdm_adapter.crypto import encrypt_oaep_sha1, fetch_public_key_pem
-from abdm_adapter.errors import AbdmResult
+from abdm_adapter.errors import AbdmResult, RetryClass
 from abdm_adapter.request_context import new_correlation_id
 from abdm_adapter.transaction import (
     check_not_expired,
     mobile_verification_needed,
     validate_transition,
 )
+
+logger = get_logger(__name__)
 
 # Not specified by any of the ground-truth sources read for Phase A/B; chosen to match ABDM's own
 # X-token TTL (1800s = 30 minutes) so a session does not outlive the token it will eventually
@@ -143,6 +147,53 @@ async def _fail(
     raise SamdError(code, detail=message or "The ABDM request failed.")
 
 
+def _result_from_samd_error(exc: SamdError) -> AbdmResult:
+    """crypto.py's `encryptionAlgorithm` check raises `SamdError` directly instead of returning an
+    `AbdmResult`, so on its own it would skip every `if not result.ok` below and escape `_fail`
+    entirely. Wrap it into the same shape so it still routes through `_fail`."""
+    return AbdmResult(
+        ok=False,
+        body={},
+        error_code=exc.code,
+        external_message=exc.detail,
+        retry_class=RetryClass.NON_RETRYABLE,
+    )
+
+
+def _result_from_transport_error(exc: Exception) -> AbdmResult:
+    """A live ABDM call can fail before it ever produces an `AbdmResult`: httpx raises on timeout,
+    connect failure, or a non-2xx `raise_for_status()`; `response.json()` raises on a non-JSON
+    body; and indexing a malformed token/cert response (`body["accessToken"]`, `body["publicKey"]`)
+    raises `KeyError`. Same reasoning as `_result_from_samd_error` above.
+
+    `_fail`'s own contract requires `external_message` to be a bounded, ABDM-sourced string that
+    never copies a raw body: `str(httpx.HTTPError)` embeds the request URL, and `str(ValueError)`
+    from a bad JSON parse embeds a slice of the upstream body. Neither is safe to hand back to the
+    caller, so the real exception goes to the logs only and the client gets a fixed message."""
+    logger.warning("abdm_transport_error", error=str(exc)[:500], exc_info=True)
+    return AbdmResult(
+        ok=False,
+        body={},
+        error_code=ErrorCode.ABHA_UPSTREAM_ERROR,
+        external_message="The ABDM gateway did not respond as expected.",
+        retry_class=RetryClass.RETRYABLE,
+    )
+
+
+def _result_from_local_error(exc: ValueError) -> AbdmResult:
+    """encrypt_oaep_sha1 raises ValueError when the certificate PEM it was handed can't be parsed.
+    Given the same PEM, retrying can't succeed, so unlike `_result_from_transport_error`'s upstream
+    faults this is NON_RETRYABLE."""
+    logger.warning("abdm_local_error", error=str(exc)[:500], exc_info=True)
+    return AbdmResult(
+        ok=False,
+        body={},
+        error_code=ErrorCode.ABHA_UPSTREAM_ERROR,
+        external_message="The ABDM request could not be completed.",
+        retry_class=RetryClass.NON_RETRYABLE,
+    )
+
+
 async def load_transaction(
     session: AsyncSession, worker: CurrentWorker, session_id: str
 ) -> AbhaTransaction:
@@ -189,20 +240,45 @@ async def submit_identity(
     validate_transition(current=State(txn.state), target=State.IDENTITY_SUBMITTED)
     validate_transition(current=State.IDENTITY_SUBMITTED, target=State.OTP_REQUESTED)
 
-    gateway_token = await client.fetch_gateway_session_token(mode=settings.abdm_mode)
-    cert_pem = await fetch_public_key_pem(
-        mode=settings.abdm_mode, cert_url=settings.abdm_cert_url, gateway_token=gateway_token
-    )
-    encrypted_aadhaar = encrypt_oaep_sha1(aadhaar_number, cert_pem)
+    try:
+        gateway_token = await client.fetch_gateway_session_token(
+            mode=settings.abdm_mode,
+            session_url=settings.abdm_session_url,
+            client_id=settings.abdm_client_id,
+            client_secret=settings.abdm_client_secret,
+            timeout_seconds=settings.abdm_timeout_seconds,
+        )
+        cert_pem = await fetch_public_key_pem(
+            mode=settings.abdm_mode,
+            cert_url=settings.abdm_cert_url,
+            gateway_token=gateway_token,
+            timeout_seconds=settings.abdm_timeout_seconds,
+        )
+    except SamdError as exc:
+        await _fail(session, worker, txn, _result_from_samd_error(exc))
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        await _fail(session, worker, txn, _result_from_transport_error(exc))
 
-    result = await client.send_otp(
-        mode=settings.abdm_mode,
-        txn_id="",
-        scope=["abha-enrol"],
-        login_hint="aadhaar",
-        encrypted_login_id=encrypted_aadhaar,
-        otp_system="aadhaar",
-    )
+    try:
+        encrypted_aadhaar = encrypt_oaep_sha1(aadhaar_number, cert_pem)
+    except ValueError as exc:
+        await _fail(session, worker, txn, _result_from_local_error(exc))
+
+    try:
+        result = await client.send_otp(
+            mode=settings.abdm_mode,
+            txn_id="",
+            scope=["abha-enrol"],
+            login_hint="aadhaar",
+            encrypted_login_id=encrypted_aadhaar,
+            otp_system="aadhaar",
+            base_url=settings.abdm_base_url,
+            timeout_seconds=settings.abdm_timeout_seconds,
+        )
+    except SamdError as exc:
+        await _fail(session, worker, txn, _result_from_samd_error(exc))
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        await _fail(session, worker, txn, _result_from_transport_error(exc))
     if not result.ok:
         await _fail(session, worker, txn, result)
 
@@ -227,22 +303,47 @@ async def verify_otp(
     check_not_expired(state=State(txn.state), expires_at=txn.expires_at)
     validate_transition(current=State(txn.state), target=State.OTP_VERIFIED)
 
-    gateway_token = await client.fetch_gateway_session_token(mode=settings.abdm_mode)
-    cert_pem = await fetch_public_key_pem(
-        mode=settings.abdm_mode, cert_url=settings.abdm_cert_url, gateway_token=gateway_token
-    )
-    encrypted_otp = encrypt_oaep_sha1(otp, cert_pem)
+    try:
+        gateway_token = await client.fetch_gateway_session_token(
+            mode=settings.abdm_mode,
+            session_url=settings.abdm_session_url,
+            client_id=settings.abdm_client_id,
+            client_secret=settings.abdm_client_secret,
+            timeout_seconds=settings.abdm_timeout_seconds,
+        )
+        cert_pem = await fetch_public_key_pem(
+            mode=settings.abdm_mode,
+            cert_url=settings.abdm_cert_url,
+            gateway_token=gateway_token,
+            timeout_seconds=settings.abdm_timeout_seconds,
+        )
+    except SamdError as exc:
+        await _fail(session, worker, txn, _result_from_samd_error(exc))
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        await _fail(session, worker, txn, _result_from_transport_error(exc))
+
+    try:
+        encrypted_otp = encrypt_oaep_sha1(otp, cert_pem)
+    except ValueError as exc:
+        await _fail(session, worker, txn, _result_from_local_error(exc))
 
     consent = abdm_consent_block(settings)
-    result = await client.enrol_by_aadhaar(
-        mode=settings.abdm_mode,
-        txn_id=txn.external_txn_id or "",
-        otp_plain=otp,
-        encrypted_otp=encrypted_otp,
-        communication_mobile=mobile_number,
-        consent_code=consent["code"],
-        consent_version=consent["version"],
-    )
+    try:
+        result = await client.enrol_by_aadhaar(
+            mode=settings.abdm_mode,
+            txn_id=txn.external_txn_id or "",
+            otp_plain=otp,
+            encrypted_otp=encrypted_otp,
+            communication_mobile=mobile_number,
+            consent_code=consent["code"],
+            consent_version=consent["version"],
+            base_url=settings.abdm_base_url,
+            timeout_seconds=settings.abdm_timeout_seconds,
+        )
+    except SamdError as exc:
+        await _fail(session, worker, txn, _result_from_samd_error(exc))
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        await _fail(session, worker, txn, _result_from_transport_error(exc))
     if not result.ok:
         await _fail(session, worker, txn, result)
 
@@ -286,18 +387,59 @@ async def verify_mobile_otp(
     check_not_expired(state=State(txn.state), expires_at=txn.expires_at)
     validate_transition(current=State(txn.state), target=State.MOBILE_VERIFIED)
 
-    gateway_token = await client.fetch_gateway_session_token(mode=settings.abdm_mode)
-    cert_pem = await fetch_public_key_pem(
-        mode=settings.abdm_mode, cert_url=settings.abdm_cert_url, gateway_token=gateway_token
-    )
-    encrypted_otp = encrypt_oaep_sha1(otp, cert_pem)
+    if settings.abdm_mode != "stub":
+        # client.verify_mobile_otp has no live implementation (docs/abdm/M1-tracker.md:
+        # CRT_ABHA_108/109 deferred, out of scope) and would raise NotImplementedError
+        # unconditionally. Fail here, before spending a live gateway-token + cert fetch on a
+        # call that can only ever crash.
+        await _fail(
+            session,
+            worker,
+            txn,
+            AbdmResult(
+                ok=False,
+                body={},
+                error_code=ErrorCode.ABHA_UPSTREAM_ERROR,
+                external_message="Mobile OTP verification is not available in live mode yet.",
+                retry_class=RetryClass.NON_RETRYABLE,
+            ),
+        )
 
-    result = await client.verify_mobile_otp(
-        mode=settings.abdm_mode,
-        txn_id=txn.external_txn_id or "",
-        otp_plain=otp,
-        encrypted_otp=encrypted_otp,
-    )
+    try:
+        gateway_token = await client.fetch_gateway_session_token(
+            mode=settings.abdm_mode,
+            session_url=settings.abdm_session_url,
+            client_id=settings.abdm_client_id,
+            client_secret=settings.abdm_client_secret,
+            timeout_seconds=settings.abdm_timeout_seconds,
+        )
+        cert_pem = await fetch_public_key_pem(
+            mode=settings.abdm_mode,
+            cert_url=settings.abdm_cert_url,
+            gateway_token=gateway_token,
+            timeout_seconds=settings.abdm_timeout_seconds,
+        )
+    except SamdError as exc:
+        await _fail(session, worker, txn, _result_from_samd_error(exc))
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        await _fail(session, worker, txn, _result_from_transport_error(exc))
+
+    try:
+        encrypted_otp = encrypt_oaep_sha1(otp, cert_pem)
+    except ValueError as exc:
+        await _fail(session, worker, txn, _result_from_local_error(exc))
+
+    try:
+        result = await client.verify_mobile_otp(
+            mode=settings.abdm_mode,
+            txn_id=txn.external_txn_id or "",
+            otp_plain=otp,
+            encrypted_otp=encrypted_otp,
+        )
+    except SamdError as exc:
+        await _fail(session, worker, txn, _result_from_samd_error(exc))
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        await _fail(session, worker, txn, _result_from_transport_error(exc))
     if not result.ok:
         await _fail(session, worker, txn, result)
 

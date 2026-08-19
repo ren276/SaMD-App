@@ -10,10 +10,15 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
+import pytest
+from fastapi import FastAPI
 from httpx import AsyncClient
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import Settings
+from app.deps import settings_dep
 from app.errors import ErrorCode
 from app.models.abha import AbhaTransaction
 from app.models.audit import AuditEvent
@@ -178,6 +183,50 @@ async def test_invalid_otp_on_enrol_by_aadhaar_fails_the_session(
     assert txn is not None
     assert txn.state == "FAILED"
     assert txn.last_error_code == ErrorCode.ABHA_OTP_INCORRECT.value
+
+
+async def test_live_mode_gateway_timeout_fails_session_with_persisted_row(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    app: FastAPI,
+    test_settings: Settings,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A live ABDM call that raises before it ever produces an `AbdmResult` (httpx timeout here;
+    equally a connect error, a non-2xx status, or a malformed body) must still land the
+    transaction on FAILED with a persisted row, not leave it stuck at its prior state. Regression
+    test for the service.py boundary around client.fetch_gateway_session_token /
+    fetch_public_key_pem / the OTP calls: without it, this scenario raised
+    httpx.ConnectTimeout straight out of the request handler and the row was never written."""
+    session_id = await _start(client, auth_headers)
+
+    live_settings = test_settings.model_copy(update={"abdm_mode": "live"})
+    monkeypatch.setitem(app.dependency_overrides, settings_dep, lambda: live_settings)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectTimeout("simulated ABDM gateway timeout", request=request)
+
+    real_init = httpx.AsyncClient.__init__
+
+    def patched_init(self: httpx.AsyncClient, *args: object, **kwargs: object) -> None:
+        kwargs["transport"] = httpx.MockTransport(handler)
+        real_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", patched_init)
+
+    response = await client.post(
+        f"/api/v1/abha/registration-sessions/{session_id}/identity",
+        json={"aadhaar_number": AADHAAR},
+        headers=auth_headers,
+    )
+    assert response.status_code == 502
+    assert response.json()["code"] == ErrorCode.ABHA_UPSTREAM_ERROR.value
+
+    txn = await session.get(AbhaTransaction, session_id)
+    assert txn is not None
+    assert txn.state == "FAILED"
+    assert txn.last_error_code == ErrorCode.ABHA_UPSTREAM_ERROR.value
 
 
 # ---------------------------------------------------------------------------
