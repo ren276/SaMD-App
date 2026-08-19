@@ -133,12 +133,16 @@ async def test_fetch_gateway_session_token_caches_across_calls(
     _patch_transport(monkeypatch, handler)
 
     first = await fetch_gateway_session_token(
-        mode="live", session_url="https://dev.abdm.gov.in/api/hiecm/gateway/v3/sessions",
-        client_id="cid", client_secret="csecret",
+        mode="live",
+        session_url="https://dev.abdm.gov.in/api/hiecm/gateway/v3/sessions",
+        client_id="cid",
+        client_secret="csecret",
     )
     second = await fetch_gateway_session_token(
-        mode="live", session_url="https://dev.abdm.gov.in/api/hiecm/gateway/v3/sessions",
-        client_id="cid", client_secret="csecret",
+        mode="live",
+        session_url="https://dev.abdm.gov.in/api/hiecm/gateway/v3/sessions",
+        client_id="cid",
+        client_secret="csecret",
     )
 
     assert first == "token-A"
@@ -166,19 +170,18 @@ async def test_fetch_gateway_session_token_single_flights_concurrent_refresh(
 
     _patch_transport(monkeypatch, handler)
 
-    task = asyncio.ensure_future(
-        asyncio.gather(
-            *[
-                fetch_gateway_session_token(
-                    mode="live",
-                    session_url="https://dev.abdm.gov.in/api/hiecm/gateway/v3/sessions",
-                    client_id="cid",
-                    client_secret="csecret",
-                )
-                for _ in range(10)
-            ]
-        )
+    gathered = asyncio.gather(
+        *[
+            fetch_gateway_session_token(
+                mode="live",
+                session_url="https://dev.abdm.gov.in/api/hiecm/gateway/v3/sessions",
+                client_id="cid",
+                client_secret="csecret",
+            )
+            for _ in range(10)
+        ]
     )
+    task = asyncio.ensure_future(gathered)
     await entered.wait()
     for _ in range(10):
         await asyncio.sleep(0)
@@ -199,15 +202,15 @@ async def test_fetch_gateway_session_token_refreshes_after_expiry(
         call_count += 1
         # expiresIn=61 minus the 60s refresh skew leaves ~1s of validity, so the second call
         # (after we force time forward) must refresh rather than reuse the cache.
-        return httpx.Response(
-            200, json={"accessToken": f"token-{call_count}", "expiresIn": 61}
-        )
+        return httpx.Response(200, json={"accessToken": f"token-{call_count}", "expiresIn": 61})
 
     _patch_transport(monkeypatch, handler)
 
     first = await fetch_gateway_session_token(
-        mode="live", session_url="https://dev.abdm.gov.in/api/hiecm/gateway/v3/sessions",
-        client_id="cid", client_secret="csecret",
+        mode="live",
+        session_url="https://dev.abdm.gov.in/api/hiecm/gateway/v3/sessions",
+        client_id="cid",
+        client_secret="csecret",
     )
     assert first == "token-1"
     assert call_count == 1
@@ -218,8 +221,10 @@ async def test_fetch_gateway_session_token_refreshes_after_expiry(
     )
 
     second = await fetch_gateway_session_token(
-        mode="live", session_url="https://dev.abdm.gov.in/api/hiecm/gateway/v3/sessions",
-        client_id="cid", client_secret="csecret",
+        mode="live",
+        session_url="https://dev.abdm.gov.in/api/hiecm/gateway/v3/sessions",
+        client_id="cid",
+        client_secret="csecret",
     )
     assert second == "token-2"
     assert call_count == 2

@@ -39,6 +39,7 @@ from app.db.base import utcnow
 from app.db.session import write_out_of_band
 from app.deps import CurrentWorker
 from app.errors import ErrorCode, SamdError
+from app.logging import get_logger
 from app.middleware.request_id import current_request_id
 from app.models.abha import AbhaTransaction
 from app.models.enums import AbhaTransactionKind, AuditAction, AuditOrigin
@@ -55,6 +56,8 @@ from abdm_adapter.transaction import (
     mobile_verification_needed,
     validate_transition,
 )
+
+logger = get_logger(__name__)
 
 # Not specified by any of the ground-truth sources read for Phase A/B; chosen to match ABDM's own
 # X-token TTL (1800s = 30 minutes) so a session does not outlive the token it will eventually
@@ -161,13 +164,33 @@ def _result_from_transport_error(exc: Exception) -> AbdmResult:
     """A live ABDM call can fail before it ever produces an `AbdmResult`: httpx raises on timeout,
     connect failure, or a non-2xx `raise_for_status()`; `response.json()` raises on a non-JSON
     body; and indexing a malformed token/cert response (`body["accessToken"]`, `body["publicKey"]`)
-    raises `KeyError`. Same reasoning as `_result_from_samd_error` above."""
+    raises `KeyError`. Same reasoning as `_result_from_samd_error` above.
+
+    `_fail`'s own contract requires `external_message` to be a bounded, ABDM-sourced string that
+    never copies a raw body: `str(httpx.HTTPError)` embeds the request URL, and `str(ValueError)`
+    from a bad JSON parse embeds a slice of the upstream body. Neither is safe to hand back to the
+    caller, so the real exception goes to the logs only and the client gets a fixed message."""
+    logger.warning("abdm_transport_error", error=str(exc)[:500], exc_info=True)
     return AbdmResult(
         ok=False,
         body={},
         error_code=ErrorCode.ABHA_UPSTREAM_ERROR,
-        external_message=str(exc)[:500],
+        external_message="The ABDM gateway did not respond as expected.",
         retry_class=RetryClass.RETRYABLE,
+    )
+
+
+def _result_from_local_error(exc: ValueError) -> AbdmResult:
+    """encrypt_oaep_sha1 raises ValueError when the certificate PEM it was handed can't be parsed.
+    Given the same PEM, retrying can't succeed, so unlike `_result_from_transport_error`'s upstream
+    faults this is NON_RETRYABLE."""
+    logger.warning("abdm_local_error", error=str(exc)[:500], exc_info=True)
+    return AbdmResult(
+        ok=False,
+        body={},
+        error_code=ErrorCode.ABHA_UPSTREAM_ERROR,
+        external_message="The ABDM request could not be completed.",
+        retry_class=RetryClass.NON_RETRYABLE,
     )
 
 
@@ -231,8 +254,17 @@ async def submit_identity(
             gateway_token=gateway_token,
             timeout_seconds=settings.abdm_timeout_seconds,
         )
-        encrypted_aadhaar = encrypt_oaep_sha1(aadhaar_number, cert_pem)
+    except SamdError as exc:
+        await _fail(session, worker, txn, _result_from_samd_error(exc))
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        await _fail(session, worker, txn, _result_from_transport_error(exc))
 
+    try:
+        encrypted_aadhaar = encrypt_oaep_sha1(aadhaar_number, cert_pem)
+    except ValueError as exc:
+        await _fail(session, worker, txn, _result_from_local_error(exc))
+
+    try:
         result = await client.send_otp(
             mode=settings.abdm_mode,
             txn_id="",
@@ -244,9 +276,9 @@ async def submit_identity(
             timeout_seconds=settings.abdm_timeout_seconds,
         )
     except SamdError as exc:
-        result = _result_from_samd_error(exc)
+        await _fail(session, worker, txn, _result_from_samd_error(exc))
     except (httpx.HTTPError, ValueError, KeyError) as exc:
-        result = _result_from_transport_error(exc)
+        await _fail(session, worker, txn, _result_from_transport_error(exc))
     if not result.ok:
         await _fail(session, worker, txn, result)
 
@@ -285,9 +317,18 @@ async def verify_otp(
             gateway_token=gateway_token,
             timeout_seconds=settings.abdm_timeout_seconds,
         )
-        encrypted_otp = encrypt_oaep_sha1(otp, cert_pem)
+    except SamdError as exc:
+        await _fail(session, worker, txn, _result_from_samd_error(exc))
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        await _fail(session, worker, txn, _result_from_transport_error(exc))
 
-        consent = abdm_consent_block(settings)
+    try:
+        encrypted_otp = encrypt_oaep_sha1(otp, cert_pem)
+    except ValueError as exc:
+        await _fail(session, worker, txn, _result_from_local_error(exc))
+
+    consent = abdm_consent_block(settings)
+    try:
         result = await client.enrol_by_aadhaar(
             mode=settings.abdm_mode,
             txn_id=txn.external_txn_id or "",
@@ -300,9 +341,9 @@ async def verify_otp(
             timeout_seconds=settings.abdm_timeout_seconds,
         )
     except SamdError as exc:
-        result = _result_from_samd_error(exc)
+        await _fail(session, worker, txn, _result_from_samd_error(exc))
     except (httpx.HTTPError, ValueError, KeyError) as exc:
-        result = _result_from_transport_error(exc)
+        await _fail(session, worker, txn, _result_from_transport_error(exc))
     if not result.ok:
         await _fail(session, worker, txn, result)
 
@@ -378,8 +419,17 @@ async def verify_mobile_otp(
             gateway_token=gateway_token,
             timeout_seconds=settings.abdm_timeout_seconds,
         )
-        encrypted_otp = encrypt_oaep_sha1(otp, cert_pem)
+    except SamdError as exc:
+        await _fail(session, worker, txn, _result_from_samd_error(exc))
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        await _fail(session, worker, txn, _result_from_transport_error(exc))
 
+    try:
+        encrypted_otp = encrypt_oaep_sha1(otp, cert_pem)
+    except ValueError as exc:
+        await _fail(session, worker, txn, _result_from_local_error(exc))
+
+    try:
         result = await client.verify_mobile_otp(
             mode=settings.abdm_mode,
             txn_id=txn.external_txn_id or "",
@@ -387,9 +437,9 @@ async def verify_mobile_otp(
             encrypted_otp=encrypted_otp,
         )
     except SamdError as exc:
-        result = _result_from_samd_error(exc)
+        await _fail(session, worker, txn, _result_from_samd_error(exc))
     except (httpx.HTTPError, ValueError, KeyError) as exc:
-        result = _result_from_transport_error(exc)
+        await _fail(session, worker, txn, _result_from_transport_error(exc))
     if not result.ok:
         await _fail(session, worker, txn, result)
 

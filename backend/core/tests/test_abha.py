@@ -202,7 +202,7 @@ async def test_live_mode_gateway_timeout_fails_session_with_persisted_row(
     session_id = await _start(client, auth_headers)
 
     live_settings = test_settings.model_copy(update={"abdm_mode": "live"})
-    app.dependency_overrides[settings_dep] = lambda: live_settings
+    monkeypatch.setitem(app.dependency_overrides, settings_dep, lambda: live_settings)
 
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectTimeout("simulated ABDM gateway timeout", request=request)
