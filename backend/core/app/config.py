@@ -87,6 +87,10 @@ class Settings(BaseSettings):
     # "abha api docs/get started/encodingndrsaencryption.md". The real Postman "Cert API" request
     # (the ground truth) uses this URL instead. See docs/requirements/abha-internal-contract.md.
     abdm_cert_url: str = "https://abhasbx.abdm.gov.in/abha/api/v3/profile/public/certificate"
+    # Gateway session host is dev.abdm.gov.in, a different host from abdm_base_url
+    # (abhasbx.abdm.gov.in): the two are never derived from one another. From the real Postman
+    # "Session API" request, "ABDM Session and cert API" folder.
+    abdm_session_url: str = "https://dev.abdm.gov.in/api/hiecm/gateway/v3/sessions"
     abdm_client_id: str = ""
     abdm_client_secret: str = ""
     abdm_hip_id: str = ""
@@ -192,6 +196,9 @@ REDACTED_KEYS: frozenset[str] = frozenset(
         "otp_value",
         "otpvalue",
         "client_secret",
+        "abdm_client_secret",
+        "txnid",
+        "txn_id",
         "full_name",
         "name",
         "mobile",

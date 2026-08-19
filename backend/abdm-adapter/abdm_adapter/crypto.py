@@ -23,8 +23,19 @@ from __future__ import annotations
 
 import base64
 
+import httpx
+from app.errors import ErrorCode, SamdError
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
+
+from abdm_adapter.request_context import abdm_headers
+
+# The one cipher this module implements. D6 (Phase 5 live wiring, 2026-08-19): the real ABDM cert
+# response is JSON-wrapped and names its own algorithm (`encryptionAlgorithm`), confirmed against
+# a real sandbox call, not assumed. If ABDM ever returns a different value here, encrypting
+# against `publicKey` anyway would silently produce ciphertext ABDM cannot decrypt; failing loudly
+# at fetch time, before any Aadhaar/OTP encryption is attempted, is cheaper than debugging that.
+EXPECTED_ENCRYPTION_ALGORITHM = "RSA/ECB/OAEPWithSHA-1AndMGF1Padding"
 
 # Fixed 2048-bit RSA public key, stub-mode only. Generated once for this session; the matching
 # private key lives only in tests/test_crypto.py. Never treat this as a real ABDM cert: it exists
@@ -61,18 +72,40 @@ def encrypt_oaep_sha1(plaintext: str, public_key_pem: str) -> str:
     return base64.b64encode(ciphertext).decode("ascii")
 
 
-async def fetch_public_key_pem(*, mode: str, cert_url: str, gateway_token: str | None) -> str:
+async def fetch_public_key_pem(
+    *,
+    mode: str,
+    cert_url: str,
+    gateway_token: str | None,
+    timeout_seconds: float = 30.0,
+) -> str:
     """The V3 cert, as a PEM string ready for `encrypt_oaep_sha1`.
 
-    Stub mode returns the fixed test key above, no network call. Live mode would GET `cert_url`
-    with the gateway session token and parse the certificate out of the response; not implemented
-    here (ABDM_MODE=live is not exercised this session, per the brief) beyond raising loudly if it
-    is ever reached, so a misconfigured live attempt fails immediately instead of silently
-    encrypting against a stub key it should not be using.
+    Stub mode returns the fixed test key above, no network call. Live mode GETs `cert_url` with
+    the gateway session token (the Postman "Cert API" request's own auth) and parses the response
+    as JSON: `{"publicKey": "<PEM>", "encryptionAlgorithm": "RSA/ECB/OAEPWithSHA-1AndMGF1Padding"}`,
+    confirmed against a real sandbox call (D6). `encryptionAlgorithm` is asserted against
+    `EXPECTED_ENCRYPTION_ALGORITHM` before the PEM is returned: this is the one place that can
+    catch ABDM changing the cipher before this module silently encrypts against a scheme it no
+    longer matches. A mismatch raises `SamdError(ABHA_UPSTREAM_ERROR)`, the same classified error
+    the rest of this package's upstream failures use, not a bare exception.
     """
     if mode == "stub":
         return STUB_PUBLIC_KEY_PEM
-    raise NotImplementedError(
-        "ABDM_MODE=live cert fetch is not implemented this session. Building it is Phase 5's "
-        "live-activation work, gated on real ABDM sandbox credentials arriving; see PROGRESS.md."
-    )
+    async with httpx.AsyncClient(timeout=timeout_seconds) as http_client:
+        response = await http_client.get(
+            cert_url, headers=abdm_headers(gateway_token=gateway_token)
+        )
+        response.raise_for_status()
+        body = response.json()
+
+    algorithm = body.get("encryptionAlgorithm")
+    if algorithm != EXPECTED_ENCRYPTION_ALGORITHM:
+        raise SamdError(
+            ErrorCode.ABHA_UPSTREAM_ERROR,
+            detail=(
+                "ABDM certificate endpoint returned an unexpected encryptionAlgorithm "
+                f"({algorithm!r}), expected {EXPECTED_ENCRYPTION_ALGORITHM!r}."
+            ),
+        )
+    return str(body["publicKey"])

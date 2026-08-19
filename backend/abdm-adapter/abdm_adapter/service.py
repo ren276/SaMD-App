@@ -189,9 +189,18 @@ async def submit_identity(
     validate_transition(current=State(txn.state), target=State.IDENTITY_SUBMITTED)
     validate_transition(current=State.IDENTITY_SUBMITTED, target=State.OTP_REQUESTED)
 
-    gateway_token = await client.fetch_gateway_session_token(mode=settings.abdm_mode)
+    gateway_token = await client.fetch_gateway_session_token(
+        mode=settings.abdm_mode,
+        session_url=settings.abdm_session_url,
+        client_id=settings.abdm_client_id,
+        client_secret=settings.abdm_client_secret,
+        timeout_seconds=settings.abdm_timeout_seconds,
+    )
     cert_pem = await fetch_public_key_pem(
-        mode=settings.abdm_mode, cert_url=settings.abdm_cert_url, gateway_token=gateway_token
+        mode=settings.abdm_mode,
+        cert_url=settings.abdm_cert_url,
+        gateway_token=gateway_token,
+        timeout_seconds=settings.abdm_timeout_seconds,
     )
     encrypted_aadhaar = encrypt_oaep_sha1(aadhaar_number, cert_pem)
 
@@ -202,6 +211,8 @@ async def submit_identity(
         login_hint="aadhaar",
         encrypted_login_id=encrypted_aadhaar,
         otp_system="aadhaar",
+        base_url=settings.abdm_base_url,
+        timeout_seconds=settings.abdm_timeout_seconds,
     )
     if not result.ok:
         await _fail(session, worker, txn, result)
@@ -227,9 +238,18 @@ async def verify_otp(
     check_not_expired(state=State(txn.state), expires_at=txn.expires_at)
     validate_transition(current=State(txn.state), target=State.OTP_VERIFIED)
 
-    gateway_token = await client.fetch_gateway_session_token(mode=settings.abdm_mode)
+    gateway_token = await client.fetch_gateway_session_token(
+        mode=settings.abdm_mode,
+        session_url=settings.abdm_session_url,
+        client_id=settings.abdm_client_id,
+        client_secret=settings.abdm_client_secret,
+        timeout_seconds=settings.abdm_timeout_seconds,
+    )
     cert_pem = await fetch_public_key_pem(
-        mode=settings.abdm_mode, cert_url=settings.abdm_cert_url, gateway_token=gateway_token
+        mode=settings.abdm_mode,
+        cert_url=settings.abdm_cert_url,
+        gateway_token=gateway_token,
+        timeout_seconds=settings.abdm_timeout_seconds,
     )
     encrypted_otp = encrypt_oaep_sha1(otp, cert_pem)
 
@@ -242,6 +262,8 @@ async def verify_otp(
         communication_mobile=mobile_number,
         consent_code=consent["code"],
         consent_version=consent["version"],
+        base_url=settings.abdm_base_url,
+        timeout_seconds=settings.abdm_timeout_seconds,
     )
     if not result.ok:
         await _fail(session, worker, txn, result)
@@ -286,9 +308,18 @@ async def verify_mobile_otp(
     check_not_expired(state=State(txn.state), expires_at=txn.expires_at)
     validate_transition(current=State(txn.state), target=State.MOBILE_VERIFIED)
 
-    gateway_token = await client.fetch_gateway_session_token(mode=settings.abdm_mode)
+    gateway_token = await client.fetch_gateway_session_token(
+        mode=settings.abdm_mode,
+        session_url=settings.abdm_session_url,
+        client_id=settings.abdm_client_id,
+        client_secret=settings.abdm_client_secret,
+        timeout_seconds=settings.abdm_timeout_seconds,
+    )
     cert_pem = await fetch_public_key_pem(
-        mode=settings.abdm_mode, cert_url=settings.abdm_cert_url, gateway_token=gateway_token
+        mode=settings.abdm_mode,
+        cert_url=settings.abdm_cert_url,
+        gateway_token=gateway_token,
+        timeout_seconds=settings.abdm_timeout_seconds,
     )
     encrypted_otp = encrypt_oaep_sha1(otp, cert_pem)
 

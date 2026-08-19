@@ -13,8 +13,12 @@ credential or a secret.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Any
+
+import httpx
 
 from abdm_adapter.errors import (
     AbdmResult,
@@ -22,6 +26,20 @@ from abdm_adapter.errors import (
     classify_get_profile,
     classify_otp_verify,
 )
+from abdm_adapter.request_context import abdm_headers
+
+# Gateway session token cache. Process-wide, in memory only (never DB, never disk, per the live-
+# wiring brief). `_session_lock` serializes refreshes so concurrent callers racing an expired
+# token do not all hit POST .../sessions at once (single-flight): the first caller through the
+# lock refreshes and populates the cache, every other caller re-checks the cache after acquiring
+# the lock and finds it already fresh.
+_cached_token: str | None = None
+_cached_token_expires_at: datetime | None = None
+_session_lock = asyncio.Lock()
+
+# Refresh this many seconds before the token's real expiry, so a call already in flight when the
+# token is fetched does not race the token's own deadline.
+_TOKEN_REFRESH_SKEW_SECONDS = 60
 
 # Stub-only sentinels. Not real Aadhaar/OTP values; chosen to be obviously fake (all-same-digit,
 # never a valid 12-digit Aadhaar or a real OTP) so nobody mistakes them for live test data.
@@ -63,14 +81,63 @@ def _stub_profile(abha_number_dashed: str = "91-7561-4088-0001") -> dict[str, An
     }
 
 
-async def fetch_gateway_session_token(*, mode: str) -> str:
+async def fetch_gateway_session_token(
+    *,
+    mode: str,
+    session_url: str = "",
+    client_id: str = "",
+    client_secret: str = "",
+    timeout_seconds: float = 30.0,
+) -> str:
     """POST .../gateway/v3/sessions. Only needed for the cert fetch in this P0 slice (Phase A
-    finding: the four enrollment/* calls carry no Authorization header in any recorded example)."""
+    finding: the four enrollment/* calls carry no Authorization header in any recorded example).
+
+    Live mode caches the returned `accessToken` in memory (module-level, this process only) and
+    refreshes it just before `expiresIn` runs out. `_session_lock` makes concurrent refreshes
+    single-flight: every caller awaits the same lock, and a caller that acquires it after another
+    caller already refreshed re-checks the cache first and returns immediately without a second
+    network call.
+    """
     if mode == "stub":
         return "stub-gateway-session-token"
-    raise NotImplementedError(
-        "ABDM_MODE=live session token fetch is not implemented this session; see PROGRESS.md."
-    )
+
+    global _cached_token, _cached_token_expires_at
+
+    now = datetime.now(UTC)
+    if _cached_token is not None and _cached_token_expires_at is not None:
+        if now < _cached_token_expires_at:
+            return _cached_token
+
+    async with _session_lock:
+        now = datetime.now(UTC)
+        if _cached_token is not None and _cached_token_expires_at is not None:
+            if now < _cached_token_expires_at:
+                return _cached_token
+
+        async with httpx.AsyncClient(timeout=timeout_seconds) as http_client:
+            response = await http_client.post(
+                session_url,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-CM-ID": "sbx",
+                    **abdm_headers(),
+                },
+                json={
+                    "clientId": client_id,
+                    "clientSecret": client_secret,
+                    "grantType": "client_credentials",
+                },
+            )
+            response.raise_for_status()
+            body = response.json()
+
+        token = str(body["accessToken"])
+        expires_in = int(body.get("expiresIn", 300))
+        _cached_token = token
+        _cached_token_expires_at = now + timedelta(
+            seconds=max(expires_in - _TOKEN_REFRESH_SKEW_SECONDS, 1)
+        )
+        return token
 
 
 async def send_otp(
@@ -81,12 +148,31 @@ async def send_otp(
     login_hint: str,
     encrypted_login_id: str,
     otp_system: str,
+    base_url: str = "",
+    timeout_seconds: float = 30.0,
 ) -> AbdmResult:
     """POST enrollment/request/otp. Same endpoint for both the initial Aadhaar-OTP request and the
     mobile-update OTP request; only `scope`/`login_hint`/`otp_system` differ between the two call
-    sites (service.py), matching the two recorded Postman requests exactly."""
+    sites (service.py), matching the two recorded Postman requests exactly.
+
+    Live mode carries no `Authorization`/`X-CM-ID` header on this call (Phase A finding: no
+    recorded example has one), matching abdm_headers()'s default REQUEST-ID/TIMESTAMP-only shape.
+    """
     if mode != "stub":
-        raise NotImplementedError("ABDM_MODE=live is not implemented this session.")
+        async with httpx.AsyncClient(timeout=timeout_seconds) as http_client:
+            response = await http_client.post(
+                f"{base_url}/abha/api/v3/enrollment/request/otp",
+                headers={"Content-Type": "application/json", **abdm_headers()},
+                json={
+                    "txnId": txn_id,
+                    "scope": scope,
+                    "loginHint": login_hint,
+                    "loginId": encrypted_login_id,
+                    "otpSystem": otp_system,
+                },
+            )
+        return classify_generic_enrollment_error(response.status_code, response.json())
+
     new_txn_id = txn_id or str(uuid.uuid4())
     body = {
         "txnId": new_txn_id,
@@ -105,11 +191,30 @@ async def enrol_by_aadhaar(
     communication_mobile: str,
     consent_code: str,
     consent_version: str,
+    base_url: str = "",
+    timeout_seconds: float = 30.0,
 ) -> AbdmResult:
     """POST enrollment/enrol/byAadhaar. `otp_plain` is stub-only, used to pick which recorded
-    example to replay; never sent anywhere and never logged (see service.py)."""
+    example to replay; never sent anywhere and never logged (see service.py). Live mode sends
+    `encrypted_otp`, never `otp_plain`, matching that rule."""
     if mode != "stub":
-        raise NotImplementedError("ABDM_MODE=live is not implemented this session.")
+        async with httpx.AsyncClient(timeout=timeout_seconds) as http_client:
+            response = await http_client.post(
+                f"{base_url}/abha/api/v3/enrollment/enrol/byAadhaar",
+                headers={"Content-Type": "application/json", **abdm_headers()},
+                json={
+                    "authData": {
+                        "authMethods": ["otp"],
+                        "otp": {
+                            "txnId": txn_id,
+                            "otpValue": encrypted_otp,
+                            "mobile": communication_mobile,
+                        },
+                    },
+                    "consent": {"code": consent_code, "version": consent_version},
+                },
+            )
+        return classify_generic_enrollment_error(response.status_code, response.json())
 
     if otp_plain == _STUB_OTP_INCORRECT:
         return classify_generic_enrollment_error(
