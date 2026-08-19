@@ -37,6 +37,11 @@ def _redact(value: Any, depth: int = 0) -> Any:
         }
     if isinstance(value, list | tuple):
         return [_redact(item, depth + 1) for item in value]
+    if isinstance(value, str) and value.lstrip().startswith("-----BEGIN"):
+        # ABDM's V3 public-key PEM (crypto.py's fetch_public_key_pem) has no fixed key name at
+        # every call site; this catches it, and any other PEM block, by value rather than by key,
+        # the same "belt and braces" reasoning as _drop_body_keys below.
+        return REDACTED
     return value
 
 

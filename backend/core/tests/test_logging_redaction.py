@@ -84,6 +84,36 @@ def test_deeply_nested_structures_are_replaced_not_partially_walked() -> None:
     assert "'1'" not in rendered
 
 
+def test_abdm_secrets_and_transaction_ids_are_masked() -> None:
+    """M1 live wiring: a config-load log line or a request log line must never carry the ABDM
+    client secret, an OTP value, or the ABDM transaction id."""
+    result = _process(
+        {
+            "event": "abdm_config_loaded",
+            "abdm_client_secret": "s3cr3t",
+            "otp_value": "123456",
+            "txnid": "37d8d312-35a0-41e7-a6e4-1074eb18a5fa",
+            "txn_id": "37d8d312-35a0-41e7-a6e4-1074eb18a5fa",
+        }
+    )
+    assert result["abdm_client_secret"] == REDACTED
+    assert result["otp_value"] == REDACTED
+    assert result["txnid"] == REDACTED
+    assert result["txn_id"] == REDACTED
+
+
+def test_abdm_pem_value_is_masked_regardless_of_key_name() -> None:
+    """The V3 public-key PEM (crypto.py's fetch_public_key_pem) has no single field name at every
+    call site, so it must be caught by value, not by key."""
+    result = _process(
+        {
+            "event": "abdm_cert_fetched",
+            "some_unexpected_field_name": "-----BEGIN PUBLIC KEY-----\nMIIB...\n-----END",
+        }
+    )
+    assert result["some_unexpected_field_name"] == REDACTED
+
+
 def test_redaction_key_list_covers_the_identity_columns_encrypted_at_rest() -> None:
     """The log redaction list and the PHI-at-rest column list must not drift apart."""
     for column in (
