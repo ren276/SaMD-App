@@ -150,27 +150,40 @@ async def test_fetch_gateway_session_token_single_flights_concurrent_refresh(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Ten callers racing an empty cache must trigger exactly one POST to the sessions endpoint,
-    not ten: the single-flight lock, not luck, is what proves this."""
+    not ten: the single-flight lock, not luck, is what proves this. The handler blocks on the
+    first call until the other nine callers have had a chance to pile up behind the lock, so the
+    overlap is forced rather than hoping the event loop happens to interleave that way."""
     call_count = 0
+    entered = asyncio.Event()
+    release = asyncio.Event()
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    async def handler(request: httpx.Request) -> httpx.Response:
         nonlocal call_count
         call_count += 1
+        entered.set()
+        await release.wait()
         return httpx.Response(200, json={"accessToken": "token-B", "expiresIn": 1800})
 
     _patch_transport(monkeypatch, handler)
 
-    results = await asyncio.gather(
-        *[
-            fetch_gateway_session_token(
-                mode="live",
-                session_url="https://dev.abdm.gov.in/api/hiecm/gateway/v3/sessions",
-                client_id="cid",
-                client_secret="csecret",
-            )
-            for _ in range(10)
-        ]
+    task = asyncio.ensure_future(
+        asyncio.gather(
+            *[
+                fetch_gateway_session_token(
+                    mode="live",
+                    session_url="https://dev.abdm.gov.in/api/hiecm/gateway/v3/sessions",
+                    client_id="cid",
+                    client_secret="csecret",
+                )
+                for _ in range(10)
+            ]
+        )
     )
+    await entered.wait()
+    for _ in range(10):
+        await asyncio.sleep(0)
+    release.set()
+    results = await task
 
     assert all(token == "token-B" for token in results)
     assert call_count == 1

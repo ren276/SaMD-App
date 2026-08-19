@@ -160,7 +160,6 @@ async def test_fetch_public_key_pem_live_mode_rejects_unexpected_encryption_algo
     implements, fetch_public_key_pem must fail loudly at fetch time, before any Aadhaar/OTP value
     is encrypted against a scheme this module no longer matches."""
     import httpx
-
     from app.errors import ErrorCode, SamdError
 
     def handler(request: httpx.Request) -> httpx.Response:
