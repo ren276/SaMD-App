@@ -1,0 +1,17 @@
+# Secrets must never enter a build context, let alone an image layer.
+**/.env
+**/*.env
+!**/.env.example
+
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.venv/
+**/venv/
+core/tests/
+abdm-adapter/tests/
+**/htmlcov/
+**/.coverage
+**/*.egg-info/

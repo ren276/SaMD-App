@@ -1,6 +1,10 @@
 # Multi-stage: the build stage carries the toolchain, the runtime stage does not.
 # The same image runs in dev, staging, and production. Only environment variables differ.
 # A staging-specific image is a staging-specific bug.
+#
+# Build context is backend/ (see backend/docker-compose.yml's api.build), not backend/core/,
+# because backend/abdm-adapter is a sibling package mounted as a router into this same process
+# (app/main.py imports abdm_adapter.router) and Docker cannot COPY a path outside its context.
 
 FROM python:3.12-slim AS build
 
@@ -14,12 +18,18 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends build-essential \
  && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml ./
-COPY app ./app
+COPY abdm-adapter/pyproject.toml ./abdm-adapter/pyproject.toml
+COPY abdm-adapter/abdm_adapter ./abdm-adapter/abdm_adapter
+COPY core/pyproject.toml ./core/pyproject.toml
+COPY core/app ./core/app
 
+# abdm-adapter first: it has no dependency pins of its own (see its pyproject.toml), it runs
+# inside core's dependency set. Installed non-editable, unlike the local dev venv's editable
+# install, an image layer is not a source tree someone edits in place.
 RUN python -m venv /opt/venv \
  && /opt/venv/bin/pip install --upgrade pip==25.0 \
- && /opt/venv/bin/pip install .
+ && /opt/venv/bin/pip install ./abdm-adapter \
+ && /opt/venv/bin/pip install ./core
 
 
 FROM python:3.12-slim AS runtime
@@ -36,9 +46,9 @@ RUN groupadd --gid 10001 samd \
 WORKDIR /srv/app
 
 COPY --from=build /opt/venv /opt/venv
-COPY app ./app
-COPY alembic ./alembic
-COPY alembic.ini ./alembic.ini
+COPY core/app ./app
+COPY core/alembic ./alembic
+COPY core/alembic.ini ./alembic.ini
 
 USER samd
 
