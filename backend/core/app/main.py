@@ -23,6 +23,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.adapters.kernel.circuit_breaker import KernelCircuitBreakers
 from app.adapters.kernel.client import build_kernel_client
+from app.api import admin as admin_routes
 from app.api.v1 import auth as auth_routes
 from app.api.v1 import encounters as encounter_routes
 from app.api.v1 import health as health_routes
@@ -152,6 +153,7 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestIdMiddleware)
 
     app.include_router(health_routes.router)
+    app.include_router(admin_routes.router)
     app.include_router(auth_routes.router)
     app.include_router(patient_routes.router)
     app.include_router(encounter_routes.router)
