@@ -1,0 +1,18 @@
+#!/bin/sh
+# Blocks any commit message containing a Claude/Anthropic co-author trailer.
+# Installed after scrubbing Claude out of contributor history (2026-08-20).
+
+msg_file="$1"
+
+if grep -qiE '^Co-Authored-By:.*(claude|anthropic)' "$msg_file"; then
+  echo "commit-msg hook: Co-Authored-By trailer referencing Claude/Anthropic is not allowed." >&2
+  echo "Remove that trailer and commit again." >&2
+  exit 1
+fi
+
+if grep -qiE 'generated with.*claude code' "$msg_file"; then
+  echo "commit-msg hook: 'Generated with Claude Code' line is not allowed in commit messages." >&2
+  exit 1
+fi
+
+exit 0
