@@ -21,9 +21,7 @@ from tests.conftest import (
 SENTINEL_PAYLOAD = "SENTINEL_PAYLOAD_DO_NOT_RENDER_a1b2c3"
 
 
-async def test_asha_worker_is_forbidden(
-    client: AsyncClient, auth_headers: dict[str, str]
-) -> None:
+async def test_asha_worker_is_forbidden(client: AsyncClient, auth_headers: dict[str, str]) -> None:
     response = await client.get("/admin/dashboard", headers=auth_headers)
     assert response.status_code == 403
 
@@ -37,13 +35,9 @@ async def test_doctor_can_view_dashboard(
 
 
 @pytest.fixture
-async def doctor_pending_pin_change(
-    session: AsyncSession, doctor_headers: dict[str, str]
-) -> None:
+async def doctor_pending_pin_change(session: AsyncSession, doctor_headers: dict[str, str]) -> None:
     account = (
-        await session.execute(
-            select(UserAccount).where(UserAccount.worker_id == DOCTOR_WORKER_ID)
-        )
+        await session.execute(select(UserAccount).where(UserAccount.worker_id == DOCTOR_WORKER_ID))
     ).scalar_one()
     account.must_change_pin = True
     account.pin_hash = hash_pin(TEST_PIN)
@@ -64,9 +58,7 @@ async def test_dashboard_never_renders_pin_hash_or_audit_payload(
     session: AsyncSession,
 ) -> None:
     account = (
-        await session.execute(
-            select(UserAccount).where(UserAccount.worker_id == TEST_WORKER_ID)
-        )
+        await session.execute(select(UserAccount).where(UserAccount.worker_id == TEST_WORKER_ID))
     ).scalar_one()
     real_pin_hash = account.pin_hash
 

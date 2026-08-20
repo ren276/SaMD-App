@@ -70,7 +70,8 @@ async def _sync_panel(session: AsyncSession) -> list[dict[str, Any]]:
     # One UNION ALL round trip rather than one query per table (ponytail: 19 separate awaits
     # would be 19 network round trips for what is one page load).
     parts = [
-        f"SELECT '{table}' AS table_name, sync_state, count(*) AS row_count "
+        # table is always one of the literal _SYNC_TABLES entries above, never request input.
+        f"SELECT '{table}' AS table_name, sync_state, count(*) AS row_count "  # noqa: S608
         f"FROM {table} GROUP BY sync_state"
         for table in _SYNC_TABLES
     ]

@@ -106,7 +106,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build image
-        run: docker build -t samd-backend-core:ci backend/core
+        run: docker build -t samd-backend-core:ci -f backend/core/Dockerfile backend
 
       - name: Confirm the image does not run as root
         run: |
