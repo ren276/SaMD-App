@@ -222,7 +222,10 @@ class MockKernelFallbackSource @Inject constructor(
         val inferenceEndedAt = Instant.now()
 
         val complaint = payload.chiefComplaint.lowercase()
-        val scenario = SCENARIOS.firstOrNull { s -> s.keywords.any { complaint.contains(it) } }
+        val scenario = SCENARIOS
+            .mapNotNull { s -> s.keywords.filter { complaint.contains(it) }.maxByOrNull { it.length }?.let { it.length to s } }
+            .maxByOrNull { (matchLength, _) -> matchLength }
+            ?.second
             ?: DEFAULT_SCENARIO
         val confidence = Random.nextDouble(scenario.confidenceRange.start, scenario.confidenceRange.endInclusive)
 

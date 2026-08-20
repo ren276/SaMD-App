@@ -7,7 +7,6 @@ import com.example.samdapp.domain.repository.ConsultationRepository
 import com.example.samdapp.domain.repository.EncounterRepository
 import com.example.samdapp.domain.repository.PatientRepository
 import com.example.samdapp.domain.repository.VitalsRepository
-import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 
@@ -35,8 +34,9 @@ class RetryKernelAssessmentUseCase @Inject constructor(
         val encounterId = caseRecord.encounterId
 
         val vitals = vitalsRepository.observeLatestForEncounter(encounterId).first()?.toVitalsReading()
-            ?: com.example.samdapp.domain.model.VitalsReading()
-        val consultation = consultationRepository.observeForEncounter(encounterId).filterNotNull().first()
+            ?: return Result.failure(IllegalStateException("No vitals recorded for encounter $encounterId"))
+        val consultation = consultationRepository.observeForEncounter(encounterId).first()
+            ?: return Result.failure(IllegalStateException("No consultation recorded for encounter $encounterId"))
         val encounter = encounterRepository.observeEncounter(encounterId).first()
         val patient = encounter?.patientId?.let { patientRepository.observePatient(it).first() }
 

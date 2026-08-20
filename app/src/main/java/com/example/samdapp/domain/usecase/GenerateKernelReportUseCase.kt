@@ -9,6 +9,7 @@ import com.example.samdapp.domain.model.KernelReportOutput
 import com.example.samdapp.domain.model.RiskCategory
 import com.example.samdapp.domain.model.UrgencyLevel
 import com.example.samdapp.domain.repository.KernelReportRepository
+import kotlinx.coroutines.CancellationException
 import java.time.Instant
 import java.util.UUID
 import java.util.logging.Logger
@@ -164,12 +165,12 @@ class GenerateKernelReportUseCase @Inject constructor(
                 requiredHumanVerification = confidence < HUMAN_VERIFICATION_CONFIDENCE_THRESHOLD,
                 inferenceSource = InferenceSource.REAL_INFERENCE,
             )
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             // Any failure (network down, timeout, HTTP error, parse error, server offline) is
             // logged here and returns null — the caller tries kernelFallbackSource next, then
             // buildUnavailableOutput. The app never crashes when the ML server is unreachable.
-            // CancellationException is a Throwable (not Exception) in Kotlin so structured
-            // concurrency is not broken.
             logger.warning("Kernel API unavailable — trying fallback source. Reason: ${e.message}")
             null
         }

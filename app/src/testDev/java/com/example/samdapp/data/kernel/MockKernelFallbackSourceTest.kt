@@ -46,6 +46,24 @@ class MockKernelFallbackSourceTest {
     }
 
     @Test
+    fun `dengue fever complaint selects the dengue scenario, not the generic fever scenario`() = runTest {
+        val source = MockKernelFallbackSource(FakeDeviceInfoProvider())
+
+        val output = source.fallback("case-3", payload("dengue fever"), Instant.EPOCH, dataQualityScore = 1.0)
+
+        assertEquals("Dengue fever", output.predictedCondition)
+    }
+
+    @Test
+    fun `typhoid fever complaint selects the typhoid scenario, not the generic fever scenario`() = runTest {
+        val source = MockKernelFallbackSource(FakeDeviceInfoProvider())
+
+        val output = source.fallback("case-4", payload("typhoid fever"), Instant.EPOCH, dataQualityScore = 1.0)
+
+        assertEquals("Typhoid fever", output.predictedCondition)
+    }
+
+    @Test
     fun `unmatched complaint falls back to the default lower-confidence scenario`() = runTest {
         val source = MockKernelFallbackSource(FakeDeviceInfoProvider())
 

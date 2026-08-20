@@ -74,7 +74,16 @@ class KernelAssessmentViewModelTest {
         val patientRepo = FakePatientRepository().apply { registered = testPatient("p1") }
         val retryUseCase = RetryKernelAssessmentUseCase(
             caseRecordRepository = FakeCaseRecordRepository(initial = listOf(caseRecord)),
-            vitalsRepository = FakeVitalsRepository(),
+            vitalsRepository = FakeVitalsRepository(
+                latestByEncounter = mapOf(
+                    "enc-1" to com.example.samdapp.domain.model.VitalsSnapshot(
+                        encounterId = "enc-1",
+                        patientId = "p1",
+                        pulseBpm = 80,
+                        recordedAt = Instant.EPOCH,
+                    ),
+                ),
+            ),
             consultationRepository = FakeConsultationRepository(byEncounter = mapOf("enc-1" to testConsultation("enc-1"))),
             encounterRepository = FakeEncounterRepository(initialEncounters = listOf(encounter)),
             patientRepository = patientRepo,
@@ -145,7 +154,11 @@ class KernelAssessmentViewModelTest {
     @Test
     fun `retry that fails again stays honestly unavailable, not a silently kept-stale display`() = runTest(mainDispatcherRule.dispatcher) {
         val repo = FakeKernelReportRepository().apply {
-            saved["case-1"] = testKernelReportOutput("case-1", InferenceSource.UNAVAILABLE)
+            saved["case-1"] = testKernelReportOutput(
+                "case-1",
+                InferenceSource.UNAVAILABLE,
+                predictedCondition = "STALE — should not survive retry",
+            )
         }
         val vm = viewModel("case-1", repo, retryKernelSource = AlwaysFailsKernelSource)
         advanceUntilIdle()
@@ -154,6 +167,7 @@ class KernelAssessmentViewModelTest {
         advanceUntilIdle()
 
         assertTrue(vm.uiState.value.display!!.isUnavailable)
+        assertTrue(vm.uiState.value.display!!.predictedCondition != "STALE — should not survive retry")
         assertFalse(vm.uiState.value.isRetrying)
     }
 }

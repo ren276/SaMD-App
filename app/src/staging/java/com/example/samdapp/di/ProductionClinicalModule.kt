@@ -12,7 +12,7 @@ import javax.inject.Singleton
 
 /**
  * Staging/prod bindings for the two clinical mock/fallback seams — kernel-mock production safety
- * fix (see `docs/risk-file/kernel-mock-safety.md`). No fabricated vitals, no fabricated kernel
+ * fix (see `docs/quality/risk-management-file.md`). No fabricated vitals, no fabricated kernel
  * scenario: [UnavailableVitalsSource] returns an empty reading, [NoFallbackKernelSource] always
  * returns null, which `GenerateKernelReportUseCase` turns into an honest UNAVAILABLE result. Dev
  * binds the mock implementations instead (`src/dev/java/.../di/DevClinicalMockModule.kt`).

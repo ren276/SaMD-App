@@ -102,7 +102,11 @@ internal fun KernelAssessmentContent(uiState: KernelAssessmentUiState, actions: 
                     )
                 }
             }
-            LiabilityRow(uiState.liabilityAcknowledged, actions::onLiabilityAcknowledgedChange)
+            LiabilityRow(
+                checked = uiState.liabilityAcknowledged,
+                onCheckedChange = actions::onLiabilityAcknowledgedChange,
+                assessmentUnavailable = display.isUnavailable,
+            )
             Button(
                 onClick = actions::onContinue,
                 enabled = uiState.canContinue,
@@ -197,12 +201,20 @@ private fun ExplainabilityCard(display: AssessmentDisplay) {
 }
 
 @Composable
-private fun LiabilityRow(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+private fun LiabilityRow(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    assessmentUnavailable: Boolean,
+) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Checkbox(checked = checked, onCheckedChange = onCheckedChange)
         Text(
-            "I understand this is an AI-generated assessment — not a diagnosis — and requires " +
-                "physician verification.",
+            if (assessmentUnavailable) {
+                "I understand that no AI assessment was generated and physician review is required."
+            } else {
+                "I understand this is an AI-generated assessment — not a diagnosis — and requires " +
+                    "physician verification."
+            },
             style = MaterialTheme.typography.bodyMedium,
         )
     }

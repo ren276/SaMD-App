@@ -36,7 +36,16 @@ class RetryKernelAssessmentUseCaseTest {
         val patientRepo = FakePatientRepository().apply { registered = testPatient(encounter.patientId) }
         return RetryKernelAssessmentUseCase(
             caseRecordRepository = FakeCaseRecordRepository(initial = listOf(caseRecord)),
-            vitalsRepository = FakeVitalsRepository(),
+            vitalsRepository = FakeVitalsRepository(
+                latestByEncounter = mapOf(
+                    encounter.id to com.example.samdapp.domain.model.VitalsSnapshot(
+                        encounterId = encounter.id,
+                        patientId = encounter.patientId,
+                        pulseBpm = 80,
+                        recordedAt = Instant.EPOCH,
+                    ),
+                ),
+            ),
             consultationRepository = FakeConsultationRepository(byEncounter = mapOf(encounter.id to testConsultation(encounter.id, encounter.patientId))),
             encounterRepository = FakeEncounterRepository(initialEncounters = listOf(encounter)),
             patientRepository = patientRepo,

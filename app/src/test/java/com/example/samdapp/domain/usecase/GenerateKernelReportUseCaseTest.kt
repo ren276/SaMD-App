@@ -10,6 +10,7 @@ import com.example.samdapp.testutil.FakeDeviceInfoProvider
 import com.example.samdapp.testutil.FakeKernelFallbackSource
 import com.example.samdapp.testutil.FakeKernelReportRepository
 import com.example.samdapp.testutil.testKernelReportOutput
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -24,6 +25,18 @@ private class OfflineKernelSource : RemoteKernelSource {
         patientSex: String,
     ): KernelAssessmentResult {
         throw IOException("Simulated network unavailability")
+    }
+}
+
+/** Stub RemoteKernelSource that always throws CancellationException — simulates the calling
+ *  coroutine (e.g. the screen) being cancelled mid-assess. */
+private class CancellingKernelSource : RemoteKernelSource {
+    override suspend fun assess(
+        payload: KernelPayload,
+        patientAge: Int,
+        patientSex: String,
+    ): KernelAssessmentResult {
+        throw CancellationException("Simulated coroutine cancellation")
     }
 }
 
@@ -121,6 +134,23 @@ class GenerateKernelReportUseCaseTest {
             output.confidenceScore < GenerateKernelReportUseCase.HUMAN_VERIFICATION_CONFIDENCE_THRESHOLD,
             output.requiredHumanVerification,
         )
+    }
+
+    @Test
+    fun `cancellation during the real call is rethrown, never treated as a fallback trigger`() = runTest {
+        val repo = FakeKernelReportRepository()
+        val fallback = FakeKernelFallbackSource(result = testKernelReportOutput("case-1", InferenceSource.MOCK_FALLBACK))
+        val useCase = GenerateKernelReportUseCase(repo, FakeDeviceInfoProvider(), CancellingKernelSource(), fallback)
+
+        try {
+            useCase("case-1", payload())
+            org.junit.Assert.fail("Expected CancellationException to propagate")
+        } catch (e: CancellationException) {
+            // expected
+        }
+
+        assertEquals(0, fallback.callCount)
+        assertTrue(repo.saved.isEmpty())
     }
 
     @Test

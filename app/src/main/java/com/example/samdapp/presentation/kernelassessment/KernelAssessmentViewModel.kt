@@ -155,9 +155,13 @@ class KernelAssessmentViewModel @AssistedInject constructor(
         if (_uiState.value.isRetrying) return
         viewModelScope.launch {
             _uiState.update { it.copy(isRetrying = true) }
-            val result = retryKernelAssessmentUseCase(caseRecordId)
-            val display = result.getOrNull()?.toDisplay() ?: _uiState.value.display
-            _uiState.update { it.copy(isRetrying = false, display = display) }
+            try {
+                val result = retryKernelAssessmentUseCase(caseRecordId)
+                val display = result.getOrNull()?.toDisplay() ?: _uiState.value.display
+                _uiState.update { it.copy(display = display) }
+            } finally {
+                _uiState.update { it.copy(isRetrying = false) }
+            }
         }
     }
 
