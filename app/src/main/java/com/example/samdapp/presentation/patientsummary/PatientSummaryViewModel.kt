@@ -8,12 +8,14 @@ import com.example.samdapp.domain.model.CaseStatus
 import com.example.samdapp.domain.model.ConsultationChain
 import com.example.samdapp.domain.model.ConsultationHistoryEntry
 import com.example.samdapp.domain.model.EvaluateReportOutput
+import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.domain.model.Patient
 import com.example.samdapp.domain.model.PhysicianDecision
 import com.example.samdapp.domain.model.groupIntoChains
 import com.example.samdapp.domain.repository.CaseRecordRepository
 import com.example.samdapp.domain.repository.EncounterRepository
 import com.example.samdapp.domain.repository.EvaluateReportRepository
+import com.example.samdapp.domain.repository.KernelReportRepository
 import com.example.samdapp.domain.repository.PatientRepository
 import com.example.samdapp.domain.usecase.SubmitDoctorDecisionUseCase
 import dagger.assisted.Assisted
@@ -54,6 +56,11 @@ data class PatientSummaryUiState(
     val caseStatus: CaseStatus? = null,
     val showDoctorReviewPicker: Boolean = false,
     val evaluateOutput: EvaluateReportOutput? = null,
+    /** Kernel-mock production safety fix: the AI-assessment source behind the case the physician
+     *  is about to AGREE/MODIFY/REJECT — null once evaluate output exists and is REAL_INFERENCE
+     *  (nothing to flag), or MOCK_FALLBACK/UNAVAILABLE so the physician performs the safety gate
+     *  with full knowledge the content wasn't real inference. The doctor must not decide blind. */
+    val kernelInferenceSource: InferenceSource? = null,
     val selectedDecision: PhysicianDecision? = null,
     val manualDrugName: String = "",
     val manualDosage: String = "",
@@ -77,6 +84,10 @@ data class PatientSummaryUiState(
 ) {
     val canOpenDoctorReview: Boolean get() = caseStatus == CaseStatus.SENT_TO_DOCTOR && !showDoctorReviewPicker
     val canViewReport: Boolean get() = caseRecordId != null
+    /** True when [kernelInferenceSource] is anything other than real inference — the marker the
+     *  physician review card renders. */
+    val isAssessmentNotReal: Boolean
+        get() = kernelInferenceSource != null && kernelInferenceSource != InferenceSource.REAL_INFERENCE
     val canConfirmDecision: Boolean
         get() = when (selectedDecision) {
             null -> false
@@ -106,6 +117,7 @@ class PatientSummaryViewModel @AssistedInject constructor(
     private val caseRecordRepository: CaseRecordRepository,
     private val encounterRepository: EncounterRepository,
     private val evaluateReportRepository: EvaluateReportRepository,
+    private val kernelReportRepository: KernelReportRepository,
     private val brandLookupSource: BrandLookupSource,
     private val submitDoctorDecisionUseCase: SubmitDoctorDecisionUseCase,
 ) : ViewModel(), PatientSummaryActions {
@@ -148,7 +160,14 @@ class PatientSummaryViewModel @AssistedInject constructor(
         if (!_uiState.value.canOpenDoctorReview) return
         viewModelScope.launch {
             val evaluateOutput = evaluateReportRepository.getForCase(caseRecordId)
-            _uiState.update { it.copy(showDoctorReviewPicker = true, evaluateOutput = evaluateOutput) }
+            val kernelInferenceSource = kernelReportRepository.getForCase(caseRecordId)?.inferenceSource
+            _uiState.update {
+                it.copy(
+                    showDoctorReviewPicker = true,
+                    evaluateOutput = evaluateOutput,
+                    kernelInferenceSource = kernelInferenceSource,
+                )
+            }
         }
     }
 

@@ -11,6 +11,7 @@ import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.domain.model.KernelReportOutput
 import com.example.samdapp.domain.repository.EvaluateReportRepository
 import com.example.samdapp.domain.repository.KernelReportRepository
+import com.example.samdapp.domain.usecase.RetryKernelAssessmentUseCase
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
@@ -35,6 +36,11 @@ data class AssessmentDisplay(
     val confidencePercent: Int,
     val requiresHumanVerification: Boolean,
     val isMockFallback: Boolean,
+    /** True when the real kernel call failed and this build had no fallback to offer
+     *  ([InferenceSource.UNAVAILABLE] — always true in staging/prod on failure, since those
+     *  flavors bind no mock). Distinguishes "the AI genuinely couldn't run" from a mock result,
+     *  so the screen can show a retry affordance instead of a fabricated assessment. */
+    val isUnavailable: Boolean,
     val sourceLabel: String,
     /** Per-candidate lines. Evaluate source: `"ICD (confidence%) — why"`. Kernel fallback: plain
      *  differential names (no per-candidate confidence/reasoning in that older contract shape). */
@@ -54,6 +60,7 @@ private fun EvaluateReportOutput.toDisplay(): AssessmentDisplay {
         confidencePercent = ((top?.adjustedConfidence ?: 0.0) * 100).toInt(),
         requiresHumanVerification = safetyAndTriage.requiresHumanReview,
         isMockFallback = false,
+        isUnavailable = false,
         sourceLabel = "Real-time AI inference (/api/v1/evaluate)",
         differentialLines = summary.differential.map {
             "${it.icdCandidate} (${(it.adjustedConfidence * 100).toInt()}%) — ${it.why}"
@@ -70,9 +77,11 @@ private fun KernelReportOutput.toDisplay(): AssessmentDisplay = AssessmentDispla
     confidencePercent = (confidenceScore * 100).toInt(),
     requiresHumanVerification = requiredHumanVerification,
     isMockFallback = inferenceSource == InferenceSource.MOCK_FALLBACK,
+    isUnavailable = inferenceSource == InferenceSource.UNAVAILABLE,
     sourceLabel = when (inferenceSource) {
         InferenceSource.REAL_INFERENCE -> "Real-time AI inference (/v1/assess)"
         InferenceSource.MOCK_FALLBACK -> "Offline fallback (mock) — ML server unavailable"
+        InferenceSource.UNAVAILABLE -> "Assessment unavailable — AI server unreachable"
     },
     differentialLines = differentials,
     reasoningLines = listOf(reasoningSummary),
@@ -84,6 +93,7 @@ data class KernelAssessmentUiState(
     val isLoading: Boolean = true,
     val display: AssessmentDisplay? = null,
     val liabilityAcknowledged: Boolean = false,
+    val isRetrying: Boolean = false,
 ) {
     val canContinue: Boolean get() = !isLoading && liabilityAcknowledged
 }
@@ -96,6 +106,7 @@ sealed interface KernelAssessmentEffect {
 interface KernelAssessmentActions {
     fun onLiabilityAcknowledgedChange(acknowledged: Boolean)
     fun onContinue()
+    fun onRetry()
 }
 
 /**
@@ -110,6 +121,7 @@ class KernelAssessmentViewModel @AssistedInject constructor(
     @Assisted private val caseRecordId: String,
     private val evaluateReportRepository: EvaluateReportRepository,
     private val kernelReportRepository: KernelReportRepository,
+    private val retryKernelAssessmentUseCase: RetryKernelAssessmentUseCase,
     private val auditLogger: AuditLogger,
 ) : ViewModel(), KernelAssessmentActions {
 
@@ -135,6 +147,19 @@ class KernelAssessmentViewModel @AssistedInject constructor(
 
     override fun onLiabilityAcknowledgedChange(acknowledged: Boolean) =
         _uiState.update { it.copy(liabilityAcknowledged = acknowledged) }
+
+    /** Retry affordance on the UNAVAILABLE state (kernel-mock production safety fix): re-runs the
+     *  real `/api/v1/assess` call. May legitimately come back UNAVAILABLE again if the server is
+     *  still unreachable — that's an honest result, not an error in this use case. */
+    override fun onRetry() {
+        if (_uiState.value.isRetrying) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isRetrying = true) }
+            val result = retryKernelAssessmentUseCase(caseRecordId)
+            val display = result.getOrNull()?.toDisplay() ?: _uiState.value.display
+            _uiState.update { it.copy(isRetrying = false, display = display) }
+        }
+    }
 
     override fun onContinue() {
         if (!_uiState.value.canContinue) return

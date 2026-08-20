@@ -65,6 +65,44 @@ fun testPatient(id: String, fullName: String = "P-$id", age: Int? = 30): Patient
     referringPhysicianName = null, createdAt = Instant.EPOCH, updatedAt = Instant.EPOCH,
 )
 
+fun testKernelReportOutput(
+    caseRecordId: String,
+    inferenceSource: com.example.samdapp.domain.model.InferenceSource,
+    predictedCondition: String = "Viral fever",
+    confidenceScore: Double = 0.8,
+    requiredHumanVerification: Boolean = false,
+): KernelReportOutput = KernelReportOutput(
+    id = "kr-$caseRecordId", caseRecordId = caseRecordId, predictedCondition = predictedCondition,
+    confidenceScore = confidenceScore, differentials = emptyList(), reasoningSummary = "summary",
+    evidenceFor = emptyList(), evidenceAgainst = emptyList(), modelVersion = "test-model", icdCode = null,
+    deviceId = "device-1", softwareVersion = "1.0", dataQualityScore = 1.0, uncertaintyScore = 1.0 - confidenceScore,
+    riskCategory = com.example.samdapp.domain.model.RiskCategory.MODERATE,
+    urgencyLevel = com.example.samdapp.domain.model.UrgencyLevel.ROUTINE,
+    inferenceStartedAt = Instant.EPOCH, inferenceEndedAt = Instant.EPOCH,
+    requiredHumanVerification = requiredHumanVerification, inferenceSource = inferenceSource,
+)
+
+/** Deterministic [com.example.samdapp.domain.kernel.KernelFallbackSource] test double — null by
+ *  default (mirrors staging/prod's `NoFallbackKernelSource`), or returns [result] when set
+ *  (mirrors dev's `MockKernelFallbackSource`, without the real keyword-matching logic — that's
+ *  tested separately against the real class in `src/testDev/`). */
+class FakeKernelFallbackSource(
+    var result: KernelReportOutput? = null,
+) : com.example.samdapp.domain.kernel.KernelFallbackSource {
+    var callCount = 0
+        private set
+
+    override suspend fun fallback(
+        caseRecordId: String,
+        payload: com.example.samdapp.domain.model.KernelPayload,
+        inferenceStartedAt: Instant,
+        dataQualityScore: Double,
+    ): KernelReportOutput? {
+        callCount++
+        return result
+    }
+}
+
 class FakeAuditLogger : AuditLogger {
     data class Entry(val action: String, val patientId: String?, val caseRecordId: String?, val payload: String)
 
@@ -327,6 +365,35 @@ class FakeEncounterRepository(
 
     override fun observeHistoryForPatient(patientId: String): Flow<List<ConsultationHistoryEntry>> = flowOf(history)
 }
+
+class FakeVitalsRepository(
+    private val latestByEncounter: Map<String, com.example.samdapp.domain.model.VitalsSnapshot?> = emptyMap(),
+) : com.example.samdapp.domain.repository.VitalsRepository {
+    override suspend fun saveVitals(snapshot: com.example.samdapp.domain.model.VitalsSnapshot): Result<Unit> = Result.success(Unit)
+    override fun observeLatestForEncounter(encounterId: String): Flow<com.example.samdapp.domain.model.VitalsSnapshot?> =
+        flowOf(latestByEncounter[encounterId])
+}
+
+class FakeConsultationRepository(
+    private val byEncounter: Map<String, com.example.samdapp.domain.model.Consultation?> = emptyMap(),
+) : com.example.samdapp.domain.repository.ConsultationRepository {
+    override suspend fun saveConsultation(consultation: com.example.samdapp.domain.model.Consultation): Result<Unit> = Result.success(Unit)
+    override suspend fun addAttachment(attachment: com.example.samdapp.domain.model.Attachment): Result<Unit> = Result.success(Unit)
+    override suspend fun updateTranscription(consultationId: String, transcription: String): Result<Unit> = Result.success(Unit)
+    override fun observeForEncounter(encounterId: String): Flow<com.example.samdapp.domain.model.Consultation?> =
+        flowOf(byEncounter[encounterId])
+}
+
+fun testConsultation(
+    encounterId: String,
+    patientId: String = "p1",
+    chiefComplaint: String = "fever",
+): com.example.samdapp.domain.model.Consultation = com.example.samdapp.domain.model.Consultation(
+    id = "consult-$encounterId", patientId = patientId, encounterId = encounterId, chiefComplaint = chiefComplaint,
+    onset = null, durationBucket = null, severityScore = null, aggravatingFactors = null, relievingFactors = null,
+    impactOnDailyActivities = null, relevantHistory = null, transcription = null, attachments = emptyList(),
+    createdAt = Instant.EPOCH, updatedAt = Instant.EPOCH,
+)
 
 class FakeDoctorRepository(private val doctors: List<Doctor> = emptyList()) : DoctorRepository {
     override suspend fun getDoctors(): Result<List<Doctor>> = Result.success(doctors)

@@ -1,7 +1,9 @@
 package com.example.samdapp.presentation.patientsummary
 
+import com.example.samdapp.domain.model.CaseRecord
 import com.example.samdapp.domain.model.CaseStatus
 import com.example.samdapp.domain.model.ConsultationHistoryEntry
+import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.domain.usecase.SubmitDoctorDecisionUseCase
 import com.example.samdapp.testutil.FakeAuditLogger
 import com.example.samdapp.testutil.FakeBrandLookupSource
@@ -9,9 +11,11 @@ import com.example.samdapp.testutil.FakeCaseRecordRepository
 import com.example.samdapp.testutil.FakeDiagnosisFeedbackRepository
 import com.example.samdapp.testutil.FakeEncounterRepository
 import com.example.samdapp.testutil.FakeEvaluateReportRepository
+import com.example.samdapp.testutil.FakeKernelReportRepository
 import com.example.samdapp.testutil.FakePatientRepository
 import com.example.samdapp.testutil.FakePrescriptionRepository
 import com.example.samdapp.testutil.MainDispatcherRule
+import com.example.samdapp.testutil.testKernelReportOutput
 import com.example.samdapp.testutil.testPatient
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -34,14 +38,17 @@ class PatientSummaryViewModelTest {
     private fun viewModel(
         patientId: String = "p1",
         history: List<ConsultationHistoryEntry> = emptyList(),
+        caseRecordRepository: FakeCaseRecordRepository = FakeCaseRecordRepository(),
+        kernelReportRepository: FakeKernelReportRepository = FakeKernelReportRepository(),
     ): PatientSummaryViewModel {
         val patientRepo = FakePatientRepository().apply { registered = testPatient(patientId) }
         return PatientSummaryViewModel(
             patientId = patientId,
             patientRepository = patientRepo,
-            caseRecordRepository = FakeCaseRecordRepository(),
+            caseRecordRepository = caseRecordRepository,
             encounterRepository = FakeEncounterRepository(history = history),
             evaluateReportRepository = FakeEvaluateReportRepository(),
+            kernelReportRepository = kernelReportRepository,
             brandLookupSource = FakeBrandLookupSource(),
             submitDoctorDecisionUseCase = SubmitDoctorDecisionUseCase(
                 caseRecordRepository = FakeCaseRecordRepository(),
@@ -90,5 +97,52 @@ class PatientSummaryViewModelTest {
         assertEquals("enc-2", state.chains.single().latest.encounterId)
         assertEquals(2, state.chains.single().visitCount)
         assertFalse(state.isLoadingHistory)
+    }
+
+    /** Kernel-mock production safety fix: the doctor's AGREE/MODIFY/REJECT decision point must
+     *  surface whether the case's AI assessment was real inference — the physician must not
+     *  perform the safety gate blind to a mock/unavailable result. */
+    @Test
+    fun `opening the doctor review picker surfaces a MOCK_FALLBACK kernel assessment as not-real`() = runTest(mainDispatcherRule.dispatcher) {
+        val caseRecord = CaseRecord(
+            id = "case-1", patientId = "p1", encounterId = "enc-1", status = CaseStatus.SENT_TO_DOCTOR,
+            assignedDoctorId = "doc-1", createdAt = java.time.Instant.EPOCH, updatedAt = java.time.Instant.EPOCH,
+        )
+        val kernelRepo = FakeKernelReportRepository().apply {
+            saved["case-1"] = testKernelReportOutput("case-1", InferenceSource.MOCK_FALLBACK)
+        }
+        val vm = viewModel(
+            caseRecordRepository = FakeCaseRecordRepository(initial = listOf(caseRecord)),
+            kernelReportRepository = kernelRepo,
+        )
+        advanceUntilIdle()
+
+        vm.onOpenDoctorReviewPicker()
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertEquals(InferenceSource.MOCK_FALLBACK, state.kernelInferenceSource)
+        assertTrue(state.isAssessmentNotReal)
+    }
+
+    @Test
+    fun `opening the doctor review picker on a real-inference case does not flag it as not-real`() = runTest(mainDispatcherRule.dispatcher) {
+        val caseRecord = CaseRecord(
+            id = "case-1", patientId = "p1", encounterId = "enc-1", status = CaseStatus.SENT_TO_DOCTOR,
+            assignedDoctorId = "doc-1", createdAt = java.time.Instant.EPOCH, updatedAt = java.time.Instant.EPOCH,
+        )
+        val kernelRepo = FakeKernelReportRepository().apply {
+            saved["case-1"] = testKernelReportOutput("case-1", InferenceSource.REAL_INFERENCE)
+        }
+        val vm = viewModel(
+            caseRecordRepository = FakeCaseRecordRepository(initial = listOf(caseRecord)),
+            kernelReportRepository = kernelRepo,
+        )
+        advanceUntilIdle()
+
+        vm.onOpenDoctorReviewPicker()
+        advanceUntilIdle()
+
+        assertFalse(vm.uiState.value.isAssessmentNotReal)
     }
 }

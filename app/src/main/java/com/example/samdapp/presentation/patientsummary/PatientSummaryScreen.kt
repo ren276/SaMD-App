@@ -40,6 +40,7 @@ import com.example.samdapp.config.FeatureFlags
 import com.example.samdapp.domain.model.CaseStatus
 import com.example.samdapp.domain.model.ConsultationChain
 import com.example.samdapp.domain.model.ConsultationHistoryEntry
+import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.domain.model.Patient
 import com.example.samdapp.domain.model.PhysicianDecision
 import com.example.samdapp.domain.model.TRAINED_ICD_CANDIDATES
@@ -240,6 +241,22 @@ private fun DoctorReviewCard(uiState: PatientSummaryUiState, actions: PatientSum
     Card(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Physician Review", style = MaterialTheme.typography.titleMedium)
+            if (uiState.isAssessmentNotReal) {
+                Card(colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                    Text(
+                        when (uiState.kernelInferenceSource) {
+                            InferenceSource.MOCK_FALLBACK ->
+                                "⚠ This case's AI assessment used the offline mock fallback — not real inference. Review accordingly."
+                            InferenceSource.UNAVAILABLE ->
+                                "⚠ No AI assessment was generated for this case — the server was unreachable."
+                            else -> "⚠ This case's AI assessment was not real inference."
+                        },
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(8.dp),
+                    )
+                }
+            }
             uiState.evaluateOutput?.diagnosticSummary?.primaryAilmentName?.let {
                 Text("AI diagnosis: $it", style = MaterialTheme.typography.bodyMedium)
             }

@@ -9,6 +9,7 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import com.example.samdapp.domain.model.AttachmentType
 import com.example.samdapp.domain.model.EvaluateReportOutput
+import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.domain.model.MeasurementType
 import com.example.samdapp.domain.report.ClinicalReport
 import com.example.samdapp.domain.report.ReportAttachmentEntry
@@ -36,6 +37,19 @@ import java.util.Locale
  * which this renderer deliberately doesn't hold — it stays plain `android.graphics.*` so the same
  * instance can be constructed once and reused for both the preview and the PDF export.
  */
+/**
+ * The exact marker text drawn onto the report for a non-real assessment, or null for
+ * [InferenceSource.REAL_INFERENCE] (nothing to flag). Pulled out of [ReportCanvasRenderer] as a
+ * plain function — independent of [android.graphics.Canvas] — so the decision of what the report
+ * says about a mock/unavailable assessment is unit-testable; [android.graphics.Canvas] itself
+ * isn't mockable in this project's plain-JVM unit test setup (no Robolectric).
+ */
+internal fun assessmentMarkerLabel(inferenceSource: InferenceSource): String? = when (inferenceSource) {
+    InferenceSource.REAL_INFERENCE -> null
+    InferenceSource.MOCK_FALLBACK -> "OFFLINE MOCK — not a real AI assessment"
+    InferenceSource.UNAVAILABLE -> "UNAVAILABLE — no assessment was generated"
+}
+
 class ReportCanvasRenderer(
     private val logoBitmap: Bitmap? = null,
     private val imageLoader: (String) -> Bitmap? = { null },
@@ -233,6 +247,10 @@ class ReportCanvasRenderer(
             report.kernelOutput?.let { k ->
                 add("Device" to k.deviceId)
                 add("App version" to k.softwareVersion)
+                // Kernel-mock production safety fix: the signed artifact that travels with a
+                // referred patient must not be silent about a non-real assessment. Only rendered
+                // for MOCK_FALLBACK/UNAVAILABLE — REAL_INFERENCE adds nothing here.
+                assessmentMarkerLabel(k.inferenceSource)?.let { marker -> add("AI Assessment" to marker) }
             }
         }
         val rowH = lineHeight(bodyPaint) + 3f
