@@ -40,6 +40,7 @@ class PatientSummaryViewModelTest {
         history: List<ConsultationHistoryEntry> = emptyList(),
         caseRecordRepository: FakeCaseRecordRepository = FakeCaseRecordRepository(),
         kernelReportRepository: FakeKernelReportRepository = FakeKernelReportRepository(),
+        evaluateReportRepository: FakeEvaluateReportRepository = FakeEvaluateReportRepository(),
     ): PatientSummaryViewModel {
         val patientRepo = FakePatientRepository().apply { registered = testPatient(patientId) }
         return PatientSummaryViewModel(
@@ -47,7 +48,7 @@ class PatientSummaryViewModelTest {
             patientRepository = patientRepo,
             caseRecordRepository = caseRecordRepository,
             encounterRepository = FakeEncounterRepository(history = history),
-            evaluateReportRepository = FakeEvaluateReportRepository(),
+            evaluateReportRepository = evaluateReportRepository,
             kernelReportRepository = kernelReportRepository,
             brandLookupSource = FakeBrandLookupSource(),
             submitDoctorDecisionUseCase = SubmitDoctorDecisionUseCase(
@@ -144,5 +145,29 @@ class PatientSummaryViewModelTest {
         advanceUntilIdle()
 
         assertFalse(vm.uiState.value.isAssessmentNotReal)
+    }
+
+    /** H-14: the doctor's AGREE/MODIFY/REJECT decision point must surface an `/api/v1/evaluate`
+     *  failure as an explicit "evaluation failed" state, not a silently missing treatment
+     *  section the physician might not notice is absent. */
+    @Test
+    fun `opening the doctor review picker surfaces a failed evaluate call, not a silent gap`() = runTest(mainDispatcherRule.dispatcher) {
+        val caseRecord = CaseRecord(
+            id = "case-1", patientId = "p1", encounterId = "enc-1", status = CaseStatus.SENT_TO_DOCTOR,
+            assignedDoctorId = "doc-1", createdAt = java.time.Instant.EPOCH, updatedAt = java.time.Instant.EPOCH,
+        )
+        val evaluateRepo = FakeEvaluateReportRepository().apply { failures["case-1"] = "IOException" }
+        val vm = viewModel(
+            caseRecordRepository = FakeCaseRecordRepository(initial = listOf(caseRecord)),
+            evaluateReportRepository = evaluateRepo,
+        )
+        advanceUntilIdle()
+
+        vm.onOpenDoctorReviewPicker()
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertEquals("IOException", state.evaluateFailureCode)
+        assertEquals(null, state.evaluateOutput)
     }
 }

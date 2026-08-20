@@ -94,6 +94,12 @@ data class ClinicalReport(
     /** Real-inference NLEM treatment/brand-mapping/vitals-triage output from `/api/v1/evaluate` —
      *  null when that call hasn't run yet or failed (no mock fallback for this endpoint). */
     val evaluateOutput: EvaluateReportOutput?,
+    /** H-14: set (and [evaluateOutput] left null) when `/api/v1/evaluate` was attempted and
+     *  failed — distinguishes that from "hasn't run yet," which leaves both null. Never set
+     *  alongside a non-null [evaluateOutput]; a retry that succeeds overwrites the persisted
+     *  failure row (see EvaluateReportEntity.failureCode's KDoc), so the two states never
+     *  coexist for the same case. */
+    val evaluateFailureCode: String?,
     val attachments: List<ReportAttachmentEntry>,
     val diagnosis: String?,
     /** Doctor's Agree/Modify/Reject on the kernel differential — reported back via the out-of-app

@@ -61,6 +61,7 @@ class ReportFormatter @Inject constructor() {
         visitDateTime: Instant,
         kernelOutput: KernelReportOutput?,
         evaluateOutput: EvaluateReportOutput?,
+        evaluateFailureCode: String?,
         prescription: Prescription?,
         prescribingDoctor: Doctor?,
     ): ClinicalReport {
@@ -131,6 +132,7 @@ class ReportFormatter @Inject constructor() {
             vitals = vitals?.let(::toVitalLines).orEmpty(),
             kernelOutput = kernelOutput,
             evaluateOutput = evaluateOutput,
+            evaluateFailureCode = evaluateFailureCode,
             attachments = attachmentLines,
             diagnosis = prescription?.diagnosis,
             kernelDecision = prescription?.kernelDecision,

@@ -56,6 +56,11 @@ data class PatientSummaryUiState(
     val caseStatus: CaseStatus? = null,
     val showDoctorReviewPicker: Boolean = false,
     val evaluateOutput: EvaluateReportOutput? = null,
+    /** H-14: set when `/api/v1/evaluate` was attempted and failed for this case — null once
+     *  [evaluateOutput] exists (a real report) or if evaluate simply hasn't run yet. The doctor
+     *  must see "evaluation failed," not a silently missing treatment section, the same
+     *  no-decide-blind rule [kernelInferenceSource] enforces for the assessment side. */
+    val evaluateFailureCode: String? = null,
     /** Kernel-mock production safety fix: the AI-assessment source behind the case the physician
      *  is about to AGREE/MODIFY/REJECT — null once evaluate output exists and is REAL_INFERENCE
      *  (nothing to flag), or MOCK_FALLBACK/UNAVAILABLE so the physician performs the safety gate
@@ -160,11 +165,13 @@ class PatientSummaryViewModel @AssistedInject constructor(
         if (!_uiState.value.canOpenDoctorReview) return
         viewModelScope.launch {
             val evaluateOutput = evaluateReportRepository.getForCase(caseRecordId)
+            val evaluateFailureCode = evaluateReportRepository.getFailureCodeForCase(caseRecordId)
             val kernelInferenceSource = kernelReportRepository.getForCase(caseRecordId)?.inferenceSource
             _uiState.update {
                 it.copy(
                     showDoctorReviewPicker = true,
                     evaluateOutput = evaluateOutput,
+                    evaluateFailureCode = evaluateFailureCode,
                     kernelInferenceSource = kernelInferenceSource,
                 )
             }

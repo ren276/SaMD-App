@@ -16,6 +16,16 @@ data class EvaluateReportEntity(
     val payloadJson: String,
     val inferenceStartedAt: Instant,
     val inferenceEndedAt: Instant,
+    /** H-14, MIGRATION_14_15: non-null means this row is an honest "`/api/v1/evaluate` failed"
+     *  marker, not a real report — [payloadJson] is then a placeholder ("{}"), never a
+     *  half-real payload, and callers must check this field before deserializing it. Deliberately
+     *  excluded from [com.example.samdapp.data.remote.dto.EvaluateReportSyncPayloadDto] and from
+     *  [EvaluateReportDao.getPendingForSync]'s predicate: this column exists specifically so a
+     *  failure row is structurally unable to reach the sync outbox and be pushed to the backend
+     *  as a real evaluate report (see the H-14 decision doc, docs/quality/h-14-evaluate-failure-decision.md,
+     *  Option 2). A later successful retry's [com.example.samdapp.data.repository.EvaluateReportRepositoryImpl.save]
+     *  REPLACEs this same row with a real one, clearing this field back to null. */
+    val failureCode: String? = null,
     val syncState: SyncState = SyncState.PENDING,
     val serverVersion: Int? = null,
     val syncErrorCode: String? = null,

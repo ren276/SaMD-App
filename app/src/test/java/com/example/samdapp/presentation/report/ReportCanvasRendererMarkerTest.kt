@@ -36,4 +36,16 @@ class ReportCanvasRendererMarkerTest {
         assertTrue(label.contains("UNAVAILABLE", ignoreCase = true))
         assertEquals(false, label.contains("MOCK", ignoreCase = true))
     }
+
+    @Test
+    fun `null evaluate failure code renders no marker`() {
+        assertNull(evaluateFailureMarkerLabel(null))
+    }
+
+    @Test
+    fun `a set evaluate failure code renders an explicit evaluation-failed marker`() {
+        val label = evaluateFailureMarkerLabel("IOException")
+        requireNotNull(label)
+        assertTrue(label.contains("FAILED", ignoreCase = true))
+    }
 }

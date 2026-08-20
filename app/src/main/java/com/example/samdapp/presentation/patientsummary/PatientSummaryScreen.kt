@@ -257,6 +257,17 @@ private fun DoctorReviewCard(uiState: PatientSummaryUiState, actions: PatientSum
                     )
                 }
             }
+            if (uiState.evaluateFailureCode != null) {
+                Card(colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                    Text(
+                        "⚠ No AI treatment recommendation was generated for this case — the evaluate " +
+                            "call failed. Prescribe from clinical judgement alone.",
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(8.dp),
+                    )
+                }
+            }
             uiState.evaluateOutput?.diagnosticSummary?.primaryAilmentName?.let {
                 Text("AI diagnosis: $it", style = MaterialTheme.typography.bodyMedium)
             }
