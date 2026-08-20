@@ -7,17 +7,17 @@ import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.domain.model.KernelPayload
 import com.example.samdapp.domain.model.VitalsReading
 import com.example.samdapp.testutil.FakeDeviceInfoProvider
+import com.example.samdapp.testutil.FakeKernelFallbackSource
 import com.example.samdapp.testutil.FakeKernelReportRepository
+import com.example.samdapp.testutil.testKernelReportOutput
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
 
-/**
- * Stub RemoteKernelSource that always throws IOException — simulates the ML server being offline.
- * All tests verify the graceful fallback to mock inference (Phase 4 behaviour unchanged).
- */
+/** Stub RemoteKernelSource that always throws IOException — simulates the ML server being offline. */
 private class OfflineKernelSource : RemoteKernelSource {
     override suspend fun assess(
         payload: KernelPayload,
@@ -25,6 +25,18 @@ private class OfflineKernelSource : RemoteKernelSource {
         patientSex: String,
     ): KernelAssessmentResult {
         throw IOException("Simulated network unavailability")
+    }
+}
+
+/** Stub RemoteKernelSource that always throws CancellationException — simulates the calling
+ *  coroutine (e.g. the screen) being cancelled mid-assess. */
+private class CancellingKernelSource : RemoteKernelSource {
+    override suspend fun assess(
+        payload: KernelPayload,
+        patientAge: Int,
+        patientSex: String,
+    ): KernelAssessmentResult {
+        throw CancellationException("Simulated coroutine cancellation")
     }
 }
 
@@ -48,10 +60,16 @@ private class WorkingKernelSource : RemoteKernelSource {
     )
 }
 
-/** REQ-HAN-07: fuller kernel response — differentials, reasoning, confidence-driven verification flag. */
+/**
+ * REQ-HAN-07/kernel-mock production safety fix: this use case now only orchestrates real API →
+ * fallback source → honest-unavailable. The dev-only mock scenario table itself is tested against
+ * the real `MockKernelFallbackSource` class in `src/testDev/.../MockKernelFallbackSourceTest.kt` —
+ * that class doesn't exist outside the dev flavor, so it can't be referenced from this
+ * flavor-independent test source set.
+ */
 class GenerateKernelReportUseCaseTest {
 
-    private fun payload(chiefComplaint: String) = KernelPayload(
+    private fun payload(chiefComplaint: String = "fever") = KernelPayload(
         caseToken = "case-1",
         vitals = VitalsReading(),
         chiefComplaint = chiefComplaint,
@@ -63,62 +81,85 @@ class GenerateKernelReportUseCaseTest {
     )
 
     @Test
-    fun `matched keyword scenario returns its curated differentials and persists via the repository`() = runTest {
+    fun `successful real API call stamps REAL_INFERENCE and never calls the fallback source`() = runTest {
         val repo = FakeKernelReportRepository()
-        val useCase = GenerateKernelReportUseCase(repo, FakeDeviceInfoProvider(), OfflineKernelSource())
+        val fallback = FakeKernelFallbackSource(result = testKernelReportOutput("case-1", InferenceSource.MOCK_FALLBACK))
+        val useCase = GenerateKernelReportUseCase(repo, FakeDeviceInfoProvider(), WorkingKernelSource(), fallback)
 
-        val result = useCase("case-1", payload("Fever and chills for two days"))
-
-        val output = result.getOrThrow()
-        assertEquals("Viral fever", output.predictedCondition)
-        assertEquals(3, output.differentials.size)
-        assertTrue(output.reasoningSummary.isNotBlank())
-        assertTrue(output.evidenceFor.isNotEmpty())
-        assertEquals(output, repo.saved["case-1"])
-        assertEquals(InferenceSource.MOCK_FALLBACK, output.inferenceSource)
-    }
-
-    @Test
-    fun `successful real API call stamps REAL_INFERENCE`() = runTest {
-        val repo = FakeKernelReportRepository()
-        val useCase = GenerateKernelReportUseCase(repo, FakeDeviceInfoProvider(), WorkingKernelSource())
-
-        val output = useCase("case-1", payload("fever")).getOrThrow()
+        val output = useCase("case-1", payload()).getOrThrow()
 
         assertEquals(InferenceSource.REAL_INFERENCE, output.inferenceSource)
+        assertEquals(0, fallback.callCount)
+        assertEquals(output, repo.saved["case-1"])
     }
 
     @Test
-    fun `unmatched complaint falls back to the default lower-confidence scenario`() = runTest {
+    fun `real API failure with a fallback source available returns exactly what the fallback returns`() = runTest {
         val repo = FakeKernelReportRepository()
-        val useCase = GenerateKernelReportUseCase(repo, FakeDeviceInfoProvider(), OfflineKernelSource())
+        val mockResult = testKernelReportOutput("case-1", InferenceSource.MOCK_FALLBACK, predictedCondition = "Dev mock scenario")
+        val fallback = FakeKernelFallbackSource(result = mockResult)
+        val useCase = GenerateKernelReportUseCase(repo, FakeDeviceInfoProvider(), OfflineKernelSource(), fallback)
 
-        val output = useCase("case-2", payload("Patient feels generally unwell")).getOrThrow()
+        val output = useCase("case-1", payload()).getOrThrow()
 
-        assertEquals("Non-specific presentation", output.predictedCondition)
+        assertEquals(mockResult, output)
+        assertEquals(1, fallback.callCount)
     }
 
     @Test
-    fun `confidence always lands in 0-1 and drives requiredHumanVerification at the 90 percent threshold`() = runTest {
+    fun `real API failure with no fallback source available (staging-prod shape) yields an honest UNAVAILABLE result, never a fabricated one`() = runTest {
         val repo = FakeKernelReportRepository()
-        val useCase = GenerateKernelReportUseCase(repo, FakeDeviceInfoProvider(), OfflineKernelSource())
+        val fallback = FakeKernelFallbackSource(result = null) // mirrors NoFallbackKernelSource
+        val useCase = GenerateKernelReportUseCase(repo, FakeDeviceInfoProvider(), OfflineKernelSource(), fallback)
 
-        repeat(20) { i ->
-            val output = useCase("case-$i", payload("cough and cold")).getOrThrow()
-            assertTrue(output.confidenceScore in 0.0..1.0)
-            assertEquals(
-                output.confidenceScore < GenerateKernelReportUseCase.HUMAN_VERIFICATION_CONFIDENCE_THRESHOLD,
-                output.requiredHumanVerification,
-            )
+        val output = useCase("case-1", payload()).getOrThrow()
+
+        assertEquals(InferenceSource.UNAVAILABLE, output.inferenceSource)
+        assertEquals("Assessment unavailable", output.predictedCondition)
+        assertTrue(output.requiredHumanVerification)
+        assertEquals(1, fallback.callCount)
+        assertEquals(output, repo.saved["case-1"])
+    }
+
+    @Test
+    fun `confidence always lands in 0-1 and drives requiredHumanVerification at the 90 percent threshold on the real path`() = runTest {
+        val repo = FakeKernelReportRepository()
+        val fallback = FakeKernelFallbackSource(result = null)
+        val useCase = GenerateKernelReportUseCase(repo, FakeDeviceInfoProvider(), WorkingKernelSource(), fallback)
+
+        val output = useCase("case-1", payload()).getOrThrow()
+
+        assertTrue(output.confidenceScore in 0.0..1.0)
+        assertEquals(
+            output.confidenceScore < GenerateKernelReportUseCase.HUMAN_VERIFICATION_CONFIDENCE_THRESHOLD,
+            output.requiredHumanVerification,
+        )
+    }
+
+    @Test
+    fun `cancellation during the real call is rethrown, never treated as a fallback trigger`() = runTest {
+        val repo = FakeKernelReportRepository()
+        val fallback = FakeKernelFallbackSource(result = testKernelReportOutput("case-1", InferenceSource.MOCK_FALLBACK))
+        val useCase = GenerateKernelReportUseCase(repo, FakeDeviceInfoProvider(), CancellingKernelSource(), fallback)
+
+        try {
+            useCase("case-1", payload())
+            org.junit.Assert.fail("Expected CancellationException to propagate")
+        } catch (e: CancellationException) {
+            // expected
         }
+
+        assertEquals(0, fallback.callCount)
+        assertTrue(repo.saved.isEmpty())
     }
 
     @Test
     fun `save failure surfaces as a failed Result`() = runTest {
         val repo = FakeKernelReportRepository().apply { saveResult = Result.failure(RuntimeException("db error")) }
-        val useCase = GenerateKernelReportUseCase(repo, FakeDeviceInfoProvider(), OfflineKernelSource())
+        val fallback = FakeKernelFallbackSource(result = null)
+        val useCase = GenerateKernelReportUseCase(repo, FakeDeviceInfoProvider(), OfflineKernelSource(), fallback)
 
-        val result = useCase("case-1", payload("fever"))
+        val result = useCase("case-1", payload())
 
         assertTrue(result.isFailure)
     }

@@ -76,8 +76,12 @@ internal fun KernelAssessmentContent(uiState: KernelAssessmentUiState, actions: 
             modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(padding).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            ConfidenceGauge(display)
-            ExplainabilityCard(display)
+            if (display.isUnavailable) {
+                UnavailableCard(isRetrying = uiState.isRetrying, onRetry = actions::onRetry)
+            } else {
+                ConfidenceGauge(display)
+                ExplainabilityCard(display)
+            }
             if (display.isMockFallback) {
                 Card(colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)) {
                     Text(
@@ -98,12 +102,40 @@ internal fun KernelAssessmentContent(uiState: KernelAssessmentUiState, actions: 
                     )
                 }
             }
-            LiabilityRow(uiState.liabilityAcknowledged, actions::onLiabilityAcknowledgedChange)
+            LiabilityRow(
+                checked = uiState.liabilityAcknowledged,
+                onCheckedChange = actions::onLiabilityAcknowledgedChange,
+                assessmentUnavailable = display.isUnavailable,
+            )
             Button(
                 onClick = actions::onContinue,
                 enabled = uiState.canContinue,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
             ) { Text("Continue", style = MaterialTheme.typography.titleMedium) }
+        }
+    }
+}
+
+/** Honest failure state — kernel-mock production safety fix. Shown instead of the confidence
+ *  gauge/explainability cards when [AssessmentDisplay.isUnavailable] is true: no fabricated
+ *  diagnosis, just the fact that the AI assessment did not run, with a retry affordance. */
+@Composable
+private fun UnavailableCard(isRetrying: Boolean, onRetry: () -> Unit) {
+    Card(colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                "Assessment unavailable",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            Text(
+                "The AI server could not be reached and no offline result is available. No diagnosis was generated.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            Button(onClick = onRetry, enabled = !isRetrying) {
+                Text(if (isRetrying) "Retrying…" else "Retry")
+            }
         }
     }
 }
@@ -169,12 +201,20 @@ private fun ExplainabilityCard(display: AssessmentDisplay) {
 }
 
 @Composable
-private fun LiabilityRow(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+private fun LiabilityRow(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    assessmentUnavailable: Boolean,
+) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Checkbox(checked = checked, onCheckedChange = onCheckedChange)
         Text(
-            "I understand this is an AI-generated assessment — not a diagnosis — and requires " +
-                "physician verification.",
+            if (assessmentUnavailable) {
+                "I understand that no AI assessment was generated and physician review is required."
+            } else {
+                "I understand this is an AI-generated assessment — not a diagnosis — and requires " +
+                    "physician verification."
+            },
             style = MaterialTheme.typography.bodyMedium,
         )
     }
