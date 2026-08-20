@@ -208,10 +208,17 @@ class InferenceSource(StrEnum):
     """REQ-HAN-08. Which path produced a /v1/assess result.
 
     Stored server side so the mock-fallback rate becomes a queryable metric for the first time.
+
+    UNAVAILABLE mirrors Android's InferenceSource.kt (H-09 kernel-mock production safety fix,
+    2026-08-20): staging/prod's honest failure state when the real call failed and no fallback
+    scenario was produced. Added here by migration 0006, which widens
+    ck_kernel_reports_inference_source to match; see that migration's docstring for the sync
+    rejection this closes.
     """
 
     REAL_INFERENCE = "REAL_INFERENCE"
     MOCK_FALLBACK = "MOCK_FALLBACK"
+    UNAVAILABLE = "UNAVAILABLE"
 
 
 class PhysicianDecision(StrEnum):
