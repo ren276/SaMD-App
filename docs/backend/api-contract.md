@@ -1070,6 +1070,32 @@ Field-level merge for non-conflicting fields is Phase 3 of the roadmap and lands
 path creates a second writer. Adding merge logic before a second writer exists is speculative
 complexity.
 
+**One current assessment per case (Phase 4 requirement, `kernel_reports` and `evaluate_reports`).**
+Both tables carry **at most one current row per `case_record_id`, scoped to the facility**, and
+`/sync/push` must enforce it. This is an invariant on the data, not a suggestion about
+implementation: a unique constraint, an upsert keyed on `(facility_id, case_record_id)`, or an
+explicit supersede-then-insert all satisfy it, and the mechanism is the backend's choice. What is
+fixed:
+
+- A pushed assessment for a `case_record_id` that already has one **replaces** it when its
+  `client_updated_at` is newer, and is acknowledged `stale` when it is not — the same
+  last-write-wins rule as above, applied on `case_record_id` rather than on the record `id`.
+  Newest-write-wins is the clinical rule, not just the sync rule: the common case is a retry
+  superseding a failed or `UNAVAILABLE` attempt, and the retry is the assessment the clinician
+  acted on.
+- The record `id` differs between the superseded row and its replacement. The device mints a fresh
+  `id` per assessment attempt, so matching on `id` alone will silently accumulate duplicates —
+  this is exactly the defect `MIGRATION_15_16` fixes device-side.
+- **The server must never serve more than one current assessment per case**, on `/sync/pull`
+  (§6.2) or on any DOCTOR-facing bundle fetch. A reader receiving two rows for one case has no
+  basis to choose between them, which is the failure mode this requirement exists to prevent
+  (risk file RR-02).
+
+Why it is stated here rather than filed separately: the device-side fix shipped first
+(`MIGRATION_15_16` de-dups existing rows and adds a UNIQUE index on `caseRecordId`), and it cannot
+reach duplicates that already synced. This requirement is the server-side half, to be built with
+the Phase 4 push path and honoured by the Phase 3/§6.2 pull path — not a loose follow-up ticket.
+
 **Success Response (200), including partial failure:** the batch is processed record by record.
 One bad record does not fail the batch, because a field worker's day of captured data must not be
 held hostage by a single malformed row.

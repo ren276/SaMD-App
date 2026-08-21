@@ -381,3 +381,75 @@ val MIGRATION_14_15 = object : Migration(14, 15) {
         connection.execSQL("ALTER TABLE `evaluate_reports` ADD COLUMN `failureCode` TEXT")
     }
 }
+
+/**
+ * One current assessment per case: makes `caseRecordId` UNIQUE on `kernel_reports` and
+ * `evaluate_reports`, after de-duping the rows already there.
+ *
+ * Both tables' KDoc has always claimed "one row per case, replaced wholesale on retry", and both
+ * repositories rely on that claim (`getForCase` takes `.first()` of the match set). It was only
+ * ever true for `evaluate_reports`, and only since the H-14 pass added
+ * `EvaluateReportDao.getIdForCase`. On `kernel_reports` it was never true: `GenerateKernelReport-
+ * UseCase` mints a fresh `UUID.randomUUID()` per attempt, the primary key is that `id`, and the
+ * REPLACE-upsert therefore keyed on a value that never collided — so every re-assessment of a case
+ * (a retry after an `InferenceSource.UNAVAILABLE` failure, most of all) inserted an ADDITIONAL row,
+ * and the five `getForCase` readers picked between them with no `ORDER BY` at all. Clinically that
+ * is the sharpest edge here: an unordered `.first()` can hand a reviewer the superseded failure
+ * row while the successful retry sits in the same table unread.
+ *
+ * **De-dup rule: newest write wins.** A successful retry must beat the failure row it replaced, so
+ * the surviving row per `caseRecordId` is the one with the greatest `localModifiedAt`. That column
+ * is the right key rather than `inferenceEndedAt` because it is defined as "when this row's bytes
+ * last changed on this device", whereas `inferenceEndedAt` is clinical inference timing and is a
+ * placeholder on a failure row. It is safe to sort on: NOT NULL on both tables, and although
+ * MIGRATION_12_13 added it as `NOT NULL DEFAULT 0` it backfilled every existing row in the same
+ * step from `COALESCE(inferenceEndedAt, inferenceStartedAt)`, both NOT NULL — no row carries 0.
+ * Ties (two writes for one case inside the same millisecond — a network round trip apart in
+ * practice, but not provably impossible) break on `rowid DESC`, which is insertion order on these
+ * rowid tables, so the outcome is deterministic rather than left to SQLite's choice. The
+ * correlated subquery below exists for that tiebreak: the shorter `MAX()`-with-bare-columns form
+ * SQLite allows would leave which row's `rowid` is returned implementation-defined.
+ *
+ * **Deleted duplicates are not recoverable and are not pushed anywhere.** The DELETE is
+ * device-local. No foreign key anywhere references either table's `id` (checked against schema
+ * 15), and the sync outbox is a query over `syncState` rather than a separate table
+ * (`RoomSyncOutboxRepository`), so a discarded PENDING row simply leaves the outbox with no
+ * orphan behind. A discarded row that was already SYNCED does still exist on the backend: this
+ * migration cannot reach it, and enforcing the same invariant server-side is a stated Phase 4
+ * sync-push requirement (`docs/backend/api-contract.md` §6.1), deliberately not mixed into this
+ * commit.
+ *
+ * **Expected first-launch effect:** where the surviving row is PENDING and the discarded one had
+ * been SYNCED, the case re-pushes under the surviving `id`. That is the intended outcome — newest
+ * content should win on the server too — but it does mean a one-time push spike on the first sync
+ * after upgrade. Recorded in PROGRESS.md's deploy notes so it is not misread as a sync fault.
+ *
+ * The index name is reused rather than suffixed: Room names an index `index_<table>_<column>`
+ * whether or not it is unique, so the exported schema 16 expects exactly these names.
+ */
+val MIGRATION_15_16 = object : Migration(15, 16) {
+    override fun migrate(connection: SQLiteConnection) {
+        for (table in listOf("kernel_reports", "evaluate_reports")) {
+            connection.execSQL(
+                """
+                DELETE FROM `$table`
+                WHERE `rowid` NOT IN (
+                    SELECT (
+                        SELECT r.`rowid` FROM `$table` AS r
+                        WHERE r.`caseRecordId` = g.`caseRecordId`
+                        ORDER BY r.`localModifiedAt` DESC, r.`rowid` DESC
+                        LIMIT 1
+                    )
+                    FROM `$table` AS g
+                    GROUP BY g.`caseRecordId`
+                )
+                """.trimIndent(),
+            )
+            connection.execSQL("DROP INDEX IF EXISTS `index_${table}_caseRecordId`")
+            connection.execSQL(
+                "CREATE UNIQUE INDEX IF NOT EXISTS `index_${table}_caseRecordId` " +
+                    "ON `$table` (`caseRecordId`)",
+            )
+        }
+    }
+}
