@@ -18,6 +18,19 @@ data object AbhaSignUp
 data object AbhaLogin
 data class AbhaOtpRoute(val abhaId: String)
 
+/** Aadhaar step of the real ABDM-backed create flow, reached from [AbhaEntry]'s "Create ABHA ID".
+ *  Takes no arguments: the registration session does not exist until this screen starts one. */
+data object AbhaAadhaarEntry
+
+/**
+ * OTP step of the real create flow. [sessionId] is the backend's local registration-transaction
+ * id and the only handle carried across steps, exactly as [AbhaOtpRoute] carries `abhaId` — there
+ * is no client-side ABDM `txnId` in this contract, so nothing here is redaction-sensitive.
+ * [maskedMobile] is ABDM's already-masked rendering of the Aadhaar-linked number (`XXXXXX3210`),
+ * carried because no endpoint returns it a second time and it is display-only.
+ */
+data class AbhaCreateOtpRoute(val sessionId: String, val maskedMobile: String?)
+
 /** [abhaId] is null for a manual/no-ABHA registration ("Skip" on [AbhaEntry]); non-null when
  *  reached via the mock ABHA sign-up/login flow, so [RegisterViewModel] autofills from it. */
 data class Register(val abhaId: String? = null)
@@ -107,6 +120,10 @@ private val SECURED_ROUTE_TYPES: Set<Class<out Any>> = setOf(
     AbhaSignUp::class.java,
     AbhaLogin::class.java,
     AbhaOtpRoute::class.java,
+    // The Aadhaar screen shows a full Aadhaar number and the create-OTP screen shows a live OTP
+    // plus the patient's communication mobile. Both are squarely what this list is for.
+    AbhaAadhaarEntry::class.java,
+    AbhaCreateOtpRoute::class.java,
     Register::class.java,
     MedicalBackground::class.java,
     PatientSummary::class.java,

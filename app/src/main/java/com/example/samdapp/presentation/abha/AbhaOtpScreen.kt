@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -20,15 +19,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.example.samdapp.domain.model.formatAbhaId
+import com.example.samdapp.presentation.common.OtpInputField
 import com.example.samdapp.presentation.common.StepProgressIndicator
-import com.example.samdapp.presentation.common.filterDigitsOnly
 
 @Composable
 fun AbhaOtpScreen(
@@ -62,13 +60,10 @@ internal fun AbhaOtpContent(uiState: AbhaOtpUiState, actions: AbhaOtpActions, on
         ) {
             StepProgressIndicator(current = 1, total = 4, label = "ABHA ID")
             Text(text = "ABHA ID: ${formatAbhaId(uiState.abhaId)}", style = MaterialTheme.typography.titleMedium)
-            OutlinedTextField(
+            OtpInputField(
                 value = uiState.otp,
-                onValueChange = { actions.onOtpChange(filterDigitsOnly(it, maxLength = 6)) },
-                label = { Text("Mock OTP — any 6 digits accepted") },
-                singleLine = true,
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth(),
+                onValueChange = actions::onOtpChange,
+                label = "Mock OTP — any 6 digits accepted",
             )
 
             uiState.errorMessage?.let { message ->
