@@ -362,3 +362,22 @@ val MIGRATION_13_14 = object : Migration(13, 14) {
         connection.execSQL("ALTER TABLE `patients` ADD COLUMN `verifiedAt` INTEGER")
     }
 }
+
+/**
+ * H-14 evaluate-failure signal (docs/quality/h-14-evaluate-failure-decision.md, Option 2): a
+ * nullable local-only marker on `evaluate_reports`, non-null when `/api/v1/evaluate` was
+ * attempted and failed. Every pre-existing row gets `NULL` (a real report), which is Room's
+ * default `ADD COLUMN` behavior with no explicit default clause.
+ *
+ * Deliberately excluded from `EvaluateReportSyncPayloadDto`: this column must never cross the
+ * sync wire, both because a failure carries nothing the backend's `evaluate_reports` schema has
+ * a place for, and because the H-09-tail defect (migration 0006 on the backend) is the concrete
+ * proof of what happens when a device-only enum/state value leaks onto the wire unannounced.
+ * `EvaluateReportDao.getPendingForSync`'s `failureCode IS NULL` predicate is the actual
+ * enforcement point — this column existing at all is what makes that predicate possible.
+ */
+val MIGRATION_14_15 = object : Migration(14, 15) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL("ALTER TABLE `evaluate_reports` ADD COLUMN `failureCode` TEXT")
+    }
+}

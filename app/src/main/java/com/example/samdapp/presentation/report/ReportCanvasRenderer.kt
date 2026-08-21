@@ -50,6 +50,17 @@ internal fun assessmentMarkerLabel(inferenceSource: InferenceSource): String? = 
     InferenceSource.UNAVAILABLE -> "UNAVAILABLE — no assessment was generated"
 }
 
+/**
+ * H-14 analog of [assessmentMarkerLabel] for `/api/v1/evaluate`: the exact marker text drawn
+ * when [ClinicalReport.evaluateFailureCode] is set (evaluate ran and failed), or null when it's
+ * unset — the case is either not yet evaluated ([ClinicalReport.evaluateOutput] and this both
+ * null, no section at all) or evaluated successfully ([ClinicalReport.evaluateOutput] non-null,
+ * the real [evaluateBlock] renders instead). Same plain-function split as [assessmentMarkerLabel]
+ * for the same reason: unit-testable without Robolectric.
+ */
+internal fun evaluateFailureMarkerLabel(failureCode: String?): String? =
+    failureCode?.let { "EVALUATION FAILED — no AI treatment recommendation was generated" }
+
 class ReportCanvasRenderer(
     private val logoBitmap: Bitmap? = null,
     private val imageLoader: (String) -> Bitmap? = { null },
@@ -169,6 +180,11 @@ class ReportCanvasRenderer(
             add(gap(4f))
             add(sectionHeaderBlock("AI Clinical Evaluation"))
             add(evaluateBlock(it))
+        }
+        evaluateFailureMarkerLabel(report.evaluateFailureCode)?.let { marker ->
+            add(gap(4f))
+            add(sectionHeaderBlock("AI Clinical Evaluation"))
+            add(urgentLineBlock(marker))
         }
         if (report.attachments.isNotEmpty()) {
             add(gap(4f))
@@ -333,6 +349,10 @@ class ReportCanvasRenderer(
 
     private fun mediaLineBlock(text: String) = Block(lineHeight(bodyPaint) + 2f) { c, top ->
         c.drawText(text, MARGIN, top + bodyPaint.textSize, bodyPaint)
+    }
+
+    private fun urgentLineBlock(text: String) = Block(lineHeight(urgentPaint) + 2f) { c, top ->
+        c.drawText(text, MARGIN, top + urgentPaint.textSize, urgentPaint)
     }
 
     private fun vitalsBlock(report: ClinicalReport): Block {

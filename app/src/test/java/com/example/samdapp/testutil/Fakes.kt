@@ -291,16 +291,34 @@ class FakeKernelReportRepository : KernelReportRepository {
     override suspend fun getForCase(caseRecordId: String): KernelReportOutput? = saved[caseRecordId]
 }
 
+/** H-14: [saved] and [failures] mirror EvaluateReportRepositoryImpl's real "one row per case"
+ *  behavior (getIdForCase-resolved REPLACE upsert) — [save] and [saveFailure] each clear the
+ *  other's entry for the same case, so a successful retry can never leave both set at once. */
 class FakeEvaluateReportRepository : EvaluateReportRepository {
     val saved = mutableMapOf<String, EvaluateReportOutput>()
+    val failures = mutableMapOf<String, String>()
     var saveResult: Result<Unit> = Result.success(Unit)
+    var saveFailureResult: Result<Unit> = Result.success(Unit)
 
     override suspend fun save(report: EvaluateReportOutput): Result<Unit> {
-        if (saveResult.isSuccess) saved[report.caseRecordId] = report
+        if (saveResult.isSuccess) {
+            saved[report.caseRecordId] = report
+            failures.remove(report.caseRecordId)
+        }
         return saveResult
     }
 
+    override suspend fun saveFailure(caseRecordId: String, failureCode: String): Result<Unit> {
+        if (saveFailureResult.isSuccess) {
+            failures[caseRecordId] = failureCode
+            saved.remove(caseRecordId)
+        }
+        return saveFailureResult
+    }
+
     override suspend fun getForCase(caseRecordId: String): EvaluateReportOutput? = saved[caseRecordId]
+
+    override suspend fun getFailureCodeForCase(caseRecordId: String): String? = failures[caseRecordId]
 }
 
 class FakeDiagnosisFeedbackRepository : DiagnosisFeedbackRepository {

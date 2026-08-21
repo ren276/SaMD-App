@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.errors import ErrorCode
 from app.models.audit import AuditEvent
+from app.models.kernel import KernelReport
 from app.models.patient import Patient
 from app.models.sync import SyncBatch, SyncLogEntry
 from app.services import audit as audit_service
@@ -174,6 +175,37 @@ def ailment_record(
     return _record("ailments", record_id, client_updated_at, data)
 
 
+def kernel_report_record(
+    record_id: str,
+    *,
+    case_record_id: str = CASE_ID,
+    inference_source: str = "REAL_INFERENCE",
+    client_updated_at: str = "2026-08-16T09:46:00.000Z",
+) -> dict[str, Any]:
+    data = {
+        "case_record_id": case_record_id,
+        "predicted_condition": "Viral fever",
+        "confidence_score": 0.82,
+        "differentials": ["Dengue", "Typhoid"],
+        "reasoning_summary": "Fever pattern consistent with viral syndrome.",
+        "evidence_for": ["fever reported"],
+        "evidence_against": [],
+        "model_version": "xgboost-v1",
+        "icd_code": None,
+        "device_id": TEST_DEVICE_ID,
+        "software_version": "1.0",
+        "data_quality_score": 1.0,
+        "uncertainty_score": 0.18,
+        "risk_category": "MODERATE",
+        "urgency_level": "ROUTINE",
+        "inference_started_at": client_updated_at,
+        "inference_ended_at": client_updated_at,
+        "required_human_verification": False,
+        "inference_source": inference_source,
+    }
+    return _record("kernel_reports", record_id, client_updated_at, data)
+
+
 def audit_record(
     record_id: str,
     *,
@@ -236,6 +268,42 @@ async def test_happy_path_mixed_batch_all_applied(
         ("ailments", "applied"),
         ("audit_log", "applied"),
     }
+
+
+# ---------------------------------------------------------------------------
+# inference_source = UNAVAILABLE (H-09 tail, closed by migration 0006)
+# ---------------------------------------------------------------------------
+
+
+async def test_unavailable_inference_source_kernel_report_is_accepted_and_persisted(
+    client: AsyncClient, auth_headers: dict[str, str], session: AsyncSession
+) -> None:
+    """Before migration 0006, this inference_source value made the INSERT violate
+    ck_kernel_reports_inference_source, which app/services/sync.py surfaces as a per-record
+    SAMD-SYNC-6003 rejection, not a 500 the caller could not miss. Asserting only the HTTP
+    response would not have caught a regression here: the persisted row is what matters (see
+    CLAUDE.md's rule on this exact trap).
+    """
+    records = [
+        patient_record(),
+        encounter_record(),
+        case_record_record(),
+        kernel_report_record("kr-unavailable-1", inference_source="UNAVAILABLE"),
+    ]
+    response = await push(client, auth_headers, records)
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["rejected"] == 0
+    assert data["applied"] == 4
+    assert {(r["table"], r["status"]) for r in data["results"]} >= {
+        ("kernel_reports", "applied"),
+    }
+
+    persisted = (
+        await session.execute(select(KernelReport).where(KernelReport.id == "kr-unavailable-1"))
+    ).scalar_one()
+    assert persisted.inference_source == "UNAVAILABLE"
 
 
 # ---------------------------------------------------------------------------

@@ -52,6 +52,7 @@ class AssembleReportUseCase @Inject constructor(
         val prescription = prescriptionRepository.getForCase(caseRecordId)
         val kernelOutput = kernelReportRepository.getForCase(caseRecordId)
         val evaluateOutput = evaluateReportRepository.getForCase(caseRecordId)
+        val evaluateFailureCode = evaluateReportRepository.getFailureCodeForCase(caseRecordId)
         val prescribingDoctor = prescription?.doctorId?.let { docId ->
             doctorRepository.getDoctors().getOrNull()?.firstOrNull { it.id == docId }
         }
@@ -69,6 +70,7 @@ class AssembleReportUseCase @Inject constructor(
                 visitDateTime = encounter?.startedAt ?: caseRecord.createdAt,
                 kernelOutput = kernelOutput,
                 evaluateOutput = evaluateOutput,
+                evaluateFailureCode = evaluateFailureCode,
                 prescription = prescription,
                 prescribingDoctor = prescribingDoctor,
             ),

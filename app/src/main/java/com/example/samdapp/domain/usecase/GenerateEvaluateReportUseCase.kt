@@ -59,7 +59,11 @@ class GenerateEvaluateReportUseCase @Inject constructor(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            logger.warning("Evaluate API unavailable — no treatment section will be shown. Reason: ${e.message}")
+            logger.warning("Evaluate API unavailable — recording an honest failure marker. Reason: ${e.message}")
+            // H-14: persists the failure so it is readable back, distinguishable from "hasn't run
+            // yet" — see EvaluateReportRepository.saveFailure's KDoc. Best-effort: if even this
+            // write fails, the caller still gets the original Result.failure(e) below.
+            evaluateReportRepository.saveFailure(caseRecordId, e::class.simpleName ?: "UNKNOWN_ERROR")
             Result.failure(e)
         }
     }
