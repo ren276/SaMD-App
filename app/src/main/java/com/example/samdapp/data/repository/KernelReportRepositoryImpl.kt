@@ -13,19 +13,31 @@ class KernelReportRepositoryImpl @Inject constructor(
 ) : KernelReportRepository {
 
     override suspend fun save(report: KernelReportOutput): Result<Unit> = asDataResult {
-        // upsert() is REPLACE: without this read, a re-saved report would silently wipe
-        // serverVersion (syncstate-reset session). syncState needs no explicit reset —
-        // KernelReportEntity's default is already PENDING, and REPLACE always writes the full
-        // default set.
-        val existingServerVersion = kernelReportDao.getServerVersion(report.id)
-        kernelReportDao.upsert(report.toEntity(serverVersion = existingServerVersion))
+        // Resolved by caseRecordId, not report.id (which GenerateKernelReportUseCase mints fresh
+        // on every attempt): this is what makes upsert()'s REPLACE actually replace the one row
+        // this case already has — including an InferenceSource.UNAVAILABLE row a retry supersedes
+        // — rather than insert a second row that observeForCase would then arbitrate between.
+        // Same shape as EvaluateReportRepositoryImpl.save; MIGRATION_15_16's unique index on
+        // caseRecordId is the structural enforcement.
+        //
+        // upsert() is REPLACE, so serverVersion must be read back and threaded through or a
+        // re-saved report silently wipes it (syncstate-reset session). Routing that read through
+        // the RESOLVED id is what makes it work at all: getServerVersion(report.id) could only
+        // ever return null, since report.id was brand new on every retry. syncState needs no
+        // explicit reset — KernelReportEntity's default is already PENDING, and REPLACE always
+        // writes the full default set.
+        val id = kernelReportDao.getIdForCase(report.caseRecordId) ?: report.id
+        val existingServerVersion = kernelReportDao.getServerVersion(id)
+        kernelReportDao.upsert(report.toEntity(id = id, serverVersion = existingServerVersion))
     }
 
+    // .first() takes the single row the unique index on caseRecordId guarantees (MIGRATION_15_16),
+    // not an arbitrary pick from several.
     override suspend fun getForCase(caseRecordId: String): KernelReportOutput? =
         kernelReportDao.observeForCase(caseRecordId).first()?.toDomain()
 }
 
-private fun KernelReportOutput.toEntity(serverVersion: Int?) = KernelReportEntity(
+private fun KernelReportOutput.toEntity(id: String, serverVersion: Int?) = KernelReportEntity(
     id = id,
     caseRecordId = caseRecordId,
     predictedCondition = predictedCondition,

@@ -3306,3 +3306,31 @@ was found once the suite could finally be watched run to completion.
 ================================================================
 ```
 
+---
+
+## DEPLOY NOTE: MIGRATION_15_16 causes a one-time sync push spike (2026-08-21)
+
+**Read before the first release that ships DB version 16.** This is expected behaviour, not a
+sync fault. Do not treat the spike as a regression and do not "fix" it by suppressing the push.
+
+`MIGRATION_15_16` collapses pre-existing duplicate rows on `kernel_reports` and `evaluate_reports`
+to one row per `caseRecordId` (newest `localModifiedAt` wins, `rowid DESC` tiebreak) and then makes
+`caseRecordId` UNIQUE on both tables. Where the surviving row is `PENDING` and the row it displaced
+had already been `SYNCED`, the case re-pushes on the next sync under the surviving row's `id`.
+
+Consequences to expect on the first launch after upgrade, per device:
+
+- **A larger-than-usual outbox batch**, proportional to how many cases on that device were ever
+  re-assessed (a retry after an `InferenceSource.UNAVAILABLE` result is the common producer).
+  Devices used heavily offline will show the biggest jump.
+- **Backend rows for the same case under two different record `id`s** — the previously-synced one
+  and the re-pushed survivor. The backend does not yet enforce one-current-assessment-per-case;
+  that is a stated Phase 4 sync-push requirement (`docs/backend/api-contract.md` §6.1) and is
+  deliberately not part of this commit. Until it lands, this is a known, accepted state
+  (risk file RR-02), not a defect to chase on the device.
+- **No data loss risk from the spike itself.** The push path is unchanged; only the number of
+  pending rows differs.
+
+Verification before release: the migration must be exercised on a real SQLCipher-encrypted
+database, not only in JVM tests — see the HARD GATE section above for why an androidTest suite that
+compiles clean is not evidence that it passes.
