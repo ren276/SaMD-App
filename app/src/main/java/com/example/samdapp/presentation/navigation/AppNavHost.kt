@@ -26,6 +26,8 @@ import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
 import com.example.samdapp.config.FeatureFlags
 import com.example.samdapp.domain.auth.UserSession
+import com.example.samdapp.presentation.abha.AbhaAadhaarEntryScreen
+import com.example.samdapp.presentation.abha.AbhaCreateOtpScreen
 import com.example.samdapp.presentation.abha.AbhaEntryScreen
 import com.example.samdapp.presentation.abha.AbhaLoginScreen
 import com.example.samdapp.presentation.abha.AbhaOtpScreen
@@ -185,9 +187,26 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
             }
             entry<AbhaEntry> {
                 AbhaEntryScreen(
-                    onCreateAbha = { backStack.add(AbhaSignUp) },
+                    // "Create ABHA ID" now opens the real ABDM-backed Aadhaar flow. [AbhaSignUp]
+                    // and its mock use case are left in place, reachable from AbhaOtpScreen's
+                    // "Create ABHA ID instead", because the login side is still P1 mock.
+                    onCreateAbha = { backStack.add(AbhaAadhaarEntry) },
                     onLoginWithAbha = { backStack.add(AbhaLogin) },
                     onSkip = { backStack.add(Register()) },
+                )
+            }
+            entry<AbhaAadhaarEntry> {
+                AbhaAadhaarEntryScreen(
+                    onOtpRequested = { sessionId, maskedMobile ->
+                        backStack.add(AbhaCreateOtpRoute(sessionId, maskedMobile))
+                    },
+                )
+            }
+            entry<AbhaCreateOtpRoute> { key ->
+                AbhaCreateOtpScreen(
+                    sessionId = key.sessionId,
+                    maskedMobile = key.maskedMobile,
+                    onEnrolled = { abhaId -> backStack.add(Register(abhaId)) },
                 )
             }
             entry<AbhaSignUp> {

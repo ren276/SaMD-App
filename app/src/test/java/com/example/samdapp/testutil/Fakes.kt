@@ -12,6 +12,11 @@ import com.example.samdapp.domain.auth.ChangePinResult
 import com.example.samdapp.domain.auth.SignInResult
 import com.example.samdapp.domain.auth.UserRole
 import com.example.samdapp.domain.auth.UserSession
+import com.example.samdapp.domain.abha.AbdmAbhaSource
+import com.example.samdapp.domain.abha.AbhaApiResult
+import com.example.samdapp.domain.abha.AbhaIdentity
+import com.example.samdapp.domain.abha.AbhaSessionSnapshot
+import com.example.samdapp.domain.abha.AbhaTransactionState
 import com.example.samdapp.domain.model.AbhaProfile
 import com.example.samdapp.domain.model.AilmentEntry
 import com.example.samdapp.domain.doctor.DoctorPrescriptionInbox
@@ -147,6 +152,68 @@ class FakeAbhaProfileRepository(
 
     override suspend fun getProfile(abhaId: String): AbhaProfile? = profiles[abhaId]
 }
+
+/** Every method defaults to a plausible [AbhaApiResult.Success] for the state that method is
+ *  meant to produce; a test overrides only the one field it cares about. Call tracking is by
+ *  argument capture, not just a boolean, so a consent-gate or masked-mobile-pass-through test can
+ *  assert on exactly what was sent, not just whether something was. */
+class FakeAbdmAbhaSource(
+    var startResult: AbhaApiResult<AbhaSessionSnapshot> =
+        AbhaApiResult.Success(AbhaSessionSnapshot(sessionId = "session-1", state = AbhaTransactionState.STARTED)),
+    var submitIdentityResult: AbhaApiResult<AbhaSessionSnapshot> =
+        AbhaApiResult.Success(AbhaSessionSnapshot(sessionId = "session-1", state = AbhaTransactionState.OTP_REQUESTED)),
+    var verifyOtpResult: AbhaApiResult<AbhaSessionSnapshot> =
+        AbhaApiResult.Success(AbhaSessionSnapshot(sessionId = "session-1", state = AbhaTransactionState.ENROLLED)),
+    var verifyMobileOtpResult: AbhaApiResult<AbhaSessionSnapshot> =
+        AbhaApiResult.Success(AbhaSessionSnapshot(sessionId = "session-1", state = AbhaTransactionState.MOBILE_VERIFIED)),
+    var getProfileResult: AbhaApiResult<AbhaIdentity> = AbhaApiResult.Success(testAbhaIdentity()),
+) : AbdmAbhaSource {
+    var startCalled = false
+    var submitIdentityCalled = false
+    var submitIdentityAadhaar: String? = null
+    val verifyOtpCalls = mutableListOf<Triple<String, String, String>>()
+    val verifyMobileOtpCalls = mutableListOf<Pair<String, String>>()
+    var getProfileCalled = false
+
+    override suspend fun startRegistrationSession(): AbhaApiResult<AbhaSessionSnapshot> {
+        startCalled = true
+        return startResult
+    }
+
+    override suspend fun submitIdentity(sessionId: String, aadhaarNumber: String): AbhaApiResult<AbhaSessionSnapshot> {
+        submitIdentityCalled = true
+        submitIdentityAadhaar = aadhaarNumber
+        return submitIdentityResult
+    }
+
+    override suspend fun verifyOtp(sessionId: String, otp: String, mobileNumber: String): AbhaApiResult<AbhaSessionSnapshot> {
+        verifyOtpCalls += Triple(sessionId, otp, mobileNumber)
+        return verifyOtpResult
+    }
+
+    override suspend fun verifyMobileOtp(sessionId: String, otp: String): AbhaApiResult<AbhaSessionSnapshot> {
+        verifyMobileOtpCalls += sessionId to otp
+        return verifyMobileOtpResult
+    }
+
+    override suspend fun getSessionState(sessionId: String): AbhaApiResult<AbhaSessionSnapshot> = startResult
+
+    override suspend fun getProfile(sessionId: String): AbhaApiResult<AbhaIdentity> {
+        getProfileCalled = true
+        return getProfileResult
+    }
+}
+
+fun testAbhaIdentity(
+    abhaNumber: String = "12345678901234",
+    name: String = "Anita Kumari",
+    mobileNumber: String? = "XXXXXX7776",
+): AbhaIdentity = AbhaIdentity(
+    abhaNumber = abhaNumber, abhaAddress = null, name = name, dateOfBirth = null, gender = "Female",
+    address = "Village Rampur", district = "Sitapur", state = "Uttar Pradesh", pincode = "261001",
+    mobileNumber = mobileNumber, emailAddress = null, photoUrl = null, kycVerified = true,
+    verificationSource = "ABDM", verifiedAt = Instant.EPOCH,
+)
 
 fun testAbhaProfile(
     abhaId: String = "12345678901234",
