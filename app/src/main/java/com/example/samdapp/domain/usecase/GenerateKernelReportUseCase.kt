@@ -145,16 +145,31 @@ class GenerateKernelReportUseCase @Inject constructor(
                 // Payload carries server-verbatim values and a measured zero only: no condition
                 // string, no confidence, no PHI. caseRecordId is the pseudonymous case token
                 // every other action already logs.
-                auditLogger.log(
-                    action = AuditAction.KERNEL_EMPTY_DIFFERENTIAL,
-                    caseRecordId = caseRecordId,
-                    payload = auditPayload(
-                        "triageUrgency" to result.triageUrgency,
-                        "modelVersion" to result.modelVersion,
-                        "safetyScreenPassed" to result.safetyScreenPassed.toString(),
-                        "differentialCount" to "0",
-                    ),
-                )
+                //
+                // The log call is wrapped separately: it sits inside this method's own outer
+                // try/catch, and if it threw uncaught, that catch would return null here, sending
+                // the case through kernelFallbackSource next. On a dev build with a configured
+                // mock scenario, that would fabricate a diagnosis for a kernel response that was
+                // actually reached with an empty differential, exactly what this whole change
+                // exists to prevent, just relocated to an audit-write failure instead of a
+                // network failure. A missed breadcrumb is an acceptable loss; a fabricated
+                // scenario for a defective audit write is not.
+                try {
+                    auditLogger.log(
+                        action = AuditAction.KERNEL_EMPTY_DIFFERENTIAL,
+                        caseRecordId = caseRecordId,
+                        payload = auditPayload(
+                            "triageUrgency" to result.triageUrgency,
+                            "modelVersion" to result.modelVersion,
+                            "safetyScreenPassed" to result.safetyScreenPassed.toString(),
+                            "differentialCount" to "0",
+                        ),
+                    )
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    logger.warning("Could not record kernel empty-differential audit event: ${e.message}")
+                }
                 return buildUnavailableOutput(caseRecordId, payload, inferenceStartedAt)
             }
 

@@ -21,12 +21,12 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.audit_actions_device import DEVICE_AUDIT_ACTIONS
 from app.errors import ErrorCode
 from app.models.audit import AuditEvent
 from app.models.kernel import KernelReport
 from app.models.patient import Patient
 from app.models.sync import SyncBatch, SyncLogEntry
-from app.domain.audit_actions_device import DEVICE_AUDIT_ACTIONS
 from app.services import audit as audit_service
 from tests.conftest import TEST_DEVICE_ID, TEST_FACILITY_ID, TEST_WORKER_ID
 from tests.test_patients import PATIENT_ID
