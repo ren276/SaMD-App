@@ -76,6 +76,19 @@ enum class AuditAction(val value: String) {
 
     KERNEL_ASSESSMENT_ACKNOWLEDGED("kernel_assessment_acknowledged"),
     KERNEL_RESPONSE_RECEIVED("kernel_response_received"),
+
+    /** `/api/v1/assess` answered 200 but with an empty `differential_diagnosis`: the kernel was
+     *  reached and ran, and produced no usable assessment. The worker sees the same
+     *  [com.example.samdapp.domain.model.InferenceSource.UNAVAILABLE] state as an unreachable
+     *  kernel, deliberately, since operationally the two are identical. This row is what lets
+     *  field analysis tell them apart afterwards, because "the kernel is down" and "the kernel is
+     *  returning empty differentials" are different root causes with different fixes. Emitted by
+     *  [com.example.samdapp.domain.usecase.GenerateKernelReportUseCase] at the branch itself, so
+     *  it covers the retry path as well as the initial send. Payload carries only server-verbatim
+     *  values (triage urgency, model version, safety screen) plus a measured `differentialCount`
+     *  of 0: never a condition string and never a confidence, since no such value legitimately
+     *  exists for this case and the whole point of the fix is that none gets invented. */
+    KERNEL_EMPTY_DIFFERENTIAL("kernel_empty_differential"),
 }
 
 /** Builds the JSON blob stored in AuditLogEntity.payload from a flat set of fields. */

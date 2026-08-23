@@ -21,6 +21,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.audit_actions_device import DEVICE_AUDIT_ACTIONS
 from app.errors import ErrorCode
 from app.models.audit import AuditEvent
 from app.models.kernel import KernelReport
@@ -678,3 +679,56 @@ async def test_sync_log_has_one_row_per_record(
     )
     assert len(rows) == 2
     assert {r.status for r in rows} == {"applied"}
+
+
+# ---------------------------------------------------------------------------
+# Empty-differential fabrication fix: kernel_empty_differential audit action
+# ---------------------------------------------------------------------------
+
+
+def test_kernel_empty_differential_is_in_the_accepted_device_action_set() -> None:
+    """Sourced from the checked-in mirror (app/domain/audit_actions_device.py), not retyped, same
+    as every other assertion against DEVICE_AUDIT_ACTIONS in this module. There is no DB-level
+    CHECK constraint on audit_events.action (confirmed: models/audit.py's __table_args__ only
+    constrains origin/entry_hash/previous_hash) -- app-level enforcement in services/sync.py is
+    the only gate, so this and the real-insert test below are what stand in for a constraint test.
+    """
+    assert "kernel_empty_differential" in DEVICE_AUDIT_ACTIONS
+
+
+async def test_kernel_empty_differential_audit_row_is_accepted_and_persisted(
+    client: AsyncClient, auth_headers: dict[str, str], session: AsyncSession
+) -> None:
+    """A device-origin audit_log row carrying action=kernel_empty_differential must sync-push
+    successfully and land in audit_events with that action verbatim -- proves the accepted-set
+    widening actually takes effect end to end, not just that the Python set contains the string.
+    Asserts the persisted row via a fresh query, not the HTTP response, per this repo's rule that
+    a write-survived-a-failure-path test must check the DB, not the return value.
+    """
+    response = await push(
+        client,
+        auth_headers,
+        [
+            audit_record(
+                "al-empty-diff",
+                action="kernel_empty_differential",
+                case_record_id="case-empty-diff-1",
+                payload=(
+                    '{"triageUrgency":"ROUTINE","modelVersion":"xgboost-v1",'
+                    '"safetyScreenPassed":"true","differentialCount":"0"}'
+                ),
+            )
+        ],
+    )
+    assert response.status_code == 200
+
+    row = (
+        await session.execute(
+            select(AuditEvent).where(AuditEvent.action == "kernel_empty_differential")
+        )
+    ).scalar_one()
+    assert row.case_record_id == "case-empty-diff-1"
+    assert row.origin == "DEVICE"
+    # No fabricated clinical value reaches the server-side audit row either.
+    assert "Non-specific" not in row.payload
+    assert "confidence" not in row.payload

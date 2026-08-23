@@ -7,6 +7,7 @@ import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.domain.kernel.KernelAssessmentResult
 import com.example.samdapp.domain.kernel.RemoteKernelSource
 import com.example.samdapp.domain.model.KernelPayload
+import com.example.samdapp.testutil.FakeAuditLogger
 import com.example.samdapp.testutil.FakeCaseRecordRepository
 import com.example.samdapp.testutil.FakeConsultationRepository
 import com.example.samdapp.testutil.FakeDeviceInfoProvider
@@ -51,7 +52,7 @@ class RetryKernelAssessmentUseCaseTest {
             patientRepository = patientRepo,
             sendToKernelUseCase = SendToKernelUseCase(),
             generateKernelReportUseCase = GenerateKernelReportUseCase(
-                FakeKernelReportRepository(), FakeDeviceInfoProvider(), remoteKernelSource, kernelFallbackSource,
+                FakeKernelReportRepository(), FakeDeviceInfoProvider(), remoteKernelSource, kernelFallbackSource, FakeAuditLogger(),
             ),
         )
     }
@@ -91,7 +92,7 @@ class RetryKernelAssessmentUseCaseTest {
             patientRepository = patientRepo,
             sendToKernelUseCase = SendToKernelUseCase(),
             generateKernelReportUseCase = GenerateKernelReportUseCase(
-                FakeKernelReportRepository(), FakeDeviceInfoProvider(), AlwaysFailsKernelSource, FakeKernelFallbackSource(),
+                FakeKernelReportRepository(), FakeDeviceInfoProvider(), AlwaysFailsKernelSource, FakeKernelFallbackSource(), FakeAuditLogger(),
             ),
         )
 
