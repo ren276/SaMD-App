@@ -44,6 +44,13 @@ DEVICE_AUDIT_ACTIONS: frozenset[str] = frozenset(
         "evaluate_response_received",
         "family_history_added",
         "kernel_assessment_acknowledged",
+        # Emitted when /api/v1/assess answers 200 with an empty differential_diagnosis: the
+        # device routes the case to InferenceSource.UNAVAILABLE and records this so field
+        # analysis can separate an unreachable kernel from one returning empty differentials.
+        # Added with the device-side empty-200 fabrication fix, same change as the Kotlin enum
+        # value, because a device action this set does not accept is a permanent silent sync
+        # rejection of a row the device will keep re-sending.
+        "kernel_empty_differential",
         "kernel_response_received",
         "medical_history_item_added",
         "medication_added",

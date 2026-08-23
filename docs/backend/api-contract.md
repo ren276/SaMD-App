@@ -869,10 +869,23 @@ Retention for `kernel_assessments` follows `kernel_call_log`: 24 months, decisio
   OkHttp read timeout so behaviour under a slow kernel does not change)
 - 500: `SAMD-SYS-9005`
 
-**Android fallback behaviour is unchanged.** `GenerateKernelReportUseCase.tryRealApi` catches any
-failure and falls back to the curated mock scenario table, stamping
-`InferenceSource.MOCK_FALLBACK` (REQ-HAN-08). Every error above is a normal `HttpException` or
-`IOException` at the Retrofit layer, so that fallback keeps working with no change.
+**Android failure behaviour.** `GenerateKernelReportUseCase.tryRealApi` catches any failure and
+asks the build flavor's `KernelFallbackSource` for a result. That table is dev-only: dev binds
+`MockKernelFallbackSource` and stamps `InferenceSource.MOCK_FALLBACK`, while staging and prod bind
+`NoFallbackKernelSource`, which always returns null, so a failure there produces an honest
+`InferenceSource.UNAVAILABLE` result with no fabricated diagnosis (REQ-HAN-08, hazard H-09). Every
+error above is a normal `HttpException` or `IOException` at the Retrofit layer, so that path keeps
+working with no change.
+
+**A 200 carrying an empty `differential_diagnosis` is not a success.** The device treats it as
+`InferenceSource.UNAVAILABLE` on every flavor, without consulting the fallback source at all, and
+records an audit row with action `kernel_empty_differential` (accepted by sync push, see §Sync).
+It does not substitute a placeholder condition or confidence: until the empty-200 fabrication fix,
+`RetrofitKernelSource` filled in `"Non-specific presentation"` at `0.50` and the use case stamped
+that `REAL_INFERENCE`, which put invented clinical content in front of a clinician attributed to
+the model. The user-facing unavailable copy is deliberately reach-neutral, because the same state
+is produced by an unreachable kernel and by a reached-but-empty one; only the audit trail
+distinguishes them.
 
 ### 5.4 POST /api/v1/evaluate
 

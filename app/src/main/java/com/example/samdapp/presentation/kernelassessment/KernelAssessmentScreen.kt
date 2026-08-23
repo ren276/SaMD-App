@@ -129,7 +129,7 @@ private fun UnavailableCard(isRetrying: Boolean, onRetry: () -> Unit) {
                 color = MaterialTheme.colorScheme.onErrorContainer,
             )
             Text(
-                "The AI server could not be reached and no offline result is available. No diagnosis was generated.",
+                "The AI did not produce a result for this case. No diagnosis was generated.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onErrorContainer,
             )

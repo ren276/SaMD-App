@@ -1,5 +1,8 @@
 package com.example.samdapp.domain.usecase
 
+import com.example.samdapp.domain.audit.AuditAction
+import com.example.samdapp.domain.audit.AuditLogger
+import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.config.DeviceInfoProvider
 import com.example.samdapp.domain.kernel.KernelFallbackSource
 import com.example.samdapp.domain.kernel.RemoteKernelSource
@@ -27,6 +30,12 @@ import javax.inject.Inject
  * - `evidenceAgainst`    (from `evidence_against`)                → [KernelReportOutput.evidenceAgainst]
  * - `triageUrgency`      (from `triage_urgency`)                  → prepended to [KernelReportOutput.reasoningSummary]
  *
+ * **Empty-differential path**: a 200 carrying an empty `differential_diagnosis` is NOT a success.
+ * The model ran and produced no usable assessment, which is operationally identical to not having
+ * run, so [tryRealApi] routes it straight to [buildUnavailableOutput] and records an
+ * [AuditAction.KERNEL_EMPTY_DIFFERENTIAL] breadcrumb. It deliberately does not consult
+ * [kernelFallbackSource] first, so even a dev build cannot substitute a mock scenario for it.
+ *
  * **Fallback path**: if the real call fails for ANY reason (IOException, HttpException, timeout,
  * server offline), the exception is caught and logged, and [kernelFallbackSource] is asked for a
  * fallback. What that returns depends entirely on the build flavor — dev binds a mock scenario
@@ -49,6 +58,7 @@ class GenerateKernelReportUseCase @Inject constructor(
     private val deviceInfoProvider: DeviceInfoProvider,
     private val remoteKernelSource: RemoteKernelSource,
     private val kernelFallbackSource: KernelFallbackSource,
+    private val auditLogger: AuditLogger,
 ) {
     companion object {
         const val HUMAN_VERIFICATION_CONFIDENCE_THRESHOLD = 0.90
@@ -100,6 +110,11 @@ class GenerateKernelReportUseCase @Inject constructor(
      * Attempts the remote kernel call via [remoteKernelSource]. Returns null on any failure
      * — the caller falls back to [kernelFallbackSource], then [buildUnavailableOutput]. This
      * method never throws.
+     *
+     * A 200 with an empty differential is the one case that returns a NON-null
+     * [InferenceSource.UNAVAILABLE] output rather than null: returning null there would send it
+     * through [kernelFallbackSource] first, which on a dev build would answer with a mock
+     * scenario and label a reached-but-empty kernel as [InferenceSource.MOCK_FALLBACK].
      */
     private suspend fun tryRealApi(
         caseRecordId: String,
@@ -115,6 +130,33 @@ class GenerateKernelReportUseCase @Inject constructor(
                 patientSex = patientSex ?: "U",
             )
             logger.info("Kernel API success — case $caseRecordId, triage=${result.triageUrgency}")
+
+            if (result.predictedCondition == null) {
+                // 200 with an empty differential_diagnosis: the model produced no usable
+                // assessment. Operationally identical to not running. Never fabricate.
+                //
+                // Logged here rather than at either caller because both SendingViewModel's
+                // initial run and RetryKernelAssessmentUseCase's retry pass through this branch,
+                // and only here is the empty-200 fact distinguishable from an unreachable kernel
+                // (which exits at the catch below, never reaching this line). The user sees the
+                // same UNAVAILABLE state either way; the audit trail is what separates
+                // "kernel down" from "kernel returning empty differentials" in field analysis.
+                //
+                // Payload carries server-verbatim values and a measured zero only: no condition
+                // string, no confidence, no PHI. caseRecordId is the pseudonymous case token
+                // every other action already logs.
+                auditLogger.log(
+                    action = AuditAction.KERNEL_EMPTY_DIFFERENTIAL,
+                    caseRecordId = caseRecordId,
+                    payload = auditPayload(
+                        "triageUrgency" to result.triageUrgency,
+                        "modelVersion" to result.modelVersion,
+                        "safetyScreenPassed" to result.safetyScreenPassed.toString(),
+                        "differentialCount" to "0",
+                    ),
+                )
+                return buildUnavailableOutput(caseRecordId, payload, inferenceStartedAt)
+            }
 
             val inferenceEndedAt = Instant.now()
             val confidence = result.confidenceScore
@@ -196,8 +238,12 @@ class GenerateKernelReportUseCase @Inject constructor(
         predictedCondition = "Assessment unavailable",
         confidenceScore = 0.0,
         differentials = emptyList(),
-        reasoningSummary = "The AI assessment server could not be reached and no offline result is " +
-            "available in this build. Retry once connectivity is restored.",
+        // Reach-neutral by design: this same output is produced both when the kernel could not
+        // be reached and when it answered 200 with an empty differential. Naming either cause
+        // here would be false half the time, and the cause belongs in the audit trail, not on a
+        // clinical record. What is true in both cases is that no assessment exists.
+        reasoningSummary = "Assessment unavailable. The AI did not produce a result for this " +
+            "case and no diagnosis was generated. Tap Retry to run the assessment again.",
         evidenceFor = emptyList(),
         evidenceAgainst = emptyList(),
         modelVersion = "unavailable",

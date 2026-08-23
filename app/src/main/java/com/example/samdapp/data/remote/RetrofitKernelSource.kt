@@ -60,16 +60,26 @@ class RetrofitKernelSource @Inject constructor(
         // top differential's evidence_for    → evidenceFor
         // top differential's evidence_against→ evidenceAgainst
         // triage_urgency                     → included in reasoningSummary by the use case
-        val topDiff = response.differentialDiagnosis.firstOrNull()
+        // .orEmpty() collapses an absent/null differential_diagnosis key and a present-but-empty
+        // list into the same "no differential" case, so both reach GenerateKernelReportUseCase's
+        // empty-differential branch identically rather than the absent-key case NPE-ing into the
+        // generic catch (which would look identical to an unreachable kernel in the audit trail).
+        val differentials = response.differentialDiagnosis.orEmpty()
+        val topDiff = differentials.firstOrNull()
 
+        // No differential means no assessment: predictedCondition stays null and the use case
+        // routes the case to InferenceSource.UNAVAILABLE. Substituting a placeholder condition
+        // and confidence here (as this did until the empty-200 fabrication fix) put invented
+        // clinical content in front of a clinician stamped REAL_INFERENCE, indistinguishable
+        // from a real model output because the call itself had succeeded.
         return KernelAssessmentResult(
-            predictedCondition = topDiff?.conditionTier ?: "Non-specific presentation",
-            confidenceScore = (topDiff?.probability ?: 0.50).coerceIn(0.0, 1.0),
+            predictedCondition = topDiff?.conditionTier,
+            confidenceScore = topDiff?.probability?.coerceIn(0.0, 1.0) ?: 0.0,
             triageUrgency = response.triageUrgency,
             safetyScreenPassed = response.safetyScreenPassed,
             evidenceFor = topDiff?.evidenceFor.orEmpty(),
             evidenceAgainst = topDiff?.evidenceAgainst.orEmpty(),
-            differentials = response.differentialDiagnosis.drop(1).map { it.conditionTier },
+            differentials = differentials.drop(1).map { it.conditionTier },
             recommendedInvestigations = response.recommendedInvestigations,
             modelVersion = response.modelMetadata?.modelVersion,
         )

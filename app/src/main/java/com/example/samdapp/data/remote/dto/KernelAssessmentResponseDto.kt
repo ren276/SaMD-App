@@ -7,13 +7,20 @@ import com.google.gson.annotations.SerializedName
  * Maps to [com.example.samdapp.domain.model.KernelReportOutput] in [GenerateKernelReportUseCase].
  *
  * The [differentialDiagnosis] list is the ML model's ranked differentials — each entry carries
- * its own probability, SHAP evidence strings, and a condition tier label.
+ * its own probability, SHAP evidence strings, and a condition tier label. Declared nullable
+ * because Gson populates fields by reflection and bypasses Kotlin's non-null enforcement: an
+ * absent or JSON-null key on the wire silently lands as Kotlin `null`, not a runtime error, no
+ * matter what this property's declared type claims. A non-null declaration here previously masked
+ * that gap and let an absent-key response NPE at the call site's `.firstOrNull()`, which landed in
+ * the generic failure catch and was indistinguishable from an unreachable kernel in the audit
+ * trail. Declaring it nullable makes the absent-key and empty-list cases equivalent on purpose:
+ * both mean "the kernel answered but produced no differential."
  */
 data class KernelAssessmentResponseDto(
     @SerializedName("case_token") val caseToken: String,
     @SerializedName("safety_screen_passed") val safetyScreenPassed: Boolean,
     @SerializedName("triage_urgency") val triageUrgency: String,
-    @SerializedName("differential_diagnosis") val differentialDiagnosis: List<DifferentialDto>,
+    @SerializedName("differential_diagnosis") val differentialDiagnosis: List<DifferentialDto>?,
     @SerializedName("recommended_investigations") val recommendedInvestigations: List<String>,
     @SerializedName("model_metadata") val modelMetadata: ModelMetadataDto?,
 )

@@ -33,12 +33,22 @@ interface RemoteKernelSource {
 
 /**
  * The parsed, domain-typed result from the remote kernel — decoupled from the Retrofit DTO shapes.
- * [predictedCondition] is the top-ranked differential's condition tier.
+ *
+ * [predictedCondition] is the top-ranked differential's condition tier, or **null** when the
+ * kernel answered 200 with an empty `differential_diagnosis`: the model was reached and ran, but
+ * produced no usable assessment. Null is the only honest value there. Implementations must never
+ * substitute a placeholder condition or a placeholder confidence, because the result of this call
+ * is stamped [com.example.samdapp.domain.model.InferenceSource.REAL_INFERENCE] by
+ * [com.example.samdapp.domain.usecase.GenerateKernelReportUseCase], so anything invented here
+ * reaches a clinician attributed to the model. The use case treats null as
+ * [com.example.samdapp.domain.model.InferenceSource.UNAVAILABLE].
+ *
+ * [confidenceScore] is meaningful only when [predictedCondition] is non-null.
  * [evidenceFor]/[evidenceAgainst] are SHAP-based reasoning strings from the top differential.
  * [differentials] contains all OTHER ranked differentials (excluding the top one).
  */
 data class KernelAssessmentResult(
-    val predictedCondition: String,
+    val predictedCondition: String?,
     val confidenceScore: Double,
     val triageUrgency: String,
     val safetyScreenPassed: Boolean,

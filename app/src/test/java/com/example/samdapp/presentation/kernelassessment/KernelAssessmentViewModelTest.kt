@@ -89,7 +89,7 @@ class KernelAssessmentViewModelTest {
             patientRepository = patientRepo,
             sendToKernelUseCase = SendToKernelUseCase(),
             generateKernelReportUseCase = GenerateKernelReportUseCase(
-                FakeKernelReportRepository(), FakeDeviceInfoProvider(), retryKernelSource, retryFallback,
+                FakeKernelReportRepository(), FakeDeviceInfoProvider(), retryKernelSource, retryFallback, FakeAuditLogger(),
             ),
         )
         return KernelAssessmentViewModel(

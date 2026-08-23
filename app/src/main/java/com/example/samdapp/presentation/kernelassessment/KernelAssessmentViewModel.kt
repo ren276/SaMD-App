@@ -81,7 +81,9 @@ private fun KernelReportOutput.toDisplay(): AssessmentDisplay = AssessmentDispla
     sourceLabel = when (inferenceSource) {
         InferenceSource.REAL_INFERENCE -> "Real-time AI inference (/v1/assess)"
         InferenceSource.MOCK_FALLBACK -> "Offline fallback (mock) — ML server unavailable"
-        InferenceSource.UNAVAILABLE -> "Assessment unavailable — AI server unreachable"
+        // Reach-neutral: UNAVAILABLE covers both an unreachable kernel and one that answered
+        // with an empty differential. Naming a cause here would be wrong half the time.
+        InferenceSource.UNAVAILABLE -> "Assessment unavailable: no AI result was produced"
     },
     differentialLines = differentials,
     reasoningLines = listOf(reasoningSummary),
