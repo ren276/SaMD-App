@@ -26,8 +26,9 @@ import binascii
 
 import httpx
 from app.errors import ErrorCode, SamdError
+from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 from abdm_adapter.request_context import abdm_headers
 
@@ -143,11 +144,22 @@ async def fetch_public_key_pem(
     try:
         der_bytes = base64.b64decode(public_key_b64, validate=True)
         public_key = serialization.load_der_public_key(der_bytes)
-    except (binascii.Error, ValueError) as exc:
+    except (binascii.Error, ValueError, UnsupportedAlgorithm) as exc:
         raise SamdError(
             ErrorCode.ABHA_UPSTREAM_ERROR,
             detail="ABDM certificate endpoint returned a publicKey that could not be parsed.",
         ) from exc
+
+    # `load_der_public_key` accepts any valid SubjectPublicKeyInfo, not just RSA — an EC key
+    # parses fine here but `encrypt_oaep_sha1` cannot use it (no `.encrypt()` on an EC public
+    # key), and `submit_identity`/`verify_otp`/`verify_mobile_otp` in service.py catch only
+    # `ValueError` around that call, so the AttributeError would escape uncaught instead of
+    # landing as the classified NON_RETRYABLE error every other malformed-cert case gets here.
+    if not isinstance(public_key, rsa.RSAPublicKey):
+        raise SamdError(
+            ErrorCode.ABHA_UPSTREAM_ERROR,
+            detail="ABDM certificate endpoint returned a publicKey that is not RSA.",
+        )
 
     return public_key.public_bytes(
         encoding=serialization.Encoding.PEM,

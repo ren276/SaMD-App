@@ -229,6 +229,44 @@ async def test_fetch_public_key_pem_live_mode_rejects_valid_base64_non_der(
     assert exc_info.value.code == ErrorCode.ABHA_UPSTREAM_ERROR
 
 
+async def test_fetch_public_key_pem_live_mode_rejects_non_rsa_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A DER SubjectPublicKeyInfo that parses fine but isn't RSA (an EC key here) must also raise
+    SamdError(ABHA_UPSTREAM_ERROR). `load_der_public_key` alone would accept it; `encrypt_oaep_sha1`
+    cannot encrypt with it (no `.encrypt()` on an EC public key), and service.py's callers catch
+    only ValueError around that call, so without an explicit RSA check the resulting AttributeError
+    would escape as an unhandled 500 instead of the classified NON_RETRYABLE error."""
+    import httpx
+    from app.errors import ErrorCode, SamdError
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    ec_public_key = ec.generate_private_key(ec.SECP256R1()).public_key()
+    ec_der_b64 = base64.b64encode(
+        ec_public_key.public_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+    ).decode()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "publicKey": ec_der_b64,
+                "encryptionAlgorithm": "RSA/ECB/OAEPWithSHA-1AndMGF1Padding",
+            },
+        )
+
+    _patch_transport(monkeypatch, handler)
+
+    with pytest.raises(SamdError) as exc_info:
+        await fetch_public_key_pem(
+            mode="live", cert_url="https://example.invalid/cert", gateway_token="gw-token-123"
+        )
+    assert exc_info.value.code == ErrorCode.ABHA_UPSTREAM_ERROR
+
+
 async def test_fetch_public_key_pem_live_mode_rejects_missing_publickey_field(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
