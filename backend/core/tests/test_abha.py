@@ -287,12 +287,90 @@ async def test_live_mode_profile_fetch_failure_leaves_transaction_failed_with_pe
     assert txn.state == "FAILED"
     assert txn.last_error_code == ErrorCode.ABHA_UPSTREAM_ERROR.value
 
-    audit_actions = list(
-        (await session.execute(select(AuditEvent.action).where(AuditEvent.action.in_(
-            [AuditAction.ABHA_SESSION_FAILED.value]
-        )))).scalars()
+    # Scoped to this session's own row, not "does an ABHA_SESSION_FAILED action exist anywhere in
+    # the table": a shared test database running other tests' failure rows in sequence would make
+    # an unscoped existence check pass even if THIS call never wrote one. _audit/_fail always put
+    # {"session_id": ...} in the payload (see _audit and _fail's _write above), so filtering on
+    # that value ties the assertion to this test's own persisted row.
+    failed_audit_rows = (
+        await session.execute(
+            select(AuditEvent.payload).where(
+                AuditEvent.action == AuditAction.ABHA_SESSION_FAILED.value
+            )
+        )
+    ).scalars()
+    assert any(session_id in payload for payload in failed_audit_rows)
+
+
+async def test_live_mode_malformed_profile_body_fails_session_with_persisted_row(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    app: FastAPI,
+    test_settings: Settings,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A live ABDM response that classifies as ok=True at the HTTP layer (status 200, ABHANumber
+    present) can still fail once `mapping.profile_to_abha_identity` tries to use one of its other
+    fields: `yearOfBirth` as a JSON number instead of a string, say, is a plausible contract drift
+    a mocked stub can never produce but a real ABDM response could, and it raises AttributeError
+    out of `dob.from_split_fields`'s `.strip()` call. Before this test, `fetch_profile` mapped the
+    body only after already flushing `PROFILE_RETRIEVED` on the request session, so a mapping
+    failure here left the row silently rolled back to its prior state on the request's rollback,
+    never FAILED, never audited, the exact `_fail`-out-of-band trap this module's own docstring
+    names. The mapping call now runs and is guarded before that flush."""
+    session_id = await _start(client, auth_headers)
+    await _submit_identity(client, auth_headers, session_id)
+    otp_response = await client.post(
+        f"/api/v1/abha/registration-sessions/{session_id}/otp",
+        json={"otp": OTP_VALID, "mobile_number": MOBILE_SAME_AS_AADHAAR},
+        headers=auth_headers,
     )
-    assert AuditAction.ABHA_SESSION_FAILED.value in audit_actions
+    assert otp_response.json()["data"]["state"] == "ENROLLED"
+
+    live_settings = test_settings.model_copy(update={"abdm_mode": "live"})
+    monkeypatch.setitem(app.dependency_overrides, settings_dep, lambda: live_settings)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "ABHANumber": "91-7561-4088-0001",
+                "name": "Sunita Devi",
+                "yearOfBirth": 1991,  # malformed: a number, not the documented string
+                "gender": "F",
+                "mobile": "******0903",
+                "kycVerified": True,
+            },
+        )
+
+    real_init = httpx.AsyncClient.__init__
+
+    def patched_init(self: httpx.AsyncClient, *args: object, **kwargs: object) -> None:
+        kwargs["transport"] = httpx.MockTransport(handler)
+        real_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", patched_init)
+
+    response = await client.get(
+        f"/api/v1/abha/registration-sessions/{session_id}/profile", headers=auth_headers
+    )
+    assert response.status_code == 502
+    assert response.json()["code"] == ErrorCode.ABHA_UPSTREAM_ERROR.value
+
+    txn = await session.get(AbhaTransaction, session_id)
+    assert txn is not None
+    assert txn.state == "FAILED"
+    assert txn.last_error_code == ErrorCode.ABHA_UPSTREAM_ERROR.value
+
+    failed_audit_rows = (
+        await session.execute(
+            select(AuditEvent.payload).where(
+                AuditEvent.action == AuditAction.ABHA_SESSION_FAILED.value
+            )
+        )
+    ).scalars()
+    assert any(session_id in payload for payload in failed_audit_rows)
 
 
 async def test_d5_no_phi_in_persisted_row_or_logs_live_mode(

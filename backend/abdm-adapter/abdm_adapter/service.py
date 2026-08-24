@@ -479,10 +479,20 @@ async def fetch_profile(
     if not result.ok:
         await _fail(session, worker, txn, result)
 
+    # Mapped before any flush on this row: `_fail` writes out of band on its own connection, and
+    # its own contract (this module's docstring, and `_fail`'s) requires the request session to
+    # hold no prior flush on the row when that happens, or the out-of-band UPDATE deadlocks
+    # against the request session's uncommitted one. A malformed field here (ABDM returning
+    # yearOfBirth as a number instead of a string, say) must still route through the same guard
+    # every other failure in this module does, not escape as a bare 500 with the row stuck at
+    # whatever state it was in before this call.
+    try:
+        identity = mapping.profile_to_abha_identity(result.body)
+    except (AttributeError, TypeError, ValueError, KeyError) as exc:
+        await _fail(session, worker, txn, _result_from_transport_error(exc))
+
     txn.state = State.PROFILE_RETRIEVED.value
     await session.flush()
-
-    identity = mapping.profile_to_abha_identity(result.body)
 
     validate_transition(current=State.PROFILE_RETRIEVED, target=State.COMPLETED)
     txn.state = State.COMPLETED.value
