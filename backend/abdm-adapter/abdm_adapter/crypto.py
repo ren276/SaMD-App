@@ -22,6 +22,7 @@ correct: the stub path never fetches that URL at all. Live-activation checklist 
 from __future__ import annotations
 
 import base64
+import binascii
 
 import httpx
 from app.errors import ErrorCode, SamdError
@@ -35,6 +36,17 @@ from abdm_adapter.request_context import abdm_headers
 # a real sandbox call, not assumed. If ABDM ever returns a different value here, encrypting
 # against `publicKey` anyway would silently produce ciphertext ABDM cannot decrypt; failing loudly
 # at fetch time, before any Aadhaar/OTP encryption is attempted, is cheaper than debugging that.
+#
+# D6 correction (watched live M1 run, 2026-08-24): the JSON wrapper above was confirmed correct,
+# but `publicKey`'s own value was not: it is base64-encoded DER SubjectPublicKeyInfo, not PEM
+# text. Verbatim finding from the watched run: "ABDM sandbox GET
+# /abha/api/v3/profile/public/certificate returns HTTP 200, content-type: application/json, body
+# shape {"publicKey": "<base64-DER>", "encryptionAlgorithm": "RSA/ECB/OAEPWithSHA-1AndMGF1Padding"}.
+# The publicKey value is a base64-encoded DER SubjectPublicKeyInfo, not a PEM string. Length
+# observed: 736 chars, decoding to a 4096-bit RSA public key. First 8 chars MIICIjAN, last 8 chars
+# AwEAAQ==. Confirmed 2026-08-24 via probe against abhasbx.abdm.gov.in from a live-mode backend
+# container." `fetch_public_key_pem` below decodes and re-serializes to PEM so every caller keeps
+# taking PEM; nothing downstream of this module ever learns the wire format changed.
 EXPECTED_ENCRYPTION_ALGORITHM = "RSA/ECB/OAEPWithSHA-1AndMGF1Padding"
 
 # Fixed 2048-bit RSA public key, stub-mode only. Generated once for this session; the matching
@@ -83,12 +95,25 @@ async def fetch_public_key_pem(
 
     Stub mode returns the fixed test key above, no network call. Live mode GETs `cert_url` with
     the gateway session token (the Postman "Cert API" request's own auth) and parses the response
-    as JSON: `{"publicKey": "<PEM>", "encryptionAlgorithm": "RSA/ECB/OAEPWithSHA-1AndMGF1Padding"}`,
-    confirmed against a real sandbox call (D6). `encryptionAlgorithm` is asserted against
-    `EXPECTED_ENCRYPTION_ALGORITHM` before the PEM is returned: this is the one place that can
-    catch ABDM changing the cipher before this module silently encrypts against a scheme it no
-    longer matches. A mismatch raises `SamdError(ABHA_UPSTREAM_ERROR)`, the same classified error
-    the rest of this package's upstream failures use, not a bare exception.
+    as JSON: `{"publicKey": "<base64-DER>", "encryptionAlgorithm":
+    "RSA/ECB/OAEPWithSHA-1AndMGF1Padding"}` (D6, corrected 2026-08-24 — see the comment on
+    `EXPECTED_ENCRYPTION_ALGORITHM` above for the watched-run finding that caught this).
+    `encryptionAlgorithm` is asserted against `EXPECTED_ENCRYPTION_ALGORITHM` before the key is
+    parsed: this is the one place that can catch ABDM changing the cipher before this module
+    silently encrypts against a scheme it no longer matches. `publicKey` is then base64-decoded
+    (`validate=True`: the default silently drops invalid characters and can turn corrupt input
+    into plausible-looking DER) and parsed as a DER SubjectPublicKeyInfo, then re-serialized to
+    PEM so every caller of this function keeps taking PEM regardless of the wire format.
+
+    Every failure mode below — bad algorithm, missing `publicKey`, malformed base64, base64 that
+    isn't a valid DER SubjectPublicKeyInfo — raises `SamdError(ABHA_UPSTREAM_ERROR)`, the same
+    classified error the rest of this package's upstream failures use. This is deliberately
+    unified: a cert this module cannot use is never retryable (retrying can't fix a shape ABDM
+    sent wrong), so every one of these must route through `_result_from_samd_error` in
+    `service.py`, not `_result_from_transport_error`. Before the base64-DER fix, a malformed
+    `publicKey` raised `binascii.Error`/`ValueError` from inside the try block that also covers
+    `httpx.HTTPError`, misrouting it to `_result_from_transport_error` (RETRYABLE) and burning a
+    real gateway session token retrying a call that could never succeed.
     """
     if mode == "stub":
         return STUB_PUBLIC_KEY_PEM
@@ -108,4 +133,23 @@ async def fetch_public_key_pem(
                 f"({algorithm!r}), expected {EXPECTED_ENCRYPTION_ALGORITHM!r}."
             ),
         )
-    return str(body["publicKey"])
+
+    public_key_b64 = body.get("publicKey")
+    if not isinstance(public_key_b64, str):
+        raise SamdError(
+            ErrorCode.ABHA_UPSTREAM_ERROR,
+            detail="ABDM certificate endpoint response was missing a publicKey field.",
+        )
+    try:
+        der_bytes = base64.b64decode(public_key_b64, validate=True)
+        public_key = serialization.load_der_public_key(der_bytes)
+    except (binascii.Error, ValueError) as exc:
+        raise SamdError(
+            ErrorCode.ABHA_UPSTREAM_ERROR,
+            detail="ABDM certificate endpoint returned a publicKey that could not be parsed.",
+        ) from exc
+
+    return public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode("ascii")
