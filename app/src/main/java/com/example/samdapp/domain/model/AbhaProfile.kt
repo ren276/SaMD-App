@@ -65,3 +65,32 @@ fun maskAbhaId(rawAbhaId: String): String =
  */
 fun isMaskedAbhaMobile(mobileNumber: String?): Boolean =
     !mobileNumber.isNullOrBlank() && !mobileNumber.all(Char::isDigit)
+
+/**
+ * [AbhaProfile.gender] normalised onto the app's own biological-sex vocabulary, the three options
+ * the registration form offers (`RegisterScreen`'s selector: `"Female"`, `"Male"`, `"Other"`).
+ * Returns null when the stored value maps to none of them, which callers treat as "leave the
+ * field alone", never as a reason to default to one.
+ *
+ * Two vocabularies genuinely reach this function:
+ * - The real ABDM `/profile/account` response returns a single letter, `"F"`/`"M"`/`"O"`, copied
+ *   through unchanged by the backend (`docs/requirements/abha-internal-contract.md`'s field diff,
+ *   `gender` row: "single-letter code, direct copy").
+ * - The Phase 1 mock create/login flow stores whatever the worker picked in the sign-up form,
+ *   which is already one of the three full words (see `AbhaSignUpViewModel`'s `gender`).
+ *
+ * Before this existed, `RegisterViewModel` compared the stored value directly against the three
+ * full words, so a real `"F"` never matched and gender silently failed to autofill. That was
+ * broken under `ABDM_MODE=stub` too, since the stub profile also returns `"F"`.
+ *
+ * ABDM's undisclosed/unknown code maps to null on purpose. `"Other"` is a stated answer, not a
+ * placeholder for a missing one, and autofilling it would put an unstated value into a clinical
+ * field the worker would then have no prompt to correct.
+ */
+fun abhaGenderToBiologicalSex(gender: String?): String? =
+    when (gender?.trim()?.uppercase()) {
+        "F", "FEMALE" -> "Female"
+        "M", "MALE" -> "Male"
+        "O", "OTHER" -> "Other"
+        else -> null
+    }

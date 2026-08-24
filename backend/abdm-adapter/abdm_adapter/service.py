@@ -460,7 +460,22 @@ async def fetch_profile(
             ErrorCode.ABHA_INVALID_STATE, detail="No verified session token available yet."
         )
 
-    result = await client.get_profile(mode=settings.abdm_mode, x_token=txn.external_token_encrypted)
+    # Same guard every other outbound call in this module already has (see verify_mobile_otp
+    # above). Without it a transport failure here escapes as a bare 500: no FAILED state, no
+    # ABHA_*_FAILED audit row, and the transaction stalls in MOBILE_VERIFIED/ENROLLED until
+    # expires_at. That was unreachable while the live branch raised NotImplementedError; it is
+    # reachable now.
+    try:
+        result = await client.get_profile(
+            mode=settings.abdm_mode,
+            x_token=txn.external_token_encrypted,
+            base_url=settings.abdm_base_url,
+            timeout_seconds=settings.abdm_timeout_seconds,
+        )
+    except SamdError as exc:
+        await _fail(session, worker, txn, _result_from_samd_error(exc))
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        await _fail(session, worker, txn, _result_from_transport_error(exc))
     if not result.ok:
         await _fail(session, worker, txn, result)
 

@@ -16,6 +16,7 @@ import com.google.gson.Gson
 import retrofit2.Response
 import java.io.IOException
 import javax.inject.Inject
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * Retrofit-backed implementation of [AbdmAbhaSource]. Same `call { }` / error-parsing shape as
@@ -115,8 +116,29 @@ class RetrofitAbhaSource @Inject constructor(
     private suspend inline fun <T> call(block: suspend () -> Response<ApiEnvelopeDto<T>>): AbhaApiResult<T> {
         val response = try {
             block()
+        } catch (e: CancellationException) {
+            // Never swallowed: this is the caller's coroutine being cancelled, not a server
+            // outcome. Must be rethrown before the RuntimeException branch below, which it
+            // otherwise matches (java.util.concurrent.CancellationException is a RuntimeException).
+            throw e
         } catch (e: IOException) {
             return AbhaApiResult.Failure(code = null, message = e.message ?: "Network error.")
+        } catch (e: RuntimeException) {
+            // The HTTP exchange itself succeeded and Gson then failed to build the DTO: a
+            // malformed or contract-drifted body. Previously this escaped uncaught and killed the
+            // enrolment coroutine, because only IOException was handled here.
+            //
+            // ProtocolViolation, not Failure(code = null): the backend WAS reached, so this must
+            // not land in the "unreachable, safe to fall back to mock" branch this class's KDoc
+            // and AbhaApiResult's own KDoc both warn about. It is also not retryable, which
+            // ProtocolViolation already encodes downstream (AbhaEnrolResult.kt) since pressing
+            // again re-fetches the same bad body.
+            //
+            // The exception message is deliberately not interpolated: a parse failure's message
+            // quotes the offending value, which for date_of_birth is patient data.
+            return AbhaApiResult.ProtocolViolation(
+                "Malformed response body from the backend (${e.javaClass.simpleName})",
+            )
         }
 
         if (response.isSuccessful) {
