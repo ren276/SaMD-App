@@ -11,7 +11,7 @@ import httpx
 import pytest
 
 import abdm_adapter.client as client_module
-from abdm_adapter.client import enrol_by_aadhaar, fetch_gateway_session_token, send_otp
+from abdm_adapter.client import enrol_by_aadhaar, fetch_gateway_session_token, get_profile, send_otp
 
 
 @pytest.fixture(autouse=True)
@@ -73,6 +73,62 @@ async def test_send_otp_live_mode_matches_postman_request_shape(
         "loginId": "ZW5jcnlwdGVkLWFhZGhhYXI=",
         "otpSystem": "aadhaar",
     }
+
+
+async def test_get_profile_live_mode_matches_postman_request_shape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ground truth: docs/requirements/abha-internal-contract.md line 84, the only recorded
+    example for this endpoint. `X-token: Bearer <token>` plus REQUEST-ID/TIMESTAMP, GET, no body.
+
+    Deliberately asserts the gateway `Authorization` header is ABSENT: the ABDM PDF's header
+    tables for neighbouring `profile/*` endpoints list one, but no Postman ground truth this
+    codebase has recorded for THIS endpoint does. Sending X-token only and letting a real 401 on
+    the first watched live run be the signal, rather than adding a header no recorded example
+    supports, is the locked decision (see client.py's get_profile docstring)."""
+    captured: dict[str, httpx.Request] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["request"] = request
+        return httpx.Response(200, json={"ABHANumber": "91-7561-4088-0001", "name": "Sunita Devi"})
+
+    _patch_transport(monkeypatch, handler)
+
+    result = await get_profile(
+        mode="live",
+        x_token="real-x-token",
+        base_url="https://abhasbx.abdm.gov.in",
+    )
+
+    assert result.ok is True
+    request = captured["request"]
+    assert request.method == "GET"
+    assert str(request.url) == "https://abhasbx.abdm.gov.in/abha/api/v3/profile/account"
+    assert "REQUEST-ID" in request.headers
+    assert "TIMESTAMP" in request.headers
+    assert request.headers["X-token"] == "Bearer real-x-token"
+    assert "Authorization" not in request.headers
+    assert request.content == b""
+
+
+async def test_get_profile_live_mode_x_token_expired(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The recorded 401 shape (errors.py's classify_get_profile / test_error_mapping.py's own
+    fixture): `{"message": "X-token expired", "timestamp": ...}`, no `error.code` envelope."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            401, json={"message": "X-token expired", "timestamp": "2024-05-10 14:51:16"}
+        )
+
+    _patch_transport(monkeypatch, handler)
+
+    result = await get_profile(
+        mode="live",
+        x_token="expired-x-token",
+        base_url="https://abhasbx.abdm.gov.in",
+    )
+
+    assert result.ok is False
 
 
 async def test_enrol_by_aadhaar_live_mode_never_sends_plaintext_otp(

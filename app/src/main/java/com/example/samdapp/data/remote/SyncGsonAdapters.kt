@@ -22,12 +22,28 @@ object InstantGsonAdapter : JsonSerializer<Instant>, JsonDeserializer<Instant> {
         Instant.parse(json.asString)
 }
 
+/**
+ * [deserialize] resolves to null instead of throwing when the value is not a full ISO date.
+ *
+ * The backend types `AbhaIdentity.date_of_birth` as `str | None` and deliberately allows a bare
+ * year such as `"1991"`: ABDM's `profile/account` response carries `yearOfBirth`/`monthOfBirth`/
+ * `dayOfBirth` as separate strings, and when only the year is present the adapter emits the year
+ * alone rather than a fabricated `"1991-01-01"` (`docs/requirements/abha-internal-contract.md`,
+ * decision D3). `LocalDate.parse("1991")` throws `DateTimeParseException`, which is not an
+ * `IOException` and so escaped [com.example.samdapp.data.remote.RetrofitAbhaSource]'s error
+ * handling entirely and crashed the enrolment coroutine on exactly the accounts D3 exists for.
+ *
+ * Null is the honest result: a year alone is not a `LocalDate`, and inventing a month and day here
+ * would reintroduce the same fabricated precision D3 forbids on the backend. Every consumer
+ * already types this field `LocalDate?`. Asking the worker to complete a partial date of birth is
+ * a UI job, not a deserializer's.
+ */
 object LocalDateGsonAdapter : JsonSerializer<LocalDate>, JsonDeserializer<LocalDate> {
     override fun serialize(src: LocalDate, typeOfSrc: java.lang.reflect.Type, context: com.google.gson.JsonSerializationContext) =
         JsonPrimitive(src.toString())
 
-    override fun deserialize(json: com.google.gson.JsonElement, typeOfT: java.lang.reflect.Type, context: com.google.gson.JsonDeserializationContext): LocalDate =
-        LocalDate.parse(json.asString)
+    override fun deserialize(json: com.google.gson.JsonElement, typeOfT: java.lang.reflect.Type, context: com.google.gson.JsonDeserializationContext): LocalDate? =
+        runCatching { LocalDate.parse(json.asString) }.getOrNull()
 }
 
 /** The one place this [Gson] configuration is built — [com.example.samdapp.di.NetworkModule]'s

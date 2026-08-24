@@ -219,8 +219,9 @@ fun testAbhaProfile(
     abhaId: String = "12345678901234",
     name: String = "Anita Kumari",
     mobileNumber: String? = "9998887776",
+    gender: String = "Female",
 ): AbhaProfile = AbhaProfile(
-    abhaId = abhaId, abhaAddress = null, name = name, dateOfBirth = null, gender = "Female",
+    abhaId = abhaId, abhaAddress = null, name = name, dateOfBirth = null, gender = gender,
     address = "Village Rampur", district = "Sitapur", state = "Uttar Pradesh", pincode = "261001",
     mobileNumber = mobileNumber, emailAddress = null, photoUrlMock = null, kycVerified = true,
     createdAt = Instant.EPOCH,

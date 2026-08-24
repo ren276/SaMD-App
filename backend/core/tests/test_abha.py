@@ -22,6 +22,7 @@ from app.deps import settings_dep
 from app.errors import ErrorCode
 from app.models.abha import AbhaTransaction
 from app.models.audit import AuditEvent
+from app.models.enums import AuditAction
 from app.models.sync import SyncLogEntry
 
 AADHAAR = "234567890123"
@@ -227,6 +228,243 @@ async def test_live_mode_gateway_timeout_fails_session_with_persisted_row(
     assert txn is not None
     assert txn.state == "FAILED"
     assert txn.last_error_code == ErrorCode.ABHA_UPSTREAM_ERROR.value
+
+
+async def test_live_mode_profile_fetch_failure_leaves_transaction_failed_with_persisted_row(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    app: FastAPI,
+    test_settings: Settings,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same regression as test_live_mode_gateway_timeout_fails_session_with_persisted_row, for the
+    `fetch_profile` boundary specifically: before this session, `client.get_profile`'s live branch
+    raised a bare `NotImplementedError` and `service.fetch_profile` wrapped nothing in try/except,
+    so any failure here escaped as an unhandled 500 with the transaction stuck at whatever state
+    it was in (ENROLLED here), never FAILED, and no ABHA_SESSION_FAILED audit row.
+
+    Reaches ENROLLED the normal way (stub mode, full walk, no mobile step needed), matching
+    test_full_session_started_to_completed_no_mobile_step, then flips to live mode only for the
+    `/profile` call, whose mock transport raises before producing any body at all.
+
+    Asserts the PERSISTED row and a PERSISTED audit row, not the HTTP response alone, per this
+    repo's rule that a request-scoped rollback can make a handler's return value lie about what
+    actually landed in the database (the same trap D5/the Phase 5 ABDM adapter's `_fail` exists to
+    avoid, and the exact reason `_fail` writes out of band).
+    """
+    session_id = await _start(client, auth_headers)
+    await _submit_identity(client, auth_headers, session_id)
+    otp_response = await client.post(
+        f"/api/v1/abha/registration-sessions/{session_id}/otp",
+        json={"otp": OTP_VALID, "mobile_number": MOBILE_SAME_AS_AADHAAR},
+        headers=auth_headers,
+    )
+    assert otp_response.json()["data"]["state"] == "ENROLLED"
+
+    live_settings = test_settings.model_copy(update={"abdm_mode": "live"})
+    monkeypatch.setitem(app.dependency_overrides, settings_dep, lambda: live_settings)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectTimeout("simulated ABDM profile-fetch timeout", request=request)
+
+    real_init = httpx.AsyncClient.__init__
+
+    def patched_init(self: httpx.AsyncClient, *args: object, **kwargs: object) -> None:
+        kwargs["transport"] = httpx.MockTransport(handler)
+        real_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", patched_init)
+
+    response = await client.get(
+        f"/api/v1/abha/registration-sessions/{session_id}/profile", headers=auth_headers
+    )
+    assert response.status_code == 502
+    assert response.json()["code"] == ErrorCode.ABHA_UPSTREAM_ERROR.value
+
+    txn = await session.get(AbhaTransaction, session_id)
+    assert txn is not None
+    assert txn.state == "FAILED"
+    assert txn.last_error_code == ErrorCode.ABHA_UPSTREAM_ERROR.value
+
+    # Scoped to this session's own row, not "does an ABHA_SESSION_FAILED action exist anywhere in
+    # the table": a shared test database running other tests' failure rows in sequence would make
+    # an unscoped existence check pass even if THIS call never wrote one. _audit/_fail always put
+    # {"session_id": ...} in the payload (see _audit and _fail's _write above), so filtering on
+    # that value ties the assertion to this test's own persisted row.
+    failed_audit_rows = (
+        await session.execute(
+            select(AuditEvent.payload).where(
+                AuditEvent.action == AuditAction.ABHA_SESSION_FAILED.value
+            )
+        )
+    ).scalars()
+    assert any(session_id in payload for payload in failed_audit_rows)
+
+
+async def test_live_mode_malformed_profile_body_fails_session_with_persisted_row(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    app: FastAPI,
+    test_settings: Settings,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A live ABDM response that classifies as ok=True at the HTTP layer (status 200, ABHANumber
+    present) can still fail once `mapping.profile_to_abha_identity` tries to use one of its other
+    fields: `yearOfBirth` as a JSON number instead of a string, say, is a plausible contract drift
+    a mocked stub can never produce but a real ABDM response could, and it raises AttributeError
+    out of `dob.from_split_fields`'s `.strip()` call. Before this test, `fetch_profile` mapped the
+    body only after already flushing `PROFILE_RETRIEVED` on the request session, so a mapping
+    failure here left the row silently rolled back to its prior state on the request's rollback,
+    never FAILED, never audited, the exact `_fail`-out-of-band trap this module's own docstring
+    names. The mapping call now runs and is guarded before that flush."""
+    session_id = await _start(client, auth_headers)
+    await _submit_identity(client, auth_headers, session_id)
+    otp_response = await client.post(
+        f"/api/v1/abha/registration-sessions/{session_id}/otp",
+        json={"otp": OTP_VALID, "mobile_number": MOBILE_SAME_AS_AADHAAR},
+        headers=auth_headers,
+    )
+    assert otp_response.json()["data"]["state"] == "ENROLLED"
+
+    live_settings = test_settings.model_copy(update={"abdm_mode": "live"})
+    monkeypatch.setitem(app.dependency_overrides, settings_dep, lambda: live_settings)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "ABHANumber": "91-7561-4088-0001",
+                "name": "Sunita Devi",
+                "yearOfBirth": 1991,  # malformed: a number, not the documented string
+                "gender": "F",
+                "mobile": "******0903",
+                "kycVerified": True,
+            },
+        )
+
+    real_init = httpx.AsyncClient.__init__
+
+    def patched_init(self: httpx.AsyncClient, *args: object, **kwargs: object) -> None:
+        kwargs["transport"] = httpx.MockTransport(handler)
+        real_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", patched_init)
+
+    response = await client.get(
+        f"/api/v1/abha/registration-sessions/{session_id}/profile", headers=auth_headers
+    )
+    assert response.status_code == 502
+    assert response.json()["code"] == ErrorCode.ABHA_UPSTREAM_ERROR.value
+
+    txn = await session.get(AbhaTransaction, session_id)
+    assert txn is not None
+    assert txn.state == "FAILED"
+    assert txn.last_error_code == ErrorCode.ABHA_UPSTREAM_ERROR.value
+
+    failed_audit_rows = (
+        await session.execute(
+            select(AuditEvent.payload).where(
+                AuditEvent.action == AuditAction.ABHA_SESSION_FAILED.value
+            )
+        )
+    ).scalars()
+    assert any(session_id in payload for payload in failed_audit_rows)
+
+
+async def test_d5_no_phi_in_persisted_row_or_logs_live_mode(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    app: FastAPI,
+    test_settings: Settings,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: Any,
+) -> None:
+    """D5's live-mode sibling. test_d5_no_phi_in_persisted_row_or_logs below never overrides
+    abdm_mode, so it only ever exercises client.get_profile's stub reply, the dict literal in
+    client.py, never a real ABDM response parsed off the wire. This test is the one that actually
+    covers the PHI risk D5 exists for: a real photo, under both recorded key names (profilePhoto
+    and kycPhoto), arriving through a mocked HTTP response and the same response.json() parsing
+    client.py's live branch uses, the same path a live account's face photo takes. Deliberately a
+    separate test, not a parametrized
+    merge of the two: keeping stub and live apart means a change that breaks live-mode redaction
+    cannot hide behind the stub-mode test still passing.
+
+    Kept as a same-property sibling, not folded into the one below, on the operator's explicit
+    call: two tests over one parametrized test, so neither path can go quietly unexercised."""
+    session_id = await _start(client, auth_headers)
+    await _submit_identity(client, auth_headers, session_id)
+    await client.post(
+        f"/api/v1/abha/registration-sessions/{session_id}/otp",
+        json={"otp": OTP_VALID, "mobile_number": MOBILE_SAME_AS_AADHAAR},
+        headers=auth_headers,
+    )
+
+    live_settings = test_settings.model_copy(update={"abdm_mode": "live"})
+    monkeypatch.setitem(app.dependency_overrides, settings_dep, lambda: live_settings)
+
+    live_photo_marker = "/9j/live-fixture-jpeg-bytes-not-a-real-photo"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "ABHANumber": "91-7561-4088-0001",
+                "preferredAbhaAddress": "sunita.devi0001@sbx",
+                "name": "Sunita Devi",
+                "yearOfBirth": "1991",
+                "monthOfBirth": "04",
+                "dayOfBirth": "12",
+                "gender": "F",
+                "profilePhoto": live_photo_marker,
+                "kycPhoto": live_photo_marker,
+                "mobile": "******0903",
+                "kycVerified": True,
+            },
+        )
+
+    real_init = httpx.AsyncClient.__init__
+
+    def patched_init(self: httpx.AsyncClient, *args: object, **kwargs: object) -> None:
+        kwargs["transport"] = httpx.MockTransport(handler)
+        real_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", patched_init)
+
+    response = await client.get(
+        f"/api/v1/abha/registration-sessions/{session_id}/profile", headers=auth_headers
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["photo_url"] is None
+    assert live_photo_marker not in response.text
+
+    row = (
+        (
+            await session.execute(
+                text(
+                    "SELECT local_transaction_id, external_txn_id, state, last_error_code, "
+                    "last_error_detail, abha_number, abha_address, abha_status, abha_type, "
+                    "external_token_encrypted FROM abha_transactions "
+                    "WHERE local_transaction_id = :id"
+                ),
+                {"id": session_id},
+            )
+        )
+        .mappings()
+        .one()
+    )
+    row_text = " ".join(str(v) for k, v in row.items() if k != "external_token_encrypted")
+    assert "/9j/" not in row_text
+
+    audit_rows = list((await session.execute(select(AuditEvent.payload))).scalars())
+    for payload in audit_rows:
+        assert "/9j/" not in payload
+
+    captured = capsys.readouterr()
+    log_output = captured.out + captured.err
+    assert "/9j/" not in log_output
 
 
 # ---------------------------------------------------------------------------

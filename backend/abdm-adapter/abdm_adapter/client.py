@@ -2,9 +2,11 @@
 module in this package is agnostic to `ABDM_MODE`.
 
 `ABDM_MODE=stub` replays the real Postman example bodies (Phase A contract doc) through the full
-adapter and state machine; no network call happens. `ABDM_MODE=live` is not implemented beyond a
-loud `NotImplementedError`, per the brief: this session builds nothing that could accidentally
-make a real call.
+adapter and state machine; no network call happens. `ABDM_MODE=live` is implemented for the
+session-token fetch, `send_otp`, `enrol_by_aadhaar` and `get_profile`; `verify_mobile_otp` still
+raises a loud `NotImplementedError`. Every live path here is exercised only against a mocked
+transport in
+`tests/test_client_live.py`; no test in this repo makes a real ABDM call.
 
 The stub's branching on plaintext OTP values (`"111111"`/`"222222"` below) exists only so tests can
 drive every classified outcome deterministically; it has no bearing on live behaviour and is not a
@@ -298,9 +300,35 @@ async def verify_mobile_otp(
     return classify_otp_verify(200, success_body)
 
 
-async def get_profile(*, mode: str, x_token: str) -> AbdmResult:
+async def get_profile(
+    *,
+    mode: str,
+    x_token: str,
+    base_url: str = "",
+    timeout_seconds: float = 30.0,
+) -> AbdmResult:
     """GET profile/account, authenticated with the per-transaction X-token from enrol_by_aadhaar's
-    `tokens.token` (or verify_mobile_otp's `token`), never the gateway session token."""
+    `tokens.token` (or verify_mobile_otp's `token`), never the gateway session token.
+
+    Live mode sends `X-token` and nothing else beyond REQUEST-ID/TIMESTAMP. That is the recorded
+    Postman ground truth for this endpoint (`docs/requirements/abha-internal-contract.md` line 84,
+    which lists exactly `X-token: Bearer <token>`, `REQUEST-ID`, `TIMESTAMP`). The ABDM PDF's
+    header tables for neighbouring `profile/*` endpoints do additionally list a gateway
+    `Authorization` token; that disagreement is left unresolved on purpose rather than guessed at,
+    because a 401 on the first watched live run is a definitive answer and a speculative extra
+    header is not. If that run returns 401, add `gateway_token=` here (abdm_headers already
+    supports it) rather than reworking this call.
+
+    The response body is never logged, here or by any caller. `profilePhoto`/`kycPhoto` are inline
+    base64 JPEG bytes and `REDACTED_KEYS` (backend/core's config.py) has no key for either, so the
+    recursive log redactor would not mask them. See mapping.py's module docstring, decision D5.
+    """
     if mode != "stub":
-        raise NotImplementedError("ABDM_MODE=live is not implemented this session.")
+        async with httpx.AsyncClient(timeout=timeout_seconds) as http_client:
+            response = await http_client.get(
+                f"{base_url}/abha/api/v3/profile/account",
+                headers=abdm_headers(x_token=x_token),
+            )
+        return classify_get_profile(response.status_code, response.json())
+
     return classify_get_profile(200, _stub_profile())

@@ -173,4 +173,45 @@ class RegisterViewModelTest {
             assertTrue(viewModel.uiState.value.autofilledFields.isEmpty())
             assertEquals(null, viewModel.uiState.value.abhaId)
         }
+
+    /** Before abhaGenderToBiologicalSex existed, this comparison was `profile.gender in
+     *  listOf("Female", "Male", "Other")` directly, so a real ABDM single-letter code never
+     *  matched and gender silently failed to autofill (broken under ABDM_MODE=stub too, since
+     *  the stub profile also returns "F", see AbhaProfile.kt's abhaGenderToBiologicalSex). */
+    @Test
+    fun `loadAbhaProfile autofills biological sex from ABDM single-letter gender code`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val repo = FakePatientRepository()
+            val audit = FakeAuditLogger()
+            val profile = testAbhaProfile(abhaId = "43422151056749", name = "Sunita Devi", gender = "F")
+            val abhaRepo = FakeAbhaProfileRepository(listOf(profile))
+            val viewModel = RegisterViewModel(RegisterPatientUseCase(repo), audit, abhaRepo)
+
+            viewModel.loadAbhaProfile(profile.abhaId)
+            advanceUntilIdle()
+
+            val state = viewModel.uiState.value
+            assertEquals("Female", state.biologicalSex)
+            assertTrue(state.sexAutofilledFromAbha)
+        }
+
+    /** An unrecognised gender code (contract drift, or a real "O"/"U" this vocabulary doesn't yet
+     *  cover) must leave the worker's current selection alone rather than silently defaulting. */
+    @Test
+    fun `loadAbhaProfile leaves biological sex unchanged for an unrecognised gender code`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val repo = FakePatientRepository()
+            val audit = FakeAuditLogger()
+            val profile = testAbhaProfile(abhaId = "43422151056749", name = "Anita Kumari", gender = "U")
+            val abhaRepo = FakeAbhaProfileRepository(listOf(profile))
+            val viewModel = RegisterViewModel(RegisterPatientUseCase(repo), audit, abhaRepo)
+            val sexBefore = viewModel.uiState.value.biologicalSex
+
+            viewModel.loadAbhaProfile(profile.abhaId)
+            advanceUntilIdle()
+
+            val state = viewModel.uiState.value
+            assertEquals(sexBefore, state.biologicalSex)
+            assertTrue(!state.sexAutofilledFromAbha)
+        }
 }

@@ -7,6 +7,7 @@ import com.example.samdapp.data.mock.DemoPatientProfile
 import com.example.samdapp.domain.audit.AuditAction
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
+import com.example.samdapp.domain.model.abhaGenderToBiologicalSex
 import com.example.samdapp.domain.model.isMaskedAbhaMobile
 import com.example.samdapp.domain.repository.AbhaProfileRepository
 import com.example.samdapp.domain.usecase.RegisterPatientUseCase
@@ -149,13 +150,15 @@ class RegisterViewModel @Inject constructor(
                 fields = autofill(fields, RegisterField.PINCODE, profile.pincode)
                 fields = autofill(fields, RegisterField.ABHA_NUMBER, profile.abhaId)
                 fields = autofill(fields, RegisterField.DATE_OF_BIRTH, profile.dateOfBirth?.toString())
-                val sexAutofilled = profile.gender in listOf("Female", "Male", "Other")
+                // Normalised, not compared raw: ABDM sends "F"/"M", the Phase 1 mock stores
+                // "Female"/"Male"/"Other". See abhaGenderToBiologicalSex.
+                val abhaSex = abhaGenderToBiologicalSex(profile.gender)
                 state.copy(
                     fields = fields,
-                    biologicalSex = if (sexAutofilled) profile.gender else state.biologicalSex,
+                    biologicalSex = abhaSex ?: state.biologicalSex,
                     abhaId = abhaId,
                     autofilledFields = autofilled,
-                    sexAutofilledFromAbha = sexAutofilled,
+                    sexAutofilledFromAbha = abhaSex != null,
                     maskedAbhaMobile = if (mobileIsMasked) profile.mobileNumber else null,
                 )
             }
