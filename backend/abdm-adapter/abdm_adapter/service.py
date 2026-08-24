@@ -270,6 +270,7 @@ async def submit_identity(
     try:
         result = await client.send_otp(
             mode=settings.abdm_mode,
+            gateway_token=gateway_token,
             txn_id="",
             scope=["abha-enrol"],
             login_hint="aadhaar",
@@ -334,6 +335,7 @@ async def verify_otp(
     try:
         result = await client.enrol_by_aadhaar(
             mode=settings.abdm_mode,
+            gateway_token=gateway_token,
             txn_id=txn.external_txn_id or "",
             otp_plain=otp,
             encrypted_otp=encrypted_otp,

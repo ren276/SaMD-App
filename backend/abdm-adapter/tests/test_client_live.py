@@ -48,6 +48,7 @@ async def test_send_otp_live_mode_matches_postman_request_shape(
 
     result = await send_otp(
         mode="live",
+        gateway_token="gw-token-abc",
         txn_id="",
         scope=["abha-enrol"],
         login_hint="aadhaar",
@@ -61,8 +62,11 @@ async def test_send_otp_live_mode_matches_postman_request_shape(
     assert str(request.url) == "https://abhasbx.abdm.gov.in/abha/api/v3/enrollment/request/otp"
     assert "REQUEST-ID" in request.headers
     assert "TIMESTAMP" in request.headers
-    # Phase A finding: no Authorization/X-CM-ID header on this endpoint in any recorded example.
-    assert "Authorization" not in request.headers
+    # Live-verified 2026-08-24: this endpoint 401s "Missing Credentials" (WSO2 900902) without
+    # this header. See client.py's send_otp docstring for the full finding.
+    assert request.headers["Authorization"] == "Bearer gw-token-abc"
+    # X-CM-ID is still confirmed absent by the same probe; only Authorization was missing.
+    assert "X-CM-ID" not in request.headers
     import json as _json
 
     body = _json.loads(request.content)
@@ -73,6 +77,38 @@ async def test_send_otp_live_mode_matches_postman_request_shape(
         "loginId": "ZW5jcnlwdGVkLWFhZGhhYXI=",
         "otpSystem": "aadhaar",
     }
+
+
+async def test_send_otp_live_mode_carries_gateway_bearer_from_session_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression guard distinct from the shape test above: proves the gateway Bearer is not
+    hardcoded, shadowed, or crossed with the per-transaction X-token (get_profile's mechanism —
+    see client.py's get_profile docstring on why the two must never collapse into one header)."""
+    captured: dict[str, httpx.Request] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["request"] = request
+        return httpx.Response(200, json={"txnId": "real-txn-id", "message": "OTP sent"})
+
+    _patch_transport(monkeypatch, handler)
+
+    await send_otp(
+        mode="live",
+        gateway_token="distinct-token-xyz",
+        txn_id="",
+        scope=["abha-enrol"],
+        login_hint="aadhaar",
+        encrypted_login_id="ZW5jcnlwdGVkLWFhZGhhYXI=",
+        otp_system="aadhaar",
+        base_url="https://abhasbx.abdm.gov.in",
+    )
+
+    request = captured["request"]
+    assert request.headers["Authorization"] == "Bearer distinct-token-xyz"
+    assert "X-token" not in request.headers
+    assert "REQUEST-ID" in request.headers
+    assert "TIMESTAMP" in request.headers
 
 
 async def test_get_profile_live_mode_matches_postman_request_shape(
@@ -153,6 +189,7 @@ async def test_enrol_by_aadhaar_live_mode_never_sends_plaintext_otp(
 
     result = await enrol_by_aadhaar(
         mode="live",
+        gateway_token="gw-token-abc",
         txn_id="real-txn-id",
         otp_plain="123456",
         encrypted_otp="ZW5jcnlwdGVkLW90cA==",
@@ -167,6 +204,7 @@ async def test_enrol_by_aadhaar_live_mode_never_sends_plaintext_otp(
     assert str(request.url) == (
         "https://abhasbx.abdm.gov.in/abha/api/v3/enrollment/enrol/byAadhaar"
     )
+    assert request.headers["Authorization"] == "Bearer gw-token-abc"
     import json as _json
 
     body = _json.loads(request.content)

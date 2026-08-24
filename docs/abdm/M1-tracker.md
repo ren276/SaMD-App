@@ -19,8 +19,8 @@ demo-auth creation paths (contract's own "what Phase B must not build" section).
 |---|---|---|
 | Gateway session token | Done | `client.fetch_gateway_session_token`. In-memory cache, single-flight refresh via `asyncio.Lock`, refreshes 60s before `expiresIn`. Tested: cache hit, concurrent single-flight (10 concurrent callers -> 1 POST), refresh-after-expiry. |
 | Public certificate fetch | Done | `crypto.fetch_public_key_pem`. Response is JSON-wrapped: `{"publicKey": "<base64-DER>", "encryptionAlgorithm": "RSA/ECB/OAEPWithSHA-1AndMGF1Padding"}`. The wrapper (JSON, with an `encryptionAlgorithm` sibling) was confirmed against a real sandbox call on 2026-08-19 (D6); `publicKey`'s own encoding was wrongly assumed to be PEM text at that time and corrected to base64-DER SubjectPublicKeyInfo on 2026-08-24, via a watched live M1 run (D6 correction). `encryptionAlgorithm` is asserted against `EXPECTED_ENCRYPTION_ALGORITHM` before the key is parsed; a mismatch, a missing/malformed `publicKey`, or base64 that isn't a valid DER SubjectPublicKeyInfo all raise `SamdError(ABHA_UPSTREAM_ERROR)` at fetch time (NON_RETRYABLE), rather than silently encrypting with a scheme ABDM may have changed or misrouting an unparseable cert to a retry. |
-| Send Aadhaar OTP (`enrollment/request/otp`) | Done | `client.send_otp`. Matches Postman body/headers exactly (no Authorization/X-CM-ID, per the Phase A finding). Tested against a mocked transport. |
-| Enrol by Aadhaar (`enrollment/enrol/byAadhaar`) | Done | `client.enrol_by_aadhaar`. `otp_plain` never leaves the process; only `encrypted_otp` goes on the wire, tested explicitly. |
+| Send Aadhaar OTP (`enrollment/request/otp`) | Done | `client.send_otp`. Body matches Postman exactly. Headers **corrected 2026-08-24**: carries `Authorization: Bearer <gateway session token>` — the earlier "no Authorization/X-CM-ID, per the Phase A finding" claim was live-verified false for this endpoint (see D7 below). `X-CM-ID` remains confirmed absent. Tested against a mocked transport, plus an end-to-end assertion in `backend/core/tests/test_abha.py`. |
+| Enrol by Aadhaar (`enrollment/enrol/byAadhaar`) | Done | `client.enrol_by_aadhaar`. `otp_plain` never leaves the process; only `encrypted_otp` goes on the wire, tested explicitly. Also carries the gateway `Authorization: Bearer` header, applied by **extrapolation** from the `send_otp` finding (same WSO2 gateway product, same `/abha/api/v3/enrollment/*` prefix) — **not yet live-verified** for this endpoint, confirmation pending the next watched run. |
 | RSA-OAEP-SHA1 encryption | Done (pre-existing, unchanged) | `crypto.encrypt_oaep_sha1`, already built and tested prior to this session. |
 | Credential config via environment | Done (pre-existing) | `Settings.abdm_client_id/secret`, boot-time gate requiring both when `abdm_mode=live` outside dev, already in `config.py`. This session added `abdm_session_url` (the gateway host differs from `abdm_base_url`) and fixed `.env.example`'s stale `ABDM_CERT_URL`. |
 | Secret/PHI log redaction | Done, extended | `REDACTED_KEYS` gained `abdm_client_secret`, `txnid`, `txn_id`. Raw PEM added as a value-pattern scrub (`-----BEGIN` prefix) in `logging.py`, since it has no single field name at every call site. Tested in `backend/core/tests/test_logging_redaction.py`. |
@@ -72,13 +72,68 @@ demo-auth creation paths (contract's own "what Phase B must not build" section).
   `test_submit_identity_end_to_end_with_base64_der_cert_produces_ciphertext` in
   `backend/core/tests/test_abha.py`.
 
+- **D7, `enrollment/request/otp` auth header (2026-08-25).** The Phase A finding that "the four
+  enrollment/* calls carry no Authorization header in any recorded example" is **falsified for
+  `send_otp` by direct measurement**:
+
+  > On 2026-08-24 against abhasbx.abdm.gov.in sandbox, POST /abha/api/v3/enrollment/request/otp
+  > returned 401 "Missing Credentials" (WSO2 error 900902) when called without an
+  > Authorization: Bearer <gateway-session-token> header, and returned 400 "Invalid LoginId" when
+  > the same call was made with the header, proving auth was the missing piece. This contradicts
+  > the client.py docstring claim (Phase A finding) that "the four enrollment/* calls carry no
+  > Authorization header in any recorded example." The recorded examples were either incomplete or
+  > ABDM's sandbox gateway config has changed. Verified via /tmp/probe_otp.py in-container, using
+  > the same fetch_gateway_session_token path the adapter uses.
+
+  `client.send_otp` now sends this header; `client.enrol_by_aadhaar` now sends it too, but only by
+  **extrapolation** (same gateway product, same path prefix) — that half is **presumed**, not
+  measured. `X-CM-ID` remains confirmed absent by the same probe. `get_profile`'s and
+  `verify_mobile_otp`'s auth are unaffected — see the live-activation-risks list below for both.
+  `client.py`'s `fetch_gateway_session_token`/`send_otp`/`enrol_by_aadhaar`/`verify_mobile_otp`
+  docstrings carry the full finding verbatim.
+
 ## Live-activation risks, verify on first watched enrollment
 
-Not resolved this session; each of these should be checked against the real first live call
-before the flow is widened past one watched enrollment.
+Each item states the endpoint, current belief, evidence class, and the exact action if it fails.
 
+- `enrollment/request/otp` — **RESOLVED 2026-08-25, measured** (D7 above). Requires
+  `Authorization: Bearer <gateway session token>`.
+- `enrollment/enrol/byAadhaar` — **UNVERIFIED, header applied by inference** (D7 above). Confirm on
+  the next watched run. If it 401s *with* the header, or succeeds *without* it, the inference was
+  wrong — record which, and correct `client.py`'s `enrol_by_aadhaar` docstring against that result.
+- `profile/account` (`get_profile`) — **DEFERRED, no `Authorization` sent.** Has never made a real
+  ABDM call (PR #17 tested it against a mock transport only); every live run to date has died at
+  Call 1/3 on the 401 this branch fixes. If the WSO2-gateway-product inference in D7 holds,
+  `profile/account` is expected to 401 the same way on the first live call that reaches it. Exact
+  fix, when undertaken: pass `gateway_token=` to `abdm_headers(...)` in `client.get_profile`
+  alongside the existing `x_token=`, which requires `service.fetch_profile` to fetch a gateway
+  token it currently does not (that call graph fetches none today) — an architectural change, not
+  one line, deliberately deferred to a **separate PR** rather than bundled into this one. Failure
+  here is cheap: the ABHA already exists by this point, no OTP is burned, and the transaction is
+  re-attemptable.
+- `enrollment/auth/byAbdm` (`verify_mobile_otp`) — still `NotImplementedError` in live mode. When
+  implemented, it will carry the same gateway Bearer for the same D7 reasoning.
 - Masked-mobile extraction from free-text `message` (`service.py`'s `_extract_masked_mobile`) is
   still a regex against ABDM's own wording, fragile if ABDM ever rewords the message.
 - `mobile_number` on the final `AbhaIdentity` is masked-only (ABDM never returns the full number
   via `profile/account`); documented as a contract gap in `abha-internal-contract.md`, not decided
   or changed here. (D4 in the contract doc.)
+
+## Durable finding: local `.env` silently overrides "stub" test intent
+
+2026-08-24: `backend/core/tests/` auto-loads `backend/core/.env` via pydantic-settings, causing
+tests to hit whatever `ABDM_MODE` the local env holds. If `.env` is set to `live` for a local
+watched run, stub-labeled tests silently hit the real ABDM sandbox. Workaround: force
+`ABDM_MODE=stub` on the pytest invocation. Real fix: test `conftest.py` should force
+`ABDM_MODE=stub` regardless of `.env` — test isolation is not what pydantic-settings' auto-load
+respects. Separate PR. Same root cause class as PR #18's "recorded contract artifacts can silently
+omit headers" finding: an implicit mechanism doing something the reader didn't expect. Symptom seen
+locally: intermittent `RuntimeError: Event loop is closed` under the real-network timing this
+causes, easy to mistake for a different bug.
+
+## Watched-run retry sequence (after this branch merges, container force-recreated)
+
+Call 1 (session token) -> Call 2 (send OTP, expect OTP arrives) -> Call 3 (enrol by Aadhaar, expect
+success) -> Call 4 (get_profile, expect **401 or success**). If Call 4 401s, that is the deferred
+`get_profile` issue above, **not a new bug** — the response is to file the follow-up PR named
+above, not to investigate mid-run.
