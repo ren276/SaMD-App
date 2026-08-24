@@ -259,6 +259,11 @@ async def test_submit_identity_end_to_end_with_base64_der_cert_produces_cipherte
     changes to service.py's three try/except blocks" claim with an actual passing call, not just
     the crypto-level unit tests in abdm-adapter/tests/test_crypto.py.
 
+    Also the sole test proving service.py threads the real gateway_token from
+    `fetch_gateway_session_token` into `send_otp`'s outbound Authorization header (live-verified
+    2026-08-24: this endpoint 401s "Missing Credentials" without it) -- adapter-level tests pass
+    the token in explicitly and cannot catch a call site silently dropping it.
+
     Asserts the outbound request/otp body carries a non-empty base64 `loginId` (the encrypted
     Aadhaar made it all the way through the fixed parse-and-encrypt pipeline) and asserts the
     PERSISTED transaction row, not just the HTTP response, per this repo's rule that a
@@ -315,6 +320,13 @@ async def test_submit_identity_end_to_end_with_base64_der_cert_produces_cipherte
     assert isinstance(login_id, str) and login_id != ""
     _base64.b64decode(login_id, validate=True)  # must itself be valid base64 ciphertext
     assert AADHAAR not in otp_request.content.decode()
+    # Live-verified 2026-08-24: enrollment/request/otp 401s "Missing Credentials" (WSO2 900902)
+    # without Authorization: Bearer <gateway session token>. This is the one assertion in the
+    # suite that proves service.py actually threads the real token from
+    # fetch_gateway_session_token through to send_otp's outbound request, rather than dropping it
+    # or defaulting to empty string -- the adapter-level tests in test_client_live.py pass the
+    # token in explicitly and so cannot catch that class of regression on their own.
+    assert otp_request.headers["Authorization"] == "Bearer gw-token"
 
     txn = await session.get(AbhaTransaction, session_id)
     assert txn is not None

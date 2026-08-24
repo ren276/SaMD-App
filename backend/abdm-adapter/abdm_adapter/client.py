@@ -91,8 +91,27 @@ async def fetch_gateway_session_token(
     client_secret: str = "",
     timeout_seconds: float = 30.0,
 ) -> str:
-    """POST .../gateway/v3/sessions. Only needed for the cert fetch in this P0 slice (Phase A
-    finding: the four enrollment/* calls carry no Authorization header in any recorded example).
+    """POST .../gateway/v3/sessions.
+
+    Needed for the cert fetch AND for `send_otp`/`enrol_by_aadhaar` (and, once implemented,
+    `verify_mobile_otp`). The Phase A finding that "the four enrollment/* calls carry no
+    Authorization header in any recorded example" is FALSIFIED for `send_otp`, live-verified
+    2026-08-24:
+
+    On 2026-08-24 against abhasbx.abdm.gov.in sandbox, POST /abha/api/v3/enrollment/request/otp
+    returned 401 "Missing Credentials" (WSO2 error 900902) when called without an
+    Authorization: Bearer <gateway-session-token> header, and returned 400 "Invalid LoginId" when
+    the same call was made with the header, proving auth was the missing piece. This contradicts
+    the earlier claim that the four enrollment/* calls carry no Authorization header in any
+    recorded example. The recorded examples were either incomplete or ABDM's sandbox gateway
+    config has changed. Verified via /tmp/probe_otp.py in-container, using this same function's
+    token.
+
+    `X-CM-ID` is still confirmed absent by the same probe: only the Authorization half of the old
+    claim was wrong.
+
+    `enrol_by_aadhaar` carries the same Bearer by extrapolation (same gateway product, same
+    `/abha/api/v3/enrollment/*` prefix), not by direct live verification — see its own docstring.
 
     Live mode caches the returned `accessToken` in memory (module-level, this process only) and
     refreshes it just before `expiresIn` runs out. `_session_lock` makes concurrent refreshes
@@ -145,6 +164,7 @@ async def fetch_gateway_session_token(
 async def send_otp(
     *,
     mode: str,
+    gateway_token: str,
     txn_id: str,
     scope: list[str],
     login_hint: str,
@@ -157,14 +177,28 @@ async def send_otp(
     mobile-update OTP request; only `scope`/`login_hint`/`otp_system` differ between the two call
     sites (service.py), matching the two recorded Postman requests exactly.
 
-    Live mode carries no `Authorization`/`X-CM-ID` header on this call (Phase A finding: no
-    recorded example has one), matching abdm_headers()'s default REQUEST-ID/TIMESTAMP-only shape.
+    Live mode carries `Authorization: Bearer <gateway_token>`, live-verified 2026-08-24:
+
+    On 2026-08-24 against abhasbx.abdm.gov.in sandbox, POST /abha/api/v3/enrollment/request/otp
+    returned 401 "Missing Credentials" (WSO2 error 900902) when called without this header, and
+    returned 400 "Invalid LoginId" when the same call was made with it, proving auth was the
+    missing piece. This contradicts the earlier claim that the four enrollment/* calls carry no
+    Authorization header in any recorded example. The recorded examples were either incomplete or
+    ABDM's sandbox gateway config has changed. Verified via /tmp/probe_otp.py in-container, using
+    the same fetch_gateway_session_token path this adapter uses.
+
+    `X-CM-ID` is still confirmed absent by the same probe; `gateway_token` is a required parameter
+    (not `str | None`) so a future edit that drops it at the call site fails loudly (`TypeError`)
+    rather than silently reintroducing the 401.
     """
     if mode != "stub":
         async with httpx.AsyncClient(timeout=timeout_seconds) as http_client:
             response = await http_client.post(
                 f"{base_url}/abha/api/v3/enrollment/request/otp",
-                headers={"Content-Type": "application/json", **abdm_headers()},
+                headers={
+                    "Content-Type": "application/json",
+                    **abdm_headers(gateway_token=gateway_token),
+                },
                 json={
                     "txnId": txn_id,
                     "scope": scope,
@@ -187,6 +221,7 @@ async def send_otp(
 async def enrol_by_aadhaar(
     *,
     mode: str,
+    gateway_token: str,
     txn_id: str,
     otp_plain: str,
     encrypted_otp: str,
@@ -198,12 +233,24 @@ async def enrol_by_aadhaar(
 ) -> AbdmResult:
     """POST enrollment/enrol/byAadhaar. `otp_plain` is stub-only, used to pick which recorded
     example to replay; never sent anywhere and never logged (see service.py). Live mode sends
-    `encrypted_otp`, never `otp_plain`, matching that rule."""
+    `encrypted_otp`, never `otp_plain`, matching that rule.
+
+    Live mode carries `Authorization: Bearer <gateway_token>`, applied by EXTRAPOLATION from the
+    `send_otp` finding (2026-08-24: `enrollment/request/otp` 401s "Missing Credentials" / WSO2
+    900902 without this header) — same WSO2 gateway product, same `/abha/api/v3/enrollment/*`
+    prefix. This header is NOT itself live-verified for this endpoint; confirm on the next watched
+    live run (docs/abdm/M1-tracker.md, live-activation-risks section). If that run 401s even with
+    the header, or succeeds without it, the inference was wrong and this comment must be corrected
+    against that result, not re-guessed.
+    """
     if mode != "stub":
         async with httpx.AsyncClient(timeout=timeout_seconds) as http_client:
             response = await http_client.post(
                 f"{base_url}/abha/api/v3/enrollment/enrol/byAadhaar",
-                headers={"Content-Type": "application/json", **abdm_headers()},
+                headers={
+                    "Content-Type": "application/json",
+                    **abdm_headers(gateway_token=gateway_token),
+                },
                 json={
                     "authData": {
                         "authMethods": ["otp"],
@@ -267,6 +314,10 @@ async def verify_mobile_otp(
 ) -> AbdmResult:
     """POST enrollment/auth/byAbdm. D2: success/failure is `body["authResult"]`, HTTP status is
     200 either way, matching both the recorded Postman example and the brief's own confirmed body.
+
+    When live mode is implemented: carries `Authorization: Bearer <gateway session token>`, same
+    reasoning as `enrol_by_aadhaar` (same gateway product, same `/abha/api/v3/enrollment/*`
+    prefix; see `send_otp`'s docstring for the live-verified finding this extrapolates from).
     """
     if mode != "stub":
         raise NotImplementedError("ABDM_MODE=live is not implemented this session.")
