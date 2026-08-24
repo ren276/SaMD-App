@@ -230,6 +230,97 @@ async def test_live_mode_gateway_timeout_fails_session_with_persisted_row(
     assert txn.last_error_code == ErrorCode.ABHA_UPSTREAM_ERROR.value
 
 
+# Real ABDM wire shape for the /certificate response (D6, corrected 2026-08-24): `publicKey` is
+# base64-encoded DER SubjectPublicKeyInfo, not PEM text. Same literal as
+# abdm-adapter/tests/test_crypto.py's STUB_PUBLIC_KEY_B64_DER (that file's own comment explains why
+# it is hardcoded rather than computed): a 2048-bit test key's PEM body lines concatenated.
+_LIVE_CERT_PUBLIC_KEY_B64_DER = (
+    "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4Z8PDv5t+ScPKLcgLEVT"
+    "CAKk3YbdC7SQQnM80/y4T/q58gUprbx8AfNhfix0ubzeg3nyra0b+4P2s2Lfam0q"
+    "IOlVwEMaT0rdKOa70QJsIJjwaVbmxsZ4PinuTYpBwg92xpCAOCtQGYDqp2ib1moy"
+    "Igf6gM6m9eF+POSxGIvsZ4vtRL+HodJMlUEsH7bSz/wiLsk86NthtDvhX6CWr77k"
+    "QiE3X7fnaGce+ILy3f3f8ovaxK2v1wOgnIc+tvOMZeJ5pweFWEW5q3IMUnds4g/s"
+    "lUzYtvFXLicGaKyUYQbE+zzZq++9QS6nqQ8Lwv70RuGhCj/rgcj88I5+eg0Mvnt0"
+    "ywIDAQAB"
+)
+
+
+async def test_submit_identity_end_to_end_with_base64_der_cert_produces_ciphertext(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    app: FastAPI,
+    test_settings: Settings,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end regression for the base64-DER cert fix (D6, corrected 2026-08-24), through the
+    real `submit_identity` wiring: gateway session token -> `fetch_public_key_pem` (now parsing
+    base64-DER, not PEM) -> `encrypt_oaep_sha1` -> `client.send_otp`. Proves the memo's "zero
+    changes to service.py's three try/except blocks" claim with an actual passing call, not just
+    the crypto-level unit tests in abdm-adapter/tests/test_crypto.py.
+
+    Asserts the outbound request/otp body carries a non-empty base64 `loginId` (the encrypted
+    Aadhaar made it all the way through the fixed parse-and-encrypt pipeline) and asserts the
+    PERSISTED transaction row, not just the HTTP response, per this repo's rule that a
+    request-scoped rollback can make a handler's return value lie about what actually landed in
+    the database.
+    """
+    import base64 as _base64
+
+    session_id = await _start(client, auth_headers)
+
+    live_settings = test_settings.model_copy(update={"abdm_mode": "live"})
+    monkeypatch.setitem(app.dependency_overrides, settings_dep, lambda: live_settings)
+
+    captured: dict[str, httpx.Request] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/sessions"):
+            return httpx.Response(200, json={"accessToken": "gw-token", "expiresIn": 1800})
+        if path.endswith("/certificate"):
+            return httpx.Response(
+                200,
+                json={
+                    "publicKey": _LIVE_CERT_PUBLIC_KEY_B64_DER,
+                    "encryptionAlgorithm": "RSA/ECB/OAEPWithSHA-1AndMGF1Padding",
+                },
+            )
+        if path.endswith("/request/otp"):
+            captured["request"] = request
+            return httpx.Response(200, json={"txnId": "real-txn-id", "message": "OTP sent"})
+        raise AssertionError(f"unexpected request to {path}")
+
+    real_init = httpx.AsyncClient.__init__
+
+    def patched_init(self: httpx.AsyncClient, *args: object, **kwargs: object) -> None:
+        kwargs["transport"] = httpx.MockTransport(handler)
+        real_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", patched_init)
+
+    response = await client.post(
+        f"/api/v1/abha/registration-sessions/{session_id}/identity",
+        json={"aadhaar_number": AADHAAR},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["state"] == "OTP_REQUESTED"
+
+    import json as _json
+
+    otp_request = captured["request"]
+    body = _json.loads(otp_request.content)
+    login_id = body["loginId"]
+    assert isinstance(login_id, str) and login_id != ""
+    _base64.b64decode(login_id, validate=True)  # must itself be valid base64 ciphertext
+    assert AADHAAR not in otp_request.content.decode()
+
+    txn = await session.get(AbhaTransaction, session_id)
+    assert txn is not None
+    assert txn.state == "OTP_REQUESTED"
+
+
 async def test_live_mode_profile_fetch_failure_leaves_transaction_failed_with_persisted_row(
     client: AsyncClient,
     auth_headers: dict[str, str],

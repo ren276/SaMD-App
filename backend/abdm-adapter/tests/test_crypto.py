@@ -51,6 +51,26 @@ kbp+Cka3Sj/QviiCloMx16bC
 """
 
 
+# The real ABDM wire shape (D6, corrected 2026-08-24): `publicKey` is base64-encoded DER
+# SubjectPublicKeyInfo, not PEM text. This literal is hardcoded, not computed from
+# STUB_PUBLIC_KEY_PEM via the `cryptography` library at test time: a computed fixture would only
+# prove `cryptography` round-trips with itself, the same fabrication defect that let the old
+# live-mode mock send raw PEM and pass. By RFC 7468 a PEM body IS the base64 of the DER, so this
+# literal is simply STUB_PUBLIC_KEY_PEM's six body lines concatenated — auditable by eye, no
+# library needed. Shape: len 392, first 8 MIIBIjAN, last 8 ywIDAQAB, 2048-bit (real ABDM cert
+# observed 2026-08-24: len 736, first 8 MIICIjAN, last 8 AwEAAQ==, 4096-bit — differs only by key
+# size, per the design memo's correction: do not assert the ABDM tail bytes against this stub).
+STUB_PUBLIC_KEY_B64_DER = (
+    "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4Z8PDv5t+ScPKLcgLEVT"
+    "CAKk3YbdC7SQQnM80/y4T/q58gUprbx8AfNhfix0ubzeg3nyra0b+4P2s2Lfam0q"
+    "IOlVwEMaT0rdKOa70QJsIJjwaVbmxsZ4PinuTYpBwg92xpCAOCtQGYDqp2ib1moy"
+    "Igf6gM6m9eF+POSxGIvsZ4vtRL+HodJMlUEsH7bSz/wiLsk86NthtDvhX6CWr77k"
+    "QiE3X7fnaGce+ILy3f3f8ovaxK2v1wOgnIc+tvOMZeJ5pweFWEW5q3IMUnds4g/s"
+    "lUzYtvFXLicGaKyUYQbE+zzZq++9QS6nqQ8Lwv70RuGhCj/rgcj88I5+eg0Mvnt0"
+    "ywIDAQAB"
+)
+
+
 def _decrypt(ciphertext_b64: str) -> str:
     private_key = serialization.load_pem_private_key(_TEST_PRIVATE_KEY_PEM.encode(), password=None)
     plaintext = private_key.decrypt(  # type: ignore[union-attr]
@@ -127,16 +147,16 @@ async def test_fetch_public_key_pem_live_mode_parses_json_wrapped_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Live mode GETs `cert_url` with the gateway token as a Bearer header and parses the real
-    ABDM response shape: JSON with `publicKey` and `encryptionAlgorithm` fields (D6, confirmed
-    against a real sandbox call), not raw PEM text. Confirmed against a local httpx MockTransport
-    rather than a real ABDM call."""
+    ABDM response shape: JSON with `publicKey` (base64-encoded DER SubjectPublicKeyInfo, D6
+    corrected 2026-08-24) and `encryptionAlgorithm` fields, not raw PEM text. Confirmed against a
+    local httpx MockTransport rather than a real ABDM call."""
     import httpx
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
             json={
-                "publicKey": STUB_PUBLIC_KEY_PEM,
+                "publicKey": STUB_PUBLIC_KEY_B64_DER,
                 "encryptionAlgorithm": "RSA/ECB/OAEPWithSHA-1AndMGF1Padding",
             },
         )
@@ -146,11 +166,142 @@ async def test_fetch_public_key_pem_live_mode_parses_json_wrapped_response(
     pem = await fetch_public_key_pem(
         mode="live", cert_url="https://example.invalid/cert", gateway_token="gw-token-123"
     )
-    assert pem == STUB_PUBLIC_KEY_PEM
+    returned_key = serialization.load_pem_public_key(pem.encode("utf-8"))
+    stub_key = serialization.load_pem_public_key(STUB_PUBLIC_KEY_PEM.encode("utf-8"))
+    assert returned_key.public_numbers() == stub_key.public_numbers()  # type: ignore[union-attr]
     request = captured["request"]
     assert request.headers["Authorization"] == "Bearer gw-token-123"
     assert "REQUEST-ID" in request.headers
     assert "TIMESTAMP" in request.headers
+
+
+async def test_fetch_public_key_pem_live_mode_rejects_malformed_base64(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A publicKey that isn't valid base64 must raise SamdError(ABHA_UPSTREAM_ERROR), not a bare
+    binascii.Error. Before the fix, this exception was caught by the try block shared with
+    httpx.HTTPError and misrouted to _result_from_transport_error (RETRYABLE); a cert this module
+    cannot parse is never retryable."""
+    import httpx
+    from app.errors import ErrorCode, SamdError
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "publicKey": "not!!!valid!!!base64@@@",
+                "encryptionAlgorithm": "RSA/ECB/OAEPWithSHA-1AndMGF1Padding",
+            },
+        )
+
+    _patch_transport(monkeypatch, handler)
+
+    with pytest.raises(SamdError) as exc_info:
+        await fetch_public_key_pem(
+            mode="live", cert_url="https://example.invalid/cert", gateway_token="gw-token-123"
+        )
+    assert exc_info.value.code == ErrorCode.ABHA_UPSTREAM_ERROR
+
+
+async def test_fetch_public_key_pem_live_mode_rejects_valid_base64_non_der(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Valid base64 that does not decode to a DER SubjectPublicKeyInfo must also raise
+    SamdError(ABHA_UPSTREAM_ERROR)."""
+    import httpx
+    from app.errors import ErrorCode, SamdError
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "publicKey": base64.b64encode(b"not a DER SubjectPublicKeyInfo").decode(),
+                "encryptionAlgorithm": "RSA/ECB/OAEPWithSHA-1AndMGF1Padding",
+            },
+        )
+
+    _patch_transport(monkeypatch, handler)
+
+    with pytest.raises(SamdError) as exc_info:
+        await fetch_public_key_pem(
+            mode="live", cert_url="https://example.invalid/cert", gateway_token="gw-token-123"
+        )
+    assert exc_info.value.code == ErrorCode.ABHA_UPSTREAM_ERROR
+
+
+async def test_fetch_public_key_pem_live_mode_rejects_non_rsa_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A DER SubjectPublicKeyInfo that parses fine but isn't RSA (an EC key here) must also raise
+    SamdError(ABHA_UPSTREAM_ERROR). `load_der_public_key` alone would accept it; `encrypt_oaep_sha1`
+    cannot encrypt with it (no `.encrypt()` on an EC public key), and service.py's callers catch
+    only ValueError around that call, so without an explicit RSA check the resulting AttributeError
+    would escape as an unhandled 500 instead of the classified NON_RETRYABLE error."""
+    import httpx
+    from app.errors import ErrorCode, SamdError
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    ec_public_key = ec.generate_private_key(ec.SECP256R1()).public_key()
+    ec_der_b64 = base64.b64encode(
+        ec_public_key.public_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+    ).decode()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "publicKey": ec_der_b64,
+                "encryptionAlgorithm": "RSA/ECB/OAEPWithSHA-1AndMGF1Padding",
+            },
+        )
+
+    _patch_transport(monkeypatch, handler)
+
+    with pytest.raises(SamdError) as exc_info:
+        await fetch_public_key_pem(
+            mode="live", cert_url="https://example.invalid/cert", gateway_token="gw-token-123"
+        )
+    assert exc_info.value.code == ErrorCode.ABHA_UPSTREAM_ERROR
+
+
+async def test_fetch_public_key_pem_live_mode_rejects_missing_publickey_field(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A response missing publicKey entirely must raise SamdError(ABHA_UPSTREAM_ERROR), the same
+    NON_RETRYABLE class as every other malformed-cert case (previously this raised KeyError and
+    was misrouted to RETRYABLE)."""
+    import httpx
+    from app.errors import ErrorCode, SamdError
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"encryptionAlgorithm": "RSA/ECB/OAEPWithSHA-1AndMGF1Padding"},
+        )
+
+    _patch_transport(monkeypatch, handler)
+
+    with pytest.raises(SamdError) as exc_info:
+        await fetch_public_key_pem(
+            mode="live", cert_url="https://example.invalid/cert", gateway_token="gw-token-123"
+        )
+    assert exc_info.value.code == ErrorCode.ABHA_UPSTREAM_ERROR
+
+
+def test_stub_public_key_b64_der_matches_stub_pem() -> None:
+    """Anti-fabrication guard: proves STUB_PUBLIC_KEY_B64_DER is genuinely the base64-DER
+    encoding of STUB_PUBLIC_KEY_PEM, not a made-up literal that happens to parse. A mock that
+    fabricates the wire shape is not a test of the wire shape."""
+    decoded = base64.b64decode(STUB_PUBLIC_KEY_B64_DER, validate=True)
+    stub_key = serialization.load_pem_public_key(STUB_PUBLIC_KEY_PEM.encode("utf-8"))
+    expected_der = stub_key.public_bytes(  # type: ignore[union-attr]
+        encoding=serialization.Encoding.DER,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    assert decoded == expected_der
 
 
 async def test_fetch_public_key_pem_live_mode_rejects_unexpected_encryption_algorithm(
@@ -166,7 +317,7 @@ async def test_fetch_public_key_pem_live_mode_rejects_unexpected_encryption_algo
         return httpx.Response(
             200,
             json={
-                "publicKey": STUB_PUBLIC_KEY_PEM,
+                "publicKey": STUB_PUBLIC_KEY_B64_DER,
                 "encryptionAlgorithm": "RSA/ECB/PKCS1Padding",
             },
         )

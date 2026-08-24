@@ -163,8 +163,11 @@ def _result_from_samd_error(exc: SamdError) -> AbdmResult:
 def _result_from_transport_error(exc: Exception) -> AbdmResult:
     """A live ABDM call can fail before it ever produces an `AbdmResult`: httpx raises on timeout,
     connect failure, or a non-2xx `raise_for_status()`; `response.json()` raises on a non-JSON
-    body; and indexing a malformed token/cert response (`body["accessToken"]`, `body["publicKey"]`)
-    raises `KeyError`. Same reasoning as `_result_from_samd_error` above.
+    body; and indexing a malformed token response (`body["accessToken"]`) raises `KeyError`. A
+    malformed cert response (missing/undecodable `publicKey`, bad `encryptionAlgorithm`) is NOT
+    handled here: `fetch_public_key_pem` raises `SamdError` for all of those, since a cert this
+    module cannot use is never retryable (see `crypto.fetch_public_key_pem`'s docstring). Same
+    reasoning as `_result_from_samd_error` above.
 
     `_fail`'s own contract requires `external_message` to be a bounded, ABDM-sourced string that
     never copies a raw body: `str(httpx.HTTPError)` embeds the request URL, and `str(ValueError)`
