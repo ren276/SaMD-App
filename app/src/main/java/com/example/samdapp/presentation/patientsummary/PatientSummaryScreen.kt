@@ -62,6 +62,7 @@ fun PatientSummaryScreen(
     onContinueToDoctorAssignment: (caseRecordId: String) -> Unit,
     onOpenChain: (patientId: String, rootEncounterId: String) -> Unit,
     onOpenAuditTrail: (patientId: String) -> Unit,
+    onOpenAbhaProfile: (abhaId: String) -> Unit,
     bottomBar: @Composable () -> Unit = {},
     viewModel: PatientSummaryViewModel = hiltViewModel<PatientSummaryViewModel, PatientSummaryViewModel.Factory>(
         creationCallback = { factory -> factory.create(patientId) },
@@ -129,6 +130,17 @@ fun PatientSummaryScreen(
                     patient.bloodGroup?.let { SummaryRow("Blood group", it) }
                     patient.emergencyContact?.let { SummaryRow("Emergency contact", it) }
                 }
+            }
+
+            // Entry point for BUILD 2's ABHA profile read surface — shown only when the linkage
+            // (Patient.abhaNumber, written during registration autofill) exists. Whether the
+            // AbhaProfile row itself landed on this device is the screen's own concern, handled
+            // by its empty state, not gated here.
+            patient.abhaNumber?.let { abhaNumber ->
+                OutlinedButton(
+                    onClick = { onOpenAbhaProfile(abhaNumber) },
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                ) { Text("View ABHA profile") }
             }
 
             if (FeatureFlags.PATIENT_AUDIT_ENABLED) {

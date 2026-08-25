@@ -36,7 +36,9 @@ sealed interface AbhaEnrolOutcome {
  * [AbhaIdentity.mobileNumber] (ABDM's masked value, passed through unmodified) and NOT from the
  * `mobileNumber` argument below, so the plaintext number the worker typed never lands in the
  * database. [com.example.samdapp.domain.model.isMaskedAbhaMobile] is what downstream code uses to
- * notice the stored value is masked.
+ * notice the stored value is masked — though the 2026-08-25 live `get_profile` observation
+ * returned 10 unmasked digits, so that branch is dead on the live path (detection logic is still
+ * correct; only the "ABDM always masks it" assumption was wrong).
  */
 class EnrolAbhaUseCase @Inject constructor(
     private val abdmAbhaSource: AbdmAbhaSource,
@@ -112,7 +114,12 @@ class EnrolAbhaUseCase @Inject constructor(
 }
 
 /** [AbhaProfile.photoUrlMock] is the mock-era name of the field; the real photo URL goes in it
- *  unchanged, renaming the column is a migration and out of scope here. */
+ *  unchanged, renaming the column is a migration and out of scope here.
+ *
+ *  // TODO(POST-BUILD-2): [AbhaIdentity.verificationSource] is dropped here on purpose — BUILD 2
+ *  //  decided persisting it isn't worth a v16->v17 migration for one display string. Follow-up
+ *  //  ticket: "persist verification_source on AbhaProfile and render on AbhaProfileScreen"
+ *  //  (one-column migration + one line here + one line in the screen). */
 private fun AbhaIdentity.toProfile() = AbhaProfile(
     abhaId = abhaNumber,
     abhaAddress = abhaAddress,
