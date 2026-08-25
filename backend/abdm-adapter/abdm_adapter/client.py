@@ -354,21 +354,26 @@ async def verify_mobile_otp(
 async def get_profile(
     *,
     mode: str,
+    gateway_token: str,
     x_token: str,
     base_url: str = "",
     timeout_seconds: float = 30.0,
 ) -> AbdmResult:
-    """GET profile/account, authenticated with the per-transaction X-token from enrol_by_aadhaar's
-    `tokens.token` (or verify_mobile_otp's `token`), never the gateway session token.
+    """GET profile/account, authenticated with two structurally different tokens on the same call:
+    the per-transaction `X-token` from enrol_by_aadhaar's `tokens.token` (or verify_mobile_otp's
+    `token`), and the gateway session token (see fetch_gateway_session_token).
 
-    Live mode sends `X-token` and nothing else beyond REQUEST-ID/TIMESTAMP. That is the recorded
-    Postman ground truth for this endpoint (`docs/requirements/abha-internal-contract.md` line 84,
-    which lists exactly `X-token: Bearer <token>`, `REQUEST-ID`, `TIMESTAMP`). The ABDM PDF's
-    header tables for neighbouring `profile/*` endpoints do additionally list a gateway
-    `Authorization` token; that disagreement is left unresolved on purpose rather than guessed at,
-    because a 401 on the first watched live run is a definitive answer and a speculative extra
-    header is not. If that run returns 401, add `gateway_token=` here (abdm_headers already
-    supports it) rather than reworking this call.
+    Live mode sends both `Authorization: Bearer <gateway_token>` and `X-token: Bearer <x_token>`,
+    plus REQUEST-ID/TIMESTAMP. The recorded Postman ground truth for this endpoint
+    (`docs/requirements/abha-internal-contract.md` line 84) lists only `X-token`, REQUEST-ID, and
+    TIMESTAMP. PR #19 measured that the WSO2 gateway in front of abhasbx.abdm.gov.in rejects
+    enrollment/request/otp with 401 "Missing Credentials" (WSO2 error 900902) without an
+    Authorization: Bearer gateway session token, and that this is a gateway policy rejection, not
+    an application response. `profile/account` sits behind the same gateway. The `Authorization`
+    header here is applied by that same inference, not by a live measurement of this specific
+    endpoint: confirm on the next watched run that reaches Call 4, and if it 401s even with the
+    header, or succeeds without it, the inference was wrong for this endpoint and this docstring
+    must be corrected against that result.
 
     The response body is never logged, here or by any caller. `profilePhoto`/`kycPhoto` are inline
     base64 JPEG bytes and `REDACTED_KEYS` (backend/core's config.py) has no key for either, so the
@@ -378,7 +383,7 @@ async def get_profile(
         async with httpx.AsyncClient(timeout=timeout_seconds) as http_client:
             response = await http_client.get(
                 f"{base_url}/abha/api/v3/profile/account",
-                headers=abdm_headers(x_token=x_token),
+                headers=abdm_headers(gateway_token=gateway_token, x_token=x_token),
             )
         return classify_get_profile(response.status_code, response.json())
 

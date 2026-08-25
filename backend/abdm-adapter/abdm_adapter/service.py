@@ -259,7 +259,7 @@ async def submit_identity(
         )
     except SamdError as exc:
         await _fail(session, worker, txn, _result_from_samd_error(exc))
-    except (httpx.HTTPError, ValueError, KeyError) as exc:
+    except (httpx.HTTPError, TypeError, ValueError, KeyError) as exc:
         await _fail(session, worker, txn, _result_from_transport_error(exc))
 
     try:
@@ -323,7 +323,7 @@ async def verify_otp(
         )
     except SamdError as exc:
         await _fail(session, worker, txn, _result_from_samd_error(exc))
-    except (httpx.HTTPError, ValueError, KeyError) as exc:
+    except (httpx.HTTPError, TypeError, ValueError, KeyError) as exc:
         await _fail(session, worker, txn, _result_from_transport_error(exc))
 
     try:
@@ -426,7 +426,7 @@ async def verify_mobile_otp(
         )
     except SamdError as exc:
         await _fail(session, worker, txn, _result_from_samd_error(exc))
-    except (httpx.HTTPError, ValueError, KeyError) as exc:
+    except (httpx.HTTPError, TypeError, ValueError, KeyError) as exc:
         await _fail(session, worker, txn, _result_from_transport_error(exc))
 
     try:
@@ -465,6 +465,23 @@ async def fetch_profile(
             ErrorCode.ABHA_INVALID_STATE, detail="No verified session token available yet."
         )
 
+    # Token-only acquisition (no cert, no encryption): profile/account needs the gateway Bearer
+    # alongside the existing per-transaction X-token (client.py's get_profile docstring). In a real
+    # run this is normally a cache hit behind fetch_gateway_session_token's own lock, since Call 3
+    # (enrol_by_aadhaar) fetched the same token seconds earlier and its expiry skew has not lapsed.
+    try:
+        gateway_token = await client.fetch_gateway_session_token(
+            mode=settings.abdm_mode,
+            session_url=settings.abdm_session_url,
+            client_id=settings.abdm_client_id,
+            client_secret=settings.abdm_client_secret,
+            timeout_seconds=settings.abdm_timeout_seconds,
+        )
+    except SamdError as exc:
+        await _fail(session, worker, txn, _result_from_samd_error(exc))
+    except (httpx.HTTPError, TypeError, ValueError, KeyError) as exc:
+        await _fail(session, worker, txn, _result_from_transport_error(exc))
+
     # Same guard every other outbound call in this module already has (see verify_mobile_otp
     # above). Without it a transport failure here escapes as a bare 500: no FAILED state, no
     # ABHA_*_FAILED audit row, and the transaction stalls in MOBILE_VERIFIED/ENROLLED until
@@ -473,6 +490,7 @@ async def fetch_profile(
     try:
         result = await client.get_profile(
             mode=settings.abdm_mode,
+            gateway_token=gateway_token,
             x_token=txn.external_token_encrypted,
             base_url=settings.abdm_base_url,
             timeout_seconds=settings.abdm_timeout_seconds,
