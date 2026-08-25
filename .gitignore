@@ -45,3 +45,5 @@ graphify-out/
 app/graphify-out/
 backend/graphify-out/
 .claude/settings.json.graphify-bak
+# Session notes: local continuity log, not for the shared repo.
+docs/session-notes/
