@@ -37,6 +37,11 @@ data class Register(val abhaId: String? = null)
 data class MedicalBackground(val patientId: String)
 data class PatientSummary(val patientId: String)
 
+/** Read-only ABHA profile view, reached from [PatientSummary]'s ABHA row (shown only when
+ *  `patient.abhaNumber != null`). NOT a bottom-nav tab and NOT named `Profile`/`ProfileScreen` —
+ *  those already name the signed-in worker's own profile screen ([Profile] above). */
+data class AbhaProfileRoute(val abhaId: String)
+
 /** Digital consent checkpoint (REQ-TRS-01) — shown once, before Compounder (where ailment
  *  capture begins). [followUpOfEncounterId] carries the worker's optional "this is a follow-up
  *  to a prior visit" pick from PatientSummary's consultation history (Part C) through to
@@ -128,6 +133,7 @@ private val SECURED_ROUTE_TYPES: Set<Class<out Any>> = setOf(
     MedicalBackground::class.java,
     PatientSummary::class.java,
     PatientAuditRoute::class.java,
+    AbhaProfileRoute::class.java,
     ConsentRoute::class.java,
     Compounder::class.java,
     EmergencyOverrideRoute::class.java,

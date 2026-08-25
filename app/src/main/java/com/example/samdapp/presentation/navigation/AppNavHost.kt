@@ -31,6 +31,7 @@ import com.example.samdapp.presentation.abha.AbhaCreateOtpScreen
 import com.example.samdapp.presentation.abha.AbhaEntryScreen
 import com.example.samdapp.presentation.abha.AbhaLoginScreen
 import com.example.samdapp.presentation.abha.AbhaOtpScreen
+import com.example.samdapp.presentation.abha.AbhaProfileScreen
 import com.example.samdapp.presentation.abha.AbhaSignUpScreen
 import com.example.samdapp.presentation.acknowledgement.AcknowledgementScreen
 import com.example.samdapp.presentation.auth.AuthUiState
@@ -248,11 +249,15 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
                         backStack.add(ConsultationChainRoute(patientId, rootEncounterId))
                     },
                     onOpenAuditTrail = { patientId -> backStack.add(PatientAuditRoute(patientId)) },
+                    onOpenAbhaProfile = { abhaId -> backStack.add(AbhaProfileRoute(abhaId)) },
                     bottomBar = bottomNavBar(current = null),
                 )
             }
             entry<PatientAuditRoute> { key ->
                 PatientAuditScreen(patientId = key.patientId)
+            }
+            entry<AbhaProfileRoute> { key ->
+                AbhaProfileScreen(abhaId = key.abhaId)
             }
             entry<ConsentRoute> { key ->
                 ConsentScreen(
