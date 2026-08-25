@@ -31,11 +31,13 @@ def abdm_timestamp() -> str:
 
 
 def abdm_headers(*, gateway_token: str | None = None, x_token: str | None = None) -> dict[str, str]:
-    """The REQUEST-ID/TIMESTAMP pair every ABDM call carries, plus whichever bearer header this
-    specific call needs. At most one of `gateway_token`/`x_token` should be set: the gateway
-    session token (cert fetch only, in this P0 slice) and the per-transaction X-token (profile
-    fetch only) are never the same header on the same call. See crypto.py's module docstring and
-    the Phase A contract's "two structurally different tokens" finding.
+    """The REQUEST-ID/TIMESTAMP pair every ABDM call carries, plus whichever bearer header(s) this
+    specific call needs. `gateway_token` and `x_token` are two structurally different tokens and
+    are never interchangeable, but a single call can legitimately carry both: `profile/account`
+    sends the gateway session token as `Authorization` and the per-transaction token as `X-token`
+    on the same request. See crypto.py's module docstring and the Phase A contract's "two
+    structurally different tokens" finding, and client.py's `get_profile` docstring for why both
+    are present on that call.
     """
     headers = {"REQUEST-ID": new_request_id(), "TIMESTAMP": abdm_timestamp()}
     if gateway_token is not None:

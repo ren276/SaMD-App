@@ -117,11 +117,14 @@ async def test_get_profile_live_mode_matches_postman_request_shape(
     """Ground truth: docs/requirements/abha-internal-contract.md line 84, the only recorded
     example for this endpoint. `X-token: Bearer <token>` plus REQUEST-ID/TIMESTAMP, GET, no body.
 
-    Deliberately asserts the gateway `Authorization` header is ABSENT: the ABDM PDF's header
-    tables for neighbouring `profile/*` endpoints list one, but no Postman ground truth this
-    codebase has recorded for THIS endpoint does. Sending X-token only and letting a real 401 on
-    the first watched live run be the signal, rather than adding a header no recorded example
-    supports, is the locked decision (see client.py's get_profile docstring)."""
+    Also asserts the gateway `Authorization` header, applied by inference from the PR #19 finding
+    (enrollment/request/otp 401s "Missing Credentials", WSO2 error 900902, without an
+    Authorization: Bearer gateway session token; the rejection is a gateway policy rejection, not
+    an application response, and profile/account sits behind the same gateway). This header is NOT
+    itself live-verified for this endpoint: confirm on the next watched run that reaches Call 4
+    (see client.py's get_profile docstring and docs/abdm/M1-tracker.md's live-activation-risks
+    section). The `X-token` assertion below proves the new header was added alongside the existing
+    one, not substituted for it."""
     captured: dict[str, httpx.Request] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -132,6 +135,7 @@ async def test_get_profile_live_mode_matches_postman_request_shape(
 
     result = await get_profile(
         mode="live",
+        gateway_token="gw-token-abc",
         x_token="real-x-token",
         base_url="https://abhasbx.abdm.gov.in",
     )
@@ -143,8 +147,36 @@ async def test_get_profile_live_mode_matches_postman_request_shape(
     assert "REQUEST-ID" in request.headers
     assert "TIMESTAMP" in request.headers
     assert request.headers["X-token"] == "Bearer real-x-token"
-    assert "Authorization" not in request.headers
+    assert request.headers["Authorization"] == "Bearer gw-token-abc"
     assert request.content == b""
+
+
+async def test_get_profile_live_mode_sends_both_tokens_without_conflating_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Anti-fabrication guard: uses two DIFFERENT token values so a bug that crosses the gateway
+    Bearer and the per-transaction X-token (or collapses them into one) fails this test, not just
+    a presence check. With a single shared token value, a swapped-header bug is invisible."""
+    captured: dict[str, httpx.Request] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["request"] = request
+        return httpx.Response(200, json={"ABHANumber": "91-7561-4088-0001", "name": "Sunita Devi"})
+
+    _patch_transport(monkeypatch, handler)
+
+    await get_profile(
+        mode="live",
+        gateway_token="gateway-AAA",
+        x_token="transaction-BBB",
+        base_url="https://abhasbx.abdm.gov.in",
+    )
+
+    request = captured["request"]
+    assert request.headers["Authorization"] == "Bearer gateway-AAA"
+    assert request.headers["X-token"] == "Bearer transaction-BBB"
+    assert "gateway-AAA" not in request.headers["X-token"]
+    assert "transaction-BBB" not in request.headers["Authorization"]
 
 
 async def test_get_profile_live_mode_x_token_expired(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -160,6 +192,7 @@ async def test_get_profile_live_mode_x_token_expired(monkeypatch: pytest.MonkeyP
 
     result = await get_profile(
         mode="live",
+        gateway_token="gw-token-abc",
         x_token="expired-x-token",
         base_url="https://abhasbx.abdm.gov.in",
     )

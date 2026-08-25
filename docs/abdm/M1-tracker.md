@@ -86,11 +86,20 @@ demo-auth creation paths (contract's own "what Phase B must not build" section).
   > the same fetch_gateway_session_token path the adapter uses.
 
   `client.send_otp` now sends this header; `client.enrol_by_aadhaar` now sends it too, but only by
-  **extrapolation** (same gateway product, same path prefix) — that half is **presumed**, not
-  measured. `X-CM-ID` remains confirmed absent by the same probe. `get_profile`'s and
-  `verify_mobile_otp`'s auth are unaffected — see the live-activation-risks list below for both.
+  **extrapolation** (same gateway product, same path prefix), that half is **presumed**, not
+  measured. `X-CM-ID` remains confirmed absent by the same probe. `get_profile`'s auth is extended
+  the same way by D8 below. `verify_mobile_otp`'s auth is unaffected, still `NotImplementedError`.
   `client.py`'s `fetch_gateway_session_token`/`send_otp`/`enrol_by_aadhaar`/`verify_mobile_otp`
   docstrings carry the full finding verbatim.
+
+- **D8, `profile/account` auth header (`fix/abha-get-profile-gateway-bearer`).** Same extrapolation
+  as `enrol_by_aadhaar` in D7: `profile/account` sits behind the same WSO2 gateway as the
+  `enrollment/*` endpoints, so `client.get_profile` now sends both `Authorization: Bearer <gateway
+  session token>` and the existing per-transaction `X-token` on the same request. Not itself
+  live-verified, no watched run has reached Call 4 yet. `service.fetch_profile` acquires the token
+  via the same `fetch_gateway_session_token` the other three call sites use; in practice this is
+  normally a cache hit, since Call 3 (`enrol_by_aadhaar`) fetches the same token seconds earlier and
+  its expiry skew has not lapsed by the time Call 4 runs.
 
 ## Live-activation risks, verify on first watched enrollment
 
@@ -101,18 +110,27 @@ Each item states the endpoint, current belief, evidence class, and the exact act
 - `enrollment/enrol/byAadhaar` — **UNVERIFIED, header applied by inference** (D7 above). Confirm on
   the next watched run. If it 401s *with* the header, or succeeds *without* it, the inference was
   wrong — record which, and correct `client.py`'s `enrol_by_aadhaar` docstring against that result.
-- `profile/account` (`get_profile`) — **DEFERRED, no `Authorization` sent.** Has never made a real
-  ABDM call (PR #17 tested it against a mock transport only); every live run to date has died at
-  Call 1/3 on the 401 this branch fixes. If the WSO2-gateway-product inference in D7 holds,
-  `profile/account` is expected to 401 the same way on the first live call that reaches it. Exact
-  fix, when undertaken: pass `gateway_token=` to `abdm_headers(...)` in `client.get_profile`
-  alongside the existing `x_token=`, which requires `service.fetch_profile` to fetch a gateway
-  token it currently does not (that call graph fetches none today) — an architectural change, not
-  one line, deliberately deferred to a **separate PR** rather than bundled into this one. Failure
-  here is cheap: the ABHA already exists by this point, no OTP is burned, and the transaction is
-  re-attemptable.
+- `profile/account` (`get_profile`) **UNVERIFIED, header applied by inference (D8 below).**
+  `service.fetch_profile` now acquires a gateway token and `client.get_profile` sends
+  `Authorization: Bearer <gateway session token>` alongside the existing `X-token`. Has never made
+  a real ABDM call end to end (PR #17 tested it against a mock transport only; PR #19 fixed Call 2
+  and Call 3, so Call 4 has not yet been reached on a real run). Confirm on the next watched run.
+  If it 401s even with the header, or succeeds without it, the D7/D8 inference was wrong for this
+  endpoint, and `client.py`'s `get_profile` docstring must be corrected against that result.
 - `enrollment/auth/byAbdm` (`verify_mobile_otp`) — still `NotImplementedError` in live mode. When
   implemented, it will carry the same gateway Bearer for the same D7 reasoning.
+- **Finding #6, state-machine semantics on post-enrolment failure.** If `get_profile` fails after
+  enrolment already succeeded, the transaction lands in `FAILED`, and without care a downstream
+  reader could mistake that for "ABHA creation failed" when the ABHA exists at ABDM and only the
+  profile read failed. The discriminator already exists in the persisted data with no schema
+  change: `state = 'FAILED' AND abha_number IS NOT NULL` means enrolment succeeded and only a later
+  step failed; `abha_number IS NULL` means creation itself never completed. The audit trail agrees
+  independently, since `_fail` never removes the `ABHA_ENROLLED` row it already wrote. What is
+  still missing is a named contract: no state value, no doc line, and no reader-facing rule tells a
+  downstream consumer to make that check. `fix/abha-get-profile-gateway-bearer` pins the current
+  discriminator with a test (`test_profile_fetch_failure_after_enrolment_preserves_the_enrolment_evidence`)
+  but deliberately does not add a state value, a column, or a migration for it. That is a separate
+  state-semantics design ticket, not this branch.
 - Masked-mobile extraction from free-text `message` (`service.py`'s `_extract_masked_mobile`) is
   still a regex against ABDM's own wording, fragile if ABDM ever rewords the message.
 - `mobile_number` on the final `AbhaIdentity` is masked-only (ABDM never returns the full number
@@ -134,6 +152,8 @@ causes, easy to mistake for a different bug.
 ## Watched-run retry sequence (after this branch merges, container force-recreated)
 
 Call 1 (session token) -> Call 2 (send OTP, expect OTP arrives) -> Call 3 (enrol by Aadhaar, expect
-success) -> Call 4 (get_profile, expect **401 or success**). If Call 4 401s, that is the deferred
-`get_profile` issue above, **not a new bug** — the response is to file the follow-up PR named
-above, not to investigate mid-run.
+success) -> Call 4 (get_profile, expect **success**, since `fix/abha-get-profile-gateway-bearer` now
+sends the gateway Bearer here too). A 401 at Call 4 after that branch merges is no longer an
+expected, deferred outcome, it is a real finding: the D8 inference was wrong for this endpoint, and
+`client.py`'s `get_profile` docstring and this tracker must both be corrected against the actual
+result, not re-guessed.

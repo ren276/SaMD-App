@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import abdm_adapter.client as client_module
 import httpx
 import pytest
 from fastapi import FastAPI
@@ -24,6 +25,20 @@ from app.models.abha import AbhaTransaction
 from app.models.audit import AuditEvent
 from app.models.enums import AuditAction
 from app.models.sync import SyncLogEntry
+
+
+@pytest.fixture(autouse=True)
+def _reset_gateway_session_cache() -> None:
+    """The gateway session token cache is module-level, in-memory state (client.py: by design,
+    never DB, never disk). Each test must start from a clean cache so one test's cached token
+    cannot leak into another test's mock transport and produce a confusing mismatch. Mirrors
+    test_client_live.py's own _reset_session_cache fixture."""
+    client_module._cached_token = None
+    client_module._cached_token_expires_at = None
+    yield
+    client_module._cached_token = None
+    client_module._cached_token_expires_at = None
+
 
 AADHAAR = "234567890123"
 OTP_VALID = "654321"
@@ -368,8 +383,21 @@ async def test_live_mode_profile_fetch_failure_leaves_transaction_failed_with_pe
     live_settings = test_settings.model_copy(update={"abdm_mode": "live"})
     monkeypatch.setitem(app.dependency_overrides, settings_dep, lambda: live_settings)
 
+    profile_call_reached = False
+
     def handler(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectTimeout("simulated ABDM profile-fetch timeout", request=request)
+        # Path-aware: fetch_profile now calls /sessions for the gateway token before /profile/
+        # account. A path-blind handler would answer both the same way, making this test pass for
+        # the wrong reason (a timeout on the sessions call, not the profile call it names and
+        # documents). See docs/abdm/M1-tracker.md's Call 4 threading note.
+        path = request.url.path
+        if path.endswith("/sessions"):
+            return httpx.Response(200, json={"accessToken": "gw-token", "expiresIn": 1800})
+        if path.endswith("/profile/account"):
+            nonlocal profile_call_reached
+            profile_call_reached = True
+            raise httpx.ConnectTimeout("simulated ABDM profile-fetch timeout", request=request)
+        raise AssertionError(f"unexpected request to {path}")
 
     real_init = httpx.AsyncClient.__init__
 
@@ -384,6 +412,10 @@ async def test_live_mode_profile_fetch_failure_leaves_transaction_failed_with_pe
     )
     assert response.status_code == 502
     assert response.json()["code"] == ErrorCode.ABHA_UPSTREAM_ERROR.value
+    # Positive proof the timeout fired on the profile call specifically, not just that SOME call
+    # timed out: a future prepended call (another token fetch, say) cannot silently redefine what
+    # this test covers without this assertion catching it.
+    assert profile_call_reached is True
 
     txn = await session.get(AbhaTransaction, session_id)
     assert txn is not None
@@ -434,18 +466,29 @@ async def test_live_mode_malformed_profile_body_fails_session_with_persisted_row
     live_settings = test_settings.model_copy(update={"abdm_mode": "live"})
     monkeypatch.setitem(app.dependency_overrides, settings_dep, lambda: live_settings)
 
+    profile_call_reached = False
+
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={
-                "ABHANumber": "91-7561-4088-0001",
-                "name": "Sunita Devi",
-                "yearOfBirth": 1991,  # malformed: a number, not the documented string
-                "gender": "F",
-                "mobile": "******0903",
-                "kycVerified": True,
-            },
-        )
+        # Path-aware: see the timeout test above for why a path-blind handler here would break
+        # once fetch_profile also calls /sessions for the gateway token.
+        path = request.url.path
+        if path.endswith("/sessions"):
+            return httpx.Response(200, json={"accessToken": "gw-token", "expiresIn": 1800})
+        if path.endswith("/profile/account"):
+            nonlocal profile_call_reached
+            profile_call_reached = True
+            return httpx.Response(
+                200,
+                json={
+                    "ABHANumber": "91-7561-4088-0001",
+                    "name": "Sunita Devi",
+                    "yearOfBirth": 1991,  # malformed: a number, not the documented string
+                    "gender": "F",
+                    "mobile": "******0903",
+                    "kycVerified": True,
+                },
+            )
+        raise AssertionError(f"unexpected request to {path}")
 
     real_init = httpx.AsyncClient.__init__
 
@@ -460,6 +503,7 @@ async def test_live_mode_malformed_profile_body_fails_session_with_persisted_row
     )
     assert response.status_code == 502
     assert response.json()["code"] == ErrorCode.ABHA_UPSTREAM_ERROR.value
+    assert profile_call_reached is True
 
     txn = await session.get(AbhaTransaction, session_id)
     assert txn is not None
@@ -509,24 +553,34 @@ async def test_d5_no_phi_in_persisted_row_or_logs_live_mode(
     monkeypatch.setitem(app.dependency_overrides, settings_dep, lambda: live_settings)
 
     live_photo_marker = "/9j/live-fixture-jpeg-bytes-not-a-real-photo"
+    profile_call_reached = False
 
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={
-                "ABHANumber": "91-7561-4088-0001",
-                "preferredAbhaAddress": "sunita.devi0001@sbx",
-                "name": "Sunita Devi",
-                "yearOfBirth": "1991",
-                "monthOfBirth": "04",
-                "dayOfBirth": "12",
-                "gender": "F",
-                "profilePhoto": live_photo_marker,
-                "kycPhoto": live_photo_marker,
-                "mobile": "******0903",
-                "kycVerified": True,
-            },
-        )
+        # Path-aware: see the timeout test's comment above for why a path-blind handler here
+        # would break once fetch_profile also calls /sessions for the gateway token.
+        path = request.url.path
+        if path.endswith("/sessions"):
+            return httpx.Response(200, json={"accessToken": "gw-token", "expiresIn": 1800})
+        if path.endswith("/profile/account"):
+            nonlocal profile_call_reached
+            profile_call_reached = True
+            return httpx.Response(
+                200,
+                json={
+                    "ABHANumber": "91-7561-4088-0001",
+                    "preferredAbhaAddress": "sunita.devi0001@sbx",
+                    "name": "Sunita Devi",
+                    "yearOfBirth": "1991",
+                    "monthOfBirth": "04",
+                    "dayOfBirth": "12",
+                    "gender": "F",
+                    "profilePhoto": live_photo_marker,
+                    "kycPhoto": live_photo_marker,
+                    "mobile": "******0903",
+                    "kycVerified": True,
+                },
+            )
+        raise AssertionError(f"unexpected request to {path}")
 
     real_init = httpx.AsyncClient.__init__
 
@@ -540,6 +594,7 @@ async def test_d5_no_phi_in_persisted_row_or_logs_live_mode(
         f"/api/v1/abha/registration-sessions/{session_id}/profile", headers=auth_headers
     )
     assert response.status_code == 200
+    assert profile_call_reached is True
     assert response.json()["data"]["photo_url"] is None
     assert live_photo_marker not in response.text
 
@@ -568,6 +623,140 @@ async def test_d5_no_phi_in_persisted_row_or_logs_live_mode(
     captured = capsys.readouterr()
     log_output = captured.out + captured.err
     assert "/9j/" not in log_output
+
+
+async def test_fetch_profile_threads_the_real_gateway_token_from_session_fetch(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    app: FastAPI,
+    test_settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The adapter-level tests in test_client_live.py pass gateway_token in explicitly, so they
+    cannot catch service.fetch_profile silently dropping or hardcoding it. Only a test through the
+    real service call graph proves the plumbing: the /sessions mock returns a distinctive token,
+    and the assertion below checks that exact value reached the outbound /profile/account request,
+    the same role test_abha.py's send_otp threading test plays for Call 2 (PR #19)."""
+    session_id = await _start(client, auth_headers)
+    await _submit_identity(client, auth_headers, session_id)
+    await client.post(
+        f"/api/v1/abha/registration-sessions/{session_id}/otp",
+        json={"otp": OTP_VALID, "mobile_number": MOBILE_SAME_AS_AADHAAR},
+        headers=auth_headers,
+    )
+
+    live_settings = test_settings.model_copy(update={"abdm_mode": "live"})
+    monkeypatch.setitem(app.dependency_overrides, settings_dep, lambda: live_settings)
+
+    captured: dict[str, httpx.Request] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/sessions"):
+            return httpx.Response(200, json={"accessToken": "profile-gw-token", "expiresIn": 1800})
+        if path.endswith("/profile/account"):
+            captured["request"] = request
+            return httpx.Response(
+                200,
+                json={
+                    "ABHANumber": "91-7561-4088-0001",
+                    "name": "Sunita Devi",
+                    "yearOfBirth": "1991",
+                    "monthOfBirth": "04",
+                    "dayOfBirth": "12",
+                    "gender": "F",
+                    "mobile": "******0903",
+                    "kycVerified": True,
+                },
+            )
+        raise AssertionError(f"unexpected request to {path}")
+
+    real_init = httpx.AsyncClient.__init__
+
+    def patched_init(self: httpx.AsyncClient, *args: object, **kwargs: object) -> None:
+        kwargs["transport"] = httpx.MockTransport(handler)
+        real_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", patched_init)
+
+    response = await client.get(
+        f"/api/v1/abha/registration-sessions/{session_id}/profile", headers=auth_headers
+    )
+    assert response.status_code == 200
+
+    profile_request = captured["request"]
+    assert profile_request.headers["Authorization"] == "Bearer profile-gw-token"
+
+
+async def test_profile_fetch_failure_after_enrolment_preserves_the_enrolment_evidence(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    app: FastAPI,
+    test_settings: Settings,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Finding #6: a get_profile failure after a successful enrolment must not leave a row that a
+    downstream reader could mistake for "ABHA creation itself failed". The discriminator already
+    exists in the persisted data without any schema change: state == FAILED with abha_number set
+    means enrolment succeeded and only the later profile read failed, versus abha_number IS NULL
+    which means creation itself never completed. This test pins that positive discriminator, not
+    just state == FAILED, so a future change cannot silently clear abha_number on this failure path
+    without breaking a test. Naming a new terminal state or column for this distinction is left to
+    the separate state-semantics design ticket (docs/abdm/M1-tracker.md); this test only protects
+    the data that ticket will build on.
+    """
+    session_id = await _start(client, auth_headers)
+    await _submit_identity(client, auth_headers, session_id)
+    otp_response = await client.post(
+        f"/api/v1/abha/registration-sessions/{session_id}/otp",
+        json={"otp": OTP_VALID, "mobile_number": MOBILE_SAME_AS_AADHAAR},
+        headers=auth_headers,
+    )
+    assert otp_response.json()["data"]["state"] == "ENROLLED"
+
+    live_settings = test_settings.model_copy(update={"abdm_mode": "live"})
+    monkeypatch.setitem(app.dependency_overrides, settings_dep, lambda: live_settings)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/sessions"):
+            return httpx.Response(200, json={"accessToken": "gw-token", "expiresIn": 1800})
+        if path.endswith("/profile/account"):
+            raise httpx.ConnectTimeout("simulated ABDM profile-fetch timeout", request=request)
+        raise AssertionError(f"unexpected request to {path}")
+
+    real_init = httpx.AsyncClient.__init__
+
+    def patched_init(self: httpx.AsyncClient, *args: object, **kwargs: object) -> None:
+        kwargs["transport"] = httpx.MockTransport(handler)
+        real_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", patched_init)
+
+    response = await client.get(
+        f"/api/v1/abha/registration-sessions/{session_id}/profile", headers=auth_headers
+    )
+    assert response.status_code == 502
+
+    txn = await session.get(AbhaTransaction, session_id)
+    assert txn is not None
+    assert txn.state == "FAILED"
+    assert txn.abha_number is not None
+    assert txn.abha_number == "91756140880001"
+
+    audit_actions = list(
+        (
+            await session.execute(
+                select(AuditEvent.action, AuditEvent.payload).where(
+                    AuditEvent.payload.contains(session_id)
+                )
+            )
+        ).all()
+    )
+    actions_seen = {action for action, _ in audit_actions}
+    assert AuditAction.ABHA_ENROLLED.value in actions_seen
+    assert AuditAction.ABHA_SESSION_FAILED.value in actions_seen
 
 
 # ---------------------------------------------------------------------------
