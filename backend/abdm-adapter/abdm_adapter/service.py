@@ -259,7 +259,7 @@ async def submit_identity(
         )
     except SamdError as exc:
         await _fail(session, worker, txn, _result_from_samd_error(exc))
-    except (httpx.HTTPError, ValueError, KeyError) as exc:
+    except (httpx.HTTPError, TypeError, ValueError, KeyError) as exc:
         await _fail(session, worker, txn, _result_from_transport_error(exc))
 
     try:
@@ -323,7 +323,7 @@ async def verify_otp(
         )
     except SamdError as exc:
         await _fail(session, worker, txn, _result_from_samd_error(exc))
-    except (httpx.HTTPError, ValueError, KeyError) as exc:
+    except (httpx.HTTPError, TypeError, ValueError, KeyError) as exc:
         await _fail(session, worker, txn, _result_from_transport_error(exc))
 
     try:
@@ -426,7 +426,7 @@ async def verify_mobile_otp(
         )
     except SamdError as exc:
         await _fail(session, worker, txn, _result_from_samd_error(exc))
-    except (httpx.HTTPError, ValueError, KeyError) as exc:
+    except (httpx.HTTPError, TypeError, ValueError, KeyError) as exc:
         await _fail(session, worker, txn, _result_from_transport_error(exc))
 
     try:
@@ -479,7 +479,7 @@ async def fetch_profile(
         )
     except SamdError as exc:
         await _fail(session, worker, txn, _result_from_samd_error(exc))
-    except (httpx.HTTPError, ValueError, KeyError) as exc:
+    except (httpx.HTTPError, TypeError, ValueError, KeyError) as exc:
         await _fail(session, worker, txn, _result_from_transport_error(exc))
 
     # Same guard every other outbound call in this module already has (see verify_mobile_otp

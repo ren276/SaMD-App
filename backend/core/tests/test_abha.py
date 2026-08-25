@@ -759,6 +759,70 @@ async def test_profile_fetch_failure_after_enrolment_preserves_the_enrolment_evi
     assert AuditAction.ABHA_SESSION_FAILED.value in actions_seen
 
 
+async def test_profile_fetch_malformed_expires_in_fails_session_with_persisted_row(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    app: FastAPI,
+    test_settings: Settings,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CodeRabbit finding on this branch: if /sessions returns "expiresIn": null,
+    int(body.get("expiresIn", 300)) in fetch_gateway_session_token raises TypeError. Before this
+    fix, none of the four gateway-token-acquisition except clauses in service.py caught TypeError,
+    so this escaped as an unhandled 500 with no FAILED state and no ABHA_SESSION_FAILED audit row,
+    the exact _fail-bypass trap this module's own docstring names. Reached through fetch_profile
+    specifically, since that is where this branch's own new call site lives, but the fix applies to
+    all four token-acquisition call sites (submit_identity, verify_otp, verify_mobile_otp,
+    fetch_profile) for the same reason.
+    """
+    session_id = await _start(client, auth_headers)
+    await _submit_identity(client, auth_headers, session_id)
+    otp_response = await client.post(
+        f"/api/v1/abha/registration-sessions/{session_id}/otp",
+        json={"otp": OTP_VALID, "mobile_number": MOBILE_SAME_AS_AADHAAR},
+        headers=auth_headers,
+    )
+    assert otp_response.json()["data"]["state"] == "ENROLLED"
+
+    live_settings = test_settings.model_copy(update={"abdm_mode": "live"})
+    monkeypatch.setitem(app.dependency_overrides, settings_dep, lambda: live_settings)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/sessions"):
+            return httpx.Response(200, json={"accessToken": "gw-token", "expiresIn": None})
+        raise AssertionError(f"unexpected request to {path}")
+
+    real_init = httpx.AsyncClient.__init__
+
+    def patched_init(self: httpx.AsyncClient, *args: object, **kwargs: object) -> None:
+        kwargs["transport"] = httpx.MockTransport(handler)
+        real_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", patched_init)
+
+    response = await client.get(
+        f"/api/v1/abha/registration-sessions/{session_id}/profile", headers=auth_headers
+    )
+    assert response.status_code == 502
+    assert response.json()["code"] == ErrorCode.ABHA_UPSTREAM_ERROR.value
+
+    txn = await session.get(AbhaTransaction, session_id)
+    assert txn is not None
+    assert txn.state == "FAILED"
+    assert txn.last_error_code == ErrorCode.ABHA_UPSTREAM_ERROR.value
+
+    failed_audit_rows = (
+        await session.execute(
+            select(AuditEvent.payload).where(
+                AuditEvent.action == AuditAction.ABHA_SESSION_FAILED.value
+            )
+        )
+    ).scalars()
+    assert any(session_id in payload for payload in failed_audit_rows)
+
+
 # ---------------------------------------------------------------------------
 # Illegal transitions: 409 SAMD-ABHA-2002, never a silent no-op
 # ---------------------------------------------------------------------------

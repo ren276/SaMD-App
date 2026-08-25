@@ -24,7 +24,7 @@ demo-auth creation paths (contract's own "what Phase B must not build" section).
 | RSA-OAEP-SHA1 encryption | Done (pre-existing, unchanged) | `crypto.encrypt_oaep_sha1`, already built and tested prior to this session. |
 | Credential config via environment | Done (pre-existing) | `Settings.abdm_client_id/secret`, boot-time gate requiring both when `abdm_mode=live` outside dev, already in `config.py`. This session added `abdm_session_url` (the gateway host differs from `abdm_base_url`) and fixed `.env.example`'s stale `ABDM_CERT_URL`. |
 | Secret/PHI log redaction | Done, extended | `REDACTED_KEYS` gained `abdm_client_secret`, `txnid`, `txn_id`. Raw PEM added as a value-pattern scrub (`-----BEGIN` prefix) in `logging.py`, since it has no single field name at every call site. Tested in `backend/core/tests/test_logging_redaction.py`. |
-| Mobile-update OTP send/verify (`CRT_ABHA_108`/`109`) | Not in this session's scope | Your prompt named 4 calls only (session, cert, send OTP, enrol by Aadhaar). `client.verify_mobile_otp` and `client.get_profile` remain `NotImplementedError` for live mode, unchanged. |
+| Mobile-update OTP send/verify (`CRT_ABHA_108`/`109`) | Not in this session's scope | Your prompt named 4 calls only (session, cert, send OTP, enrol by Aadhaar). `client.verify_mobile_otp` remains `NotImplementedError` for live mode, unchanged. `client.get_profile` was later wired live in PR #17 and gained the gateway Bearer alongside its existing `X-token` in `fix/abha-get-profile-gateway-bearer` (D8); it is stub-only no longer. |
 
 ## xlsx test case rows, P0 (Aadhaar-OTP) section
 
