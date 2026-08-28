@@ -47,7 +47,12 @@ def profile_to_abha_identity(body: dict[str, Any]) -> dict[str, Any]:
         "district": body.get("districtName"),
         "state": body.get("stateName"),
         "pincode": body.get("pincode"),
-        # Masked at source (D4); never the full number. See mobile_number's own note in
+        # D4 (docs/requirements/abha-internal-contract.md), CONTRADICTED 2026-08-28: this was
+        # assumed always-masked from the recorded example, but a prior watched live run observed
+        # a full, unmasked mobile on this same field, and a 2026-08-28 run redacted its own
+        # observation before it could adjudicate either way. Neither shape is confirmed; do not
+        # assume masked. service.py's _extract_masked_mobile is suspect on the same assumption,
+        # pending a deliberate, unredacted recheck. See mobile_number's own note in
         # docs/requirements/abha-field-mapping.md for the Android-side REQ-REG-01 consequence.
         "mobile_number": body.get("mobile"),
         "email_address": None,

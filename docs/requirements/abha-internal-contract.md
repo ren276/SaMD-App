@@ -250,17 +250,17 @@ api-contract.md §8's `AbhaIdentity` is reproduced here for reference:
 | `abha_number` | `ABHANumber`: `"91-7561-4088-XXXX"` | **Needs a transform.** Real value is dash-formatted, 14 digits with dashes. `AbhaProfile.abha_id` (the model already built) is documented as "14 bare digits, never the dash-formatted display form." Backend must strip dashes before storing. Not a bug in the model, a real step Phase B must not skip. |
 | `abha_address` | `preferredAbhaAddress` | Confirmed, direct copy. |
 | `name` | `name`: `"Username Kailas Shelke"` (also available split as `firstName`/`middleName`/`lastName`) | Confirmed. Real response gives both forms; use the combined `name` field, matching `AbhaProfile.name` (single column). |
-| `date_of_birth` | **No combined `dob` field on this endpoint.** Only `yearOfBirth`, `monthOfBirth`, `dayOfBirth` as separate strings. | **Gap.** Must be composed (`f"{yearOfBirth}-{monthOfBirth}-{dayOfBirth}"`) here. Note this is *different* from the enrol/byAadhaar response's embedded `ABHAProfile.dob`, which *is* a single `"DD-MM-YYYY"` string. Two different shapes for the same logical field across two different real ABDM responses in the same flow; Phase B's mapper needs two separate parse paths, not one. |
+| `date_of_birth` | **No combined `dob` field on this endpoint.** Only `yearOfBirth`, `monthOfBirth`, `dayOfBirth` as separate strings. | **Gap.** Must be composed (`f"{yearOfBirth}-{monthOfBirth}-{dayOfBirth}"`) here. Note this is *different* from the enrol/byAadhaar response's embedded `ABHAProfile.dob`, which *is* a single `"DD-MM-YYYY"` string. Two different shapes for the same logical field across two different real ABDM responses in the same flow; Phase B's mapper needs two separate parse paths, not one. **Confirmed live, 2026-08-28:** full DOB observed for a fully-KYC'd account (D3). |
 | `gender` | `gender`: `"M"` | Confirmed, single-letter code, direct copy. |
 | `address` | `address` | Confirmed, direct copy. |
 | `district` | `districtName` (there is also a numeric `districtCode`) | Confirmed; use the name field, drop the code. |
 | `state` | `stateName` (there is also a numeric `stateCode`) | Confirmed; use the name field, drop the code. |
 | `pincode` | `pincode` | Confirmed, direct copy. |
-| `mobile_number` | `mobile`: `"******0903"` | **Gap, not a transform.** The real endpoint never returns the full mobile number, only a masked one (last 4 digits). The pinned shape's own example (`"9876543210"`, a full number) is not achievable from this endpoint. Either `mobile_number` in the real internal response is masked too (contract needs updating to say so) or it is populated from the mobile the worker typed in during the `identity`/mobile-update step (the app's own input, not ABDM's), which the backend already has server-side and could carry forward instead of re-deriving from the profile fetch. Decision needed before Phase B, not made here. |
+| `mobile_number` | `mobile`: `"******0903"` | **Gap, not a transform.** The real endpoint never returns the full mobile number, only a masked one (last 4 digits). The pinned shape's own example (`"9876543210"`, a full number) is not achievable from this endpoint. Either `mobile_number` in the real internal response is masked too (contract needs updating to say so) or it is populated from the mobile the worker typed in during the `identity`/mobile-update step (the app's own input, not ABDM's), which the backend already has server-side and could carry forward instead of re-deriving from the profile fetch. Decision needed before Phase B, not made here. **Contradicted, 2026-08-28:** a prior watched run observed a full unmasked mobile on this field; see D4 below, unresolved. |
 | `email_address` | **Field absent entirely** from this response. | Confirmed as always-null for this flow, consistent with the pinned example already showing `null`. Not a gap, just confirms there is no real source, ever, via this path. |
-| `photo_url` | `profilePhoto` (base64 JPEG) and a second, separate `kycPhoto` (also base64 JPEG) | **Gap.** Real response carries the actual image bytes inline, twice, under two different field names; nothing named `photo_url` and nothing that is a URL. Matches this project's existing "no binary upload in v1" precedent for attachments (stored `NOT_UPLOADED`, no object storage yet); the pinned shape's own example already shows `null`, which reads as "deliberately dropped, not wired to object storage yet." Recorded as a decision to confirm, not silently assumed: `photo_url` stays `null` in v1, the two base64 blobs are received and discarded, never persisted, never logged. |
+| `photo_url` | `profilePhoto` (base64 JPEG) and a second, separate `kycPhoto` (also base64 JPEG) | **Gap.** Real response carries the actual image bytes inline, twice, under two different field names; nothing named `photo_url` and nothing that is a URL. Matches this project's existing "no binary upload in v1" precedent for attachments (stored `NOT_UPLOADED`, no object storage yet); the pinned shape's own example already shows `null`, which reads as "deliberately dropped, not wired to object storage yet." Recorded as a decision to confirm, not silently assumed: `photo_url` stays `null` in v1, the two base64 blobs are received and discarded, never persisted, never logged. **Confirmed live, 2026-08-28:** both fields present as inline base64, approximately 5640 bytes each (D5). |
 | `kyc_verified` | `kycVerified`: `true` | Confirmed, direct copy. |
-| `verification_source` | **Not derived from the response at all.** Nearest real fields are `verificationType: "AADHAAR"` and `verificationStatus: "VERIFIED"`. | Confirmed as a backend-assigned constant, not a mapped field: since this whole vertical slice is one workflow (Aadhaar OTP), `verification_source` can be hardcoded to `"ABDM_AADHAAR_OTP"` for every profile this endpoint returns, matching the pinned example. No mapping bug; just confirming it is a workflow-level constant, not a per-response field, so Phase B should not go looking for a source field that will not be there. |
+| `verification_source` | **Not derived from the response at all.** Nearest real fields are `verificationType: "AADHAAR"` and `verificationStatus: "VERIFIED"`. | Confirmed as a backend-assigned constant, not a mapped field: since this whole vertical slice is one workflow (Aadhaar OTP), `verification_source` can be hardcoded to `"ABDM_AADHAAR_OTP"` for every profile this endpoint returns, matching the pinned example. No mapping bug; just confirming it is a workflow-level constant, not a per-response field, so Phase B should not go looking for a source field that will not be there. **Confirmed live, 2026-08-28:** `verificationStatus` present on the wire, the real observable key. |
 | `verified_at` | Not present as such; closest is `createdDate`: `"07-05-2024"` (ABDM's own account-creation date, `DD-MM-YYYY`) | Confirmed as backend-assigned (the SaMD server's own timestamp of when *this* verification transaction completed), not `createdDate`, which is a different concept (when the ABHA account itself was created, possibly long before this particular login/verification). |
 
 **Fields the real response carries that the pinned `AbhaIdentity` shape has no slot for at all**
@@ -354,19 +354,31 @@ Settled inputs for Phase B, per the operator's own framing; each is now code, no
   (`"1991"`), never a fabricated `"1991-01-01"`; `AbhaIdentity.date_of_birth` is typed `str | None`
   specifically so this is representable. Tested in `backend/abdm-adapter/tests/test_dob.py`,
   including the malformed-input case that the writing of that test caught as a real crash bug in
-  the first draft of `from_ddmmyyyy` (unguarded `int()` on a non-numeric value).
-- **D4, masked mobile only.** `AbhaIdentity.mobile_number` is the masked value straight from
-  ABDM's `profile/account.mobile` field, or `None`; never fabricated. The regex extraction of the
-  masked suffix out of `identity`'s free-text `message` (`abdm_adapter/service.py`'s
-  `_extract_masked_mobile`) is flagged in that function's own docstring as fragile against ABDM
-  changing the wording, and is a live-activation checklist item. The Android-side consequence
-  (`abha-field-mapping.md`'s `mobileNumber -> Patient.mobileNumber` autofill can no longer satisfy
-  REQ-REG-01's contact-method rule on its own) is now noted directly in that file; the Android fix
-  itself is Phase 6, not built here.
+  the first draft of `from_ddmmyyyy` (unguarded `int()` on a non-numeric value). **Confirmed live,
+  2026-08-28:** a watched M1 run observed full DOB, `yearOfBirth`/`monthOfBirth`/`dayOfBirth` all
+  present, for a fully-KYC'd account. The year-only fallback did not fire this run; it remains
+  justified for accounts where ABDM only holds a partial DOB.
+- **D4, masked mobile only. CONTRADICTED, 2026-08-28, unresolved.** This bullet originally
+  asserted `AbhaIdentity.mobile_number` is always the masked value straight from ABDM's
+  `profile/account.mobile` field, based on the recorded Postman example. That assertion is now
+  **contradicted**: a prior watched live run observed a full, unmasked 10-digit mobile on the same
+  field. A 2026-08-28 watched run could not adjudicate either way, since its own observation of
+  `mobile` was redacted by the structured logger before the masked/unmasked shape could be
+  recorded. Neither "masked" nor "unmasked" is settled; do not assume either. The regex extraction
+  of the masked suffix out of `identity`'s free-text `message` (`abdm_adapter/service.py`'s
+  `_extract_masked_mobile`) already assumed a masked value and is flagged in that function's own
+  docstring as fragile against ABDM changing the wording; it is now **suspect on the masked
+  assumption itself**, not just the wording, pending a deliberate, unredacted recheck of
+  `profile/account.mobile`. The Android-side consequence (`abha-field-mapping.md`'s
+  `mobileNumber -> Patient.mobileNumber` autofill can no longer satisfy REQ-REG-01's contact-method
+  rule on its own) is noted directly in that file, and that file's own masked-only claim carries
+  the same 2026-08-28 correction; the Android fix itself is Phase 6, not built here.
 - **D5, photo dropped, never persisted.** `abdm_adapter/mapping.py`'s `profile_to_abha_identity`
   reads `profilePhoto`/`kycPhoto` off the raw ABDM body only via `body.get(...)` calls that are
   never assigned to anything the function returns; the values go out of scope with the function
-  and touch nothing else. `photo_url` is always `None`. Proven, not assumed, by
+  and touch nothing else. `photo_url` is always `None`. **Confirmed against the live wire,
+  2026-08-28:** both `profilePhoto` and `kycPhoto` are present as inline base64, approximately 5640
+  bytes each; the drop behavior held against real data, not just the recorded example. Proven, not assumed, by
   `backend/core/tests/test_abha.py::test_d5_no_phi_in_persisted_row_or_logs`, which also checks the
   raw SQL row (bypassing the ORM's decrypt hook, which would otherwise mask a plaintext-token bug)
   and `capsys`-captured log output for a base64 JPEG magic-byte prefix, not just for Aadhaar/OTP

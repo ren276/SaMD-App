@@ -101,22 +101,45 @@ demo-auth creation paths (contract's own "what Phase B must not build" section).
   normally a cache hit, since Call 3 (`enrol_by_aadhaar`) fetches the same token seconds earlier and
   its expiry skew has not lapsed by the time Call 4 runs.
 
+- **D9, watched live M1 run reaches and completes `get_profile` end to end (2026-08-28).** A
+  watched live run against `abhasbx.abdm.gov.in` reached Call 4/5 (request path
+  `.../registration-sessions/e77ec543-.../profile`, ~18:16:58Z) and it **succeeded**. This
+  **confirms the D8 inference**: `client.get_profile`'s `Authorization: Bearer <gateway session
+  token>` alongside `X-token` is correct for `profile/account`. A successful `get_profile` on this
+  same run cannot occur without a successful `enrol_by_aadhaar` preceding it, so **D7's
+  extrapolated half for `enrol/byAadhaar` is thereby also confirmed**, live, not by inference
+  alone. Observed wire shape (structure-only capture, no PHI logged, per the live-run checklist):
+  - DOB: `yearOfBirth`, `monthOfBirth`, `dayOfBirth` all PRESENT. Full DOB observed for this
+    fully-KYC'd account. The D3 year-only fallback did not fire this run; it remains justified for
+    accounts where ABDM only holds a partial DOB.
+  - Photo: `profilePhoto` AND `kycPhoto` both present as inline base64, approximately 5640 bytes
+    each, on the live wire. Confirms D5 against real data: dropped at the backend, `photo_url`
+    stays `null`, never persisted, never logged. This is the observation the deferred photo-un-drop
+    BUILD needed: a future un-drop must decode inline base64 (`Base64.decode` ->
+    `BitmapFactory.decodeByteArray`), not fetch a URL.
+  - Gender: single-char code on the wire (`CODE(len=1)`).
+  - `verificationStatus`: PRESENT on the wire, confirming this (not `verification_source`, which is
+    never a wire field) is the real observable key.
+  - **Mobile: CONTRADICTED, not resolved.** The controlled docs (D4 below, `abha-field-mapping.md`)
+    assert masked-only. A prior watched run observed a full, unmasked 10-digit mobile. This run's
+    own observation of the field was redacted by the structured logger before the masked/unmasked
+    shape could be recorded, so it neither confirms nor overturns either claim. The masked-only
+    assertion and the code that depends on it (`service.py`'s `_extract_masked_mobile`, a regex
+    that assumes a masked value) are both **suspect** pending a deliberate, unredacted check of
+    `profile/account.mobile` on a future watched run. Do not treat either shape as settled.
+
 ## Live-activation risks, verify on first watched enrollment
 
 Each item states the endpoint, current belief, evidence class, and the exact action if it fails.
 
 - `enrollment/request/otp` — **RESOLVED 2026-08-25, measured** (D7 above). Requires
   `Authorization: Bearer <gateway session token>`.
-- `enrollment/enrol/byAadhaar` — **UNVERIFIED, header applied by inference** (D7 above). Confirm on
-  the next watched run. If it 401s *with* the header, or succeeds *without* it, the inference was
-  wrong — record which, and correct `client.py`'s `enrol_by_aadhaar` docstring against that result.
-- `profile/account` (`get_profile`) **UNVERIFIED, header applied by inference (D8 below).**
-  `service.fetch_profile` now acquires a gateway token and `client.get_profile` sends
-  `Authorization: Bearer <gateway session token>` alongside the existing `X-token`. Has never made
-  a real ABDM call end to end (PR #17 tested it against a mock transport only; PR #19 fixed Call 2
-  and Call 3, so Call 4 has not yet been reached on a real run). Confirm on the next watched run.
-  If it 401s even with the header, or succeeds without it, the D7/D8 inference was wrong for this
-  endpoint, and `client.py`'s `get_profile` docstring must be corrected against that result.
+- `enrollment/enrol/byAadhaar` — **CONFIRMED 2026-08-28, live** (D9 above). The watched run's
+  successful `get_profile` could not have happened without a successful `enrol_by_aadhaar` on the
+  same run, confirming the D7 extrapolation for this endpoint.
+- `profile/account` (`get_profile`) — **CONFIRMED 2026-08-28, live** (D9 above). The watched run
+  reached Call 4/5 and it succeeded with `Authorization: Bearer <gateway session token>` alongside
+  `X-token`, confirming the D8 inference.
 - `enrollment/auth/byAbdm` (`verify_mobile_otp`) — still `NotImplementedError` in live mode. When
   implemented, it will carry the same gateway Bearer for the same D7 reasoning.
 - **Finding #6, state-machine semantics on post-enrolment failure.** If `get_profile` fails after
@@ -133,9 +156,11 @@ Each item states the endpoint, current belief, evidence class, and the exact act
   state-semantics design ticket, not this branch.
 - Masked-mobile extraction from free-text `message` (`service.py`'s `_extract_masked_mobile`) is
   still a regex against ABDM's own wording, fragile if ABDM ever rewords the message.
-- `mobile_number` on the final `AbhaIdentity` is masked-only (ABDM never returns the full number
-  via `profile/account`); documented as a contract gap in `abha-internal-contract.md`, not decided
-  or changed here. (D4 in the contract doc.)
+- `mobile_number` on the final `AbhaIdentity`: the masked-only claim is **CONTRADICTED**, not
+  settled. A prior watched run observed a full, unmasked mobile on `profile/account.mobile`; the
+  2026-08-28 run (D9 above) redacted the field before it could adjudicate either way. Both the
+  claim and `_extract_masked_mobile`'s masked-value assumption are suspect pending a deliberate,
+  unredacted recheck. (D4 in the contract doc, also corrected there.)
 
 ## Durable finding: local `.env` silently overrides "stub" test intent
 
@@ -157,3 +182,7 @@ sends the gateway Bearer here too). A 401 at Call 4 after that branch merges is 
 expected, deferred outcome, it is a real finding: the D8 inference was wrong for this endpoint, and
 `client.py`'s `get_profile` docstring and this tracker must both be corrected against the actual
 result, not re-guessed.
+
+**Run completed, 2026-08-28.** All five calls succeeded end to end; see D9 above for the full
+findings, including the one item this run did not settle (mobile masking, contradicted, not
+resolved).
