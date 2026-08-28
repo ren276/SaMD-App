@@ -52,10 +52,17 @@ interface CaseRecordDao {
      *  backed out of mid-flow — still `DRAFT`, never reaching Acknowledgement — can't resurface via
      *  [observeResumableDraftForUser] and get confused with the visit that's actually in progress.
      *  Resets `syncState` to `PENDING` too (syncstate-reset session): the `ABANDONED` status is
-     *  itself a synced field, and this bulk update can hit an already-`SYNCED` DRAFT row. */
+     *  itself a synced field, and this bulk update can hit an already-`SYNCED` DRAFT row.
+     *
+     *  Excludes a `DRAFT` case that already has a `consultation_saved` audit row (async
+     *  submission queue): that case was sent, and its assessment may already be enqueued or
+     *  complete, so a returning patient's new visit must not relabel it `ABANDONED` out from
+     *  under the queue. Same signal, same shape, as [observeResumableDraftForUser]'s exclusion. */
     @Query(
         "UPDATE case_records SET status = 'ABANDONED', updatedAt = :updatedAt, localModifiedAt = :updatedAt, " +
-            "syncState = 'PENDING' WHERE patientId = :patientId AND status = 'DRAFT'",
+            "syncState = 'PENDING' WHERE patientId = :patientId AND status = 'DRAFT' " +
+            "AND NOT EXISTS (SELECT 1 FROM audit_log al WHERE al.caseRecordId = case_records.id " +
+            "AND al.action = 'consultation_saved')",
     )
     suspend fun abandonDraftsForPatient(patientId: String, updatedAt: Instant)
 
@@ -104,15 +111,24 @@ interface CaseRecordDao {
     fun observeByEncounterId(encounterId: String): Flow<CaseRecordEntity?>
 
     /** Crash-recovery resume (item 5, privacy/UX hardening pass): the current worker's own
-     *  in-progress visit, if any — a case still `DRAFT` (never reached Acknowledgement/save) that
-     *  THIS worker started, identified via the audit trail's `encounter_started` row rather than a
-     *  new schema column (no `workerId` exists on `case_records`/`encounters`). One row max in
-     *  practice (a worker starts a new visit only after finishing or abandoning the last), but
-     *  `updatedAt DESC LIMIT 1` picks the most recent if more than one somehow exists. */
+     *  in-progress visit, if any — a case still `DRAFT` (never reached Acknowledgement/save),
+     *  not yet submitted (no `consultation_saved` audit row — the async submission queue leaves
+     *  a sent case at `DRAFT` while its assessment is enqueued or running, and that case must
+     *  not be offered back as resumable), that THIS worker started, identified via the audit
+     *  trail's `encounter_started` row rather than a new schema column (no `workerId` exists on
+     *  `case_records`/`encounters`). One row max in practice (a worker starts a new visit only
+     *  after finishing or abandoning the last), but `updatedAt DESC LIMIT 1` picks the most
+     *  recent if more than one somehow exists.
+     *
+     *  The submitted-check is a `NOT EXISTS` subquery, not a second `JOIN` on `audit_log`: a
+     *  join would multiply one row per matching `consultation_saved` entry and break the
+     *  `LIMIT 1`/most-recent semantics above. */
     @Query(
         "SELECT cr.* FROM case_records cr " +
             "JOIN audit_log al ON al.caseRecordId = cr.id " +
             "WHERE al.userId = :userId AND al.action = 'encounter_started' AND cr.status = 'DRAFT' " +
+            "AND NOT EXISTS (SELECT 1 FROM audit_log sent WHERE sent.caseRecordId = cr.id " +
+            "AND sent.action = 'consultation_saved') " +
             "ORDER BY cr.updatedAt DESC LIMIT 1",
     )
     fun observeResumableDraftForUser(userId: String): Flow<CaseRecordEntity?>
