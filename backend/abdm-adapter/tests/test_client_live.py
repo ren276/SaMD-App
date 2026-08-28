@@ -117,14 +117,15 @@ async def test_get_profile_live_mode_matches_postman_request_shape(
     """Ground truth: docs/requirements/abha-internal-contract.md line 84, the only recorded
     example for this endpoint. `X-token: Bearer <token>` plus REQUEST-ID/TIMESTAMP, GET, no body.
 
-    Also asserts the gateway `Authorization` header, applied by inference from the PR #19 finding
-    (enrollment/request/otp 401s "Missing Credentials", WSO2 error 900902, without an
-    Authorization: Bearer gateway session token; the rejection is a gateway policy rejection, not
-    an application response, and profile/account sits behind the same gateway). This header is NOT
-    itself live-verified for this endpoint: confirm on the next watched run that reaches Call 4
-    (see client.py's get_profile docstring and docs/abdm/M1-tracker.md's live-activation-risks
-    section). The `X-token` assertion below proves the new header was added alongside the existing
-    one, not substituted for it."""
+    Also asserts the gateway `Authorization` header, originally applied by inference from the
+    PR #19 finding (enrollment/request/otp 401s "Missing Credentials", WSO2 error 900902, without
+    an Authorization: Bearer gateway session token; the rejection is a gateway policy rejection,
+    not an application response, and profile/account sits behind the same gateway). CONFIRMED LIVE
+    2026-08-28: a watched run reached Call 4/5 and it succeeded with this header present (see
+    client.py's get_profile docstring and docs/abdm/M1-tracker.md's D9 entry). This test itself
+    still only exercises a mocked transport, per this file's own scope; the live confirmation
+    happened on the real watched run, not here. The `X-token` assertion below proves the new
+    header was added alongside the existing one, not substituted for it."""
     captured: dict[str, httpx.Request] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
