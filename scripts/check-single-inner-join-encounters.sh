@@ -37,7 +37,7 @@ if [ "$count" -gt 1 ]; then
     exit 1
 fi
 
-if ! printf '%s\n' "$matches" | grep -q "^$ALLOWED_FILE:"; then
+if ! printf '%s\n' "$matches" | grep -Fq "$ALLOWED_FILE:"; then
     echo "check-single-inner-join-encounters: the one 'INNER JOIN encounters' site is not in $ALLOWED_FILE."
     echo "$matches"
     echo "That query moved, or a new site replaced it in the wrong place. Confirm this is intentional"

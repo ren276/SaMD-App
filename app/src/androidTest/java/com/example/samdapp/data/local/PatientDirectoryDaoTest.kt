@@ -95,6 +95,23 @@ class PatientDirectoryDaoTest {
     }
 
     @Test
+    fun registeredInsideWindow_withOnlyAnEarlierOutOfWindowEncounter_includedOnRegistrationTime() = runBlocking {
+        // Regression guard: a plain COALESCE(MAX(e.startedAt), p.createdAt) picks the encounter
+        // time whenever any encounter exists at all, even one earlier than registration, which
+        // would wrongly exclude this patient (registered inside the window) because their only
+        // encounter happens to be outside it. The query uses the later of the two specifically
+        // so this case is included and ordered on the registration time, not the stale encounter.
+        val dao = db.patientDao()
+        val enc = db.encounterDao()
+        dao.insert(patient("p1", createdAtMillis = 1_500))
+        enc.insert(encounter("e1", "p1", startedAtMillis = 200))
+
+        val result = dao.observeRegisteredOrSeenBetween(1_000, 2_000).first()
+
+        assertEquals(listOf("p1"), result.map { it.patient.id })
+    }
+
+    @Test
     fun oldEncounterOutsideWindow_newerEncounterInsideWindow_includedOnNewestOnly() = runBlocking {
         // MAX(e.startedAt) must pick the newest encounter, not any encounter - a stale visit
         // from before the window must not by itself keep a patient out of, or force them into,

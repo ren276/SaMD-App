@@ -9,6 +9,7 @@ import com.example.samdapp.domain.repository.PatientRepository
 import com.example.samdapp.domain.usecase.GetRecentPatientsUseCase
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import java.time.Instant
@@ -58,6 +59,6 @@ class PatientsScreenTest {
         composeRule.onNodeWithText("Registered, not yet seen").assertExists("expected the null-lastSeenAt row to show its subtitle")
         composeRule.onNodeWithText("Asha Devi").performClick()
 
-        assert(openedPatientId == "p1") { "Expected tap on a null-lastSeenAt row to resolve to its patient id" }
+        assertEquals("p1", openedPatientId)
     }
 }
