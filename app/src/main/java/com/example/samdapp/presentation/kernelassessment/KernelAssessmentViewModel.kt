@@ -13,6 +13,7 @@ import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.domain.model.KernelReportOutput
 import com.example.samdapp.domain.repository.EvaluateReportRepository
 import com.example.samdapp.domain.repository.KernelReportRepository
+import com.example.samdapp.domain.usecase.GenerateKernelReportUseCase
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
@@ -73,24 +74,29 @@ private fun EvaluateReportOutput.toDisplay(): AssessmentDisplay {
     )
 }
 
+/** Shared with [KernelReportOutput.toDisplay]'s own [InferenceSource.UNAVAILABLE] branch below,
+ *  so a stalled case (no row) and a written UNAVAILABLE row (a real one) can never read
+ *  differently for what is the same clinical state. */
+private const val UNAVAILABLE_SOURCE_LABEL = "Assessment unavailable: no AI result was produced"
+
 /** Synthesized when no report row exists AND no assessment work is live for the case (stalled:
  *  enqueued work finished without ever writing a row, was cancelled, or was never enqueued).
  *  Deliberately identical in shape and wording to [KernelReportOutput]'s own
  *  [InferenceSource.UNAVAILABLE] rendering below — the same retryable state, not a second
- *  failure-looking one, for a case where not even a DB row exists to render it from. */
+ *  failure-looking one, for a case where not even a DB row exists to render it from. Shares its
+ *  predictedCondition/reasoningLines text with [GenerateKernelReportUseCase]'s own written
+ *  UNAVAILABLE row (that class's `UNAVAILABLE_PREDICTED_CONDITION`/`UNAVAILABLE_REASONING_SUMMARY`
+ *  constants), not a second copy of the same wording. */
 private fun stalledDisplay(): AssessmentDisplay = AssessmentDisplay(
-    predictedCondition = "Assessment unavailable",
+    predictedCondition = GenerateKernelReportUseCase.UNAVAILABLE_PREDICTED_CONDITION,
     icdCode = null,
     confidencePercent = 0,
     requiresHumanVerification = true,
     isMockFallback = false,
     isUnavailable = true,
-    sourceLabel = "Assessment unavailable: no AI result was produced",
+    sourceLabel = UNAVAILABLE_SOURCE_LABEL,
     differentialLines = emptyList(),
-    reasoningLines = listOf(
-        "Assessment unavailable. The AI did not produce a result for this case and no diagnosis " +
-            "was generated. Tap Retry to run the assessment again.",
-    ),
+    reasoningLines = listOf(GenerateKernelReportUseCase.UNAVAILABLE_REASONING_SUMMARY),
     evidenceFor = emptyList(),
     evidenceAgainst = emptyList(),
 )
@@ -107,7 +113,7 @@ private fun KernelReportOutput.toDisplay(): AssessmentDisplay = AssessmentDispla
         InferenceSource.MOCK_FALLBACK -> "Offline fallback (mock) — ML server unavailable"
         // Reach-neutral: UNAVAILABLE covers both an unreachable kernel and one that answered
         // with an empty differential. Naming a cause here would be wrong half the time.
-        InferenceSource.UNAVAILABLE -> "Assessment unavailable: no AI result was produced"
+        InferenceSource.UNAVAILABLE -> UNAVAILABLE_SOURCE_LABEL
     },
     differentialLines = differentials,
     reasoningLines = listOf(reasoningSummary),

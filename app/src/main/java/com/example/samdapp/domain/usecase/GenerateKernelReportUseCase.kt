@@ -65,6 +65,15 @@ class GenerateKernelReportUseCase @Inject constructor(
         /** Model-version tag stamped on a dev-flavor mock fallback result — see
          *  `MockKernelFallbackSource` in `src/dev/`. */
         const val MOCK_MODEL_VERSION = "mock-kernel-v0.1"
+
+        /** The single source of truth for the honest-unavailable clinical text, so a
+         *  written [InferenceSource.UNAVAILABLE] row and a stalled case's synthesized display
+         *  (`KernelAssessmentViewModel.stalledDisplay`, no row exists yet to read this from)
+         *  cannot drift apart into two different wordings for the same clinical state. */
+        const val UNAVAILABLE_PREDICTED_CONDITION = "Assessment unavailable"
+        const val UNAVAILABLE_REASONING_SUMMARY = "Assessment unavailable. The AI did not produce a result for this " +
+            "case and no diagnosis was generated. Tap Retry to run the assessment again."
+
         private val logger = Logger.getLogger("KernelUseCase")
 
         /** Optional [KernelPayload] signals considered for [dataQualityScore] — the whitelisted
@@ -264,15 +273,14 @@ class GenerateKernelReportUseCase @Inject constructor(
     ): KernelReportOutput = KernelReportOutput(
         id = UUID.randomUUID().toString(),
         caseRecordId = caseRecordId,
-        predictedCondition = "Assessment unavailable",
+        predictedCondition = UNAVAILABLE_PREDICTED_CONDITION,
         confidenceScore = 0.0,
         differentials = emptyList(),
         // Reach-neutral by design: this same output is produced both when the kernel could not
         // be reached and when it answered 200 with an empty differential. Naming either cause
         // here would be false half the time, and the cause belongs in the audit trail, not on a
         // clinical record. What is true in both cases is that no assessment exists.
-        reasoningSummary = "Assessment unavailable. The AI did not produce a result for this " +
-            "case and no diagnosis was generated. Tap Retry to run the assessment again.",
+        reasoningSummary = UNAVAILABLE_REASONING_SUMMARY,
         evidenceFor = emptyList(),
         evidenceAgainst = emptyList(),
         modelVersion = "unavailable",
