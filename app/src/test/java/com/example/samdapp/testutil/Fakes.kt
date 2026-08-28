@@ -33,6 +33,7 @@ import com.example.samdapp.domain.model.EvaluateReportOutput
 import com.example.samdapp.domain.model.IndianBrandSuggestion
 import com.example.samdapp.domain.model.KernelReportOutput
 import com.example.samdapp.domain.model.Patient
+import com.example.samdapp.domain.model.PatientDirectoryEntry
 import com.example.samdapp.domain.model.Prescription
 import com.example.samdapp.domain.model.ReferralRequest
 import com.example.samdapp.domain.repository.AbhaProfileRepository
@@ -134,7 +135,8 @@ class FakePatientRepository(
 
     override fun observeTodaysPatients(): Flow<List<Patient>> = flowOf(today)
 
-    override fun observeRecentPatients(days: Int): Flow<List<Patient>> = flowOf(today)
+    override fun observeRegisteredOrSeenRecently(days: Int): Flow<List<PatientDirectoryEntry>> =
+        flowOf(today.map { PatientDirectoryEntry(patient = it, lastSeenAt = null) })
 }
 
 class FakeAbhaProfileRepository(

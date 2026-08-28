@@ -50,4 +50,35 @@ interface PatientDao {
             "ORDER BY MAX(e.startedAt) DESC",
     )
     fun observePatientsWithEncounterBetween(startMillis: Long, endMillis: Long): Flow<List<PatientEntity>>
+
+    /**
+     * Patients tab directory read: registered in the window OR seen (encounter started) in the
+     * window, whichever is later. Deliberately a second, separate query from
+     * [observePatientsWithEncounterBetween] rather than a shared one with a flag - Home's
+     * work-queue semantics (REQ-ROS-01, encounter required) and this tab's directory semantics
+     * (registration is enough) must never be able to drift onto the same query by accident.
+     * `INNER JOIN encounters` above is the only encounter-required roster query on this DAO and
+     * must stay that way (see scripts/check-single-inner-join-encounters.sh); this one is LEFT.
+     *
+     * The window predicate is in HAVING, never WHERE. A WHERE clause on `e.startedAt` would
+     * silently re-narrow this LEFT JOIN back into an INNER JOIN (null-extended rows fail the
+     * WHERE and get dropped), which compiles, runs, and reintroduces the exact bug this query
+     * exists to fix: an encounter-less patient becomes unfindable again. HAVING runs after the
+     * GROUP BY / COALESCE, so a patient with no encounter is judged on their own createdAt
+     * instead of being dropped.
+     *
+     * Safe while sync is push-only (docs/sync-design.md: RemoteMediator/pull not built) - every
+     * patients row on this device was authored on this device, so this cannot surface anyone
+     * this worker did not personally register. When pull lands, this must additionally filter
+     * to device-authored rows or it reopens REQ-ROS-02/H-04 for server-sourced patients.
+     */
+    @Query(
+        "SELECT p.*, MAX(e.startedAt) AS lastSeenAt FROM patients p " +
+            "LEFT JOIN encounters e ON e.patientId = p.id " +
+            "GROUP BY p.id " +
+            "HAVING COALESCE(MAX(e.startedAt), p.createdAt) >= :startMillis " +
+            "AND COALESCE(MAX(e.startedAt), p.createdAt) < :endMillis " +
+            "ORDER BY COALESCE(MAX(e.startedAt), p.createdAt) DESC, p.id ASC",
+    )
+    fun observeRegisteredOrSeenBetween(startMillis: Long, endMillis: Long): Flow<List<PatientDirectoryRow>>
 }

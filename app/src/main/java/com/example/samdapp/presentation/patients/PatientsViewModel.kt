@@ -2,7 +2,7 @@ package com.example.samdapp.presentation.patients
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.samdapp.domain.model.Patient
+import com.example.samdapp.domain.model.PatientDirectoryEntry
 import com.example.samdapp.domain.usecase.GetRecentPatientsUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -14,7 +14,7 @@ import javax.inject.Inject
 
 data class PatientsUiState(
     val query: String = "",
-    val patients: List<Patient> = emptyList(),
+    val patients: List<PatientDirectoryEntry> = emptyList(),
     val isLoading: Boolean = true,
 )
 
@@ -29,12 +29,13 @@ class PatientsViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            combine(getRecentPatientsUseCase(), _query) { patients, query ->
+            combine(getRecentPatientsUseCase(), _query) { entries, query ->
                 val filtered = if (query.isBlank()) {
-                    patients
+                    entries
                 } else {
-                    patients.filter {
-                        it.fullName.contains(query, ignoreCase = true) || it.id.contains(query, ignoreCase = true)
+                    entries.filter {
+                        it.patient.fullName.contains(query, ignoreCase = true) ||
+                            it.patient.id.contains(query, ignoreCase = true)
                     }
                 }
                 PatientsUiState(query = query, patients = filtered, isLoading = false)
