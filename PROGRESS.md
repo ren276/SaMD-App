@@ -3334,3 +3334,96 @@ Consequences to expect on the first launch after upgrade, per device:
 Verification before release: the migration must be exercised on a real SQLCipher-encrypted
 database, not only in JVM tests — see the HARD GATE section above for why an androidTest suite that
 compiles clean is not evidence that it passes.
+
+---
+
+## Android: resumable-draft exclusion for the async submission queue (2026-08-28)
+
+Carried ticket from PR #23 (the async assessment queue session). After the queue landed,
+`ConsultationScreen`'s send path enqueues the assessment but never advances `CaseRecord` off
+`DRAFT`, so a case that has been fully submitted and is only waiting on its assessment sits at the
+same `DRAFT` status a genuinely in-progress consultation uses. Two `DRAFT`-keyed queries misfired
+on it: `CaseRecordDao.observeResumableDraftForUser` offered it back to Home as "resume this
+consultation?" — accepting it re-entered vitals capture, wrote a false `encounter_resumed` audit
+row, and a second send would re-run the assessment and upsert over the already-written report once
+the first run finished; `CaseRecordDao.abandonDraftsForPatient` flipped it to `ABANDONED` if the
+same patient returned the same day, silently mislabelling a case with a completed assessment.
+
+**Design memo first (Opus, read-only), `scratchpad/casestatus-after-enqueue-design.md`.** Weighed
+a new `CaseStatus` value (`SUBMITTED`) against a query-only exclusion. Recommended the query-only
+option: the only signal needed, a `consultation_saved` audit row, already exists, is insert-only,
+indexed on `caseRecordId`, and is written and committed one navigation step before the enqueue —
+so it can never lag the assessment work. A new enum value would need a Postgres CHECK migration,
+a backend transition-table edit, and a coordinated device+backend release for what the memo's own
+regulatory framing established is a pipeline fact, not a clinical status (three prior memos already
+draw that line: `SyncStatusImpl.kt`, the async-queue design memo, the queue-seams memo). Full
+`CaseStatus` reader list (13 sites, compile-checked and SQL-literal) enumerated in the memo as the
+cost basis for the rejected option.
+
+**Build (Sonnet, mechanical per the memo's recommendation).** `CaseRecordDao.kt`:
+`observeResumableDraftForUser` and `abandonDraftsForPatient` both gained a `NOT EXISTS` subquery
+against `audit_log` for a `consultation_saved` row on the same case, not a second `JOIN` (a join
+would multiply rows and break each query's `LIMIT 1` / bulk-update semantics). No `CaseStatus`
+change, no schema, no migration, no backend touch.
+
+**Tests.** New `ResumableDraftAndAbandonDaoTest.kt` (Room instrumented, real DB): a submitted case
+excluded from both queries, a genuinely in-progress `DRAFT` still resumable, and a multi-audit-row
+case guarding the subquery against row multiplication. `testDevDebugUnitTest`: 260 pass. New
+instrumented tests: 3/3 pass on device (`Pixel_9_Pro_3` AVD, confirmed attached), 100% success
+rate.
+
+Branch `fix/resumable-draft-exclusion`, commit `7dee000`, PR #24 opened and pushed.
+
+## Backend Phase 5: M1 live run, wire-shape findings, mobile-masking contradiction (2026-08-28)
+
+First watched live M1 run against the ABDM sandbox reaching the full five-call flow end to end
+(session token, cert, send-OTP, enrol-by-Aadhaar, `get_profile`). Request path
+`.../registration-sessions/e77ec543-.../profile`, ~18:16:58Z.
+
+**`get_profile` succeeded live, confirming D8** (`docs/abdm/M1-tracker.md`): the gateway
+`Authorization: Bearer` alongside the existing `X-token` is correct for `profile/account`, not
+just an extrapolation from the `send_otp` finding. Since a successful `get_profile` cannot happen
+without a successful `enrol_by_aadhaar` on the same run, **D7's extrapolated header for
+`enrol/byAadhaar` is confirmed too**. Both live-activation-risk entries flipped from `UNVERIFIED`
+to `CONFIRMED`. Recorded as D9 in the tracker.
+
+**Wire-shape findings, structure-only capture (no PHI logged), recorded in `M1-tracker.md` and
+`docs/requirements/abha-internal-contract.md`:**
+- DOB: `yearOfBirth`/`monthOfBirth`/`dayOfBirth` all present for this fully-KYC'd account. The
+  D3 year-only fallback did not fire this run; it remains justified for accounts where ABDM only
+  holds a partial DOB.
+- Photo: `profilePhoto` and `kycPhoto` both present as inline base64, ~5640 bytes each, confirming
+  D5 against real data (dropped at the backend, `photo_url` stays `null`, never persisted, never
+  logged). This is the observation the deferred photo-un-drop BUILD needed: a future un-drop must
+  decode inline base64 (`Base64.decode` -> `BitmapFactory.decodeByteArray`), not fetch a URL.
+- Gender: single-char code on the wire.
+- `verificationStatus` present on the wire, confirming it (not `verification_source`, never a wire
+  field) is the real observable key.
+
+**Mobile masking (D4): CONTRADICTED, not resolved.** The controlled docs asserted masked-only. A
+prior watched run had already observed a full, unmasked 10-digit mobile on the same field; this
+run's own observation was redacted by the structured logger before the masked/unmasked shape could
+be recorded, so it neither confirmed nor overturned either claim. Corrected in matching terms, not
+softened to "unverified," across all four sites that made the masked-only claim: the D4 bullet and
+the mobile row in the field-diff table (`abha-internal-contract.md`), the `mobileNumber` row
+(`abha-field-mapping.md:23`), and the `mobile_number` comment (`mapping.py:50-56`). All four now
+say contradicted/unresolved and flag `service.py`'s `_extract_masked_mobile` as suspect on its
+masked-value assumption, pending a deliberate, unredacted recheck on a future watched run. None of
+the four assert masked or unmasked as settled fact.
+
+**Temporary structural-shape instrumentation.** A `LIVE_RUN_CAPTURE`-tagged log (presence/
+absence/length only, verified to contain zero patient values) was added to
+`abdm_adapter/errors.py` to let the operator observe the wire shape live without violating the
+D5 no-PHI-in-logs guarantee (`test_d5_no_phi_in_persisted_row_or_logs` and its live sibling, both
+of which stayed green throughout). Removed in full after the run; `errors.py` is byte-identical to
+its pre-instrumentation state, so it carries no diff and was never staged or committed.
+
+**Verify.** All under `ABDM_MODE=stub` (checked by confirming no ABDM hostnames appear in test
+output, not by trusting `.env`): `test_d5_no_phi_in_persisted_row_or_logs` + live sibling, 2/2
+pass; `backend/core/tests/test_abha.py`, 19/19 pass; `backend/abdm-adapter/tests/`, 64/64 pass.
+
+Same branch/PR as above (`fix/resumable-draft-exclusion`, PR #24), commit `db70443`.
+
+**Open item, not this session's to close:** mobile masking stays contradicted until a deliberate,
+unredacted watched-run check of `profile/account.mobile` happens. Do not build Android-side mobile
+handling assuming either shape until that check lands.
