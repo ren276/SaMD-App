@@ -4,7 +4,9 @@ import com.example.samdapp.data.local.dao.KernelReportDao
 import com.example.samdapp.data.local.entity.KernelReportEntity
 import com.example.samdapp.domain.model.KernelReportOutput
 import com.example.samdapp.domain.repository.KernelReportRepository
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import java.time.Instant
 import javax.inject.Inject
 
@@ -35,6 +37,9 @@ class KernelReportRepositoryImpl @Inject constructor(
     // not an arbitrary pick from several.
     override suspend fun getForCase(caseRecordId: String): KernelReportOutput? =
         kernelReportDao.observeForCase(caseRecordId).first()?.toDomain()
+
+    override fun observeForCase(caseRecordId: String): Flow<KernelReportOutput?> =
+        kernelReportDao.observeForCase(caseRecordId).map { it?.toDomain() }
 }
 
 private fun KernelReportOutput.toEntity(id: String, serverVersion: Int?) = KernelReportEntity(

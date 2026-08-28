@@ -215,6 +215,20 @@ class GenerateKernelReportUseCaseTest {
     }
 
     @Test
+    fun `recordUnavailable writes an honest UNAVAILABLE row with no payload to score`() = runTest {
+        val repo = FakeKernelReportRepository()
+        val useCase = GenerateKernelReportUseCase(repo, FakeDeviceInfoProvider(), OfflineKernelSource(), FakeKernelFallbackSource(result = null), FakeAuditLogger())
+
+        useCase.recordUnavailable("case-1")
+
+        val saved = repo.saved["case-1"]
+        requireNotNull(saved)
+        assertEquals(InferenceSource.UNAVAILABLE, saved.inferenceSource)
+        assertEquals("Assessment unavailable", saved.predictedCondition)
+        assertEquals(0.0, saved.dataQualityScore ?: -1.0, 0.0)
+    }
+
+    @Test
     fun `save failure surfaces as a failed Result`() = runTest {
         val repo = FakeKernelReportRepository().apply { saveResult = Result.failure(RuntimeException("db error")) }
         val fallback = FakeKernelFallbackSource(result = null)

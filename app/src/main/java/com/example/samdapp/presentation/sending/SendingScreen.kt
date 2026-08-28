@@ -5,11 +5,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import com.example.samdapp.presentation.common.SamdLoadingIndicator
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -39,18 +42,29 @@ fun SendingScreen(
             }
         }
     }
+    val uiState by viewModel.uiState.collectAsState()
     Scaffold { padding ->
         Column(
             modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            SamdLoadingIndicator()
-            Text(
-                text = "Sending case to processing kernel…",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(top = 16.dp),
-            )
+            if (uiState.enqueueFailed) {
+                Text(
+                    text = "Could not queue this case for assessment. Check your device storage and try again.",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Button(onClick = viewModel::retryEnqueue, modifier = Modifier.padding(top = 16.dp)) {
+                    Text("Retry")
+                }
+            } else {
+                SamdLoadingIndicator()
+                Text(
+                    text = "Queuing case for assessment…",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(top = 16.dp),
+                )
+            }
         }
     }
 }

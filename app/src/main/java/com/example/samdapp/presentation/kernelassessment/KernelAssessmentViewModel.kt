@@ -3,6 +3,8 @@ package com.example.samdapp.presentation.kernelassessment
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.samdapp.data.assessment.AssessmentQueueScheduler
+import com.example.samdapp.data.assessment.AssessmentWorkState
 import com.example.samdapp.domain.audit.AuditAction
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
@@ -11,7 +13,6 @@ import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.domain.model.KernelReportOutput
 import com.example.samdapp.domain.repository.EvaluateReportRepository
 import com.example.samdapp.domain.repository.KernelReportRepository
-import com.example.samdapp.domain.usecase.RetryKernelAssessmentUseCase
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
@@ -20,6 +21,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -70,6 +72,28 @@ private fun EvaluateReportOutput.toDisplay(): AssessmentDisplay {
         evidenceAgainst = emptyList(),
     )
 }
+
+/** Synthesized when no report row exists AND no assessment work is live for the case (stalled:
+ *  enqueued work finished without ever writing a row, was cancelled, or was never enqueued).
+ *  Deliberately identical in shape and wording to [KernelReportOutput]'s own
+ *  [InferenceSource.UNAVAILABLE] rendering below — the same retryable state, not a second
+ *  failure-looking one, for a case where not even a DB row exists to render it from. */
+private fun stalledDisplay(): AssessmentDisplay = AssessmentDisplay(
+    predictedCondition = "Assessment unavailable",
+    icdCode = null,
+    confidencePercent = 0,
+    requiresHumanVerification = true,
+    isMockFallback = false,
+    isUnavailable = true,
+    sourceLabel = "Assessment unavailable: no AI result was produced",
+    differentialLines = emptyList(),
+    reasoningLines = listOf(
+        "Assessment unavailable. The AI did not produce a result for this case and no diagnosis " +
+            "was generated. Tap Retry to run the assessment again.",
+    ),
+    evidenceFor = emptyList(),
+    evidenceAgainst = emptyList(),
+)
 
 private fun KernelReportOutput.toDisplay(): AssessmentDisplay = AssessmentDisplay(
     predictedCondition = predictedCondition,
@@ -123,7 +147,7 @@ class KernelAssessmentViewModel @AssistedInject constructor(
     @Assisted private val caseRecordId: String,
     private val evaluateReportRepository: EvaluateReportRepository,
     private val kernelReportRepository: KernelReportRepository,
-    private val retryKernelAssessmentUseCase: RetryKernelAssessmentUseCase,
+    private val assessmentQueueScheduler: AssessmentQueueScheduler,
     private val auditLogger: AuditLogger,
 ) : ViewModel(), KernelAssessmentActions {
 
@@ -139,32 +163,45 @@ class KernelAssessmentViewModel @AssistedInject constructor(
     val effects = _effects.receiveAsFlow()
 
     init {
+        // Collected, not one-shot: the async submission queue means no report row is guaranteed
+        // to exist yet when this screen opens. workState tells apart "still processing" (show a
+        // wait state) from "stalled" (no row, nothing running - offer the same retry affordance
+        // an UNAVAILABLE row already offers, via stalledDisplay()).
         viewModelScope.launch {
-            val evaluateOutput = evaluateReportRepository.getForCase(caseRecordId)
-            val kernelOutput = kernelReportRepository.getForCase(caseRecordId)
-            val display = evaluateOutput?.toDisplay() ?: kernelOutput?.toDisplay()
-            _uiState.update { it.copy(isLoading = false, display = display) }
+            combine(
+                evaluateReportRepository.observeForCase(caseRecordId),
+                kernelReportRepository.observeForCase(caseRecordId),
+                assessmentQueueScheduler.observeWorkState(caseRecordId),
+            ) { evaluateOutput, kernelOutput, workState ->
+                Triple(evaluateOutput, kernelOutput, workState)
+            }.collect { (evaluateOutput, kernelOutput, workState) ->
+                val reportDisplay = evaluateOutput?.toDisplay() ?: kernelOutput?.toDisplay()
+                _uiState.update {
+                    when {
+                        reportDisplay != null -> it.copy(
+                            isLoading = false,
+                            display = reportDisplay,
+                            isRetrying = workState != AssessmentWorkState.NONE,
+                        )
+                        workState != AssessmentWorkState.NONE -> it.copy(isLoading = true, display = null)
+                        else -> it.copy(isLoading = false, display = stalledDisplay(), isRetrying = false)
+                    }
+                }
+            }
         }
     }
 
     override fun onLiabilityAcknowledgedChange(acknowledged: Boolean) =
         _uiState.update { it.copy(liabilityAcknowledged = acknowledged) }
 
-    /** Retry affordance on the UNAVAILABLE state (kernel-mock production safety fix): re-runs the
-     *  real `/api/v1/assess` call. May legitimately come back UNAVAILABLE again if the server is
-     *  still unreachable — that's an honest result, not an error in this use case. */
+    /** Retry affordance on the UNAVAILABLE/stalled state: re-enqueues the same unique assessment
+     *  work as the original send, via [assessmentQueueScheduler]. Fire-and-forget - the result
+     *  reaches the screen through the collected Flow in [init], not through this call's return.
+     *  May legitimately come back UNAVAILABLE again if the server is still unreachable; that's an
+     *  honest result, not an error in this use case. */
     override fun onRetry() {
         if (_uiState.value.isRetrying) return
-        viewModelScope.launch {
-            _uiState.update { it.copy(isRetrying = true) }
-            try {
-                val result = retryKernelAssessmentUseCase(caseRecordId)
-                val display = result.getOrNull()?.toDisplay() ?: _uiState.value.display
-                _uiState.update { it.copy(display = display) }
-            } finally {
-                _uiState.update { it.copy(isRetrying = false) }
-            }
-        }
+        assessmentQueueScheduler.enqueueAssessment(caseRecordId)
     }
 
     override fun onContinue() {

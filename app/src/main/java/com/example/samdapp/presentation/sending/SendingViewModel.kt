@@ -2,47 +2,51 @@ package com.example.samdapp.presentation.sending
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.samdapp.domain.audit.AuditAction
-import com.example.samdapp.domain.audit.AuditLogger
-import com.example.samdapp.domain.audit.auditPayload
-import com.example.samdapp.domain.model.VitalsReading
-import com.example.samdapp.domain.model.toVitalsReading
-import com.example.samdapp.domain.repository.ConsultationRepository
-import com.example.samdapp.domain.repository.EncounterRepository
-import com.example.samdapp.domain.repository.PatientRepository
-import com.example.samdapp.domain.repository.VitalsRepository
-import com.example.samdapp.domain.usecase.GenerateEvaluateReportUseCase
-import com.example.samdapp.domain.usecase.GenerateKernelReportUseCase
-import com.example.samdapp.domain.usecase.SendToKernelUseCase
-import com.google.gson.Gson
+import com.example.samdapp.data.assessment.AssessmentQueueScheduler
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.filterNotNull
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.logging.Logger
 
 sealed interface SendingEffect {
     data class Done(val caseRecordId: String, val consultationId: String, val audioUri: String?) : SendingEffect
 }
 
+data class SendingUiState(val enqueueFailed: Boolean = false)
+
+/**
+ * Async submission queue: the blocking kernel + evaluate calls this screen used to run inline
+ * (this class's old init block) now live in `AssessmentRunner`, run by `AssessmentWorker` off a
+ * single enqueue. This ViewModel's whole job is enqueue-then-[SendingEffect.Done]:
+ * [SendingEffect.Done] fires the instant [AssessmentQueueScheduler.enqueueAssessment] returns,
+ * not when the assessment itself finishes — `KernelAssessmentViewModel`'s collected Flow, not
+ * this screen, is what shows the result landing.
+ *
+ * [AssessmentQueueScheduler.enqueueAssessment] is not expected to throw in normal operation
+ * (WorkManager's own enqueue is a local, synchronous write), but a failed enqueue means no
+ * assessment will ever run for this case — silently proceeding to [SendingEffect.Done] would be
+ * worse than the blocking screen this replaces. A failure surfaces as
+ * [SendingUiState.enqueueFailed] instead, with [retryEnqueue] as the remedy, rather than being
+ * swallowed.
+ */
 @HiltViewModel(assistedFactory = SendingViewModel.Factory::class)
 class SendingViewModel @AssistedInject constructor(
     @Assisted("caseRecordId") private val caseRecordId: String,
     @Assisted("consultationId") private val consultationId: String,
     @Assisted("audioUri") private val audioUri: String?,
-    @Assisted("encounterId") private val encounterId: String,
-    private val vitalsRepository: VitalsRepository,
-    private val consultationRepository: ConsultationRepository,
-    private val encounterRepository: EncounterRepository,
-    private val patientRepository: PatientRepository,
-    private val sendToKernelUseCase: SendToKernelUseCase,
-    private val generateKernelReportUseCase: GenerateKernelReportUseCase,
-    private val generateEvaluateReportUseCase: GenerateEvaluateReportUseCase,
-    private val auditLogger: AuditLogger,
+    // Kept only for Factory/route-shape compatibility — the assessment itself now re-derives
+    // encounterId from caseRecordId (AssessmentRunner), same as the old retry use case did.
+    @Assisted("encounterId") encounterId: String,
+    private val assessmentQueueScheduler: AssessmentQueueScheduler,
 ) : ViewModel() {
 
     @AssistedFactory
@@ -57,80 +61,35 @@ class SendingViewModel @AssistedInject constructor(
 
     private val _effects = Channel<SendingEffect>(Channel.BUFFERED)
     val effects = _effects.receiveAsFlow()
-    private val gson = Gson()
+
+    private val _uiState = MutableStateFlow(SendingUiState())
+    val uiState: StateFlow<SendingUiState> = _uiState.asStateFlow()
 
     init {
+        enqueueAndProceed()
+    }
+
+    fun retryEnqueue() {
+        _uiState.update { it.copy(enqueueFailed = false) }
+        enqueueAndProceed()
+    }
+
+    private fun enqueueAndProceed() {
         viewModelScope.launch {
-            // Fetched by encounterId, not passed a Patient — see SendToKernelUseCase KDoc for
-            // the structural pseudonymization boundary this enforces.
-            val vitals = vitalsRepository.observeLatestForEncounter(encounterId).first()?.toVitalsReading()
-                ?: VitalsReading()
-            val consultation = consultationRepository.observeForEncounter(encounterId).filterNotNull().first()
-
-            // Resolve age + sex for the XGBoost classifier — these are clinical signals, not PII.
-            // The encounter → patient lookup is a one-hop read; null is safe (the use case
-            // uses safe defaults when age/sex are unavailable).
-            val encounter = encounterRepository.observeEncounter(encounterId).first()
-            val patient = encounter?.patientId?.let { patientRepository.observePatient(it).first() }
-            val patientAge = patient?.age
-            val patientSex = patient?.biologicalSex
-
-            val payload = sendToKernelUseCase(vitals = vitals, consultation = consultation, caseToken = caseRecordId)
-                .getOrNull()
-
-            val kernelResult = if (payload != null) {
-                generateKernelReportUseCase(
-                    caseRecordId = caseRecordId,
-                    payload = payload,
-                    patientAge = patientAge,
-                    patientSex = patientSex,
-                )
-            } else {
-                null
+            try {
+                assessmentQueueScheduler.enqueueAssessment(caseRecordId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logger.warning("Could not enqueue assessment for case $caseRecordId: ${e.message}")
+                _uiState.update { it.copy(enqueueFailed = true) }
+                return@launch
             }
-
-            // Fire alongside the /v1/assess call above — a distinct clinical concern (NLEM
-            // treatment/brand-mapping/vitals-triage), no mock fallback, failure just means the
-            // report screen omits that section (see GenerateEvaluateReportUseCase KDoc).
-            val evaluateResult = if (payload != null) {
-                generateEvaluateReportUseCase(
-                    caseRecordId = caseRecordId,
-                    payload = payload,
-                    patientAge = patientAge,
-                    patientSex = patientSex,
-                )
-            } else {
-                null
-            }
-
-            // Full raw backend response dump (inference start/end, diagnostic summary, treatment,
-            // safety/triage) into the audit trail — distinct from the curated subset the report/
-            // prescription page actually renders (see AuditAction.EVALUATE_RESPONSE_RECEIVED KDoc).
-            evaluateResult?.onSuccess { output ->
-                auditLogger.log(
-                    action = AuditAction.EVALUATE_RESPONSE_RECEIVED,
-                    patientId = patient?.id,
-                    caseRecordId = caseRecordId,
-                    payload = gson.toJson(output),
-                )
-            }?.onFailure { e ->
-                auditLogger.log(
-                    action = AuditAction.EVALUATE_RESPONSE_FAILED,
-                    patientId = patient?.id,
-                    caseRecordId = caseRecordId,
-                    payload = auditPayload("error" to e.message),
-                )
-            }
-
-            auditLogger.log(
-                action = AuditAction.KERNEL_RESPONSE_RECEIVED,
-                caseRecordId = caseRecordId,
-                payload = auditPayload(
-                    "consultationId" to consultationId,
-                    "inferenceSource" to kernelResult?.getOrNull()?.inferenceSource?.name,
-                ),
-            )
             _effects.send(SendingEffect.Done(caseRecordId, consultationId, audioUri))
         }
+    }
+
+    private companion object {
+        val logger = Logger.getLogger("SendingViewModel")
     }
 }

@@ -1,5 +1,7 @@
 package com.example.samdapp.testutil
 
+import com.example.samdapp.data.assessment.AssessmentQueueScheduler
+import com.example.samdapp.data.assessment.AssessmentWorkState
 import com.example.samdapp.data.local.dao.AuditLogDao
 import com.example.samdapp.data.local.entity.AuditLogEntity
 import com.example.samdapp.domain.audit.AuditAction
@@ -294,6 +296,17 @@ class FakeCaseRecordRepository(
 
     override fun observeCaseRecord(caseRecordId: String): Flow<CaseRecord?> = streamFor(caseRecordId).asStateFlow()
 
+    // Mirrors CaseRecordRepositoryImpl.getDayOrdinal's day-from-the-case, not day-from-now, rule.
+    override suspend fun getDayOrdinal(caseRecordId: String): Int? {
+        val record = records[caseRecordId] ?: return null
+        val zone = java.time.ZoneId.systemDefault()
+        val day = java.time.LocalDate.ofInstant(record.createdAt, zone)
+        return records.values.count {
+            val otherDay = java.time.LocalDate.ofInstant(it.createdAt, zone)
+            otherDay == day && (it.createdAt < record.createdAt || (it.createdAt == record.createdAt && it.id <= caseRecordId))
+        }
+    }
+
     override fun observeLatestForPatient(patientId: String): Flow<CaseRecord?> =
         flowOf(records.values.filter { it.patientId == patientId }.maxByOrNull { it.updatedAt })
 
@@ -352,13 +365,21 @@ class FakeReferralRepository : ReferralRepository {
 class FakeKernelReportRepository : KernelReportRepository {
     val saved = mutableMapOf<String, KernelReportOutput>()
     var saveResult: Result<Unit> = Result.success(Unit)
+    private val streams = mutableMapOf<String, MutableStateFlow<KernelReportOutput?>>()
+
+    private fun streamFor(caseRecordId: String) = streams.getOrPut(caseRecordId) { MutableStateFlow(saved[caseRecordId]) }
 
     override suspend fun save(report: KernelReportOutput): Result<Unit> {
-        if (saveResult.isSuccess) saved[report.caseRecordId] = report
+        if (saveResult.isSuccess) {
+            saved[report.caseRecordId] = report
+            streamFor(report.caseRecordId).value = report
+        }
         return saveResult
     }
 
     override suspend fun getForCase(caseRecordId: String): KernelReportOutput? = saved[caseRecordId]
+
+    override fun observeForCase(caseRecordId: String): Flow<KernelReportOutput?> = streamFor(caseRecordId).asStateFlow()
 }
 
 /** H-14: [saved] and [failures] mirror EvaluateReportRepositoryImpl's real "one row per case"
@@ -369,11 +390,15 @@ class FakeEvaluateReportRepository : EvaluateReportRepository {
     val failures = mutableMapOf<String, String>()
     var saveResult: Result<Unit> = Result.success(Unit)
     var saveFailureResult: Result<Unit> = Result.success(Unit)
+    private val streams = mutableMapOf<String, MutableStateFlow<EvaluateReportOutput?>>()
+
+    private fun streamFor(caseRecordId: String) = streams.getOrPut(caseRecordId) { MutableStateFlow(saved[caseRecordId]) }
 
     override suspend fun save(report: EvaluateReportOutput): Result<Unit> {
         if (saveResult.isSuccess) {
             saved[report.caseRecordId] = report
             failures.remove(report.caseRecordId)
+            streamFor(report.caseRecordId).value = report
         }
         return saveResult
     }
@@ -382,13 +407,37 @@ class FakeEvaluateReportRepository : EvaluateReportRepository {
         if (saveFailureResult.isSuccess) {
             failures[caseRecordId] = failureCode
             saved.remove(caseRecordId)
+            streamFor(caseRecordId).value = null
         }
         return saveFailureResult
     }
 
     override suspend fun getForCase(caseRecordId: String): EvaluateReportOutput? = saved[caseRecordId]
 
+    override fun observeForCase(caseRecordId: String): Flow<EvaluateReportOutput?> = streamFor(caseRecordId).asStateFlow()
+
     override suspend fun getFailureCodeForCase(caseRecordId: String): String? = failures[caseRecordId]
+}
+
+/** [enqueued] records every call for assertions; [setWorkState] lets a test simulate the
+ *  WorkManager-observed state (QUEUED/RUNNING/NONE) independently of whether a report row has
+ *  been saved, the same way the real [com.example.samdapp.data.assessment
+ *  .WorkManagerAssessmentScheduler] and the DB are two independently-observed sources. */
+class FakeAssessmentQueueScheduler : AssessmentQueueScheduler {
+    val enqueued = mutableListOf<String>()
+    private val states = mutableMapOf<String, MutableStateFlow<AssessmentWorkState>>()
+
+    private fun streamFor(caseRecordId: String) = states.getOrPut(caseRecordId) { MutableStateFlow(AssessmentWorkState.NONE) }
+
+    override fun enqueueAssessment(caseRecordId: String) {
+        enqueued += caseRecordId
+    }
+
+    override fun observeWorkState(caseRecordId: String): Flow<AssessmentWorkState> = streamFor(caseRecordId).asStateFlow()
+
+    fun setWorkState(caseRecordId: String, state: AssessmentWorkState) {
+        streamFor(caseRecordId).value = state
+    }
 }
 
 class FakeDiagnosisFeedbackRepository : DiagnosisFeedbackRepository {
