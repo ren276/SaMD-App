@@ -10,7 +10,9 @@ import com.example.samdapp.domain.model.EvaluateSafetyAndTriage
 import com.example.samdapp.domain.model.IndianBrandSuggestion
 import com.example.samdapp.domain.repository.EvaluateReportRepository
 import com.google.gson.Gson
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import java.time.Instant
 import java.util.UUID
 import javax.inject.Inject
@@ -84,23 +86,30 @@ class EvaluateReportRepositoryImpl @Inject constructor(
         )
     }
 
-    override suspend fun getForCase(caseRecordId: String): EvaluateReportOutput? {
-        val entity = evaluateReportDao.observeForCase(caseRecordId).first() ?: return null
-        if (entity.failureCode != null) return null
-        val payload = gson.fromJson(entity.payloadJson, EvaluateReportPayload::class.java)
+    override suspend fun getForCase(caseRecordId: String): EvaluateReportOutput? =
+        evaluateReportDao.observeForCase(caseRecordId).first()?.toOutputOrNull()
+
+    override fun observeForCase(caseRecordId: String): Flow<EvaluateReportOutput?> =
+        evaluateReportDao.observeForCase(caseRecordId).map { it?.toOutputOrNull() }
+
+    override suspend fun getFailureCodeForCase(caseRecordId: String): String? =
+        evaluateReportDao.getFailureCode(caseRecordId)
+
+    /** Null for a failure-marker row (see [EvaluateReportEntity.failureCode]'s KDoc) as well as a
+     *  missing one — a caller must never see the placeholder `payloadJson` as a real report. */
+    private fun EvaluateReportEntity.toOutputOrNull(): EvaluateReportOutput? {
+        if (failureCode != null) return null
+        val payload = gson.fromJson(payloadJson, EvaluateReportPayload::class.java)
         return EvaluateReportOutput(
-            id = entity.id,
-            caseRecordId = entity.caseRecordId,
+            id = id,
+            caseRecordId = caseRecordId,
             diagnosticSummary = payload.diagnosticSummary,
             nlemTreatment = payload.nlemTreatment,
             brandMapping = payload.brandMapping,
             safetyAndTriage = payload.safetyAndTriage,
             topIndianBrand = payload.topIndianBrand,
-            inferenceStartedAt = entity.inferenceStartedAt,
-            inferenceEndedAt = entity.inferenceEndedAt,
+            inferenceStartedAt = inferenceStartedAt,
+            inferenceEndedAt = inferenceEndedAt,
         )
     }
-
-    override suspend fun getFailureCodeForCase(caseRecordId: String): String? =
-        evaluateReportDao.getFailureCode(caseRecordId)
 }

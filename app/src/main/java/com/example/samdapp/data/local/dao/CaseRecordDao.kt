@@ -74,6 +74,26 @@ interface CaseRecordDao {
     @Query("SELECT * FROM case_records WHERE id = :caseRecordId")
     fun observeById(caseRecordId: String): Flow<CaseRecordEntity?>
 
+    /** The day-ordinal queue-position receipt (async submission queue, "case N of today") -
+     *  display-only, never a lookup key. Bounded by the day window the caller computes from the
+     *  target case's OWN `createdAt` (not the clock at read time - see
+     *  [com.example.samdapp.data.repository.CaseRecordRepositoryImpl.getDayOrdinal]), with a
+     *  `(createdAt, id)` tiebreak mirroring [PatientDao.observeRegisteredOrSeenBetween]'s
+     *  deterministic ordering. Stable: `case_records` rows are only ever inserted, never deleted
+     *  (abandonment is a status flip to `ABANDONED`, see [abandonDraftsForPatient]), so the count
+     *  of cases at or before a given one inside its day can never change once that case exists. */
+    @Query(
+        "SELECT COUNT(*) FROM case_records " +
+            "WHERE createdAt >= :dayStartMillis AND createdAt < :dayEndMillis " +
+            "AND (createdAt < :caseCreatedAtMillis OR (createdAt = :caseCreatedAtMillis AND id <= :caseRecordId))",
+    )
+    suspend fun getDayOrdinal(
+        dayStartMillis: Long,
+        dayEndMillis: Long,
+        caseCreatedAtMillis: Long,
+        caseRecordId: String,
+    ): Int
+
     @Query("SELECT * FROM case_records WHERE patientId = :patientId ORDER BY updatedAt DESC LIMIT 1")
     fun observeLatestForPatient(patientId: String): Flow<CaseRecordEntity?>
 

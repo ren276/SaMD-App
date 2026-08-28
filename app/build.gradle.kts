@@ -104,6 +104,15 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+    testOptions {
+        // Gson reflectively serializes java.time.Instant fields (see the audit-log payload in
+        // AssessmentRunner and elsewhere) - fine on-device (ART has no JPMS), but the host JVM
+        // unit test runner is Java 17+ and blocks that reflection without this. Production
+        // behavior is unaffected: this only configures the plain-JVM test runner.
+        unitTests.all {
+            it.jvmArgs("--add-opens=java.base/java.time=ALL-UNNAMED")
+        }
+    }
     sourceSets {
         getByName("androidTest") {
             // Room's exported schema JSON — MigrationTestHelper validates real migrations

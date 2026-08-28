@@ -1,5 +1,7 @@
 package com.example.samdapp.di
 
+import com.example.samdapp.data.assessment.AssessmentQueueScheduler
+import com.example.samdapp.data.assessment.WorkManagerAssessmentScheduler
 import com.example.samdapp.data.local.audit.RoomAuditLogger
 import com.example.samdapp.data.local.auth.AuthTokenStore
 import com.example.samdapp.data.local.auth.BackendAuthSession
@@ -86,6 +88,9 @@ abstract class RepositoryModule {
 
     @Binds @Singleton
     abstract fun bindSyncOutboxScheduler(impl: WorkManagerSyncOutboxScheduler): SyncOutboxScheduler
+
+    @Binds @Singleton
+    abstract fun bindAssessmentQueueScheduler(impl: WorkManagerAssessmentScheduler): AssessmentQueueScheduler
 
     @Binds @Singleton
     abstract fun bindSyncOutboxRepository(impl: RoomSyncOutboxRepository): SyncOutboxRepository

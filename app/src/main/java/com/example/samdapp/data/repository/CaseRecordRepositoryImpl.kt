@@ -8,8 +8,11 @@ import com.example.samdapp.domain.model.CaseStatus
 import com.example.samdapp.domain.model.DoctorTrackerEntry
 import com.example.samdapp.domain.repository.CaseRecordRepository
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import java.util.UUID
 import javax.inject.Inject
 
@@ -54,6 +57,23 @@ class CaseRecordRepositoryImpl @Inject constructor(
 
     override fun observeCaseRecord(caseRecordId: String): Flow<CaseRecord?> =
         caseRecordDao.observeById(caseRecordId).map { it?.toDomain() }
+
+    // The window comes from the CASE's own createdAt, not LocalDate.now(): a case created at
+    // 23:59 must keep its number, and now() would return nonsense for it after midnight (see
+    // CaseRecordDao.getDayOrdinal's KDoc).
+    override suspend fun getDayOrdinal(caseRecordId: String): Int? {
+        val record = caseRecordDao.observeById(caseRecordId).first() ?: return null
+        val zone = ZoneId.systemDefault()
+        val day = LocalDate.ofInstant(record.createdAt, zone)
+        val dayStartMillis = day.atStartOfDay(zone).toInstant().toEpochMilli()
+        val dayEndMillis = day.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        return caseRecordDao.getDayOrdinal(
+            dayStartMillis = dayStartMillis,
+            dayEndMillis = dayEndMillis,
+            caseCreatedAtMillis = record.createdAt.toEpochMilli(),
+            caseRecordId = caseRecordId,
+        )
+    }
 
     override fun observeLatestForPatient(patientId: String): Flow<CaseRecord?> =
         caseRecordDao.observeLatestForPatient(patientId).map { it?.toDomain() }

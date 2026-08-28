@@ -65,6 +65,15 @@ class GenerateKernelReportUseCase @Inject constructor(
         /** Model-version tag stamped on a dev-flavor mock fallback result — see
          *  `MockKernelFallbackSource` in `src/dev/`. */
         const val MOCK_MODEL_VERSION = "mock-kernel-v0.1"
+
+        /** The single source of truth for the honest-unavailable clinical text, so a
+         *  written [InferenceSource.UNAVAILABLE] row and a stalled case's synthesized display
+         *  (`KernelAssessmentViewModel.stalledDisplay`, no row exists yet to read this from)
+         *  cannot drift apart into two different wordings for the same clinical state. */
+        const val UNAVAILABLE_PREDICTED_CONDITION = "Assessment unavailable"
+        const val UNAVAILABLE_REASONING_SUMMARY = "Assessment unavailable. The AI did not produce a result for this " +
+            "case and no diagnosis was generated. Tap Retry to run the assessment again."
+
         private val logger = Logger.getLogger("KernelUseCase")
 
         /** Optional [KernelPayload] signals considered for [dataQualityScore] — the whitelisted
@@ -99,9 +108,22 @@ class GenerateKernelReportUseCase @Inject constructor(
 
         val output = tryRealApi(caseRecordId, payload, patientAge, patientSex, inferenceStartedAt)
             ?: kernelFallbackSource.fallback(caseRecordId, payload, inferenceStartedAt, dataQualityScore(payload))
-            ?: buildUnavailableOutput(caseRecordId, payload, inferenceStartedAt)
+            ?: buildUnavailableOutput(caseRecordId, dataQualityScore(payload), inferenceStartedAt)
 
         return kernelReportRepository.save(output).map { output }
+    }
+
+    /**
+     * Records an honest [InferenceSource.UNAVAILABLE] row for [caseRecordId] when the assessment
+     * could not even be attempted (no case record, vitals, or consultation to build a
+     * [KernelPayload] from). The async submission queue's collapse point for that failure class:
+     * whatever the runner could not resolve becomes the same distinguishable, retryable state a
+     * reached-but-failed kernel call already produces, rather than a silent gap with no row and
+     * no remedy. No payload exists here, so there is nothing to score for data quality.
+     */
+    suspend fun recordUnavailable(caseRecordId: String) {
+        val output = buildUnavailableOutput(caseRecordId, dataQualityScore = 0.0, inferenceStartedAt = Instant.now())
+        kernelReportRepository.save(output)
     }
 
     // ── Real API call ──────────────────────────────────────────────────────────
@@ -135,9 +157,10 @@ class GenerateKernelReportUseCase @Inject constructor(
                 // 200 with an empty differential_diagnosis: the model produced no usable
                 // assessment. Operationally identical to not running. Never fabricate.
                 //
-                // Logged here rather than at either caller because both SendingViewModel's
-                // initial run and RetryKernelAssessmentUseCase's retry pass through this branch,
-                // and only here is the empty-200 fact distinguishable from an unreachable kernel
+                // Logged here rather than at the caller because every AssessmentRunner.run call
+                // (a case's first assessment and every retry alike, both the same call site as of
+                // the async submission queue) passes through this branch, and only here is the
+                // empty-200 fact distinguishable from an unreachable kernel
                 // (which exits at the catch below, never reaching this line). The user sees the
                 // same UNAVAILABLE state either way; the audit trail is what separates
                 // "kernel down" from "kernel returning empty differentials" in field analysis.
@@ -170,7 +193,7 @@ class GenerateKernelReportUseCase @Inject constructor(
                 } catch (e: Exception) {
                     logger.warning("Could not record kernel empty-differential audit event: ${e.message}")
                 }
-                return buildUnavailableOutput(caseRecordId, payload, inferenceStartedAt)
+                return buildUnavailableOutput(caseRecordId, dataQualityScore(payload), inferenceStartedAt)
             }
 
             val inferenceEndedAt = Instant.now()
@@ -245,27 +268,26 @@ class GenerateKernelReportUseCase @Inject constructor(
      */
     private fun buildUnavailableOutput(
         caseRecordId: String,
-        payload: KernelPayload,
+        dataQualityScore: Double,
         inferenceStartedAt: Instant,
     ): KernelReportOutput = KernelReportOutput(
         id = UUID.randomUUID().toString(),
         caseRecordId = caseRecordId,
-        predictedCondition = "Assessment unavailable",
+        predictedCondition = UNAVAILABLE_PREDICTED_CONDITION,
         confidenceScore = 0.0,
         differentials = emptyList(),
         // Reach-neutral by design: this same output is produced both when the kernel could not
         // be reached and when it answered 200 with an empty differential. Naming either cause
         // here would be false half the time, and the cause belongs in the audit trail, not on a
         // clinical record. What is true in both cases is that no assessment exists.
-        reasoningSummary = "Assessment unavailable. The AI did not produce a result for this " +
-            "case and no diagnosis was generated. Tap Retry to run the assessment again.",
+        reasoningSummary = UNAVAILABLE_REASONING_SUMMARY,
         evidenceFor = emptyList(),
         evidenceAgainst = emptyList(),
         modelVersion = "unavailable",
         icdCode = null,
         deviceId = deviceInfoProvider.deviceId(),
         softwareVersion = deviceInfoProvider.softwareVersion(),
-        dataQualityScore = dataQualityScore(payload),
+        dataQualityScore = dataQualityScore,
         uncertaintyScore = 1.0,
         riskCategory = RiskCategory.MODERATE,
         urgencyLevel = UrgencyLevel.ROUTINE,

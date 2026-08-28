@@ -24,6 +24,13 @@ interface CaseRecordRepository {
 
     fun observeCaseRecord(caseRecordId: String): Flow<CaseRecord?>
 
+    /** Stable day-ordinal receipt for [caseRecordId] ("case N of today"), derived at read time -
+     *  no schema, no migration. Day-scoped to the CASE's own `createdAt`, not the clock at read
+     *  time, so a case created near midnight keeps its number forever. Display-only: never a
+     *  lookup key, never an ABDM token - `caseRecordId` remains the sole durable case key. Null
+     *  if the case record itself doesn't exist. */
+    suspend fun getDayOrdinal(caseRecordId: String): Int?
+
     /** Most recent case record for [patientId] — used by PatientSummary (reached only via the
      *  day-scoped roster, so this doesn't reopen the "no all-patients query" boundary, REQ-ROS-02). */
     fun observeLatestForPatient(patientId: String): Flow<CaseRecord?>
