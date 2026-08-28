@@ -2,10 +2,11 @@
 docs/requirements/abha-internal-contract.md's field diff for the full reasoning behind every line
 here; this module is that table turned into code, nothing more.
 
-D5, non-negotiable: `profilePhoto`/`kycPhoto` (inline base64 image bytes) are read out of the raw
-ABDM body and never touch anything past this function. They are not assigned to any attribute, not
-passed to any logger, not written to any dict this module returns. There is nothing to redact
-because the value never exists past this function's local scope.
+D5, non-negotiable: `profilePhoto`/`kycPhoto` (inline base64 image bytes) arrive on the raw ABDM
+body but are never extracted by this function: there is no `body.get("profilePhoto")` or
+`body.get("kycPhoto")` call anywhere below, so the bytes never reach a local variable, let alone an
+attribute, a logger, or a dict this module returns. There is nothing to redact because the value
+never exists inside this function's scope at all.
 """
 
 from __future__ import annotations
@@ -56,8 +57,9 @@ def profile_to_abha_identity(body: dict[str, Any]) -> dict[str, Any]:
         # docs/requirements/abha-field-mapping.md for the Android-side REQ-REG-01 consequence.
         "mobile_number": body.get("mobile"),
         "email_address": None,
-        # D5: always null. The real response's profilePhoto/kycPhoto bytes are read above (via
-        # body.get, never assigned here) and go out of scope with this function's return.
+        # D5: always null. The real response's profilePhoto/kycPhoto bytes are simply never
+        # extracted (no body.get call for either key anywhere in this function), so they never
+        # exist as a value here at all, let alone touch this return dict.
         "photo_url": None,
         "kyc_verified": bool(body.get("kycVerified", False)),
         "verification_source": VERIFICATION_SOURCE,

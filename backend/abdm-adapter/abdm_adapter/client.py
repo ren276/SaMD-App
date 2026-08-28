@@ -235,13 +235,12 @@ async def enrol_by_aadhaar(
     example to replay; never sent anywhere and never logged (see service.py). Live mode sends
     `encrypted_otp`, never `otp_plain`, matching that rule.
 
-    Live mode carries `Authorization: Bearer <gateway_token>`, applied by EXTRAPOLATION from the
-    `send_otp` finding (2026-08-24: `enrollment/request/otp` 401s "Missing Credentials" / WSO2
-    900902 without this header) — same WSO2 gateway product, same `/abha/api/v3/enrollment/*`
-    prefix. This header is NOT itself live-verified for this endpoint; confirm on the next watched
-    live run (docs/abdm/M1-tracker.md, live-activation-risks section). If that run 401s even with
-    the header, or succeeds without it, the inference was wrong and this comment must be corrected
-    against that result, not re-guessed.
+    Live mode carries `Authorization: Bearer <gateway_token>`, originally applied by EXTRAPOLATION
+    from the `send_otp` finding (2026-08-24: `enrollment/request/otp` 401s "Missing Credentials" /
+    WSO2 900902 without this header) — same WSO2 gateway product, same `/abha/api/v3/enrollment/*`
+    prefix. CONFIRMED LIVE 2026-08-28 (docs/abdm/M1-tracker.md, D9): a watched run's `get_profile`
+    call could not have succeeded without a successful `enrol_by_aadhaar` on the same run, so this
+    header is no longer inference alone for this endpoint.
     """
     if mode != "stub":
         async with httpx.AsyncClient(timeout=timeout_seconds) as http_client:
@@ -370,10 +369,10 @@ async def get_profile(
     enrollment/request/otp with 401 "Missing Credentials" (WSO2 error 900902) without an
     Authorization: Bearer gateway session token, and that this is a gateway policy rejection, not
     an application response. `profile/account` sits behind the same gateway. The `Authorization`
-    header here is applied by that same inference, not by a live measurement of this specific
-    endpoint: confirm on the next watched run that reaches Call 4, and if it 401s even with the
-    header, or succeeds without it, the inference was wrong for this endpoint and this docstring
-    must be corrected against that result.
+    header was originally applied by that same inference, not by a live measurement of this
+    specific endpoint. CONFIRMED LIVE 2026-08-28 (docs/abdm/M1-tracker.md, D9): a watched run
+    reached Call 4/5 and it succeeded with both headers present, so this is no longer inference
+    alone for this endpoint.
 
     The response body is never logged, here or by any caller. `profilePhoto`/`kycPhoto` are inline
     base64 JPEG bytes and `REDACTED_KEYS` (backend/core's config.py) has no key for either, so the
