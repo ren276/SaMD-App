@@ -50,4 +50,45 @@ interface PatientDao {
             "ORDER BY MAX(e.startedAt) DESC",
     )
     fun observePatientsWithEncounterBetween(startMillis: Long, endMillis: Long): Flow<List<PatientEntity>>
+
+    /**
+     * Patients tab directory read: registered in the window OR seen (encounter started) in the
+     * window, whichever is later. Deliberately a second, separate query from
+     * [observePatientsWithEncounterBetween] rather than a shared one with a flag - Home's
+     * work-queue semantics (REQ-ROS-01, encounter required) and this tab's directory semantics
+     * (registration is enough) must never be able to drift onto the same query by accident.
+     * `INNER JOIN encounters` above is the only encounter-required roster query on this DAO and
+     * must stay that way (see scripts/check-single-inner-join-encounters.sh); this one is LEFT.
+     *
+     * The window predicate is in HAVING, never WHERE. A WHERE clause on `e.startedAt` would
+     * silently re-narrow this LEFT JOIN back into an INNER JOIN (null-extended rows fail the
+     * WHERE and get dropped), which compiles, runs, and reintroduces the exact bug this query
+     * exists to fix: an encounter-less patient becomes unfindable again. HAVING runs after the
+     * GROUP BY, so a patient with no encounter is judged on their own createdAt instead of
+     * being dropped.
+     *
+     * The window-membership value is `MAX(p.createdAt, COALESCE(MAX(e.startedAt), p.createdAt))`,
+     * not a plain `COALESCE` - a plain `COALESCE(MAX(e.startedAt), p.createdAt)` would pick the
+     * encounter time whenever any encounter exists, even one earlier than registration, which
+     * would wrongly exclude a patient registered inside the window whose only encounter (however
+     * that came to exist) is outside it. Today's write order never produces that state (an
+     * encounter can only be created for a patient that already exists, so its startedAt is
+     * always >= that patient's createdAt) - the `MAX` makes the query correct without depending
+     * on that being enforced anywhere. `lastSeenAt` itself stays the plain encounter aggregate
+     * (null when there is none) - only the window-membership decision uses the wider value.
+     *
+     * Safe while sync is push-only (docs/sync-design.md: RemoteMediator/pull not built) - every
+     * patients row on this device was authored on this device, so this cannot surface anyone
+     * this worker did not personally register. When pull lands, this must additionally filter
+     * to device-authored rows or it reopens REQ-ROS-02/H-04 for server-sourced patients.
+     */
+    @Query(
+        "SELECT p.*, MAX(e.startedAt) AS lastSeenAt FROM patients p " +
+            "LEFT JOIN encounters e ON e.patientId = p.id " +
+            "GROUP BY p.id " +
+            "HAVING MAX(p.createdAt, COALESCE(MAX(e.startedAt), p.createdAt)) >= :startMillis " +
+            "AND MAX(p.createdAt, COALESCE(MAX(e.startedAt), p.createdAt)) < :endMillis " +
+            "ORDER BY MAX(p.createdAt, COALESCE(MAX(e.startedAt), p.createdAt)) DESC, p.id ASC",
+    )
+    fun observeRegisteredOrSeenBetween(startMillis: Long, endMillis: Long): Flow<List<PatientDirectoryRow>>
 }

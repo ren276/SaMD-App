@@ -1,8 +1,10 @@
 package com.example.samdapp.data.repository
 
 import com.example.samdapp.data.local.dao.PatientDao
+import com.example.samdapp.data.local.dao.PatientDirectoryRow
 import com.example.samdapp.data.local.entity.PatientEntity
 import com.example.samdapp.domain.model.Patient
+import com.example.samdapp.domain.model.PatientDirectoryEntry
 import com.example.samdapp.domain.repository.PatientRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -30,13 +32,13 @@ class PatientRepositoryImpl @Inject constructor(
             .map { entities -> entities.map(PatientEntity::toDomain) }
     }
 
-    override fun observeRecentPatients(days: Int): Flow<List<Patient>> {
+    override fun observeRegisteredOrSeenRecently(days: Int): Flow<List<PatientDirectoryEntry>> {
         val zone = ZoneId.systemDefault()
         val today = LocalDate.now(zone)
         val startMillis = today.minusDays(days.toLong() - 1).atStartOfDay(zone).toInstant().toEpochMilli()
         val endMillis = today.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
-        return patientDao.observePatientsWithEncounterBetween(startMillis, endMillis)
-            .map { entities -> entities.map(PatientEntity::toDomain) }
+        return patientDao.observeRegisteredOrSeenBetween(startMillis, endMillis)
+            .map { rows -> rows.map(PatientDirectoryRow::toDomain) }
     }
 }
 
@@ -91,4 +93,9 @@ private fun PatientEntity.toDomain() = Patient(
     referringPhysicianName = referringPhysicianName,
     createdAt = createdAt,
     updatedAt = updatedAt,
+)
+
+private fun PatientDirectoryRow.toDomain() = PatientDirectoryEntry(
+    patient = patient.toDomain(),
+    lastSeenAt = lastSeenAt,
 )

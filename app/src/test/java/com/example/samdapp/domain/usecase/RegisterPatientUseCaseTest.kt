@@ -1,6 +1,7 @@
 package com.example.samdapp.domain.usecase
 
 import com.example.samdapp.domain.model.Patient
+import com.example.samdapp.domain.model.PatientDirectoryEntry
 import com.example.samdapp.domain.repository.PatientRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
@@ -23,7 +24,8 @@ class FakePatientRepository : PatientRepository {
 
     override fun observeTodaysPatients(): Flow<List<Patient>> = flowOf(registered.toList())
 
-    override fun observeRecentPatients(days: Int): Flow<List<Patient>> = flowOf(registered.toList())
+    override fun observeRegisteredOrSeenRecently(days: Int): Flow<List<PatientDirectoryEntry>> =
+        flowOf(registered.map { PatientDirectoryEntry(patient = it, lastSeenAt = null) })
 }
 
 class RegisterPatientUseCaseTest {

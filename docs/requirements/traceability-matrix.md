@@ -26,6 +26,7 @@
 | REQ-HAN-06 | `domain/model/KernelPayload`, `SendToKernelUseCase` (no Patient param), `SendingViewModel` fetches by encounterId | H-10 | Manual ✓ (on-device: constructed payload for an identity-laden test patient contained none of it) | ✓ SendToKernelUseCaseTest |
 | REQ-ROS-01 | `HomeViewModel`, `GetTodaysPatientsUseCase` | — | Manual ✓ | ✓ HomeViewModelTest, TodaysPatientsDaoTest |
 | REQ-ROS-02 | `PatientDao.observePatientsWithEncounterBetween` (no all-query) | H-04 | Manual ✓ | ✓ TodaysPatientsDaoTest (instrumented, permanent) |
+| REQ-ROS-02 (Patients tab directory) | `PatientDao.observeRegisteredOrSeenBetween` (LEFT JOIN, still 7-day bounded; registered-not-seen resolves on createdAt, not exposed as an all-patients query) | H-04 | Manual (STEP 2, 2026-08) | ✓ PatientDirectoryDaoTest (instrumented); CI: `scripts/check-single-inner-join-encounters.sh` |
 | REQ-PID-01 | `presentation/common/PatientContextBar`, `currentPatientId` | H-03 | Manual ✓ | TODO |
 | REQ-SEC-01 | `DatabaseModule` + `DatabasePassphraseProvider` (SQLCipher/Keystore) | H-04 | Manual ✓ (DB header = ciphertext) | TODO (instrumented) |
 | REQ-SEC-02 | day-scoped query (see REQ-ROS-02) | H-04 | Manual ✓ | ✓ TodaysPatientsDaoTest |

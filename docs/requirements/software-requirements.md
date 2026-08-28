@@ -60,7 +60,14 @@ Conventions: `REQ-<AREA>-NN`. Status: **DONE** (implemented + manually verified)
 - **REQ-ROS-01** (DONE) Show today's patients (those with an encounter today) on Home;
   tap to reopen.
 - **REQ-ROS-02** (DONE) Never expose an "all patients" query — list access is day-scoped only
-  (data minimisation; risk H-04).
+  (data minimisation; risk H-04). Clarifying note (BUILD 2 follow-up, 2026-08): the Patients
+  tab's directory read (`PatientDao.observeRegisteredOrSeenBetween`) is a second, separate,
+  still-bounded 7-day query — a registered patient with no encounter yet resolves on their
+  registration time instead of being excluded, so a worker who registers someone and has not
+  yet started their visit can find them again. It remains day-scoped and is not an "all
+  patients" query. Home's `observePatientsWithEncounterBetween` (REQ-ROS-01) is untouched and
+  stays the only encounter-required query; `scripts/check-single-inner-join-encounters.sh`
+  enforces that mechanically in CI.
 
 ## Patient identity (PID)
 - **REQ-PID-01** (DONE) Display the current patient's name + unique ID persistently during an

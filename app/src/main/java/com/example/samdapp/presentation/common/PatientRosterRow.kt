@@ -15,9 +15,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.samdapp.domain.model.Patient
 
-/** Shared by Home's today roster and the Patients tab's searchable list. */
+/** Shared by Home's today roster and the Patients tab's searchable list. [subtitle] is an
+ *  optional extra line below the ID/age row - null by default so Home's call site renders
+ *  exactly as before; the Patients tab uses it to mark "Registered, not yet seen". */
 @Composable
-fun PatientRosterRow(patient: Patient, onClick: () -> Unit) {
+fun PatientRosterRow(patient: Patient, onClick: () -> Unit, subtitle: String? = null) {
     Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
             Text(text = patient.fullName, style = MaterialTheme.typography.titleMedium)
@@ -34,6 +36,13 @@ fun PatientRosterRow(patient: Patient, onClick: () -> Unit) {
                     text = ageOrSex,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (subtitle != null) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.tertiary,
                 )
             }
         }

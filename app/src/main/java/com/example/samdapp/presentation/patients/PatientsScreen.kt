@@ -25,8 +25,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.samdapp.presentation.common.PatientRosterRow
 
 /**
- * Bottom-nav "Patients" tab: last 7 days, name/ID searchable — a bounded window, not the full
- * patient table (see [com.example.samdapp.domain.usecase.GetRecentPatientsUseCase]).
+ * Bottom-nav "Patients" tab: last 7 days, name/ID searchable - a bounded window, not the full
+ * patient table (see [com.example.samdapp.domain.usecase.GetRecentPatientsUseCase]). Unlike
+ * Home, includes a patient registered but not yet seen (tapping still opens PatientSummary,
+ * same as any other row - [onOpenPatient] does not care whether the patient has an encounter).
  */
 @Composable
 fun PatientsScreen(
@@ -51,7 +53,7 @@ fun PatientsScreen(
                 uiState.isLoading -> SamdLoadingIndicator(modifier = Modifier.padding(24.dp))
                 uiState.patients.isEmpty() -> Text(
                     text = if (uiState.query.isBlank()) {
-                        "No patients seen in the last 7 days."
+                        "No patients registered or seen in the last 7 days."
                     } else {
                         "No patients match \"${uiState.query}\"."
                     },
@@ -60,8 +62,12 @@ fun PatientsScreen(
                     modifier = Modifier.padding(24.dp),
                 )
                 else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(uiState.patients, key = { it.id }) { patient ->
-                        PatientRosterRow(patient = patient, onClick = { onOpenPatient(patient.id) })
+                    items(uiState.patients, key = { it.patient.id }) { entry ->
+                        PatientRosterRow(
+                            patient = entry.patient,
+                            onClick = { onOpenPatient(entry.patient.id) },
+                            subtitle = if (entry.lastSeenAt == null) "Registered, not yet seen" else null,
+                        )
                     }
                 }
             }

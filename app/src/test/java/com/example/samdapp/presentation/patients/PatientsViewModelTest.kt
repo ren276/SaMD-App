@@ -26,7 +26,7 @@ class PatientsViewModelTest {
         advanceUntilIdle()
 
         val state = viewModel.uiState.value
-        assertEquals(listOf("p1", "p2"), state.patients.map { it.id })
+        assertEquals(listOf("p1", "p2"), state.patients.map { it.patient.id })
         assertFalse(state.isLoading)
     }
 
@@ -39,6 +39,6 @@ class PatientsViewModelTest {
         viewModel.onQueryChange("ravi")
         advanceUntilIdle()
 
-        assertEquals(listOf("p2"), viewModel.uiState.value.patients.map { it.id })
+        assertEquals(listOf("p2"), viewModel.uiState.value.patients.map { it.patient.id })
     }
 }

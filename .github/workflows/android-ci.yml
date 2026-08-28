@@ -30,6 +30,11 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      - name: Check single INNER JOIN encounters site (REQ-ROS-02)
+        run: |
+          chmod +x scripts/check-single-inner-join-encounters.sh
+          ./scripts/check-single-inner-join-encounters.sh
+
       - name: Assemble ${{ matrix.flavor }}Debug
         run: ./gradlew assemble${{ matrix.flavor }}Debug --console=plain
 
