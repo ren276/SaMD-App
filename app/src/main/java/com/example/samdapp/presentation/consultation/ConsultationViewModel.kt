@@ -3,6 +3,7 @@ package com.example.samdapp.presentation.consultation
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.samdapp.config.FeatureFlags
 import com.example.samdapp.data.mock.DemoPatientProfile
 import com.example.samdapp.domain.audit.AuditAction
 import com.example.samdapp.domain.audit.AuditLogger
@@ -132,11 +133,23 @@ class ConsultationViewModel @AssistedInject constructor(
     }
 
     override fun onRecordChiefComplaintVoice() {
+        // Disabled pending the sherpa-onnx on-device engine and the confirmation-gate design
+        // (scoped to PR 3/4): see FeatureFlags.VOICE_INPUT_ENABLED KDoc. The UI never shows the
+        // control that calls this while the flag is off, so this return is a second, independent
+        // stop, not the only one.
+        if (!FeatureFlags.VOICE_INPUT_ENABLED) return
         viewModelScope.launch {
             _uiState.update { it.copy(isRecordingVoice = true) }
             captureAudioAttachmentUseCase().fold(
                 onSuccess = { captured ->
-                    _uiState.update { it.copy(isRecordingVoice = false, chiefComplaint = captured.transcript) }
+                    // Field-audit memo C-1: a raw ASR transcript must never be written directly
+                    // into chiefComplaint. The confirmation-gate design (suggestion shown beside
+                    // the field, explicit accept/edit/discard, provenance stamp, canSend guard)
+                    // is deferred to PR 3, so until it lands this handler intentionally drops the
+                    // transcript rather than committing an unconfirmed value. audio_captured is
+                    // still logged, matching onRecordAudioAttachment's audit behavior for the
+                    // capture itself; the drop happens only at the chiefComplaint write.
+                    _uiState.update { it.copy(isRecordingVoice = false) }
                     auditLogger.log(
                         action = AuditAction.AUDIO_CAPTURED,
                         patientId = patientId,
@@ -152,6 +165,7 @@ class ConsultationViewModel @AssistedInject constructor(
     }
 
     override fun onRecordAudioAttachment() {
+        if (!FeatureFlags.VOICE_INPUT_ENABLED) return
         viewModelScope.launch {
             _uiState.update { it.copy(isRecordingVoice = true) }
             captureAudioAttachmentUseCase().fold(

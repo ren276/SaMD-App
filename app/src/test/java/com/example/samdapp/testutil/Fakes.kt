@@ -111,6 +111,24 @@ class FakeKernelFallbackSource(
     }
 }
 
+/** Tracks whether [captureAudioAttachment] was ever invoked, so a test can assert the
+ *  fix/asr-offdevice-exposure voice-flag guard actually stops the call before it happens,
+ *  not just that the returned state looks unchanged. */
+class FakeTranscriptionService(
+    private val result: Result<com.example.samdapp.domain.transcription.CapturedAudio> =
+        Result.success(com.example.samdapp.domain.transcription.CapturedAudio(uri = "speech-session://fake", transcript = "fake transcript")),
+) : com.example.samdapp.domain.transcription.TranscriptionService {
+    var captureAudioAttachmentCallCount = 0
+        private set
+
+    override suspend fun captureAudioAttachment(): Result<com.example.samdapp.domain.transcription.CapturedAudio> {
+        captureAudioAttachmentCallCount++
+        return result
+    }
+
+    override suspend fun transcribe(audioUri: String): Result<String> = result.map { it.transcript }
+}
+
 class FakeAuditLogger : AuditLogger {
     data class Entry(val action: String, val patientId: String?, val caseRecordId: String?, val payload: String)
 
