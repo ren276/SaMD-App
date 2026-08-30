@@ -3427,3 +3427,59 @@ Same branch/PR as above (`fix/resumable-draft-exclusion`, PR #24), commit `db704
 **Open item, not this session's to close:** mobile masking stays contradicted until a deliberate,
 unredacted watched-run check of `profile/account.mobile` happens. Do not build Android-side mobile
 handling assuming either shape until that check lands.
+
+## Android: ASR track PR 0, off-device recognizer exposure closed (2026-08-30)
+
+First PR of the ASR track. Design of record for the whole track is two STEP-1 read-only memos,
+`scratchpad/asr-field-audit-memo.md` and `scratchpad/asr-usecase-research-memo.md`, produced
+before any code was touched. Continue from those, not from a fresh read of the code, for any
+further ASR work.
+
+**The finding (Task 0 of the research memo).** `AndroidSpeechRecognizerService.kt`
+(`app/src/main/java/com/example/samdapp/data/transcription/`) builds its recognizer via
+`SpeechRecognizer.createSpeechRecognizer(context)`, not `createOnDeviceSpeechRecognizer`, and
+never sets `RecognizerIntent.EXTRA_PREFER_OFFLINE` (confirmed absent app-wide by grep).
+`AndroidManifest.xml` grants `INTERNET`. Android's own documentation states the offline-preference
+default is false ("either network or offline recognition engines may be used") and that even set,
+it "may have no effect" depending on the recognizer implementation. So the app, as it shipped
+before this session, could route patient-spoken narrative to a third-party cloud recognizer with
+no data-processing agreement and no coverage under H-11 (which covers only the Gemini brand-name
+lookup and explicitly excludes symptom text). This contradicts the locked principle that all
+external calls route through the backend, and is a probable DPDP exposure. Compounding it, the
+same path wrote a raw ASR transcript straight into `Consultation.chiefComplaint` with no
+confirmation step, and `chiefComplaint` reaches `/api/v1/evaluate` via `symptomString`.
+
+**The fix, this session, branch `fix/asr-offdevice-exposure`, not yet committed.**
+`FeatureFlags.VOICE_INPUT_ENABLED` added (`app/src/main/java/com/example/samdapp/config/
+FeatureFlags.kt`), `const val`, default `false`. Every voice affordance on the Consultation
+screen (Text/Voice mode toggle, "Record main concern", "Record audio" attachment) is hidden, not
+merely disabled, following the `UnavailableVitalsSource`/H-13 precedent that no affordance beats a
+degraded one. `ConsultationViewModel.onRecordChiefComplaintVoice`/`onRecordAudioAttachment` both
+return before `CaptureAudioAttachmentUseCase` is invoked, so `AndroidSpeechRecognizerService`
+cannot be reached from the UI regardless of the flag's UI-layer gating. The raw-transcript write
+into `chiefComplaint` was additionally fixed defensively so it cannot happen even if that branch
+were somehow reached, though that branch is currently unreachable and the fix is verified by
+inspection, not by a dedicated test (making the flag injectable to exercise it in isolation was
+judged out of this fix's scope). `AndroidSpeechRecognizerService`, `TranscriptionService`,
+`TranscribeAudioUseCase`, and the Transcription screen were kept in the tree unmodified, for the
+later on-device engine swap (sherpa-onnx) the research memo recommends.
+
+Chief complaint and every other field stay fully keyboard-usable; nothing on the typed path
+changed. New `ConsultationViewModelTest.kt`, 3 tests, proving the typed path works and both voice
+handlers never invoke the recognizer (asserted via call count on a new `FakeTranscriptionService`
+in `Fakes.kt`, not just on returned state). `testDevDebugUnitTest`: 263 pass (was 260), 0
+failures, single run.
+
+**Docs.** Two controlled-doc changes are proposed alongside this PR as PR 0b (`docs/quality/
+risk-management-file.md` H-15/H-16, `docs/requirements/intended-use-statement.md` §i), each
+marked `PROPOSED, AWAITING OPERATOR SIGN-OFF` inline, uncommitted, not approved by anyone yet.
+Do not treat H-15/H-16 or §i as settled until the operator confirms.
+
+**Open, owed by the operator, not closed by this session:** DECISION GATE item 6 from the
+field-audit memo, a physical-device check of whether the platform recognizer actually transmits
+audio off-device for the deployment locale. This PR disables the affordance rather than answering
+that question, so the answer is still owed before any future re-enable, not resolved by this fix.
+
+**Not done in this session, by design.** No new ASR model, no sherpa-onnx integration, no
+provenance columns, no new audit actions, no confirmation-gate UI, no classifier/kernel/wire code
+touched. Those are later, separately scoped PRs per the field-audit memo's Part E build sequence.

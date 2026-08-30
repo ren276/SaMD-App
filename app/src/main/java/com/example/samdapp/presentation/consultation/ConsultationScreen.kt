@@ -42,6 +42,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
+import com.example.samdapp.config.FeatureFlags
 import com.example.samdapp.domain.model.AttachmentType
 import com.example.samdapp.presentation.common.StepProgressIndicator
 import com.example.samdapp.presentation.common.rememberPermissionAction
@@ -131,16 +132,22 @@ private fun ConsultationContent(uiState: ConsultationUiState, actions: Consultat
                 }
             }
             item { Text("Main concern", style = MaterialTheme.typography.titleMedium) }
-            item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = !uiState.isVoiceMode, onClick = { if (uiState.isVoiceMode) actions.onToggleVoiceMode() }, label = { Text("Text") })
-                    FilterChip(selected = uiState.isVoiceMode, onClick = { if (!uiState.isVoiceMode) actions.onToggleVoiceMode() }, label = { Text("Voice") })
-                }
-            }
-            if (uiState.isVoiceMode) {
+            // Voice affordance hidden, not merely disabled, while FeatureFlags.VOICE_INPUT_ENABLED
+            // is off (see its KDoc): the off-device recognizer exposure means no dead button
+            // should sit here for a worker to tap. chiefComplaint stays fully keyboard-editable
+            // via the OutlinedTextField below, unaffected by this flag.
+            if (FeatureFlags.VOICE_INPUT_ENABLED) {
                 item {
-                    OutlinedButton(onClick = requestVoiceForChiefComplaint, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
-                        Text(if (uiState.isRecordingVoice) "Listening…" else "Record main concern", style = MaterialTheme.typography.titleMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(selected = !uiState.isVoiceMode, onClick = { if (uiState.isVoiceMode) actions.onToggleVoiceMode() }, label = { Text("Text") })
+                        FilterChip(selected = uiState.isVoiceMode, onClick = { if (!uiState.isVoiceMode) actions.onToggleVoiceMode() }, label = { Text("Voice") })
+                    }
+                }
+                if (uiState.isVoiceMode) {
+                    item {
+                        OutlinedButton(onClick = requestVoiceForChiefComplaint, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
+                            Text(if (uiState.isRecordingVoice) "Listening…" else "Record main concern", style = MaterialTheme.typography.titleMedium)
+                        }
                     }
                 }
             }
@@ -200,11 +207,15 @@ private fun ConsultationContent(uiState: ConsultationUiState, actions: Consultat
                     ) {
                         Text("Affected area photo", style = MaterialTheme.typography.titleMedium)
                     }
-                    OutlinedButton(
-                        onClick = requestVoiceForAttachment,
-                        modifier = Modifier.weight(1f).heightIn(min = 56.dp),
-                    ) {
-                        Text(if (uiState.isRecordingVoice) "Listening…" else "Record audio", style = MaterialTheme.typography.titleMedium)
+                    // Hidden, not merely disabled, while FeatureFlags.VOICE_INPUT_ENABLED is off:
+                    // see its KDoc for the off-device recognizer exposure this defers to.
+                    if (FeatureFlags.VOICE_INPUT_ENABLED) {
+                        OutlinedButton(
+                            onClick = requestVoiceForAttachment,
+                            modifier = Modifier.weight(1f).heightIn(min = 56.dp),
+                        ) {
+                            Text(if (uiState.isRecordingVoice) "Listening…" else "Record audio", style = MaterialTheme.typography.titleMedium)
+                        }
                     }
                 }
             }
