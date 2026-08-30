@@ -62,6 +62,36 @@ cloud/LAN-hosted FastAPI + XGBoost inference backend and a third-party Gemini AP
 brand-name lookup only, never blocking, never patient-identifying data). No hardware medical
 device interfacing.
 
+## i) Speech-to-text (ASR) as a documentation aid [PROPOSED, AWAITING OPERATOR SIGN-OFF]
+**Drafted this session (`fix/asr-offdevice-exposure` PR 0b) from `scratchpad/asr-usecase-research-memo.md`
+sections C.1 and the FORMATTING BOUNDARY STATEMENT. Not yet operator-approved. As of this same
+session the voice affordance itself is disabled (`FeatureFlags.VOICE_INPUT_ENABLED = false`); this
+paragraph describes the intended framing for when it is re-enabled, not current shipped behavior.**
+
+The speech-to-text function is a documentation aid. It proposes text for a human to read and
+affirmatively accept into a field. It performs no clinical interpretation, produces no diagnostic
+or triage output, and no value it proposes can be persisted or transmitted without an explicit
+human confirmation recorded in the audit trail. Its failure mode is a wrong word in a narrative
+field that a clinician reads, not a wrong clinical conclusion.
+
+Automatic processing of an ASR transcript is limited to deterministic formatting that changes the
+form of the text and never its content. A transformation is permitted only if it is deterministic,
+versioned, content-preserving, salience-neutral, and negation-inert: it may not add, remove,
+reorder across a clause boundary, or substitute any token carrying clinical meaning, and it may
+not alter, attach, detach, or rescope a negation. Extraction of narrative into structured slots,
+negation resolution, salience selection, summarisation, and any model-authored rewrite are never
+automatic: they are interpretation, not formatting, and auto-applying them would remove the human
+from the step at which a model's reading becomes the record, which is the premise this
+classification argument (§g, `docs/regulatory-foundation.md` §2.3) rests on.
+
+If extraction is ever offered, it may exist only as a constrained-decoding suggestion that emits
+either a member of a fixed enumeration or a contiguous span of the verbatim transcript, that lands
+in an unconfirmed state, that a human accepts one slot at a time against the retained verbatim
+transcript displayed alongside it, and that emits a provenance-only audit breadcrumb on every
+suggest, accept, edit, and reject. The verbatim transcript is retained as encrypted clinical data
+and is the source of truth; the audio is not retained; the audit log carries provenance only and
+never content.
+
 ## Open items before this can back a real submission
 - CDSCO/QA-RA sign-off on the condition list (§b) and contraindications (§f).
 - Formal paediatric-use review.
