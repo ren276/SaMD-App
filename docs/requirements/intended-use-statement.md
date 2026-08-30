@@ -3,8 +3,9 @@
 > **Draft for QA/RA review, not a submitted regulatory artifact.** Structured per CDSCO Guidance
 > Document on Medical Device Software (Doc No. CDSCO/MD/GD/MDSW/01/2026) §6.0, which requires
 > this statement to back the classification argument in `docs/regulatory-foundation.md` §2.3 and
-> any future CDSCO submission. Every element below is drawn from what the app actually does
-> today (2026-08) — nothing aspirational is included; gaps are flagged, not filled in.
+> any future CDSCO submission. Except for sections explicitly marked PROPOSED, every element
+> below is drawn from what the app actually does today (2026-08); gaps are flagged, not filled
+> in, and any proposed future requirement stays clearly separated from current behavior.
 
 ## a) Medical purpose
 Screening/triage and diagnostic decision support: capture of patient history, vitals, and
