@@ -22,6 +22,12 @@ class SaveConsultationUseCase @Inject constructor(
         aggravatingFactors: String?,
         relievingFactors: String?,
         impactOnDailyActivities: String?,
+        /** Null means the value was typed, which is the only path that existed before the voice
+         *  confirmation gate; a caller that ran the gate passes the stamp the worker earned
+         *  (`VOICE_CONFIRMED` or `VOICE_EDITED`). `VOICE_UNCONFIRMED` is refused one layer down,
+         *  in `ConsultationRepositoryImpl.saveConsultation`, so every caller crosses that check
+         *  rather than each one repeating it here. */
+        impactOnDailyActivitiesProvenance: FieldProvenance? = null,
         relevantHistory: String?,
     ): Result<Consultation> {
         if (chiefComplaint.isBlank()) {
@@ -39,10 +45,12 @@ class SaveConsultationUseCase @Inject constructor(
             aggravatingFactors = aggravatingFactors,
             relievingFactors = relievingFactors,
             impactOnDailyActivities = impactOnDailyActivities,
-            // No voice capture UI exists on this branch (PR 3 adds it), so any value reaching
-            // this use case was typed. Only stamp TYPED when there is a value to attribute;
-            // an absent field has no provenance to record.
-            impactOnDailyActivitiesProvenance = impactOnDailyActivities?.let { FieldProvenance.TYPED },
+            // Only stamp when there is a value to attribute: an absent field has no provenance to
+            // record. A caller that ran the voice gate supplies its own stamp; a caller that did
+            // not gets TYPED, which is the pre-gate behaviour unchanged.
+            impactOnDailyActivitiesProvenance = impactOnDailyActivities?.let {
+                impactOnDailyActivitiesProvenance ?: FieldProvenance.TYPED
+            },
             relevantHistory = relevantHistory,
             transcription = null,
             attachments = emptyList(),

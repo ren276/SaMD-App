@@ -532,7 +532,14 @@ class FakeVitalsRepository(
 class FakeConsultationRepository(
     private val byEncounter: Map<String, com.example.samdapp.domain.model.Consultation?> = emptyMap(),
 ) : com.example.samdapp.domain.repository.ConsultationRepository {
-    override suspend fun saveConsultation(consultation: com.example.samdapp.domain.model.Consultation): Result<Unit> = Result.success(Unit)
+    /** Every consultation handed to [saveConsultation], so a test can assert what would actually
+     *  have been persisted (provenance included) rather than only the resulting UI state. */
+    val saved = mutableListOf<com.example.samdapp.domain.model.Consultation>()
+
+    override suspend fun saveConsultation(consultation: com.example.samdapp.domain.model.Consultation): Result<Unit> {
+        saved += consultation
+        return Result.success(Unit)
+    }
     override suspend fun addAttachment(attachment: com.example.samdapp.domain.model.Attachment): Result<Unit> = Result.success(Unit)
     override suspend fun updateTranscription(consultationId: String, transcription: String): Result<Unit> = Result.success(Unit)
     override fun observeForEncounter(encounterId: String): Flow<com.example.samdapp.domain.model.Consultation?> =
