@@ -44,8 +44,9 @@ class ConsultationRepositoryImpl @Inject constructor(
         if (consultation.impactOnDailyActivitiesProvenance == FieldProvenance.VOICE_UNCONFIRMED) {
             return Result.failure(
                 DataError.Refused(
-                    "impactOnDailyActivitiesProvenance is VOICE_UNCONFIRMED; an unconfirmed voice " +
-                        "value cannot be persisted",
+                    reason = "impactOnDailyActivitiesProvenance is VOICE_UNCONFIRMED; an unconfirmed " +
+                        "voice value cannot be persisted",
+                    message = "Please confirm the voice suggestion before saving",
                 ),
             )
         }

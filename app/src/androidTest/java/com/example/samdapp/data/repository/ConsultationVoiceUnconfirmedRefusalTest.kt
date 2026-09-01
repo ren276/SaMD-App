@@ -46,11 +46,14 @@ class ConsultationVoiceUnconfirmedRefusalTest {
     @After
     fun tearDown() = db.close()
 
+    /** [Consultation]'s own contract (see its KDoc) is that provenance is null only when
+     *  [Consultation.impactOnDailyActivities] itself is null, so a null-provenance fixture must
+     *  pair with a null value, not an invalid null-provenance/non-null-text combination. */
     private fun consultation(id: String, provenance: FieldProvenance?) = Consultation(
         id = id, patientId = "p1", encounterId = "e-$id", chiefComplaint = "Fever",
         onset = null, durationBucket = null, severityScore = null,
         aggravatingFactors = null, relievingFactors = null,
-        impactOnDailyActivities = "Cannot go to work",
+        impactOnDailyActivities = if (provenance == null) null else "Cannot go to work",
         impactOnDailyActivitiesProvenance = provenance,
         relevantHistory = null, transcription = null, attachments = emptyList(),
         createdAt = Instant.EPOCH, updatedAt = Instant.EPOCH,
