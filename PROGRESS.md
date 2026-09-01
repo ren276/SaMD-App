@@ -3551,3 +3551,52 @@ PR 3 wires the write-refusal and the first real producer of a non-`TYPED` value.
 **Docs.** No controlled-doc change proposed alongside this PR; PR 0b's H-15/H-16 and intended-use
 §i proposals (still `PROPOSED, AWAITING OPERATOR SIGN-OFF`, per the entry above) already cover
 provenance capture at the concept level and were judged sufficient without a further edit.
+
+## Android + backend: ASR track PR 2, VOICE_FIELD_* audit actions (2026-09-01)
+
+Third PR of the ASR track (PR 0 disabled off-device recognition, PR 1 added the
+`FieldProvenance` column). Design of record is `scratchpad/asr-field-audit-memo.md` Part B.4,
+read in full before this PR.
+
+**Scope, deliberately narrow.** Only the four `VOICE_FIELD_*` audit action enum values, on both
+sides of the sync boundary. Nothing on the device emits them yet, no payload builder call site
+was added, no voice UI, no ASR engine, no provenance write-refusal, no confirmation gate. PR 3
+wires all of that.
+
+**The coordinated change, both halves in this commit.** `AuditLogger.log()` accepts only an
+`AuditAction` enum member by design, and the backend rejects any `action` value not present in
+its checked-in mirror (`app/domain/audit_actions_device.py`, read by
+`app/services/sync.py:386`'s `if action not in _DEVICE_AUDIT_ACTION_VALUES`). Skipping the
+backend half would not silently drop rows, it would permanently reject every row carrying the
+new action once PR 3 starts emitting it, so both sides land together:
+
+| Enum member (device) | Wire value (both sides) |
+|---|---|
+| `VOICE_FIELD_SUGGESTED` | `voice_field_suggested` |
+| `VOICE_FIELD_CONFIRMED` | `voice_field_confirmed` |
+| `VOICE_FIELD_EDITED` | `voice_field_edited` |
+| `VOICE_FIELD_REJECTED` | `voice_field_rejected` |
+
+`backend/core/tests/test_audit_actions_device.py` parses `AuditLogger.kt`'s enum source
+directly and asserts it equals the checked-in mirror; both its tests pass, proving the four new
+values match exactly, not just that both files were hand-edited to agree.
+
+**Tests.** Backend: `test_voice_field_actions_are_in_the_accepted_device_action_set` (mirror
+membership) and `test_voice_field_suggested_audit_row_is_accepted_and_persisted` (a real sync
+push, asserting the persisted `AuditEvent` row via `session.execute(select(...))`, not the HTTP
+response, per CLAUDE.md's convention), added to `test_sync.py` following the existing
+`kernel_empty_differential` precedent. Device: `AuditActionTest` (new, JVM-testable since enum
+members need no DB), pins the four wire values against what the backend parser reads. Full
+suites, both green: `testDevDebugUnitTest` 266 passed (was 265), 0 failed. Backend suite against
+a rebuilt (`--no-cache`) Docker image and real Postgres: 265 passed (was 263), 0 failed, single
+run, not a rerun-masked flake.
+
+**Docs.** `docs/quality/risk-management-file.md` H-15's residual control cell already named
+these four breadcrumbs as "Proposed, not yet built"; appended a note that the enum values now
+exist on both sides (enum-level only, still nothing emits them), marked `PROPOSED, AWAITING
+OPERATOR SIGN-OFF`, not approved as a completed control.
+
+**Not done in this session, by design.** No emit call sites, no `auditPayload(...)` builder
+call for these actions, no voice UI, no ASR engine, no provenance write-refusal, no
+confirmation gate, no classifier/kernel/wire-to-model file touched. `.env`/`local.properties`/
+`BuildConfig` untouched.

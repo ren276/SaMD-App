@@ -824,3 +824,60 @@ async def test_kernel_empty_differential_audit_row_is_accepted_and_persisted(
     # No fabricated clinical value reaches the server-side audit row either.
     assert "Non-specific" not in row.payload
     assert "confidence" not in row.payload
+
+
+# ---------------------------------------------------------------------------
+# ASR track PR 2: VOICE_FIELD_* audit actions (enum values only, nothing emits
+# them on the device yet)
+# ---------------------------------------------------------------------------
+
+
+def test_voice_field_actions_are_in_the_accepted_device_action_set() -> None:
+    """Sourced from the checked-in mirror, not retyped, same as the kernel_empty_differential
+    assertion above. Nothing on the device emits these yet (PR 3 wires the confirmation gate);
+    this only proves the accepted set already has room for them so PR 3 does not also need a
+    sync.py-side change.
+    """
+    assert "voice_field_suggested" in DEVICE_AUDIT_ACTIONS
+    assert "voice_field_confirmed" in DEVICE_AUDIT_ACTIONS
+    assert "voice_field_edited" in DEVICE_AUDIT_ACTIONS
+    assert "voice_field_rejected" in DEVICE_AUDIT_ACTIONS
+
+
+async def test_voice_field_suggested_audit_row_is_accepted_and_persisted(
+    client: AsyncClient, auth_headers: dict[str, str], session: AsyncSession
+) -> None:
+    """A device-origin audit_log row carrying action=voice_field_suggested must sync-push
+    successfully and land in audit_events with that action verbatim, proving the accepted-set
+    widening takes effect end to end and not just that the Python set contains the string.
+    Asserts the persisted row via a fresh query, not the HTTP response, per this repo's rule that
+    a write-survived-a-failure-path test must check the DB, not the return value.
+    """
+    response = await push(
+        client,
+        auth_headers,
+        [
+            audit_record(
+                "al-voice-suggested",
+                action="voice_field_suggested",
+                case_record_id="case-voice-1",
+                payload=(
+                    '{"slot":"IMPACT_ON_DAILY_ACTIVITIES","asrModelId":"sherpa-onnx",'
+                    '"asrModelVersion":"1","charCount":"18"}'
+                ),
+            )
+        ],
+    )
+    assert response.status_code == 200
+
+    row = (
+        await session.execute(
+            select(AuditEvent).where(AuditEvent.action == "voice_field_suggested")
+        )
+    ).scalar_one()
+    assert row.case_record_id == "case-voice-1"
+    assert row.origin == "DEVICE"
+    assert row.action == "voice_field_suggested"
+    # No transcript or corrected text reaches the server-side audit row (B.4: field-level
+    # provenance only).
+    assert "transcript" not in row.payload

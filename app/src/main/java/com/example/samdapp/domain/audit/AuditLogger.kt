@@ -89,6 +89,19 @@ enum class AuditAction(val value: String) {
      *  of 0: never a condition string and never a confidence, since no such value legitimately
      *  exists for this case and the whole point of the fix is that none gets invented. */
     KERNEL_EMPTY_DIFFERENTIAL("kernel_empty_differential"),
+
+    /** ASR track (`scratchpad/asr-field-audit-memo.md` B.4), one per state in the
+     *  confirmation-gate model. Field-level provenance only, no transcript: `auditPayload("slot"
+     *  to ..., "provenance" to ..., "asrModelId" to ..., "asrModelVersion" to ..., "charCount"
+     *  to ..., "editDistance" to ...)`. Not emitted by anything yet; PR 3 wires the confirmation
+     *  gate and its call sites. Kept ahead of that caller the same way [REFERRAL_STATUS_CHANGED]
+     *  is: adding the value now and the backend mirror entry in the same commit is cheap, and a
+     *  device action the mirror does not yet accept would be a silent, permanent sync rejection
+     *  of every row the device sends once PR 3 starts emitting it. */
+    VOICE_FIELD_SUGGESTED("voice_field_suggested"),
+    VOICE_FIELD_CONFIRMED("voice_field_confirmed"),
+    VOICE_FIELD_EDITED("voice_field_edited"),
+    VOICE_FIELD_REJECTED("voice_field_rejected"),
 }
 
 /** Builds the JSON blob stored in AuditLogEntity.payload from a flat set of fields. */
