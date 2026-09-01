@@ -9,6 +9,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -36,6 +38,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -77,7 +80,7 @@ fun ConsultationScreen(
 private val DURATION_BUCKETS = listOf("today", "few_days", "week_plus", "chronic")
 
 @Composable
-private fun ConsultationContent(uiState: ConsultationUiState, actions: ConsultationActions) {
+internal fun ConsultationContent(uiState: ConsultationUiState, actions: ConsultationActions) {
     val context = LocalContext.current
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
     var showReview by remember { mutableStateOf(false) }
@@ -110,6 +113,8 @@ private fun ConsultationContent(uiState: ConsultationUiState, actions: Consultat
         rememberPermissionAction(Manifest.permission.RECORD_AUDIO, actions::onRecordChiefComplaintVoice)
     val requestVoiceForAttachment =
         rememberPermissionAction(Manifest.permission.RECORD_AUDIO, actions::onRecordAudioAttachment)
+    val requestVoiceForImpact =
+        rememberPermissionAction(Manifest.permission.RECORD_AUDIO, actions::onRecordImpactVoice)
     val requestCameraForAffectedArea = rememberPermissionAction(Manifest.permission.CAMERA) {
         val uri = createCameraOutputUri(context)
         pendingCameraUri = uri
@@ -185,7 +190,29 @@ private fun ConsultationContent(uiState: ConsultationUiState, actions: Consultat
             }
             item { OutlinedTextField(uiState.aggravatingFactors, actions::onAggravatingFactorsChange, label = { Text("Aggravating factors") }, modifier = Modifier.fillMaxWidth()) }
             item { OutlinedTextField(uiState.relievingFactors, actions::onRelievingFactorsChange, label = { Text("Relieving factors") }, modifier = Modifier.fillMaxWidth()) }
+            // Hidden, not merely disabled, while FeatureFlags.VOICE_FIELD_IMPACT_ENABLED is off:
+            // see its KDoc. Independent of VOICE_INPUT_ENABLED (which stays off and gates
+            // chiefComplaint voice + the audio attachment); this flag governs only this field.
+            if (FeatureFlags.VOICE_FIELD_IMPACT_ENABLED) {
+                item {
+                    OutlinedButton(
+                        onClick = requestVoiceForImpact,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
+                            .testTag("impact_voice_mic_button"),
+                    ) {
+                        Text(
+                            if (uiState.isCapturingImpactVoice) "Listening…" else "Record impact on daily activities",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                    }
+                }
+            }
             item { OutlinedTextField(uiState.impactOnDailyActivities, actions::onImpactChange, label = { Text("Impact on daily activities") }, modifier = Modifier.fillMaxWidth()) }
+            if (FeatureFlags.VOICE_FIELD_IMPACT_ENABLED) {
+                uiState.impactVoiceSuggestion?.let { suggestion ->
+                    item { ImpactVoiceSuggestionSurface(suggestion = suggestion, actions = actions) }
+                }
+            }
             item { OutlinedTextField(uiState.relevantHistory, actions::onRelevantHistoryChange, label = { Text("Other relevant history") }, modifier = Modifier.fillMaxWidth()) }
 
             item { HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp)) }
@@ -263,6 +290,49 @@ private fun ConsultationReviewDialog(
         confirmButton = { Button(onClick = onConfirm) { Text("Confirm & send") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Keep editing") } },
     )
+}
+
+/**
+ * The gate's Suggested state (`scratchpad/pr3-voice-gate-design-memo.md` A.4). Rendered in its
+ * own [Card], adjacent to the impact `OutlinedTextField` above it, never inside it: the
+ * suggestion is [uiState.impactVoiceSuggestion][ConsultationUiState.impactVoiceSuggestion], a
+ * separate field from the committed value, so this composable cannot mutate the text field even
+ * by construction.
+ *
+ * The three actions are deliberately identical [OutlinedButton]s, same shape, same weight, same
+ * row. Making "Use it" a filled primary button with "Discard" as a small text button would be a
+ * visual hierarchy that pushes toward accept without reading, which is exactly the rubber-stamp
+ * failure the design memo cites evidence for (71% of ED notes carrying an error under this same
+ * class of control). Equal weight is a safety property here, not a style choice.
+ */
+@Composable
+internal fun ImpactVoiceSuggestionSurface(suggestion: String, actions: ConsultationActions) {
+    Card(modifier = Modifier.fillMaxWidth().testTag("impact_voice_suggestion_surface")) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("Voice suggestion", style = MaterialTheme.typography.labelLarge)
+            Text(suggestion, style = MaterialTheme.typography.bodyLarge)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(
+                    onClick = actions::onUseImpactSuggestion,
+                    modifier = Modifier.weight(1f).heightIn(min = 56.dp).testTag("impact_voice_use_button"),
+                ) { Text("Use it") }
+                OutlinedButton(
+                    onClick = actions::onEditImpactSuggestion,
+                    modifier = Modifier.weight(1f).heightIn(min = 56.dp).testTag("impact_voice_edit_button"),
+                ) { Text("Edit") }
+                OutlinedButton(
+                    onClick = actions::onDiscardImpactSuggestion,
+                    modifier = Modifier.weight(1f).heightIn(min = 56.dp).testTag("impact_voice_discard_button"),
+                ) { Text("Discard") }
+            }
+        }
+    }
 }
 
 @Composable
