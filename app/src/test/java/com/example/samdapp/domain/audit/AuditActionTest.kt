@@ -5,8 +5,8 @@ import org.junit.Test
 
 /**
  * ASR track PR 2 (`scratchpad/asr-field-audit-memo.md` B.4). Pins the four `VOICE_FIELD_*`
- * wire values against the backend mirror's parser (`test_audit_actions_device.py`), which reads
- * these constructor arguments directly out of this file. Nothing emits these actions yet.
+ * wire values against the backend mirror's parser (`backend/core/tests/test_audit_actions_device.py`),
+ * which reads the enum constructor arguments directly out of `AuditLogger.kt`. Nothing emits these actions yet.
  */
 class AuditActionTest {
 
