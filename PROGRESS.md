@@ -3751,3 +3751,80 @@ sherpa-onnx or any new ASR model, no classifier/kernel/wire-to-model file touche
 `.env`/`local.properties`/`BuildConfig` untouched. 3a's repository refusal is unchanged. The
 design memo's DECISION GATE items remain open, and the per-field flag question in particular is
 3c's to answer.
+
+## Android: ASR track PR 3c, the suggestion UI, mic button, and per-field flag (2026-09-01)
+
+Third of four sub-steps of PR 3. Design of record is
+`scratchpad/pr3-voice-gate-design-memo.md` Part A.4 (the UI and its anti-rubber-stamp
+constraints) and Part E.1 (the per-field flag decision). Breadcrumb emission is 3d; the
+on-device engine swap is PR 4.
+
+**The per-field flag, per E.1's recommendation.** `FeatureFlags.VOICE_FIELD_IMPACT_ENABLED`
+(default `false`) gates only the impact-field mic and suggestion surface, independent of
+`VOICE_INPUT_ENABLED`, which stays `false` and continues to gate `chiefComplaint` voice and the
+audio attachment, the two paths E.1 identifies as the High-severity half of H-15. Two flags,
+each documenting what it holds back. `VOICE_FIELD_IMPACT_ENABLED` is left off for the same
+reason as the global flag: the confirmation gate governs what enters the field, not where the
+audio goes, and the platform recognizer this PR still binds to
+(`AndroidSpeechRecognizerService`) can transmit off-device. It flips to `true` only in PR 4, in
+the same change that brings the on-device engine.
+
+**3b's callerless-handler gap is now closed.** `onRecordImpactVoice`, `onUseImpactSuggestion`,
+`onEditImpactSuggestion` and `onDiscardImpactSuggestion` had no caller after 3b; they now have
+one, and it arrives with the flag that keeps it unreachable, in the same commit. Grepping the
+handler names and the two guard fields (`impactVoiceSuggestion`, `isCapturingImpactVoice`)
+across `app/src/main/` after this change shows hits only in `ConsultationViewModel.kt` and
+`ConsultationScreen.kt`, which is the expected shape now, not the absence PR 3b noted.
+
+**The UI, reusing existing primitives per A.4's "no new design system pattern" instruction.**
+A mic button above the impact `OutlinedTextField`, wrapped in the flag guard, calling
+`onRecordImpactVoice()` via the same `rememberPermissionAction(RECORD_AUDIO, ...)` shape as the
+existing `chiefComplaint` site. A new `ImpactVoiceSuggestionSurface` composable, rendered
+directly under the text field when `impactVoiceSuggestion != null`, in its own `Card`, never
+inside the text field.
+
+**The anti-rubber-stamp constraint that matters most: the three actions are visually
+identical.** Use it, Edit and Discard are all `OutlinedButton`, same `weight(1f)`, same
+`heightIn(min = 56.dp)`, same text style, same row. None is filled, none is a small text
+button. The design memo is explicit that a visual hierarchy pushing toward accept is itself a
+rubber-stamp affordance, citing the 71%-of-ED-notes-contain-an-error evidence for exactly this
+class of control, so keeping the three buttons indistinguishable in weight is a safety property
+here, not a layout preference. Suggestion text renders at `bodyLarge`, and every touch target
+matches the screen's existing `heightIn(min = 56.dp)` floor.
+
+The field cannot be mutated by this surface even by construction: `ImpactVoiceSuggestionSurface`
+only receives the suggestion string as a parameter and never calls `onImpactChange`, so there is
+no code path inside it that could write to `impactOnDailyActivities`.
+
+**`ConsultationContent` and `ImpactVoiceSuggestionSurface` are `internal`, not `private`**,
+matching `CompounderContent`'s existing visibility, which is what lets the androidTest suite
+call them directly.
+
+**Tests.** The repo runs Compose UI androidTests (`CompounderScreenTest`,
+`PatientsScreenTest`, `RegisterScreenTest` already exist), so this step used that harness rather
+than inventing a JVM substitute. New `ConsultationVoiceGateUiTest`, 5 tests: the mic button and
+suggestion surface are both absent from `ConsultationContent` while the flag is off (the shipped
+default); the suggestion surface renders the suggestion text and all three action buttons; and
+each of Use it, Edit and Discard invokes exactly its own handler and no other. Because
+`VOICE_FIELD_IMPACT_ENABLED` is a compile-time `const val`, there is no runtime path to exercise
+flag-on rendering through `ConsultationContent` in this build (the same limitation
+`ConsultationViewModelTest` already documents for `VOICE_INPUT_ENABLED`), so the positive
+rendering assertions call `ImpactVoiceSuggestionSurface` directly, the same pattern
+`CompounderScreenTest` uses for `CompounderContent`.
+
+All 5 new tests, and the full existing androidTest suite (67 tests total), ran on
+emulator-5554 (Pixel_9_Pro_3) and passed, not deferred to merge time.
+`testDevDebugUnitTest`: 282 passed, 0 failed, unchanged (no JVM tests were needed given the
+Compose harness covers the UI claims directly).
+
+**Docs.** No new controlled-doc edit. 3a's H-15 note already states the gate does not function
+for a user until the state model, the UI and the on-device engine land together; 3c supplies
+the UI, one of those three, and the flag stays off, so the residual risk to a user is unchanged
+and that note remains accurate as written.
+
+**Not done in this step, by design.** No `VOICE_FIELD_*` breadcrumb emission (3d's TODO markers
+from 3b are unchanged), no sherpa-onnx or new ASR model, no classifier/kernel/wire-to-model file
+touched. `.env`/`local.properties`/`BuildConfig` untouched. `VOICE_INPUT_ENABLED` unchanged at
+`false`. 3a's repository refusal and 3b's state model are unchanged. The design memo's
+remaining DECISION GATE items (zero versus minimal tidy, the `dwellMs` payload addition) are
+untouched by this step and remain open for 3d.

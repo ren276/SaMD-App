@@ -98,9 +98,10 @@ interface ConsultationActions {
     fun onImpactChange(value: String)
 
     // ── Voice confirmation gate for impactOnDailyActivities ──────────────────────────────────
-    // `scratchpad/pr3-voice-gate-design-memo.md` Part A. No affordance calls any of these yet:
-    // the mic button, the suggestion surface and the feature flag that gates them are a later
-    // step, so the gate is present and tested but unreachable in this build.
+    // `scratchpad/pr3-voice-gate-design-memo.md` Part A. Called from the mic button and the
+    // suggestion surface in ConsultationScreen.kt, both hidden while
+    // FeatureFlags.VOICE_FIELD_IMPACT_ENABLED is off (see its KDoc), so the gate has a caller
+    // and a flag but is not yet reachable in a shipped build. Breadcrumb emission is PR 3d.
 
     /** Idle to Capturing. Runs the existing recognizer and routes the result to Suggested or to
      *  an honest-failure edge. Never mutates the field. */

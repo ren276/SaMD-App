@@ -43,4 +43,20 @@ object FeatureFlags {
      *
      *  See [com.example.samdapp.presentation.consultation.ConsultationScreen]. */
     const val VOICE_INPUT_ENABLED = false
+
+    /** The voice confirmation gate on `impactOnDailyActivities` only (mic button and the
+     *  suggestion surface). Independent of [VOICE_INPUT_ENABLED], which stays `false` and gates
+     *  `chiefComplaint` voice plus the audio attachment, the **High**-severity H-15 paths that
+     *  reach `/api/v1/evaluate`. Off = the mic is hidden and the suggestion surface never renders,
+     *  same "hidden, not merely disabled" discipline as [VOICE_INPUT_ENABLED].
+     *
+     *  Left off for the same reason [VOICE_INPUT_ENABLED] is: the platform recognizer PR 3 still
+     *  binds to (`AndroidSpeechRecognizerService`) can transmit off-device, and the confirmation
+     *  gate this flag would expose governs what enters the field, not where the audio goes, and
+     *  the two are orthogonal controls (`scratchpad/pr3-voice-gate-design-memo.md` Part E.2). This
+     *  flag flips to `true` only in PR 4, in the same change that swaps in the on-device engine
+     *  and removes that transmission risk.
+     *
+     *  See [com.example.samdapp.presentation.consultation.ConsultationScreen]. */
+    const val VOICE_FIELD_IMPACT_ENABLED = false
 }
