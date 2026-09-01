@@ -3521,9 +3521,10 @@ to write anything else) all carry the field.
 4. `backend/core/app/api/v1/encounters.py`: added to `_CONSULTATION_FIELDS`, the allowlist
    `sync.py` checks against.
 5. `backend/core/alembic/versions/0007_consultation_field_provenance.py`: adds the column,
-   nullable, no backfill on the server side (pre-PR-1 devices cannot have synced a
-   non-existent column, so there is no historical server row to backfill; the device-side
-   `TYPED` backfill already covers every row that could reach this column).
+   nullable, with existing server rows remaining `NULL` because there is no server-side
+   backfill. The device-side `TYPED` backfill covers rows on upgraded devices, but a
+   previously-synced row that is never re-pushed stays `NULL` on the backend regardless of
+   what the device now holds locally.
 
 **Tests.** Device: `ConsultationFieldProvenanceRoundTripTest` (2 tests, real in-memory Room DB,
 asserts the value read back from a fresh query, not the object passed to `insert()`) and

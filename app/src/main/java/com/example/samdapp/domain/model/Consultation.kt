@@ -13,10 +13,10 @@ data class Consultation(
     val aggravatingFactors: String?,
     val relievingFactors: String?,
     val impactOnDailyActivities: String?,
-    /** [FieldProvenance] of [impactOnDailyActivities]. Null on every row that predates this
-     *  column and on any row written before a caller starts setting it. See
-     *  [FieldProvenance]'s KDoc for the full contract; this PR adds only the column, nothing
-     *  writes a non-null value yet. */
+    /** [FieldProvenance] of [impactOnDailyActivities]. Null only when [impactOnDailyActivities]
+     *  itself is null; every existing row was backfilled to [FieldProvenance.TYPED] by
+     *  `MIGRATION_16_17` and every new save stamps `TYPED` when a value is present. See
+     *  [FieldProvenance]'s KDoc for the full contract; nothing writes `VOICE_*` yet. */
     val impactOnDailyActivitiesProvenance: FieldProvenance?,
     val relevantHistory: String?,
     val transcription: String?,

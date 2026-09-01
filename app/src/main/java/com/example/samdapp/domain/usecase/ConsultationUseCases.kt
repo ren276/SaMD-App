@@ -39,10 +39,10 @@ class SaveConsultationUseCase @Inject constructor(
             aggravatingFactors = aggravatingFactors,
             relievingFactors = relievingFactors,
             impactOnDailyActivities = impactOnDailyActivities,
-            // No voice capture UI exists on this branch (PR 3 adds it), so every value reaching
-            // this use case was typed. TYPED here, not null, matches the migration backfill for
-            // pre-existing rows: both state the same honest fact about how the value was entered.
-            impactOnDailyActivitiesProvenance = FieldProvenance.TYPED,
+            // No voice capture UI exists on this branch (PR 3 adds it), so any value reaching
+            // this use case was typed. Only stamp TYPED when there is a value to attribute;
+            // an absent field has no provenance to record.
+            impactOnDailyActivitiesProvenance = impactOnDailyActivities?.let { FieldProvenance.TYPED },
             relevantHistory = relevantHistory,
             transcription = null,
             attachments = emptyList(),

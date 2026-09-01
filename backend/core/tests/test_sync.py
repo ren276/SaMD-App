@@ -384,9 +384,7 @@ async def test_consultation_field_provenance_null_is_accepted_and_persisted(
     records = [
         patient_record(),
         encounter_record(),
-        consultation_record(
-            "cons-provenance-null", impact_on_daily_activities_provenance=None
-        ),
+        consultation_record("cons-provenance-null", impact_on_daily_activities_provenance=None),
     ]
     response = await push(client, auth_headers, records)
 
@@ -396,9 +394,7 @@ async def test_consultation_field_provenance_null_is_accepted_and_persisted(
     assert data["applied"] == 3
 
     persisted = (
-        await session.execute(
-            select(Consultation).where(Consultation.id == "cons-provenance-null")
-        )
+        await session.execute(select(Consultation).where(Consultation.id == "cons-provenance-null"))
     ).scalar_one()
     assert persisted.impact_on_daily_activities_provenance is None
 

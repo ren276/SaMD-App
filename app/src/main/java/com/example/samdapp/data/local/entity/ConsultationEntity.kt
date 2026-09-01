@@ -19,8 +19,9 @@ data class ConsultationEntity(
     val aggravatingFactors: String?,
     val relievingFactors: String?,
     val impactOnDailyActivities: String?,
-    /** [FieldProvenance] of [impactOnDailyActivities]. Null for every row written before
-     *  `MIGRATION_16_17`. See [FieldProvenance]'s KDoc; nothing writes a non-`TYPED` value yet. */
+    /** [FieldProvenance] of [impactOnDailyActivities]. `MIGRATION_16_17` backfills every
+     *  pre-existing row to `TYPED`; null only when [impactOnDailyActivities] itself is null.
+     *  See [FieldProvenance]'s KDoc; nothing writes `VOICE_*` yet. */
     val impactOnDailyActivitiesProvenance: FieldProvenance?,
     val relevantHistory: String?,
     val transcription: String?,

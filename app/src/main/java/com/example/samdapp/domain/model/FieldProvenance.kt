@@ -11,9 +11,9 @@ package com.example.samdapp.domain.model
  *    honest, not a guess).
  *  - [VOICE_UNCONFIRMED]: an ASR suggestion sits in UI state, not yet read and accepted by the
  *    worker. **Must never be persisted and never synced.** The repository write path refuses it
- *    — that refusal is [PR 3][scratchpad/asr-field-audit-memo.md], not this PR. This PR only adds
- *    the enum value and the column; nothing in the app can produce [VOICE_UNCONFIRMED] yet, since
- *    no voice capture UI exists on this branch.
+ *    — that refusal is PR 3 (`scratchpad/asr-field-audit-memo.md`), not this PR. This PR only
+ *    adds the enum value and the column; nothing in the app can produce [VOICE_UNCONFIRMED] yet,
+ *    since no voice capture UI exists on this branch.
  *  - [VOICE_CONFIRMED]: the worker read an ASR suggestion and tapped confirm, unedited.
  *  - [VOICE_EDITED]: voice-seeded, then hand-corrected before confirming. Kept distinct from
  *    [VOICE_CONFIRMED] because it is the ASR-quality signal (edit distance) a later production
