@@ -453,3 +453,25 @@ val MIGRATION_15_16 = object : Migration(15, 16) {
         }
     }
 }
+
+/**
+ * ASR track PR 1 (`scratchpad/asr-field-audit-memo.md` Part B.2): adds
+ * `impactOnDailyActivitiesProvenance` to `consultations`, the first (and so far only)
+ * [com.example.samdapp.domain.model.FieldProvenance] column. No UI or ASR code writes a
+ * non-`TYPED` value yet — see `FieldProvenance`'s KDoc.
+ *
+ * Backfill: every existing row's `impactOnDailyActivities` was typed (no voice capture path has
+ * ever existed on a shipped build), so backfilling to `TYPED` is a statement of fact, not an
+ * assumption — this is the memo's own reasoning for the `TYPED` default value, applied here to
+ * every pre-existing row rather than leaving them `NULL`/"unknown".
+ */
+val MIGRATION_16_17 = object : Migration(16, 17) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL(
+            "ALTER TABLE `consultations` ADD COLUMN `impactOnDailyActivitiesProvenance` TEXT",
+        )
+        connection.execSQL(
+            "UPDATE `consultations` SET `impactOnDailyActivitiesProvenance` = 'TYPED'",
+        )
+    }
+}

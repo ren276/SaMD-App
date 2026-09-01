@@ -546,7 +546,7 @@ fun testConsultation(
 ): com.example.samdapp.domain.model.Consultation = com.example.samdapp.domain.model.Consultation(
     id = "consult-$encounterId", patientId = patientId, encounterId = encounterId, chiefComplaint = chiefComplaint,
     onset = null, durationBucket = null, severityScore = null, aggravatingFactors = null, relievingFactors = null,
-    impactOnDailyActivities = null, relevantHistory = null, transcription = null, attachments = emptyList(),
+    impactOnDailyActivities = null, impactOnDailyActivitiesProvenance = null, relevantHistory = null, transcription = null, attachments = emptyList(),
     createdAt = Instant.EPOCH, updatedAt = Instant.EPOCH,
 )
 

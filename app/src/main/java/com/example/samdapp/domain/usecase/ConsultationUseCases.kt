@@ -3,6 +3,7 @@ package com.example.samdapp.domain.usecase
 import com.example.samdapp.domain.model.Attachment
 import com.example.samdapp.domain.model.AttachmentType
 import com.example.samdapp.domain.model.Consultation
+import com.example.samdapp.domain.model.FieldProvenance
 import com.example.samdapp.domain.repository.ConsultationRepository
 import java.time.Instant
 import java.util.UUID
@@ -38,6 +39,10 @@ class SaveConsultationUseCase @Inject constructor(
             aggravatingFactors = aggravatingFactors,
             relievingFactors = relievingFactors,
             impactOnDailyActivities = impactOnDailyActivities,
+            // No voice capture UI exists on this branch (PR 3 adds it), so every value reaching
+            // this use case was typed. TYPED here, not null, matches the migration backfill for
+            // pre-existing rows: both state the same honest fact about how the value was entered.
+            impactOnDailyActivitiesProvenance = FieldProvenance.TYPED,
             relevantHistory = relevantHistory,
             transcription = null,
             attachments = emptyList(),

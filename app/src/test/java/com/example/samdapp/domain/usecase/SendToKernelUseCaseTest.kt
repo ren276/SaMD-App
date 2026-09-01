@@ -32,6 +32,7 @@ class SendToKernelUseCaseTest {
         aggravatingFactors = identityLeakCanary, // NOT in the whitelist
         relievingFactors = identityLeakCanary, // NOT in the whitelist
         impactOnDailyActivities = identityLeakCanary, // NOT in the whitelist
+        impactOnDailyActivitiesProvenance = null,
         relevantHistory = "No known allergies",
         transcription = "patient reports fever since two days",
         attachments = listOf(

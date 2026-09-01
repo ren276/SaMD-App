@@ -76,6 +76,7 @@ _CONSULTATION_FIELDS = (
     "aggravating_factors",
     "relieving_factors",
     "impact_on_daily_activities",
+    "impact_on_daily_activities_provenance",
     "relevant_history",
     "transcription",
     "created_at",

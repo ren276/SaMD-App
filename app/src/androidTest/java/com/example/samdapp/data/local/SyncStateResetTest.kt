@@ -192,7 +192,8 @@ class SyncStateResetTest {
             ConsultationEntity(
                 id = "cons-1", patientId = "pat-1", encounterId = "enc-1", chiefComplaint = "Fever",
                 onset = null, durationBucket = null, severityScore = null, aggravatingFactors = null,
-                relievingFactors = null, impactOnDailyActivities = null, relevantHistory = null,
+                relievingFactors = null, impactOnDailyActivities = null,
+                impactOnDailyActivitiesProvenance = null, relevantHistory = null,
                 transcription = "original", createdAt = Instant.EPOCH, updatedAt = Instant.EPOCH,
                 syncState = SyncState.SYNCED, serverVersion = 3, localModifiedAt = Instant.EPOCH,
             ),

@@ -3,6 +3,7 @@ package com.example.samdapp.data.local.entity
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import com.example.samdapp.domain.model.FieldProvenance
 import com.example.samdapp.domain.model.SyncState
 import java.time.Instant
 
@@ -18,6 +19,9 @@ data class ConsultationEntity(
     val aggravatingFactors: String?,
     val relievingFactors: String?,
     val impactOnDailyActivities: String?,
+    /** [FieldProvenance] of [impactOnDailyActivities]. Null for every row written before
+     *  `MIGRATION_16_17`. See [FieldProvenance]'s KDoc; nothing writes a non-`TYPED` value yet. */
+    val impactOnDailyActivitiesProvenance: FieldProvenance?,
     val relevantHistory: String?,
     val transcription: String?,
     val createdAt: Instant,

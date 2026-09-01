@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.audit_actions_device import DEVICE_AUDIT_ACTIONS
 from app.errors import ErrorCode
 from app.models.audit import AuditEvent
+from app.models.encounter import Consultation
 from app.models.kernel import KernelReport
 from app.models.patient import Patient
 from app.models.sync import SyncBatch, SyncLogEntry
@@ -103,6 +104,35 @@ def encounter_record(
         "updated_at": client_updated_at,
     }
     return _record("encounters", record_id, client_updated_at, data, base_version=base_version)
+
+
+def consultation_record(
+    record_id: str,
+    *,
+    patient_id: str = PATIENT_ID,
+    encounter_id: str = ENCOUNTER_ID,
+    client_updated_at: str = "2026-08-16T09:45:00.000Z",
+    base_version: int | None = None,
+    **data_overrides: Any,
+) -> dict[str, Any]:
+    data = {
+        "patient_id": patient_id,
+        "encounter_id": encounter_id,
+        "chief_complaint": "Fever and body ache",
+        "onset": None,
+        "duration_bucket": "few_days",
+        "severity_score": 5,
+        "aggravating_factors": None,
+        "relieving_factors": None,
+        "impact_on_daily_activities": "Cannot go to work",
+        "impact_on_daily_activities_provenance": "TYPED",
+        "relevant_history": None,
+        "transcription": None,
+        "created_at": client_updated_at,
+        "updated_at": client_updated_at,
+    }
+    data.update(data_overrides)
+    return _record("consultations", record_id, client_updated_at, data, base_version=base_version)
 
 
 def case_record_record(
@@ -305,6 +335,72 @@ async def test_unavailable_inference_source_kernel_report_is_accepted_and_persis
         await session.execute(select(KernelReport).where(KernelReport.id == "kr-unavailable-1"))
     ).scalar_one()
     assert persisted.inference_source == "UNAVAILABLE"
+
+
+# ---------------------------------------------------------------------------
+# consultations.impact_on_daily_activities_provenance (ASR track PR 1)
+# ---------------------------------------------------------------------------
+
+
+async def test_consultation_field_provenance_is_accepted_and_persisted(
+    client: AsyncClient, auth_headers: dict[str, str], session: AsyncSession
+) -> None:
+    """Migration 0007 added this column and the field was added to _CONSULTATION_FIELDS and to
+    the device's ConsultationSyncPayloadDto/SyncRecordMappers in the same commit. Asserting only
+    the HTTP response would not catch a coordination miss on any one of those four points (a
+    missing model column raises before the transaction commits, but a stale _attr_map from an
+    un-migrated database, or a device sending a key the backend model does not have, both surface
+    here as a rejected record or a silently dropped field — see CLAUDE.md's rule on this exact
+    trap).
+    """
+    records = [
+        patient_record(),
+        encounter_record(),
+        consultation_record("cons-provenance-1"),
+    ]
+    response = await push(client, auth_headers, records)
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["rejected"] == 0
+    assert data["applied"] == 3
+    assert {(r["table"], r["status"]) for r in data["results"]} >= {
+        ("consultations", "applied"),
+    }
+
+    persisted = (
+        await session.execute(select(Consultation).where(Consultation.id == "cons-provenance-1"))
+    ).scalar_one()
+    assert persisted.impact_on_daily_activities_provenance == "TYPED"
+    assert persisted.impact_on_daily_activities == "Cannot go to work"
+
+
+async def test_consultation_field_provenance_null_is_accepted_and_persisted(
+    client: AsyncClient, auth_headers: dict[str, str], session: AsyncSession
+) -> None:
+    """A legacy/pre-column device row (or any row where nothing has stamped provenance yet) sends
+    null, not the string "TYPED". The nullable column must accept that, not reject it as invalid.
+    """
+    records = [
+        patient_record(),
+        encounter_record(),
+        consultation_record(
+            "cons-provenance-null", impact_on_daily_activities_provenance=None
+        ),
+    ]
+    response = await push(client, auth_headers, records)
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["rejected"] == 0
+    assert data["applied"] == 3
+
+    persisted = (
+        await session.execute(
+            select(Consultation).where(Consultation.id == "cons-provenance-null")
+        )
+    ).scalar_one()
+    assert persisted.impact_on_daily_activities_provenance is None
 
 
 # ---------------------------------------------------------------------------
