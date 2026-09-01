@@ -3600,3 +3600,65 @@ OPERATOR SIGN-OFF`, not approved as a completed control.
 call for these actions, no voice UI, no ASR engine, no provenance write-refusal, no
 confirmation gate, no classifier/kernel/wire-to-model file touched. `.env`/`local.properties`/
 `BuildConfig` untouched.
+
+## Android: ASR track PR 3a, the VOICE_UNCONFIRMED write-refusal (2026-09-01)
+
+First of four sub-steps of PR 3, the voice confirmation gate. Design of record is
+`scratchpad/pr3-voice-gate-design-memo.md` Part B, written in a read-only STEP 1 pass before any
+code, itself grounded in `scratchpad/asr-field-audit-memo.md` B.2. PR 3a is the repository
+write-refusal and its test, nothing else: no UI, no `ConsultationUiState` fields, no ViewModel
+handlers, no ASR call, no breadcrumb emission, no feature flag. Those are 3b, 3c and 3d.
+
+**What landed.** `DataError.Refused(reason)` added to the sealed `DataError`
+(`domain/DataError.kt`), and `ConsultationRepositoryImpl.saveConsultation` now returns
+`Result.failure(DataError.Refused(...))`, performing no DAO call at all, when the incoming
+`Consultation` carries `impactOnDailyActivitiesProvenance == FieldProvenance.VOICE_UNCONFIRMED`.
+
+Three properties, each a deliberate choice from the design memo's B.2 rather than a default:
+
+1. **Refused, not thrown.** `asDataResult` (`data/repository/ResultCatching.kt`) catches every
+   exception and remaps it to `DataError.Local`, whose message is "Local storage error". A
+   deliberate policy refusal reported as a storage fault is a lie in the error channel, so the
+   refusal returns before entering `asDataResult` and carries its own error type.
+2. **Refused, not dropped.** A silent drop returns success with nothing persisted, which is the
+   exact bug shape CLAUDE.md's assert-the-persisted-row rule exists to catch.
+3. **Checked before any DAO call**, so a refused write leaves no partial row to roll back.
+
+`updateTranscription` carries a comment recording that it needs no refusal: it writes only
+`transcription`, `updatedAt`/`localModifiedAt` and `syncState`, never a provenance column, so it
+cannot carry `VOICE_UNCONFIRMED`. `SaveConsultationUseCase`'s `TYPED`-stamping from PR 1 is
+untouched.
+
+**This is a backstop, not the primary control**, and the distinction matters for how H-15 is
+read. The primary control is that no code path constructs `VOICE_UNCONFIRMED` in the first place.
+Nothing does today: the state model and the gate UI are 3b and 3c, and the feature flag that
+would make any of it reachable does not exist yet. The refusal exists so that a future screen
+which forgets the gate still cannot get an unconfirmed transcript into the database. The feature
+is not user-reachable in any build after this commit.
+
+**Tests.** `ConsultationVoiceUnconfirmedRefusalTest` (androidTest, real Room), 3 tests: the
+refusal, the mandatory positive control (`VOICE_CONFIRMED` saves and reads back), and a second
+control that `TYPED` and null provenance are unaffected. The refusal test asserts the **absence
+of the row** read back through `ConsultationDao.observeForEncounter`, not the returned `Result`;
+the return value is checked second, as a bonus. All 3 ran on emulator-5554 (Pixel_9_Pro_3) and
+passed, not deferred to merge time (PR 1's lesson, where the androidTest source set did not even
+compile at its checkpoint).
+
+The test was additionally proven non-vacuous by mutation: with the refusal condition disabled,
+`voiceUnconfirmed_isRefusedAndNoRowIsPersisted` fails on the database assertion specifically
+("expected null, but was ConsultationEntity(... impactOnDailyActivitiesProvenance=VOICE_UNCONFIRMED
+...)") while both positive controls still pass. That is the signature a real refusal test should
+have, and it confirms the load-bearing assertion is the persisted-row one rather than the return
+value. `testDevDebugUnitTest`: 266 passed, 0 failed, unchanged.
+
+**Docs.** `docs/quality/risk-management-file.md` H-15 residual updated to record that the
+write-refusal backstop now exists in code while remaining unreachable, marked `PROPOSED,
+AWAITING OPERATOR SIGN-OFF`, not approved.
+
+**Not done in this step, by design.** No `ConsultationUiState` fields, no ViewModel handlers, no
+suggestion UI, no ASR invocation, no `VOICE_FIELD_*` emission, no feature flag, no
+classifier/kernel/wire-to-model file touched. `.env`/`local.properties`/`BuildConfig` untouched.
+The open decisions from the design memo's DECISION GATE (state-model shape, process-death
+handling, per-field versus global flag, the Item 6 platform-recognizer transmission question,
+zero versus minimal tidy, and the proposed `dwellMs` payload addition) are unaffected by 3a and
+remain open for 3b onward.
