@@ -8,6 +8,7 @@ import com.example.samdapp.data.mock.DemoPatientProfile
 import com.example.samdapp.domain.audit.AuditAction
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
+import com.example.samdapp.domain.audit.levenshteinDistance
 import com.example.samdapp.domain.model.AttachmentType
 import com.example.samdapp.domain.model.FieldProvenance
 import com.example.samdapp.domain.usecase.AddAttachmentUseCase
@@ -26,6 +27,21 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class PendingAttachment(val type: AttachmentType, val uri: String)
+
+/** The two facts `onSend` needs to emit `VOICE_FIELD_EDITED` honestly, captured at the Edit tap
+ *  and carried in [ConsultationUiState.impactVoicePendingEdit] until save consumes them:
+ *  [originalSuggestion] for `editDistance` against the eventual saved text, [dwellMs] for how
+ *  long the suggestion sat before the worker acted on it. */
+data class PendingVoiceEdit(val originalSuggestion: String, val dwellMs: Long)
+
+private const val SLOT_IMPACT_ON_DAILY_ACTIVITIES = "IMPACT_ON_DAILY_ACTIVITIES"
+
+/** Honest engine identity for the audit payload's `asrModelId`, per
+ *  `scratchpad/pr3-voice-gate-design-memo.md` C.2. PR 4's on-device engine replaces this. */
+private const val ASR_MODEL_ID_PLATFORM_RECOGNIZER = "android.speech.SpeechRecognizer"
+
+private fun dwellMillisSince(shownAtNanos: Long?): Long? =
+    shownAtNanos?.let { (System.nanoTime() - it) / 1_000_000 }
 
 data class ConsultationUiState(
     val chiefComplaint: String,
@@ -58,6 +74,24 @@ data class ConsultationUiState(
      *  `VOICE_UNCONFIRMED` is never assigned here (A.1): a suggestion the worker has not accepted
      *  lives in [impactVoiceSuggestion], not in the provenance of a committed value. */
     val impactProvenance: FieldProvenance? = null,
+    /** `System.nanoTime()` at the moment [impactVoiceSuggestion] was shown, or null when nothing
+     *  is or has just been shown. Consumed at the resolving action (Use it, Edit or Discard) to
+     *  compute `dwellMs` for the audit payload (`scratchpad/pr3-voice-gate-design-memo.md` C.3):
+     *  a measured interval, never content. `System.nanoTime()` rather than
+     *  `android.os.SystemClock.elapsedRealtime()` because it is monotonic, immune to wall-clock
+     *  changes, and pure JVM, so it needs no Android framework stub in a plain unit test.
+     *  Null on the two honest-failure `REJECTED` edges (ASR error, blank transcript): neither
+     *  ever showed a suggestion, so there is no dwell interval to measure, and `dwellMs` is
+     *  correctly absent from those two payloads rather than fabricated as zero. */
+    val impactVoiceSuggestionShownAtNanos: Long? = null,
+    /** Set by [ConsultationActions.onEditImpactSuggestion], consumed by `onSend`. The
+     *  `VOICE_FIELD_EDITED` breadcrumb fires at save, not at the Edit tap (memo A.3/C.1: it
+     *  records a confirmed edit, not an abandoned one), so the data that breadcrumb's
+     *  `editDistance` and `dwellMs` need is captured at the tap and carried here until save
+     *  consumes it. Null if the value's provenance is not currently `VOICE_EDITED`, or if a
+     *  fresh voice capture superseded it before save (in which case `VOICE_FIELD_EDITED` still
+     *  emits, honestly, without those two keys, rather than reusing stale metrics). */
+    val impactVoicePendingEdit: PendingVoiceEdit? = null,
     val relevantHistory: String = "",
     val pendingAttachments: List<PendingAttachment> = emptyList(),
     val isSaving: Boolean = false,
@@ -178,6 +212,8 @@ class ConsultationViewModel @AssistedInject constructor(
                 it.impactProvenance == FieldProvenance.VOICE_CONFIRMED -> FieldProvenance.VOICE_EDITED
                 else -> it.impactProvenance
             },
+            // A cleared field has no provenance and nothing pending to report at save.
+            impactVoicePendingEdit = if (value.isBlank()) null else it.impactVoicePendingEdit,
         )
     }
 
@@ -215,8 +251,19 @@ class ConsultationViewModel @AssistedInject constructor(
             captureAudioAttachmentUseCase().fold(
                 onSuccess = { captured ->
                     if (captured.transcript.isBlank()) {
-                        // Honest-failure edge: successful recognition, nothing usable in it.
-                        // TODO(PR 3d): emit AuditAction.VOICE_FIELD_REJECTED here.
+                        // Honest-failure edge: successful recognition, nothing usable in it. No
+                        // suggestion was ever shown, so no dwellMs; charCount = 0 records that the
+                        // recognizer returned something, just nothing usable, distinct from the
+                        // ASR-error edge below where no transcript was produced at all.
+                        auditLogger.log(
+                            action = AuditAction.VOICE_FIELD_REJECTED,
+                            patientId = patientId,
+                            caseRecordId = caseRecordId,
+                            payload = impactVoicePayload(
+                                provenance = FieldProvenance.VOICE_UNCONFIRMED,
+                                charCount = 0,
+                            ),
+                        )
                         _uiState.update {
                             it.copy(
                                 isCapturingImpactVoice = false,
@@ -224,18 +271,33 @@ class ConsultationViewModel @AssistedInject constructor(
                             )
                         }
                     } else {
-                        // TODO(PR 3d): emit AuditAction.VOICE_FIELD_SUGGESTED here.
+                        auditLogger.log(
+                            action = AuditAction.VOICE_FIELD_SUGGESTED,
+                            patientId = patientId,
+                            caseRecordId = caseRecordId,
+                            payload = impactVoicePayload(
+                                provenance = FieldProvenance.VOICE_UNCONFIRMED,
+                                charCount = captured.transcript.length,
+                            ),
+                        )
                         _uiState.update {
                             it.copy(
                                 isCapturingImpactVoice = false,
                                 impactVoiceSuggestion = captured.transcript,
+                                impactVoiceSuggestionShownAtNanos = System.nanoTime(),
                             )
                         }
                     }
                 },
                 onFailure = { error ->
-                    // Honest-failure edge: the capture failed, so no value was produced.
-                    // TODO(PR 3d): emit AuditAction.VOICE_FIELD_REJECTED here.
+                    // Honest-failure edge: the capture failed, so no value was produced. No
+                    // suggestion was shown (no dwellMs) and no transcript exists (no charCount).
+                    auditLogger.log(
+                        action = AuditAction.VOICE_FIELD_REJECTED,
+                        patientId = patientId,
+                        caseRecordId = caseRecordId,
+                        payload = impactVoicePayload(provenance = FieldProvenance.VOICE_UNCONFIRMED),
+                    )
                     _uiState.update {
                         it.copy(
                             isCapturingImpactVoice = false,
@@ -247,31 +309,97 @@ class ConsultationViewModel @AssistedInject constructor(
         }
     }
 
-    /** TODO(PR 3d): emit [AuditAction.VOICE_FIELD_CONFIRMED] here. */
-    override fun onUseImpactSuggestion() = _uiState.update { state ->
-        val suggestion = state.impactVoiceSuggestion ?: return@update state
-        state.copy(
-            impactOnDailyActivities = suggestion,
-            impactProvenance = FieldProvenance.VOICE_CONFIRMED,
-            impactVoiceSuggestion = null,
-        )
+    override fun onUseImpactSuggestion() {
+        val state = _uiState.value
+        val suggestion = state.impactVoiceSuggestion ?: return
+        viewModelScope.launch {
+            auditLogger.log(
+                action = AuditAction.VOICE_FIELD_CONFIRMED,
+                patientId = patientId,
+                caseRecordId = caseRecordId,
+                payload = impactVoicePayload(
+                    provenance = FieldProvenance.VOICE_CONFIRMED,
+                    charCount = suggestion.length,
+                    dwellMs = dwellMillisSince(state.impactVoiceSuggestionShownAtNanos),
+                ),
+            )
+        }
+        _uiState.update {
+            it.copy(
+                impactOnDailyActivities = suggestion,
+                impactProvenance = FieldProvenance.VOICE_CONFIRMED,
+                impactVoiceSuggestion = null,
+                impactVoiceSuggestionShownAtNanos = null,
+                impactVoicePendingEdit = null,
+            )
+        }
     }
 
     /** The suggestion is committed so the worker can correct it in place, stamped `VOICE_EDITED`
      *  from the outset. The confirm for that edit is the existing review-and-send at the screen
-     *  boundary (memo A.3), so no `VOICE_FIELD_EDITED` breadcrumb belongs here: PR 3d emits it at
-     *  save, where it records a confirmed edit rather than an abandoned one. */
+     *  boundary (memo A.3), so the `VOICE_FIELD_EDITED` breadcrumb does not emit here; `onSend`
+     *  emits it, where it records a confirmed edit rather than an abandoned one. What that later
+     *  emission needs (the original suggestion, for `editDistance`, and `dwellMs`, measured now
+     *  while the suggestion was actually on screen) is captured here and carried in
+     *  [ConsultationUiState.impactVoicePendingEdit]. */
     override fun onEditImpactSuggestion() = _uiState.update { state ->
         val suggestion = state.impactVoiceSuggestion ?: return@update state
         state.copy(
             impactOnDailyActivities = suggestion,
             impactProvenance = FieldProvenance.VOICE_EDITED,
             impactVoiceSuggestion = null,
+            impactVoiceSuggestionShownAtNanos = null,
+            impactVoicePendingEdit = PendingVoiceEdit(
+                originalSuggestion = suggestion,
+                dwellMs = dwellMillisSince(state.impactVoiceSuggestionShownAtNanos) ?: 0L,
+            ),
         )
     }
 
-    /** TODO(PR 3d): emit [AuditAction.VOICE_FIELD_REJECTED] here. */
-    override fun onDiscardImpactSuggestion() = _uiState.update { it.copy(impactVoiceSuggestion = null) }
+    override fun onDiscardImpactSuggestion() {
+        val state = _uiState.value
+        val suggestion = state.impactVoiceSuggestion
+        if (suggestion != null) {
+            viewModelScope.launch {
+                auditLogger.log(
+                    action = AuditAction.VOICE_FIELD_REJECTED,
+                    patientId = patientId,
+                    caseRecordId = caseRecordId,
+                    payload = impactVoicePayload(
+                        provenance = FieldProvenance.VOICE_UNCONFIRMED,
+                        charCount = suggestion.length,
+                        dwellMs = dwellMillisSince(state.impactVoiceSuggestionShownAtNanos),
+                    ),
+                )
+            }
+        }
+        _uiState.update {
+            it.copy(impactVoiceSuggestion = null, impactVoiceSuggestionShownAtNanos = null)
+        }
+    }
+
+    /** `slot`, `provenance` and `asrModelId`/`asrModelVersion` are on every `VOICE_FIELD_*`
+     *  payload; `charCount`, `editDistance` and `dwellMs` are passed only where the caller has
+     *  them, and appear as JSON null otherwise, matching `asrModelVersion`'s "not available yet"
+     *  convention rather than varying the payload's key set transition to transition. `slot` is a
+     *  plain `String`, not an enum: one voice-enabled field does not earn one yet (memo C.2),
+     *  promote when a second slot exists. Never a transcript, corrected text, URI or patient
+     *  name (memo C.4); `patientId`/`caseRecordId` travel as [AuditLogger.log] parameters, same
+     *  as every other call site in this class, not inside this payload. */
+    private fun impactVoicePayload(
+        provenance: FieldProvenance,
+        charCount: Int? = null,
+        editDistance: Int? = null,
+        dwellMs: Long? = null,
+    ) = auditPayload(
+        "slot" to SLOT_IMPACT_ON_DAILY_ACTIVITIES,
+        "provenance" to provenance.name,
+        "asrModelId" to ASR_MODEL_ID_PLATFORM_RECOGNIZER,
+        "asrModelVersion" to null,
+        "charCount" to charCount?.toString(),
+        "editDistance" to editDistance?.toString(),
+        "dwellMs" to dwellMs?.toString(),
+    )
     override fun onRelevantHistoryChange(value: String) = _uiState.update { it.copy(relevantHistory = value) }
 
     /** Investor-demo shortcut: fills every HPI field from [DemoPatientProfile] in one tap. */
@@ -288,6 +416,7 @@ class ConsultationViewModel @AssistedInject constructor(
                 // A prior voice-stamped provenance must not survive being overwritten by demo
                 // text it does not describe; it stamps TYPED at save like any other typed value.
                 impactProvenance = null,
+                impactVoicePendingEdit = null,
                 relevantHistory = DemoPatientProfile.RELEVANT_HISTORY,
             )
         }
@@ -375,6 +504,29 @@ class ConsultationViewModel @AssistedInject constructor(
             ).getOrElse { error ->
                 _uiState.update { it.copy(isSaving = false, errorMessage = error.message ?: "Could not save consultation") }
                 return@launch
+            }
+            // VOICE_FIELD_EDITED emits here, not at the Edit tap (memo A.3/C.1): a save is what
+            // turns a hand-corrected suggestion into a confirmed edit rather than an abandoned
+            // one. Only when the saved value's own provenance is VOICE_EDITED, so a value that
+            // reverted to TYPED/VOICE_CONFIRMED after the Edit tap (further edits, a re-capture,
+            // Use it on a fresh suggestion) does not get a stale EDITED breadcrumb.
+            if (current.impactProvenance == FieldProvenance.VOICE_EDITED) {
+                val pending = current.impactVoicePendingEdit
+                auditLogger.log(
+                    action = AuditAction.VOICE_FIELD_EDITED,
+                    patientId = patientId,
+                    caseRecordId = caseRecordId,
+                    payload = impactVoicePayload(
+                        provenance = FieldProvenance.VOICE_EDITED,
+                        charCount = current.impactOnDailyActivities.length,
+                        // Absent, honestly, rather than fabricated, if a fresh voice capture
+                        // superseded the metrics this value's Edit tap originally recorded.
+                        editDistance = pending?.let {
+                            levenshteinDistance(it.originalSuggestion, current.impactOnDailyActivities)
+                        },
+                        dwellMs = pending?.dwellMs,
+                    ),
+                )
             }
             current.pendingAttachments.forEach { pending ->
                 addAttachmentUseCase(consultation.id, pending.type, pending.uri).onSuccess {
