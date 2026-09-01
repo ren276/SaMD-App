@@ -3828,3 +3828,84 @@ touched. `.env`/`local.properties`/`BuildConfig` untouched. `VOICE_INPUT_ENABLED
 `false`. 3a's repository refusal and 3b's state model are unchanged. The design memo's
 remaining DECISION GATE items (zero versus minimal tidy, the `dwellMs` payload addition) are
 untouched by this step and remain open for 3d.
+
+## Android: ASR track PR 3d, breadcrumb emission at the gate transitions (2026-09-01)
+
+Fourth and last sub-step of PR 3. Design of record is
+`scratchpad/pr3-voice-gate-design-memo.md` Part C (C.1 transition table, C.2 payload, C.3 the
+operator-approved `dwellMs` addition, C.4 forbidden keys). Replaces the four `TODO(PR 3d)`
+markers 3b left with real emissions. No new ASR model, no flag flipped: the feature stays dark.
+
+**The four transitions, each emitting `VOICE_FIELD_*` via the existing `AuditLogger`, exactly as
+C.1 specifies.** `VOICE_FIELD_SUGGESTED` when a non-blank transcript is shown.
+`VOICE_FIELD_CONFIRMED` on Use it. `VOICE_FIELD_REJECTED` on Discard and on both honest-failure
+edges (ASR error, blank-on-success). `VOICE_FIELD_EDITED` emits at save, not at the Edit tap, so
+it records a confirmed edit rather than an abandoned one, exactly as the design memo requires,
+and only fires when the saved value's own provenance is `VOICE_EDITED` at that moment. All four
+existing `AuditAction` members from PR 2 needed no further backend change: the accepted-set
+widening already shipped there.
+
+**The payload, one private builder (`impactVoicePayload`) shared by all four call sites**, so
+the key set is identical across every emission rather than varying transition to transition.
+`slot` is `"IMPACT_ON_DAILY_ACTIVITIES"`, a plain `String` constant per C.2, not the enum B.4's
+code sketch implies: one voice-enabled field does not earn one yet. `asrModelId` is
+`"android.speech.SpeechRecognizer"`, the honest current engine identity. `asrModelVersion` is
+always `null`: the platform recognizer exposes no version, and inventing one would be exactly
+the fabrication pattern H-09/H-12 exist to prevent; PR 4's on-device engine fills both fields
+with real values. `charCount`, `editDistance` and `dwellMs` are passed only where the caller has
+them and otherwise render as JSON `null`, the same "not available yet" convention as
+`asrModelVersion`, rather than the payload's key set itself varying.
+
+**`dwellMs`, the operator-approved addition (C.3).** `System.nanoTime()` at the moment a
+suggestion is shown, stored on `ConsultationUiState.impactVoiceSuggestionShownAtNanos`, consumed
+at whichever action resolves it. `System.nanoTime()` rather than
+`android.os.SystemClock.elapsedRealtime()`: both are monotonic and immune to wall-clock changes,
+but `nanoTime()` is pure JVM and needs no Android framework stub to run under the plain
+`testDevDebugUnitTest` runner this project uses (no Robolectric). `dwellMs` is present on
+`CONFIRMED`, the save-time `EDITED`, and the Discard flavor of `REJECTED`, all three of which
+follow a real "suggestion shown" moment. It is correctly **absent**, not zero, on the two
+honest-failure `REJECTED` emissions (ASR error, blank transcript): neither ever showed a
+suggestion, so there is no dwell interval to measure, and reporting zero there would be a
+fabricated number dressed as a real one.
+
+**`editDistance`, deferred like the breadcrumb it belongs to.** Computed at save between the
+suggestion that seeded the edit and whatever the worker actually saved, via a small new
+`levenshteinDistance` helper (`domain/audit/Levenshtein.kt`), not a library. Because the
+breadcrumb itself defers to save, the two facts it needs (the original suggestion, for the
+distance; `dwellMs`, measured at the Edit tap while the suggestion was genuinely on screen) are
+captured at the tap and carried in a new `ConsultationUiState.impactVoicePendingEdit` field until
+`onSend` consumes them. If a fresh voice capture supersedes a pending edit before save (a rare
+path: Edit returns to Idle, so a second capture is legitimately reachable), `VOICE_FIELD_EDITED`
+still emits at save, honestly, without `editDistance`/`dwellMs` rather than reusing stale
+metrics from the abandoned edit.
+
+**The C.4 guard is a test, not just a claim.** `no payload ever carries the transcript, the
+corrected text, a uri, or the patient id` drives the ViewModel through SUGGESTED and a saved
+EDITED transition and asserts the raw payload string of every emitted entry does not contain the
+transcript, the corrected text, the `speech-session://` URI scheme, or the patient id, following
+the same `payload.contains(...)` idiom `AbhaCreateOtpViewModelTest` already uses for its own
+never-log-this-value checks. `patientId`/`caseRecordId` travel as `AuditLogger.log` parameters,
+matching every existing call site in this class, never inside the payload.
+
+**Tests.** `ConsultationVoiceGateBreadcrumbsTest`, 9 new tests: SUGGESTED's payload and the
+absence of `dwellMs` at that point; CONFIRMED's `dwellMs` presence and non-negativity; that Edit
+emits nothing at the tap and `VOICE_FIELD_EDITED` only appears at save, with the correct
+`editDistance` for a known correction; that a plain typed save never emits `EDITED`; Discard's
+payload; both honest-failure `REJECTED` payloads, confirming `charCount`/`dwellMs` absence
+exactly where B.3's own honest-failure reasoning says they should be absent; and the C.4 guard.
+`LevenshteinTest`, 8 new tests over known distance pairs (identical strings, empty-string edges,
+single insertion/deletion/substitution, the classic kitten/sitting pair, and a realistic hand
+correction). `testDevDebugUnitTest`: 299 passed (was 282), 0 failed, all green on the first run.
+
+**Docs.** `docs/quality/risk-management-file.md` H-15 residual updated: this is the point the
+four-breadcrumb control can honestly be described as **implemented** (emits at all four
+transitions with the metadata-only payload) rather than merely enum-level or UI-only, while
+still being flag-gated off and therefore not user-reachable. Marked `PROPOSED, AWAITING
+OPERATOR SIGN-OFF`, not approved.
+
+**Not done in this step, by design.** No feature flag flipped (`VOICE_FIELD_IMPACT_ENABLED` and
+`VOICE_INPUT_ENABLED` both stay `false`), no sherpa-onnx or new ASR model, no
+classifier/kernel/wire-to-model file touched. `.env`/`local.properties`/`BuildConfig` untouched.
+3a's repository refusal, 3b's state model, and 3c's UI are all unchanged. With 3d, all four PR 3
+sub-steps are complete; PR 4 is the on-device engine swap that finally flips
+`VOICE_FIELD_IMPACT_ENABLED`.
