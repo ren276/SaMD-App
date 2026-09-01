@@ -9,6 +9,7 @@ import com.example.samdapp.domain.audit.AuditAction
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.model.AttachmentType
+import com.example.samdapp.domain.model.FieldProvenance
 import com.example.samdapp.domain.usecase.AddAttachmentUseCase
 import com.example.samdapp.domain.usecase.CaptureAudioAttachmentUseCase
 import com.example.samdapp.domain.usecase.SaveConsultationUseCase
@@ -36,12 +37,41 @@ data class ConsultationUiState(
     val aggravatingFactors: String = "",
     val relievingFactors: String = "",
     val impactOnDailyActivities: String = "",
+    /** The outstanding ASR suggestion for [impactOnDailyActivities], or null when there is none.
+     *  It sits **beside** the committed value and is never the field value itself, so no code
+     *  path can read an unconfirmed transcript as if the worker had accepted it
+     *  (`scratchpad/pr3-voice-gate-design-memo.md` A.2 property 1).
+     *
+     *  Non-null means the gate is in its Suggested state. Nothing clears it except the three
+     *  explicit worker actions and the failure edges: there is no timeout and no auto-accept, so
+     *  a future diff that introduces a timer touching this field is wrong (A.2 property 2).
+     *
+     *  ViewModel-held only, deliberately. Process death discards it along with the rest of the
+     *  draft, which fails safe: the suggestion was never the field value and no provenance was
+     *  stamped, so nothing unconfirmed survives (A.2 property 3). */
+    val impactVoiceSuggestion: String? = null,
+    /** Mic live for [impactOnDailyActivities]. The field is never mutated while this is true. */
+    val isCapturingImpactVoice: Boolean = false,
+    /** The [FieldProvenance] the committed [impactOnDailyActivities] will carry at save.
+     *  Null means "typed, or empty": [com.example.samdapp.domain.usecase.SaveConsultationUseCase]
+     *  stamps `TYPED` for a non-blank value, which is PR 1's behaviour unchanged.
+     *  `VOICE_UNCONFIRMED` is never assigned here (A.1): a suggestion the worker has not accepted
+     *  lives in [impactVoiceSuggestion], not in the provenance of a committed value. */
+    val impactProvenance: FieldProvenance? = null,
     val relevantHistory: String = "",
     val pendingAttachments: List<PendingAttachment> = emptyList(),
     val isSaving: Boolean = false,
     val errorMessage: String? = null,
 ) {
-    val canSend: Boolean get() = chiefComplaint.isNotBlank() && !isSaving
+    /** The added clauses are the voice gate (`pr3-voice-gate-design-memo.md` A.2 property 4).
+     *  Because `ConsultationScreen` binds the send button to this, blocking here also blocks the
+     *  H-08 review dialog the button opens, so an outstanding suggestion cannot be carried past
+     *  the screen boundary. Deliberately one derived clause here rather than a second guard
+     *  inside the dialog: stacking the voice gate into that dialog would train dismissal, the
+     *  failure mode H-02 already records for AGREE. */
+    val canSend: Boolean
+        get() = chiefComplaint.isNotBlank() && !isSaving &&
+            impactVoiceSuggestion == null && !isCapturingImpactVoice
     val hasAudioAttachment: String? get() = pendingAttachments.firstOrNull { it.type == AttachmentType.AUDIO }?.uri
 }
 
@@ -66,6 +96,28 @@ interface ConsultationActions {
     fun onAggravatingFactorsChange(value: String)
     fun onRelievingFactorsChange(value: String)
     fun onImpactChange(value: String)
+
+    // ── Voice confirmation gate for impactOnDailyActivities ──────────────────────────────────
+    // `scratchpad/pr3-voice-gate-design-memo.md` Part A. No affordance calls any of these yet:
+    // the mic button, the suggestion surface and the feature flag that gates them are a later
+    // step, so the gate is present and tested but unreachable in this build.
+
+    /** Idle to Capturing. Runs the existing recognizer and routes the result to Suggested or to
+     *  an honest-failure edge. Never mutates the field. */
+    fun onRecordImpactVoice()
+
+    /** Suggested to Idle, accepting: the suggestion becomes the committed value, stamped
+     *  `VOICE_CONFIRMED`. */
+    fun onUseImpactSuggestion()
+
+    /** Suggested to Idle, accepting for correction: the suggestion becomes the committed value
+     *  stamped `VOICE_EDITED`, and the worker edits it in the field. The confirm is the existing
+     *  review-and-send, not a new per-field tap (memo A.3). */
+    fun onEditImpactSuggestion()
+
+    /** Suggested to Idle, rejecting: field and provenance untouched, suggestion dropped. */
+    fun onDiscardImpactSuggestion()
+
     fun onRelevantHistoryChange(value: String)
     fun onAddAttachment(type: AttachmentType, uri: String)
     fun onRecordAudioAttachment()
@@ -109,7 +161,116 @@ class ConsultationViewModel @AssistedInject constructor(
     override fun onSeverityScoreChange(value: Int) = _uiState.update { it.copy(severityScore = value) }
     override fun onAggravatingFactorsChange(value: String) = _uiState.update { it.copy(aggravatingFactors = value) }
     override fun onRelievingFactorsChange(value: String) = _uiState.update { it.copy(relievingFactors = value) }
-    override fun onImpactChange(value: String) = _uiState.update { it.copy(impactOnDailyActivities = value) }
+    /**
+     * Keyboard edits carry the provenance transitions from the design memo's A.3:
+     * clearing the field to empty resets provenance to null (an empty field has no provenance to
+     * record), and hand-correcting a `VOICE_CONFIRMED` value makes it `VOICE_EDITED`, which is
+     * the field-audit memo's own definition of that value ("voice-seeded, then hand-corrected").
+     * A null provenance stays null and is stamped `TYPED` at save by
+     * [com.example.samdapp.domain.usecase.SaveConsultationUseCase], PR 1's behaviour unchanged.
+     */
+    override fun onImpactChange(value: String) = _uiState.update {
+        it.copy(
+            impactOnDailyActivities = value,
+            impactProvenance = when {
+                value.isBlank() -> null
+                it.impactProvenance == FieldProvenance.VOICE_CONFIRMED -> FieldProvenance.VOICE_EDITED
+                else -> it.impactProvenance
+            },
+        )
+    }
+
+    /**
+     * Idle to Capturing, then to Suggested or to an honest-failure edge.
+     *
+     * Three properties hold on every path out of here, and they are the reason this handler is
+     * shaped the way it is (`scratchpad/pr3-voice-gate-design-memo.md` A.2 and B.3):
+     *
+     * 1. `impactOnDailyActivities` and `impactProvenance` are never written. A transcript reaches
+     *    [ConsultationUiState.impactVoiceSuggestion] only, so nothing is committed until the
+     *    worker acts on it.
+     * 2. A **blank transcript on a successful recognition** is treated as a failed capture, not as
+     *    a suggestion. `AndroidSpeechRecognizerService` reads the results list and calls
+     *    `.orEmpty()`, so a success carrying "" is reachable, and entering Suggested with an empty
+     *    suggestion would put the worker in front of a gate with nothing in it. This is the same
+     *    shape as the empty-differential-200 bug this repo already fixed once
+     *    ([AuditAction.KERNEL_EMPTY_DIFFERENTIAL]): a successful response carrying nothing usable
+     *    routes to the honest-failure state rather than being dressed up as a real result. The
+     *    blank check is a check, not a transformation: the transcript itself is stored verbatim,
+     *    with no tidying, so what the worker confirms is exactly what gets committed.
+     * 3. An error leaves the field exactly as the worker left it. Never commit an empty string,
+     *    never commit an unconfirmed value, the voice-level analogue of
+     *    [com.example.samdapp.domain.model.InferenceSource.UNAVAILABLE]'s honest-failure state.
+     *
+     * Guarded against re-entry: a capture already in flight, or a suggestion already awaiting a
+     * decision, refuses a second request rather than starting a second recognizer session or
+     * overwriting the pending suggestion when the first completes.
+     */
+    override fun onRecordImpactVoice() {
+        val current = _uiState.value
+        if (current.isCapturingImpactVoice || current.impactVoiceSuggestion != null) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isCapturingImpactVoice = true, errorMessage = null) }
+            captureAudioAttachmentUseCase().fold(
+                onSuccess = { captured ->
+                    if (captured.transcript.isBlank()) {
+                        // Honest-failure edge: successful recognition, nothing usable in it.
+                        // TODO(PR 3d): emit AuditAction.VOICE_FIELD_REJECTED here.
+                        _uiState.update {
+                            it.copy(
+                                isCapturingImpactVoice = false,
+                                errorMessage = "Nothing was heard. Please try again or type the answer.",
+                            )
+                        }
+                    } else {
+                        // TODO(PR 3d): emit AuditAction.VOICE_FIELD_SUGGESTED here.
+                        _uiState.update {
+                            it.copy(
+                                isCapturingImpactVoice = false,
+                                impactVoiceSuggestion = captured.transcript,
+                            )
+                        }
+                    }
+                },
+                onFailure = { error ->
+                    // Honest-failure edge: the capture failed, so no value was produced.
+                    // TODO(PR 3d): emit AuditAction.VOICE_FIELD_REJECTED here.
+                    _uiState.update {
+                        it.copy(
+                            isCapturingImpactVoice = false,
+                            errorMessage = error.message ?: "Voice capture failed",
+                        )
+                    }
+                },
+            )
+        }
+    }
+
+    /** TODO(PR 3d): emit [AuditAction.VOICE_FIELD_CONFIRMED] here. */
+    override fun onUseImpactSuggestion() = _uiState.update { state ->
+        val suggestion = state.impactVoiceSuggestion ?: return@update state
+        state.copy(
+            impactOnDailyActivities = suggestion,
+            impactProvenance = FieldProvenance.VOICE_CONFIRMED,
+            impactVoiceSuggestion = null,
+        )
+    }
+
+    /** The suggestion is committed so the worker can correct it in place, stamped `VOICE_EDITED`
+     *  from the outset. The confirm for that edit is the existing review-and-send at the screen
+     *  boundary (memo A.3), so no `VOICE_FIELD_EDITED` breadcrumb belongs here: PR 3d emits it at
+     *  save, where it records a confirmed edit rather than an abandoned one. */
+    override fun onEditImpactSuggestion() = _uiState.update { state ->
+        val suggestion = state.impactVoiceSuggestion ?: return@update state
+        state.copy(
+            impactOnDailyActivities = suggestion,
+            impactProvenance = FieldProvenance.VOICE_EDITED,
+            impactVoiceSuggestion = null,
+        )
+    }
+
+    /** TODO(PR 3d): emit [AuditAction.VOICE_FIELD_REJECTED] here. */
+    override fun onDiscardImpactSuggestion() = _uiState.update { it.copy(impactVoiceSuggestion = null) }
     override fun onRelevantHistoryChange(value: String) = _uiState.update { it.copy(relevantHistory = value) }
 
     /** Investor-demo shortcut: fills every HPI field from [DemoPatientProfile] in one tap. */
@@ -123,6 +284,9 @@ class ConsultationViewModel @AssistedInject constructor(
                 aggravatingFactors = DemoPatientProfile.AGGRAVATING_FACTORS,
                 relievingFactors = DemoPatientProfile.RELIEVING_FACTORS,
                 impactOnDailyActivities = DemoPatientProfile.IMPACT_ON_DAILY_ACTIVITIES,
+                // A prior voice-stamped provenance must not survive being overwritten by demo
+                // text it does not describe; it stamps TYPED at save like any other typed value.
+                impactProvenance = null,
                 relevantHistory = DemoPatientProfile.RELEVANT_HISTORY,
             )
         }
@@ -205,6 +369,7 @@ class ConsultationViewModel @AssistedInject constructor(
                 aggravatingFactors = current.aggravatingFactors.ifBlank { null },
                 relievingFactors = current.relievingFactors.ifBlank { null },
                 impactOnDailyActivities = current.impactOnDailyActivities.ifBlank { null },
+                impactOnDailyActivitiesProvenance = current.impactProvenance,
                 relevantHistory = current.relevantHistory.ifBlank { null },
             ).getOrElse { error ->
                 _uiState.update { it.copy(isSaving = false, errorMessage = error.message ?: "Could not save consultation") }

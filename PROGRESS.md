@@ -3662,3 +3662,92 @@ The open decisions from the design memo's DECISION GATE (state-model shape, proc
 handling, per-field versus global flag, the Item 6 platform-recognizer transmission question,
 zero versus minimal tidy, and the proposed `dwellMs` payload addition) are unaffected by 3a and
 remain open for 3b onward.
+
+## Android: ASR track PR 3b, the voice confirmation-gate state model (2026-09-01)
+
+Second of four sub-steps of PR 3. Design of record is `scratchpad/pr3-voice-gate-design-memo.md`
+Part A (state model) and B.3 (honest-failure edges). 3b is state, handlers, the guard and the
+failure edges. The visible suggestion surface, the mic button and the feature flag are 3c;
+breadcrumb emission is 3d.
+
+**Still dark, and this is the important framing.** No affordance calls any of the new handlers.
+Grepping the four handler names and the two new state fields across `app/src/main/` returns hits
+only in `ConsultationViewModel.kt` itself, so the gate cannot be entered from the UI in this
+build. No feature flag was added or flipped, no `auditLogger.log` call was added, and no new ASR
+model was introduced: the existing `TranscriptionService` interface and its
+`AndroidSpeechRecognizerService` binding are used unchanged, since the on-device engine is PR 4.
+The unit tests are the only thing that exercises the gate at all, which is why they cover the
+invariants rather than a happy path.
+
+**Three stored state fields on `ConsultationUiState`**, flat, matching the class's existing
+style: `impactVoiceSuggestion: String?`, `isCapturingImpactVoice: Boolean`, and
+`impactProvenance: FieldProvenance?`. Rejected is deliberately **not** a stored state: the design
+memo's A.1 establishes it as a transition, and a stored flag for it would be a state nothing ever
+renders. `VOICE_UNCONFIRMED` is never assigned to `impactProvenance` anywhere; an unaccepted
+suggestion lives in `impactVoiceSuggestion`, which is what makes 3a's repository refusal a
+backstop rather than the primary mechanism.
+
+The suggestion is held in the ViewModel only, with no `rememberSaveable` and no
+`SavedStateHandle`. That is a deliberate deviation from the field-audit memo's literal wording,
+argued in the design memo's A.2 property 3: nothing else on this screen survives process death
+either, so persisting the suggestion alone would resurrect it attached to a blank form, and
+losing it fails safe because it was never the field value and stamped no provenance.
+
+**The guard is one clause** on the existing derived `canSend`, now
+`chiefComplaint.isNotBlank() && !isSaving && impactVoiceSuggestion == null &&
+!isCapturingImpactVoice`. Because `ConsultationScreen` already binds the send button to
+`canSend`, this also blocks the H-08 review dialog the button opens. Deliberately not a second
+guard inside that dialog: stacking the voice gate there would train dismissal, the failure mode
+H-02 already records for AGREE.
+
+**Honest-failure edges (B.3), all three leaving the field and provenance untouched.** An ASR
+error shows a message and opens no gate. A worker discard drops the suggestion. And the edge a
+build most often misses: a **successful** recognition carrying a blank transcript is treated as a
+failed capture, never as a suggestion. `AndroidSpeechRecognizerService` reads the results list
+and calls `.orEmpty()`, so a success carrying "" is reachable, and entering the gate with an
+empty suggestion would put the worker in front of an empty prompt whose acceptance would commit
+an empty string over whatever they had typed. This is the same shape as the
+empty-differential-200 bug this repo already fixed once (`KERNEL_EMPTY_DIFFERENTIAL`): a success
+carrying nothing usable routes to the honest-failure state instead of being dressed up as a real
+result. The blank test is a check, not a transformation, so the transcript itself is still stored
+verbatim with no tidying, per the design memo's Part D recommendation of zero tidy for the first
+slice.
+
+**Provenance now reaches the persisted object.** `SaveConsultationUseCase` gained an optional
+`impactOnDailyActivitiesProvenance` parameter and `onSend` passes `uiState.impactProvenance`. PR
+1's behaviour is preserved exactly for the typed path: a caller that passes nothing still gets
+`TYPED` stamped for a non-blank value and null for an empty one. The keyboard transitions from
+the design memo's A.3 are wired into `onImpactChange`: clearing the field resets provenance to
+null, and hand-correcting a `VOICE_CONFIRMED` value makes it `VOICE_EDITED`, which is the
+field-audit memo's own definition of that value.
+
+**Tests.** New `ConsultationVoiceGateTest`, 14 JVM tests, all passing:
+`testDevDebugUnitTest` 280 passed (was 266), 0 failed. Coverage is the invariants, not the happy
+path: the suggestion lands beside the field and leaves the committed value untouched; `canSend`
+is false while a suggestion is outstanding and while the mic is live; each of Use it, Edit and
+Discard produces the right value, provenance and cleared suggestion; an ASR error and a blank
+transcript each leave the field and provenance untouched and never open the gate; the keyboard
+provenance transitions hold; a confirmed value is persisted carrying `VOICE_CONFIRMED`; and an
+outstanding suggestion cannot be sent past the gate. `FakeConsultationRepository` now records
+what it was asked to save so the provenance assertions check the object that would have been
+persisted rather than only the resulting UI state.
+
+One test asserts `canSend` against a constructed `ConsultationUiState` instead of by driving the
+ViewModel, because `MainDispatcherRule` uses an `UnconfinedTestDispatcher` and the capture
+coroutine therefore runs eagerly to completion, leaving the Capturing state unobservable from
+outside. `canSend` is a pure derived property, so asserting it directly tests the guard clause
+itself rather than racing the dispatcher for a glimpse of an intermediate state. Noted here
+because the first draft of that test did race it and failed.
+
+**Docs.** No new controlled-doc change: 3a's H-15 residual note already states that the gate
+does not function for a user until the state model, the UI and the on-device engine land
+together, and 3b is one of those three, not the completion of them. That note remains accurate
+as written, so re-editing H-15 to announce a state model that still cannot be reached would
+overstate the position rather than update it.
+
+**Not done in this step, by design.** No suggestion composable, no mic button, no feature flag,
+no `VOICE_FIELD_*` emission (four `TODO(PR 3d)` markers sit at the emission points), no
+sherpa-onnx or any new ASR model, no classifier/kernel/wire-to-model file touched.
+`.env`/`local.properties`/`BuildConfig` untouched. 3a's repository refusal is unchanged. The
+design memo's DECISION GATE items remain open, and the per-field flag question in particular is
+3c's to answer.
