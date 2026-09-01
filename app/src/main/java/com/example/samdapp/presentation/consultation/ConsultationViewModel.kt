@@ -201,8 +201,14 @@ class ConsultationViewModel @AssistedInject constructor(
      * 3. An error leaves the field exactly as the worker left it. Never commit an empty string,
      *    never commit an unconfirmed value, the voice-level analogue of
      *    [com.example.samdapp.domain.model.InferenceSource.UNAVAILABLE]'s honest-failure state.
+     *
+     * Guarded against re-entry: a capture already in flight, or a suggestion already awaiting a
+     * decision, refuses a second request rather than starting a second recognizer session or
+     * overwriting the pending suggestion when the first completes.
      */
     override fun onRecordImpactVoice() {
+        val current = _uiState.value
+        if (current.isCapturingImpactVoice || current.impactVoiceSuggestion != null) return
         viewModelScope.launch {
             _uiState.update { it.copy(isCapturingImpactVoice = true, errorMessage = null) }
             captureAudioAttachmentUseCase().fold(
@@ -278,6 +284,9 @@ class ConsultationViewModel @AssistedInject constructor(
                 aggravatingFactors = DemoPatientProfile.AGGRAVATING_FACTORS,
                 relievingFactors = DemoPatientProfile.RELIEVING_FACTORS,
                 impactOnDailyActivities = DemoPatientProfile.IMPACT_ON_DAILY_ACTIVITIES,
+                // A prior voice-stamped provenance must not survive being overwritten by demo
+                // text it does not describe; it stamps TYPED at save like any other typed value.
+                impactProvenance = null,
                 relevantHistory = DemoPatientProfile.RELEVANT_HISTORY,
             )
         }

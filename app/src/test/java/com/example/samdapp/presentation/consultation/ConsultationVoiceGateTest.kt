@@ -287,4 +287,44 @@ class ConsultationVoiceGateTest {
             assertTrue("onSend must refuse while a suggestion is outstanding", repository.saved.isEmpty())
             assertEquals("unconfirmed text", viewModel.uiState.value.impactVoiceSuggestion)
         }
+
+    // ── PR 30 review fixes ────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `a second capture request while one is already in flight or resolved is refused`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val service = serviceReturning("cannot lift water buckets")
+            val viewModel = newViewModel(transcriptionService = service)
+
+            viewModel.onRecordImpactVoice()
+            advanceUntilIdle()
+            // A suggestion is now outstanding; a second tap must not start another session or
+            // overwrite it.
+            viewModel.onRecordImpactVoice()
+            advanceUntilIdle()
+
+            assertEquals(
+                "a second request while a suggestion is pending must not reach the recognizer",
+                1,
+                service.captureAudioAttachmentCallCount,
+            )
+            assertEquals("cannot lift water buckets", viewModel.uiState.value.impactVoiceSuggestion)
+        }
+
+    @Test
+    fun `fillDemoData clears a prior voice provenance since the text it replaces is not what the worker confirmed`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val viewModel = newViewModel(transcriptionService = serviceReturning("cannot walk far"))
+            viewModel.onRecordImpactVoice()
+            advanceUntilIdle()
+            viewModel.onUseImpactSuggestion()
+            assertEquals(FieldProvenance.VOICE_CONFIRMED, viewModel.uiState.value.impactProvenance)
+
+            viewModel.fillDemoData()
+
+            assertNull(
+                "demo text is not what the worker voice-confirmed, so no voice provenance may survive it",
+                viewModel.uiState.value.impactProvenance,
+            )
+        }
 }
