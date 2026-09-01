@@ -61,5 +61,13 @@ DEVICE_AUDIT_ACTIONS: frozenset[str] = frozenset(
         "social_history_saved",
         "transcription_completed",
         "vitals_recorded",
+        # ASR track (asr-field-audit-memo.md B.4), one per confirmation-gate state. Not emitted
+        # by the device yet; PR 3 wires the confirmation gate. Added with the Kotlin enum values
+        # in the same commit, same reasoning as referral_status_changed above: an accepted set
+        # missing a value the device later starts sending is a silent, permanent sync rejection.
+        "voice_field_confirmed",
+        "voice_field_edited",
+        "voice_field_rejected",
+        "voice_field_suggested",
     }
 )
