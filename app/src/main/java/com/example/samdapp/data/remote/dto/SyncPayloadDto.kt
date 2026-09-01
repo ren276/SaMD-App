@@ -64,6 +64,7 @@ data class ConsultationSyncPayloadDto(
     @SerializedName("aggravating_factors") val aggravatingFactors: String?,
     @SerializedName("relieving_factors") val relievingFactors: String?,
     @SerializedName("impact_on_daily_activities") val impactOnDailyActivities: String?,
+    @SerializedName("impact_on_daily_activities_provenance") val impactOnDailyActivitiesProvenance: String?,
     @SerializedName("relevant_history") val relevantHistory: String?,
     val transcription: String?,
     @SerializedName("created_at") val createdAt: Instant,

@@ -14,11 +14,11 @@ import org.junit.Test
  * and [MIGRATION_7_8] (kernel_reports.inferenceSource traceability, REQ-HAN-08).
  *
  * [migrateAllTheWayFrom1To8] runs the plaintext (non-SQLCipher) chain through the whole history;
- * `migrateAllTheWayFrom1To16` extends it to [MIGRATION_15_16] so the full chain, not just each
+ * `migrateAllTheWayFrom1To17` extends it to [MIGRATION_16_17] so the full chain, not just each
  * migration in isolation, is proven to apply cleanly in order. Per-migration correctness for
- * [MIGRATION_15_16] itself (the de-dup + unique-index behavior) is [MigrationTest15To16], which
- * uses the SQLCipher variant — this file's plaintext helper is for chain-application coverage
- * only, not a substitute for that.
+ * [MIGRATION_15_16] (de-dup + unique-index) and [MIGRATION_16_17] (provenance backfill) is
+ * [MigrationTest15To16]/[MigrationTest16To17], which use the SQLCipher variant — this file's
+ * plaintext helper is for chain-application coverage only, not a substitute for that.
  */
 class MigrationTest {
 
@@ -49,12 +49,12 @@ class MigrationTest {
     }
 
     @Test
-    fun migrateAllTheWayFrom1To16() {
+    fun migrateAllTheWayFrom1To17() {
         helper.createDatabase(testDbName, 1).close()
 
         helper.runMigrationsAndValidate(
             testDbName,
-            16,
+            17,
             true,
             MIGRATION_1_2,
             MIGRATION_2_3,
@@ -71,6 +71,7 @@ class MigrationTest {
             MIGRATION_13_14,
             MIGRATION_14_15,
             MIGRATION_15_16,
+            MIGRATION_16_17,
         )
     }
 

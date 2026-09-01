@@ -3,6 +3,7 @@ package com.example.samdapp.data.local.entity
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import com.example.samdapp.domain.model.FieldProvenance
 import com.example.samdapp.domain.model.SyncState
 import java.time.Instant
 
@@ -18,6 +19,10 @@ data class ConsultationEntity(
     val aggravatingFactors: String?,
     val relievingFactors: String?,
     val impactOnDailyActivities: String?,
+    /** [FieldProvenance] of [impactOnDailyActivities]. `MIGRATION_16_17` backfills every
+     *  pre-existing row to `TYPED`; null only when [impactOnDailyActivities] itself is null.
+     *  See [FieldProvenance]'s KDoc; nothing writes `VOICE_*` yet. */
+    val impactOnDailyActivitiesProvenance: FieldProvenance?,
     val relevantHistory: String?,
     val transcription: String?,
     val createdAt: Instant,

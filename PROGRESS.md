@@ -3483,3 +3483,71 @@ that question, so the answer is still owed before any future re-enable, not reso
 **Not done in this session, by design.** No new ASR model, no sherpa-onnx integration, no
 provenance columns, no new audit actions, no confirmation-gate UI, no classifier/kernel/wire code
 touched. Those are later, separately scoped PRs per the field-audit memo's Part E build sequence.
+
+## Android + backend: ASR track PR 1, FieldProvenance foundation (2026-09-01)
+
+Second PR of the ASR track (first, PR 0, is the entry above). ASR now leads the track; the
+symptom multi-select work is deferred to the model phase. Design of record is
+`scratchpad/asr-field-audit-memo.md` Part B.2, read in full before this PR, not re-derived from
+code.
+
+**Scope, deliberately narrow.** No UI, no ASR engine, no voice capture, no model. This PR adds
+`FieldProvenance` (`domain/model/FieldProvenance.kt`,
+`enum class FieldProvenance { TYPED, VOICE_UNCONFIRMED, VOICE_CONFIRMED, VOICE_EDITED }`) and one
+synced nullable column, and nothing that produces a non-`TYPED` value yet. The column attaches to
+`Consultation.impactOnDailyActivities`, chosen per the memo because `KernelPayload`'s own KDoc
+excludes that field from every model path, so a later voice bug on this column cannot reach the
+classifier. `VOICE_UNCONFIRMED`'s "never persisted, never synced" contract is stated in the enum's
+KDoc but not yet enforced; the repository write refusal that makes it a structural guarantee is
+PR 3, not this PR.
+
+**Device: `AppDatabase` version 16 to 17.** `MIGRATION_16_17` adds
+`consultations.impactOnDailyActivitiesProvenance` (nullable TEXT) and backfills every existing
+row to `'TYPED'`. Backfill policy is B.2's own words, applied: "`TYPED`: the default for every
+existing row. A migration backfills every existing value to `TYPED`, which is honest: they were
+typed." `Converters.kt` gained the `FieldProvenance` TypeConverter; `ConsultationEntity`,
+`Consultation` (domain), `ConsultationRepositoryImpl`'s two mapping functions, and
+`SaveConsultationUseCase` (writes `FieldProvenance.TYPED` explicitly, since no voice path exists
+to write anything else) all carry the field.
+
+**The five sync coordination points, all in this PR:**
+1. `SyncPayloadDto.kt`: `ConsultationSyncPayloadDto.impactOnDailyActivitiesProvenance`,
+   `@SerializedName("impact_on_daily_activities_provenance")`.
+2. `SyncRecordMappers.kt`: `ConsultationEntity.toSyncRecord()` populates it on push. No pull-path
+   mapping exists for consultation fields in this codebase (only push), so nothing else was needed
+   there.
+3. `backend/core/app/models/encounter.py`: `Consultation.impact_on_daily_activities_provenance`,
+   nullable `String(20)`, no CHECK constraint (memo does not call for one at this stage).
+4. `backend/core/app/api/v1/encounters.py`: added to `_CONSULTATION_FIELDS`, the allowlist
+   `sync.py` checks against.
+5. `backend/core/alembic/versions/0007_consultation_field_provenance.py`: adds the column,
+   nullable, with existing server rows remaining `NULL` because there is no server-side
+   backfill. The device-side `TYPED` backfill covers rows on upgraded devices, but a
+   previously-synced row that is never re-pushed stays `NULL` on the backend regardless of
+   what the device now holds locally.
+
+**Tests.** Device: `ConsultationFieldProvenanceRoundTripTest` (2 tests, real in-memory Room DB,
+asserts the value read back from a fresh query, not the object passed to `insert()`) and
+`MigrationTest16To17` (2 tests, real SQLCipher-encrypted DB via `MigrationTestHelper`, proving
+both the column exists and the backfill lands `'TYPED'`) — both androidTest-only, not run in this
+environment; must run on a device/emulator before merge. `MigrationTest.kt`'s existing
+`migrateAllTheWayFrom1To16` chain test extended to `migrateAllTheWayFrom1To17`. Backend:
+`test_consultation_field_provenance_is_accepted_and_persisted` and
+`..._null_is_accepted_and_persisted` in `test_sync.py`, both asserting the persisted `Consultation`
+row via `session.execute(select(...))`, not the HTTP response, per this file's CLAUDE.md
+convention. Backend suite run against a rebuilt (`--no-cache`) Docker image and a real Postgres
+container, not stale state: 263 passed, 0 failed, single run, ~221s. Device
+`testDevDebugUnitTest`: 263 passed, 0 failed (unchanged count from PR 0 — the new provenance tests
+are androidTest, not unit tests; existing unit tests/fakes updated only to carry the new
+constructor parameter).
+
+**Not done in this session, by design.** No classifier/kernel/wire-to-model file touched (the one
+match, `SendToKernelUseCaseTest.kt`, only adds the new constructor parameter to an existing
+fixture). `.env`/`local.properties`/`BuildConfig` untouched. No voice UI, no ASR engine, no audit
+action, no confirmation gate. Nothing in the app produces `VOICE_UNCONFIRMED`,
+`VOICE_CONFIRMED`, or `VOICE_EDITED` yet; the column exists and round-trips and nothing reads it.
+PR 3 wires the write-refusal and the first real producer of a non-`TYPED` value.
+
+**Docs.** No controlled-doc change proposed alongside this PR; PR 0b's H-15/H-16 and intended-use
+§i proposals (still `PROPOSED, AWAITING OPERATOR SIGN-OFF`, per the entry above) already cover
+provenance capture at the concept level and were judged sufficient without a further edit.

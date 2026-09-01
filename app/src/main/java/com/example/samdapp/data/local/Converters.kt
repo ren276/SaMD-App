@@ -4,6 +4,7 @@ import androidx.room.TypeConverter
 import com.example.samdapp.domain.model.AllergyCategory
 import com.example.samdapp.domain.model.AttachmentType
 import com.example.samdapp.domain.model.CaseStatus
+import com.example.samdapp.domain.model.FieldProvenance
 import com.example.samdapp.domain.model.MeasurementType
 import com.example.samdapp.domain.model.MedicalHistoryCategory
 import com.example.samdapp.domain.model.MedicationKind
@@ -75,6 +76,10 @@ class Converters {
     @TypeConverter fun kernelDecisionToString(value: KernelDecision?): String? = value?.name
     @TypeConverter fun stringToKernelDecision(value: String?): KernelDecision? =
         value?.let { runCatching { KernelDecision.valueOf(it) }.getOrNull() }
+
+    @TypeConverter fun fieldProvenanceToString(value: FieldProvenance?): String? = value?.name
+    @TypeConverter fun stringToFieldProvenance(value: String?): FieldProvenance? =
+        value?.let { runCatching { FieldProvenance.valueOf(it) }.getOrNull() }
 
     @TypeConverter fun inferenceSourceToString(value: InferenceSource): String = value.name
     @TypeConverter fun stringToInferenceSource(value: String): InferenceSource = InferenceSource.valueOf(value)

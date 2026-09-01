@@ -3,6 +3,7 @@ package com.example.samdapp.domain.usecase
 import com.example.samdapp.domain.model.Attachment
 import com.example.samdapp.domain.model.AttachmentType
 import com.example.samdapp.domain.model.Consultation
+import com.example.samdapp.domain.model.FieldProvenance
 import com.example.samdapp.domain.repository.ConsultationRepository
 import java.time.Instant
 import java.util.UUID
@@ -38,6 +39,10 @@ class SaveConsultationUseCase @Inject constructor(
             aggravatingFactors = aggravatingFactors,
             relievingFactors = relievingFactors,
             impactOnDailyActivities = impactOnDailyActivities,
+            // No voice capture UI exists on this branch (PR 3 adds it), so any value reaching
+            // this use case was typed. Only stamp TYPED when there is a value to attribute;
+            // an absent field has no provenance to record.
+            impactOnDailyActivitiesProvenance = impactOnDailyActivities?.let { FieldProvenance.TYPED },
             relevantHistory = relevantHistory,
             transcription = null,
             attachments = emptyList(),

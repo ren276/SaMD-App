@@ -77,7 +77,9 @@ fun ConsultationEntity.toSyncRecord() = SyncRecordDto(
         patientId = patientId, encounterId = encounterId, chiefComplaint = chiefComplaint,
         onset = onset, durationBucket = durationBucket, severityScore = severityScore,
         aggravatingFactors = aggravatingFactors, relievingFactors = relievingFactors,
-        impactOnDailyActivities = impactOnDailyActivities, relevantHistory = relevantHistory,
+        impactOnDailyActivities = impactOnDailyActivities,
+        impactOnDailyActivitiesProvenance = impactOnDailyActivitiesProvenance?.name,
+        relevantHistory = relevantHistory,
         transcription = transcription, createdAt = createdAt, updatedAt = updatedAt,
     ),
 )
