@@ -29,6 +29,10 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -113,13 +117,25 @@ internal fun ConsultationContent(uiState: ConsultationUiState, actions: Consulta
         rememberPermissionAction(Manifest.permission.RECORD_AUDIO, actions::onRecordChiefComplaintVoice)
     val requestVoiceForAttachment =
         rememberPermissionAction(Manifest.permission.RECORD_AUDIO, actions::onRecordAudioAttachment)
-    val requestVoiceForImpact =
-        rememberPermissionAction(Manifest.permission.RECORD_AUDIO, actions::onRecordImpactVoice)
-    val requestCameraForAffectedArea = rememberPermissionAction(Manifest.permission.CAMERA) {
-        val uri = createCameraOutputUri(context)
-        pendingCameraUri = uri
-        takePictureLauncher.launch(uri)
-    }
+    // onDenied is passed here and nowhere else on purpose: this is the one voice control a worker
+    // can actually reach (FeatureFlags.VOICE_FIELD_IMPACT_ENABLED is on), so a declined prompt has
+    // to say so instead of leaving a button that silently does nothing. The other two RECORD_AUDIO
+    // call sites stay on the helper's no-op default while VOICE_INPUT_ENABLED keeps them hidden.
+    val requestVoiceForImpact = rememberPermissionAction(
+        permission = Manifest.permission.RECORD_AUDIO,
+        onGranted = actions::onRecordImpactVoice,
+        onDenied = actions::onVoicePermissionDenied,
+    )
+    // Named, not a trailing lambda: `onDenied` is the last parameter now, so a trailing lambda
+    // would silently bind to it instead of to `onGranted`.
+    val requestCameraForAffectedArea = rememberPermissionAction(
+        permission = Manifest.permission.CAMERA,
+        onGranted = {
+            val uri = createCameraOutputUri(context)
+            pendingCameraUri = uri
+            takePictureLauncher.launch(uri)
+        },
+    )
 
     Scaffold(topBar = { TopAppBar(title = { Text("Consultation") }) }) { padding: PaddingValues ->
         LazyColumn(
@@ -193,26 +209,48 @@ internal fun ConsultationContent(uiState: ConsultationUiState, actions: Consulta
             // Hidden, not merely disabled, while FeatureFlags.VOICE_FIELD_IMPACT_ENABLED is off:
             // see its KDoc. Independent of VOICE_INPUT_ENABLED (which stays off and gates
             // chiefComplaint voice + the audio attachment); this flag governs only this field.
-            if (FeatureFlags.VOICE_FIELD_IMPACT_ENABLED) {
-                item {
-                    OutlinedButton(
-                        onClick = requestVoiceForImpact,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
-                            .testTag("impact_voice_mic_button"),
-                    ) {
-                        Text(
-                            if (uiState.isCapturingImpactVoice) "Listening…" else "Record impact on daily activities",
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                    }
-                }
+            item {
+                // Typed val so Kotlin infers @Composable on the lambda correctly.
+                // trailingIcon is @Composable (() -> Unit)? — the if-expression below
+                // must resolve to that type; parenthesised lambdas alone don't carry
+                // the @Composable annotation without an explicit type ascription.
+                val micTrailingIcon: @Composable (() -> Unit)? =
+                    if (FeatureFlags.VOICE_FIELD_IMPACT_ENABLED) {
+                        {
+                            IconButton(
+                                onClick = requestVoiceForImpact,
+                                enabled = !uiState.isCapturingImpactVoice,
+                                modifier = Modifier.testTag("impact_voice_mic_button"),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Mic,
+                                    contentDescription = if (uiState.isCapturingImpactVoice)
+                                        "Listening…" else "Record impact on daily activities",
+                                    tint = if (uiState.isCapturingImpactVoice)
+                                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                    else
+                                        MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                    } else null
+                OutlinedTextField(
+                    value = uiState.impactOnDailyActivities,
+                    onValueChange = actions::onImpactChange,
+                    label = { Text("Impact on daily activities") },
+                    modifier = Modifier.fillMaxWidth(),
+                    trailingIcon = micTrailingIcon,
+                )
             }
-            item { OutlinedTextField(uiState.impactOnDailyActivities, actions::onImpactChange, label = { Text("Impact on daily activities") }, modifier = Modifier.fillMaxWidth()) }
             if (FeatureFlags.VOICE_FIELD_IMPACT_ENABLED) {
                 uiState.impactVoiceSuggestion?.let { suggestion ->
                     item { ImpactVoiceSuggestionSurface(suggestion = suggestion, actions = actions) }
                 }
             }
+            // Rendered here, immediately below the impact mic control, rather than after the
+            // attachments section below: a permission denial (or any other error on this shared
+            // state field) must be visible without scrolling past the rest of the form.
+            uiState.errorMessage?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
             item { OutlinedTextField(uiState.relevantHistory, actions::onRelevantHistoryChange, label = { Text("Other relevant history") }, modifier = Modifier.fillMaxWidth()) }
 
             item { HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp)) }
@@ -246,8 +284,6 @@ internal fun ConsultationContent(uiState: ConsultationUiState, actions: Consulta
                     }
                 }
             }
-
-            uiState.errorMessage?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
 
             item {
                 Button(

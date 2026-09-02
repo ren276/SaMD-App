@@ -42,24 +42,30 @@ object FeatureFlags {
      *  `scratchpad/asr-usecase-research-memo.md` Task 0 and
      *  `scratchpad/asr-field-audit-memo.md` C-1/DECISION GATE item 5.
      *
+     *  PR 4b's egress evidence does not change this flag's state: it closes the transmission
+     *  question for both flags at once, and transmission is not what holds this one off. What
+     *  holds it off is an ungated **High**-severity field reaching a model, which no egress
+     *  proof speaks to (`scratchpad/pr4b-flag-flip-design-memo.md` B.2).
+     *
      *  See [com.example.samdapp.presentation.consultation.ConsultationScreen]. */
     const val VOICE_INPUT_ENABLED = false
 
     /** The voice confirmation gate on `impactOnDailyActivities` only (mic button and the
      *  suggestion surface). Independent of [VOICE_INPUT_ENABLED], which stays `false` and gates
      *  `chiefComplaint` voice plus the audio attachment, the **High**-severity H-15 paths that
-     *  reach `/api/v1/evaluate`. Off = the mic is hidden and the suggestion surface never renders,
-     *  same "hidden, not merely disabled" discipline as [VOICE_INPUT_ENABLED].
+     *  reach `/api/v1/evaluate`.
      *
-     *  The on-device engine is now bound (`SherpaOnnxTranscriptionService`) and the platform
-     *  recognizer is deleted, which closes the transmission half of the argument for keeping this
-     *  off. It stays `false` regardless, deliberately: "no off-device ASR path remains" is at this
-     *  point a claim about the code, and the flag does not flip on a claim. It flips in the change
-     *  that lands the evidence — the source-level absence scan and the `StrictMode` egress
-     *  assertion — and not before (`scratchpad/pr4-sherpa-onnx-design-memo.md` Part C.2/C.3).
-     *  Still outstanding at that point, and not a code matter: the model is trained on read,
-     *  predominantly US-accented English, and no Indian-accented evaluation has been run.
+     *  **Flipped `true` — commit 5, authorized.** Transmission proof complete: L2.3 (reflection
+     *  scan, no platform recognizer in bytecode), L3.1 (decode produces real output), L3.2
+     *  (txDelta=0B / rxDelta=0B across a full decode), L3.3 (StrictMode — no network call) all
+     *  green on x86_64 emulator. L3.4 (capture-writes-no-file) relocated to the arm64 iQOO
+     *  I2302 operator run (real mic, real ABI), same trigger as L3.5. Pre-distribution gate
+     *  list: L3.4 + L3.5 on iQOO I2302 (one arm64 run closes both), CC-BY-4.0 attribution
+     *  discharged by PR 4b-1.
+     *
+     *  Outstanding non-code item: model trained on read, predominantly US-accented English;
+     *  no Indian-accented evaluation has been run.
      *
      *  See [com.example.samdapp.presentation.consultation.ConsultationScreen]. */
-    const val VOICE_FIELD_IMPACT_ENABLED = false
+    const val VOICE_FIELD_IMPACT_ENABLED = true
 }

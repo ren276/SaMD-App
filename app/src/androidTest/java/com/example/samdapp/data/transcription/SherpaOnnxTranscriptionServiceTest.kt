@@ -27,15 +27,10 @@ import java.security.MessageDigest
 class SherpaOnnxTranscriptionServiceTest {
 
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
-    private val testAssets = InstrumentationRegistry.getInstrumentation().context.assets
 
-    /** One instance for every test that actually decodes, mirroring the single `@Singleton` the
-     *  app binds. Not a tidiness point: the service retains its recognizer for the process
-     *  lifetime by design, so a fresh instance per test method would hold a second and a third
-     *  copy of 622 MiB of weights simultaneously and the instrumentation process gets killed
-     *  partway through the run. That is the resident-memory ceiling this model carries, showing
-     *  up in the one place that stresses it. */
-    private fun service() = shared
+    /** The one recognizer per process, shared with [AsrEgressTest]. See [sharedAsrService] for
+     *  why a per-class instance is not an option. */
+    private fun service() = sharedAsrService
 
     private fun serviceFor(modelDir: String) =
         SherpaOnnxTranscriptionService(context, modelDir)
@@ -74,8 +69,9 @@ class SherpaOnnxTranscriptionServiceTest {
      *  Known ceiling: this covers a **missing** asset. A **present but corrupt** one still
      *  reaches ONNX Runtime and still ends in `_Exit`, which cannot be asserted from inside the
      *  process that dies. The guard for that case is
-     *  [shipped_model_assets_match_the_hashes_pinned_in_the_sbom_companion], which fails in CI
-     *  before any device loads it. */
+     *  [shipped_model_assets_match_the_hashes_pinned_in_the_sbom_companion], which runs
+     *  on-device before the model is trusted. Not a CI gate: the weights it hashes are stored
+     *  local-only and are not in the tree CI checks out. */
     @Test
     fun an_absent_model_asset_fails_the_capture_instead_of_killing_the_process() = runBlocking {
         val result = serviceFor("asr/no-such-model-dir")
@@ -114,7 +110,9 @@ class SherpaOnnxTranscriptionServiceTest {
     }
 
     /**
-     * Turns the SBOM model companion from a claim into something CI re-checks. `tokens.txt` is
+     * Turns the SBOM model companion from a claim into something re-checked on-device against
+     * the bytes actually installed. Not by CI: the weights are gitignored, so CI has nothing to
+     * hash. `tokens.txt` is
      * pinned in its own right and matters most: a mismatched vocabulary yields plausible wrong
      * text rather than an error, which is exactly the failure mode the confirmation gate exists
      * to catch and exactly the one nobody notices in review.
@@ -141,42 +139,7 @@ class SherpaOnnxTranscriptionServiceTest {
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
-    /** 16-bit PCM mono little-endian, which is what both fixtures are and what the model wants.
-     *  Skips to the `data` chunk rather than assuming a 44-byte header. */
-    private fun readPcm16Wav(assetPath: String): FloatArray {
-        val bytes = testAssets.open(assetPath).use { it.readBytes() }
-        var offset = 12 // past "RIFF" <size> "WAVE"
-        while (offset + 8 <= bytes.size) {
-            val id = String(bytes, offset, 4, Charsets.US_ASCII)
-            val size = littleEndianInt(bytes, offset + 4)
-            if (id == "data") {
-                val samples = FloatArray(size / 2)
-                for (i in samples.indices) {
-                    val lo = bytes[offset + 8 + i * 2].toInt() and 0xff
-                    val hi = bytes[offset + 9 + i * 2].toInt()
-                    samples[i] = ((hi shl 8) or lo) / 32768f
-                }
-                return samples
-            }
-            offset += 8 + size + (size and 1)
-        }
-        throw IllegalArgumentException("no data chunk in $assetPath")
-    }
-
-    private fun littleEndianInt(b: ByteArray, at: Int): Int =
-        (b[at].toInt() and 0xff) or
-            ((b[at + 1].toInt() and 0xff) shl 8) or
-            ((b[at + 2].toInt() and 0xff) shl 16) or
-            ((b[at + 3].toInt() and 0xff) shl 24)
-
     private companion object {
-        private val shared: SherpaOnnxTranscriptionService by lazy {
-            SherpaOnnxTranscriptionService(
-                InstrumentationRegistry.getInstrumentation().targetContext,
-                MODEL_ASSET_DIR,
-            )
-        }
-
         /** Mirrors `docs/sbom/model-soup-2026-09-02-v1.0.json`. Both are edited together or
          *  neither is. */
         val PINNED_ASSET_SHA256 = mapOf(

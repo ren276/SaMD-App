@@ -258,7 +258,11 @@ private fun AilmentRow(ailment: AilmentListItem, onDelete: (id: String, audioUri
 
 @Composable
 private fun NewAilmentCard(uiState: CompounderUiState, actions: CompounderActions) {
-    val requestAudioPermission = rememberPermissionAction(Manifest.permission.RECORD_AUDIO, actions::onStartAilmentAudioRecording)
+    val requestAudioPermission = rememberPermissionAction(
+        permission = Manifest.permission.RECORD_AUDIO,
+        onGranted = actions::onStartAilmentAudioRecording,
+        onDenied = actions::onAilmentAudioPermissionDenied,
+    )
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

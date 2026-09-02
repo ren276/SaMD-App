@@ -167,6 +167,7 @@ interface CompounderActions {
     fun onPrivateHandoffAcknowledged()
     fun onPrivateHandoffCancelled()
     fun onStartAilmentAudioRecording()
+    fun onAilmentAudioPermissionDenied()
     fun onStopAilmentAudioRecording()
     fun onAddAilment()
     fun onDeleteAilment(id: String, audioUri: String?)
@@ -335,6 +336,10 @@ class CompounderViewModel @AssistedInject constructor(
             onSuccess = { uri -> _uiState.update { it.copy(isRecordingAilmentAudio = true, pendingAilmentAudioUri = uri) } },
             onFailure = { error -> _uiState.update { it.copy(errorMessage = error.message ?: "Could not start recording") } },
         )
+    }
+
+    override fun onAilmentAudioPermissionDenied() {
+        _uiState.update { it.copy(errorMessage = "Microphone permission was declined. Allow it to record, or type the ailment.") }
     }
 
     override fun onStopAilmentAudioRecording() {

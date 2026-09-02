@@ -158,6 +158,11 @@ interface ConsultationActions {
     /** Suggested to Idle, rejecting: field and provenance untouched, suggestion dropped. */
     fun onDiscardImpactSuggestion()
 
+    /** The worker declined the microphone prompt. Surfaces the refusal on the existing
+     *  [ConsultationUiState.errorMessage] path so the mic is not a silent dead end
+     *  (`scratchpad/pr4b-flag-flip-design-memo.md` D.3). */
+    fun onVoicePermissionDenied()
+
     fun onRelevantHistoryChange(value: String)
     fun onAddAttachment(type: AttachmentType, uri: String)
     fun onRecordAudioAttachment()
@@ -381,6 +386,18 @@ class ConsultationViewModel @AssistedInject constructor(
         }
         _uiState.update {
             it.copy(impactVoiceSuggestion = null, impactVoiceSuggestionShownAtNanos = null)
+        }
+    }
+
+    /** No breadcrumb: nothing was captured, nothing was suggested, and a declined system prompt
+     *  is not a gate transition. The message is the only outcome. */
+    override fun onVoicePermissionDenied() {
+        _uiState.update {
+            it.copy(
+                isCapturingImpactVoice = false,
+                errorMessage = "Microphone permission was declined. Allow it to record, " +
+                    "or type the answer.",
+            )
         }
     }
 
