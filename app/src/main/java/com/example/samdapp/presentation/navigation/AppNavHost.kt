@@ -32,6 +32,7 @@ import com.example.samdapp.presentation.abha.AbhaEntryScreen
 import com.example.samdapp.presentation.abha.AbhaLoginScreen
 import com.example.samdapp.presentation.abha.AbhaOtpScreen
 import com.example.samdapp.presentation.abha.AbhaProfileScreen
+import com.example.samdapp.presentation.licenses.OpenSourceLicensesScreen
 import com.example.samdapp.presentation.abha.AbhaSignUpScreen
 import com.example.samdapp.presentation.acknowledgement.AcknowledgementScreen
 import com.example.samdapp.presentation.auth.AuthUiState
@@ -182,9 +183,13 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
                     session = session,
                     isOnline = isOnline,
                     onToggleOnline = connectivityViewModel::toggle,
+                    onOpenLicences = { backStack.add(OpenSourceLicensesRoute) },
                     onSignOut = onSignOut,
                     bottomBar = bottomNavBar(BottomNavTab.PROFILE),
                 )
+            }
+            entry<OpenSourceLicensesRoute> {
+                OpenSourceLicensesScreen()
             }
             entry<AbhaEntry> {
                 AbhaEntryScreen(

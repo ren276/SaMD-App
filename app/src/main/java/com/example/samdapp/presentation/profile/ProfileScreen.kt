@@ -39,6 +39,7 @@ fun ProfileScreen(
     session: UserSession,
     isOnline: Boolean,
     onToggleOnline: () -> Unit,
+    onOpenLicences: () -> Unit,
     onSignOut: () -> Unit,
     bottomBar: @Composable () -> Unit = {},
 ) {
@@ -72,6 +73,10 @@ fun ProfileScreen(
                     )
                     Switch(checked = isOnline, onCheckedChange = { onToggleOnline() })
                 }
+            }
+
+            OutlinedButton(onClick = onOpenLicences, modifier = Modifier.fillMaxWidth()) {
+                Text("Open-source licences")
             }
 
             OutlinedButton(onClick = onSignOut, modifier = Modifier.fillMaxWidth()) {

@@ -4141,3 +4141,61 @@ Also ran `graphify update .` per the repo's nitpick convention (no tracked-file 
 
 `testDevDebugUnitTest`: still 299 passed, 0 failed. `SherpaOnnxTranscriptionServiceTest`: now 5
 tests (added the cancellation test), 3 consecutive clean runs on emulator-5554.
+
+## PR 4b-1: open-source licences screen (attribution)
+
+Built the licences screen the "CC-BY-4.0 attribution scope" note above flagged as missing.
+Discharges the Parakeet CC BY 4.0 attribution obligation, which attaches at APK distribution
+regardless of the flag and has been open since 4a merged. Per the 4b flag-flip design memo (Part
+E, Part F split proposal), this rides as its own PR: no dependency on the egress proofs or the
+flag flip (4b-2), and it does not touch either `VOICE_FIELD_IMPACT_ENABLED` or
+`VOICE_INPUT_ENABLED`.
+
+New: `OpenSourceLicensesRoute` (`Routes.kt`, deliberately excluded from `SECURED_ROUTE_TYPES` —
+static attribution text, no patient data), `OpenSourceLicensesScreen.kt` (hardcoded `LazyColumn`
+of cards, no licence-report plugin, no strings.xml — matches the rest of the app), one
+`OutlinedButton` on `ProfileScreen` above "Sign out", wired in `AppNavHost` at `entry<Profile>`
+the same way `AbhaProfileRoute` is. Screen not a NOTICE file — the memo's recommended discharge
+over the cheaper bundled-text alternative, since the SOUP companion's PROPOSED placement already
+names a screen and it's discoverable in a way a bundled file isn't.
+
+Content: Parakeet TDT 0.6B v2 int8 (CC BY 4.0), sherpa-onnx 1.13.7 (Apache-2.0), ONNX Runtime
+1.27.1 (MIT, version read off the shipped `.so` matching the SOUP companion, not sherpa-onnx's
+stale 1.17.1 docs), plus the app's 8 main third-party deps so the screen doesn't read as an
+afterthought.
+
+**Defect found and fixed, riding in this PR by operator decision: `cyclonedxBom` was writing an
+empty SBOM.** Its `includeConfigs` named `releaseRuntimeClasspath`, a configuration that stopped
+existing once `flavorDimensions += "environment"` landed — the real ones are
+`devReleaseRuntimeClasspath`/`prodReleaseRuntimeClasspath`. The task exited `BUILD SUCCESSFUL`
+every run while silently producing `dependsOn: []`, no `components` key at all. Every
+`./gradlew :app:cyclonedxBom` run since the flavor split landed produced nothing; the committed
+`sbom-2026-07-20-v1.0.json` (171 components) was the last real output, generated before that
+split. Fixed `includeConfigs`/`skipConfigs` to the correct flavor-qualified configuration names.
+Kept in this PR rather than split out: the eight content-item-(4) dependencies on this screen are
+sourced from the SBOM, so an honest attribution screen cannot be built on top of a broken
+generator — the screen and the fix are causally linked, and splitting them would mean shipping a
+screen whose data source was fixed in a different, later PR. Regenerating with the corrected
+config recovered Retrofit, OkHttp and WorkManager, invisible under the broken one (185 components
+total). One remaining gap is real, not a wiring bug: `net.zetetic:sqlcipher-android`'s POM
+carries no licence field at all — its row uses the publicly documented BSD-style Zetetic
+community licence text instead, sourced from `zetetic.net/sqlcipher/license`, not invented.
+
+**Controlled-doc flag, not a 4b-1 blocker — do not let this evaporate.** If `cyclonedxBom` was
+producing an empty SBOM for the whole window since the flavor split, then any SBOM-sourced claim
+made in that window — including 4a's SOUP companion and any "checked by CI" / SBOM-coverage
+statement leaning on the generated file — was describing a generator that produced nothing. The
+hand-maintained model companion (`model-soup-2026-09-02-v1.0.json`, the weights/sherpa-onnx/ONNX
+Runtime record) is unaffected — it was always hand-maintained because the generator cannot see
+`assets/` in the first place. But the *generated* half of the SBOM story was silently empty for
+that period. Next controlled-doc pass: check whether any DHF/SBOM claim overstated what the
+generator was actually producing during this window.
+
+Test: `OpenSourceLicensesScreenTest` (instrumented, Compose) — asserts the Parakeet row renders
+with the `CC BY 4.0` text; that's the assertion with a legal consequence, the rest of the list is
+data. Run on emulator-5554 (`ANDROID_SERIAL` pinned, single device attached), 1/1 passing.
+
+`testDevDebugUnitTest`: unchanged at 299 passed, 0 failed (no JVM unit tests added — the screen's
+only assertion needs Compose semantics, hence the instrumented test). `assembleDevDebug`: green.
+No controlled-doc (`docs/`) change made; the SOUP companion's screen-placement note stays
+PROPOSED, not marked approved, per the memo.
