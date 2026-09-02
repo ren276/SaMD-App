@@ -27,15 +27,10 @@ import java.security.MessageDigest
 class SherpaOnnxTranscriptionServiceTest {
 
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
-    private val testAssets = InstrumentationRegistry.getInstrumentation().context.assets
 
-    /** One instance for every test that actually decodes, mirroring the single `@Singleton` the
-     *  app binds. Not a tidiness point: the service retains its recognizer for the process
-     *  lifetime by design, so a fresh instance per test method would hold a second and a third
-     *  copy of 622 MiB of weights simultaneously and the instrumentation process gets killed
-     *  partway through the run. That is the resident-memory ceiling this model carries, showing
-     *  up in the one place that stresses it. */
-    private fun service() = shared
+    /** The one recognizer per process, shared with [AsrEgressTest]. See [sharedAsrService] for
+     *  why a per-class instance is not an option. */
+    private fun service() = sharedAsrService
 
     private fun serviceFor(modelDir: String) =
         SherpaOnnxTranscriptionService(context, modelDir)
@@ -141,42 +136,7 @@ class SherpaOnnxTranscriptionServiceTest {
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
-    /** 16-bit PCM mono little-endian, which is what both fixtures are and what the model wants.
-     *  Skips to the `data` chunk rather than assuming a 44-byte header. */
-    private fun readPcm16Wav(assetPath: String): FloatArray {
-        val bytes = testAssets.open(assetPath).use { it.readBytes() }
-        var offset = 12 // past "RIFF" <size> "WAVE"
-        while (offset + 8 <= bytes.size) {
-            val id = String(bytes, offset, 4, Charsets.US_ASCII)
-            val size = littleEndianInt(bytes, offset + 4)
-            if (id == "data") {
-                val samples = FloatArray(size / 2)
-                for (i in samples.indices) {
-                    val lo = bytes[offset + 8 + i * 2].toInt() and 0xff
-                    val hi = bytes[offset + 9 + i * 2].toInt()
-                    samples[i] = ((hi shl 8) or lo) / 32768f
-                }
-                return samples
-            }
-            offset += 8 + size + (size and 1)
-        }
-        throw IllegalArgumentException("no data chunk in $assetPath")
-    }
-
-    private fun littleEndianInt(b: ByteArray, at: Int): Int =
-        (b[at].toInt() and 0xff) or
-            ((b[at + 1].toInt() and 0xff) shl 8) or
-            ((b[at + 2].toInt() and 0xff) shl 16) or
-            ((b[at + 3].toInt() and 0xff) shl 24)
-
     private companion object {
-        private val shared: SherpaOnnxTranscriptionService by lazy {
-            SherpaOnnxTranscriptionService(
-                InstrumentationRegistry.getInstrumentation().targetContext,
-                MODEL_ASSET_DIR,
-            )
-        }
-
         /** Mirrors `docs/sbom/model-soup-2026-09-02-v1.0.json`. Both are edited together or
          *  neither is. */
         val PINNED_ASSET_SHA256 = mapOf(
