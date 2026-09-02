@@ -36,6 +36,14 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
+        // sherpa-onnx ships native libraries for arm64-v8a, armeabi-v7a, x86_64 and x86, plus an
+        // ONNX Runtime .so per ABI. Unfiltered that is four copies in every APK. arm64-v8a is the
+        // only ABI the deployed device needs; x86_64 is kept solely so the instrumented ASR tests
+        // can run on an emulator.
+        ndk {
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
+
         buildConfigField("String", "GEMINI_API_KEY", "\"${localProperties.getProperty("GEMINI_API_KEY", "")}\"")
         buildConfigField("boolean", "ENABLE_NETWORK_LOGGING", "${localProperties.getProperty("ENABLE_NETWORK_LOGGING", "false")}")
     }
@@ -104,6 +112,13 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+    androidResources {
+        // Not required by the upstream sherpa-onnx Android sample (it reads compressed assets
+        // fine via AAsset_read), but the encoder is 622 MiB of int8 weights that deflate poorly:
+        // compressing it costs minutes of build time and an inflate of the whole file on first
+        // model load, for a few percent of APK size. Stored, not deflated.
+        noCompress += listOf("onnx")
+    }
     testOptions {
         // Gson reflectively serializes java.time.Instant fields (see the audit-log payload in
         // AssessmentRunner and elsewhere) - fine on-device (ART has no JPMS), but the host JVM
@@ -162,6 +177,11 @@ dependencies {
     implementation(libs.retrofit.core)
     implementation(libs.retrofit.converter.gson)
     implementation(libs.okhttp.logging.interceptor)
+    // On-device ASR — sherpa-onnx 1.13.7 release AAR, vendored under app/libs/ because the
+    // group com.k2fsa.sherpa.onnx does not publish to Maven Central (searched 2026-09-02: zero
+    // artifacts). A file dependency, so it needs no repository declaration under this project's
+    // FAIL_ON_PROJECT_REPOS mode. Pinned in docs/sbom/ by SHA-256; see docs/sbom/README.md.
+    implementation(files("libs/sherpa-onnx-1.13.7.aar"))
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     // Fakes the backend HTTP surface for TokenAuthenticator/BearerInterceptor/RetrofitAuthService

@@ -174,8 +174,10 @@ class ConsultationVoiceGateTest {
         }
 
     /**
-     * The edge a build most often misses. `AndroidSpeechRecognizerService` reads the results list
-     * and calls `.orEmpty()`, so a **successful** recognition can carry "". Showing that as a
+     * The edge a build most often misses. `SherpaOnnxTranscriptionService` returns
+     * `Result.success("")` for audio with nothing decodable in it, so a **successful**
+     * recognition can carry "" — and with an offline recognizer that is the ordinary result of a
+     * mis-tapped mic rather than a rarity. Showing that as a
      * suggestion would put the worker in front of an empty gate, and accepting it would commit an
      * empty string over whatever they had typed. Same shape as the empty-differential-200 bug
      * this repo already fixed once: a success carrying nothing usable is a failure.

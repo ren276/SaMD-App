@@ -1,0 +1,152 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-09-02T00:00:00Z",
+    "component": {
+      "type": "application",
+      "bom-ref": "SaMDApp/app@1.0/model-soup",
+      "group": "SaMDApp",
+      "name": "app",
+      "version": "1.0"
+    },
+    "properties": [
+      {
+        "name": "samd:status",
+        "value": "PROPOSED - AWAITING OPERATOR SIGN-OFF. Not an approved controlled document."
+      },
+      {
+        "name": "samd:why-hand-maintained",
+        "value": "The generated CycloneDX SBOM is scoped to the :app releaseRuntimeClasspath. Neither the model weights (they are files under app/src/main/assets/, not a Gradle dependency) nor the sherpa-onnx AAR (a file dependency under app/libs/, since com.k2fsa.sherpa.onnx publishes nothing to Maven Central) nor ONNX Runtime (native libraries carried inside that AAR) appear in a resolved dependency graph. The single most safety-relevant SOUP this release introduces is invisible to the mechanism that exists to record SOUP. This file is that gap closed by hand. See docs/sbom/README.md."
+      },
+      {
+        "name": "samd:change-control",
+        "value": "Every component below is compiled into the APK and changes only by shipping a new app release. That makes a model change a design change under normal change control, not a post-deployment model update, so it does not engage the Algorithm Change Protocol gap recorded in docs/quality/qms-overview.md. The property holds only while there is no other update path: no download-on-first-use, no model CDN, no silent refresh, no remote config selecting a model. Any of those would reopen the ACP question and the off-device-egress question in one move."
+      }
+    ]
+  },
+  "components": [
+    {
+      "type": "library",
+      "bom-ref": "sherpa-onnx-android@1.13.7",
+      "group": "com.k2fsa.sherpa.onnx",
+      "name": "sherpa-onnx-android",
+      "version": "1.13.7",
+      "description": "On-device ASR runtime (JNI + native). Replaces the platform speech recognizer; opens no socket for recognition. Vendored at app/libs/sherpa-onnx-1.13.7.aar.",
+      "licenses": [{ "license": { "id": "Apache-2.0" } }],
+      "hashes": [
+        { "alg": "SHA-256", "content": "c4ef49e309f24fcee5c106b8a279481aaecaabb078cd37b2cd6e9a62cc8a73c8" }
+      ],
+      "externalReferences": [
+        { "type": "distribution", "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.7/sherpa-onnx-1.13.7.aar" },
+        { "type": "vcs", "url": "https://github.com/k2-fsa/sherpa-onnx" }
+      ],
+      "properties": [
+        {
+          "name": "samd:sourcing",
+          "value": "GitHub release asset, not a Maven coordinate. Maven Central was searched on 2026-09-02 for the group com.k2fsa.sherpa.onnx and returned zero artifacts, so the coordinate cited in third-party write-ups does not resolve. Consumed as implementation(files(\"libs/sherpa-onnx-1.13.7.aar\")), which is why it needs this manual entry."
+        },
+        { "name": "samd:abi-shipped", "value": "arm64-v8a (target device), x86_64 (emulator tests only). armeabi-v7a and x86 are filtered out of the APK." }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "onnxruntime-android@1.27.1",
+      "group": "com.microsoft.onnxruntime",
+      "name": "onnxruntime-android",
+      "version": "1.27.1",
+      "description": "Inference engine, shipped as libonnxruntime.so inside the sherpa-onnx AAR. Tracked as its own component because it has its own version and its own CVE surface.",
+      "licenses": [{ "license": { "id": "MIT" } }],
+      "hashes": [
+        { "alg": "SHA-256", "content": "dc5e4c172b1be9e530c6a62ad8f1be3e0a911cabdee6195abf28dab72477e194" }
+      ],
+      "properties": [
+        {
+          "name": "samd:version-provenance",
+          "value": "1.27.1 was READ OFF the consumed AAR (version string in jni/arm64-v8a/libonnxruntime.so, identical in jni/x86_64/), not taken from documentation. The sherpa-onnx Android build page states 1.17.1; that page is stale for v1.13.7 and pinning 1.17.1 here would have recorded a component that does not ship."
+        },
+        { "name": "samd:hash-scope", "value": "SHA-256 is of jni/arm64-v8a/libonnxruntime.so, the shipped target-device binary. The x86_64 build (emulator only) is b2e0b6b0ffde094837df455d6e67b865dc4f7bf246b976ad4687a5220211f751." }
+      ]
+    },
+    {
+      "type": "machine-learning-model",
+      "bom-ref": "model/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8",
+      "name": "sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8",
+      "version": "int8",
+      "description": "NVIDIA Parakeet TDT 0.6B v2, exported to ONNX for sherpa-onnx and int8-quantised. Offline (whole-utterance) transducer. Vendored at app/src/main/assets/asr/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/. The directory name is the value of asrModelId in the VOICE_FIELD_* audit payload.",
+      "licenses": [{ "license": { "id": "CC-BY-4.0" } }],
+      "hashes": [
+        { "alg": "SHA-256", "content": "a32b12d17bbbc309d0686fbbcc2987b5e9b8333a7da83fa6b089f0a2acd651ab" },
+        { "alg": "SHA-256", "content": "b6bb64963457237b900e496ee9994b59294526439fbcc1fecf705b31a15c6b4e" },
+        { "alg": "SHA-256", "content": "7946164367946e7f9f29a122407c3252b680dbae9a51343eb2488d057c3c43d2" }
+      ],
+      "externalReferences": [
+        { "type": "distribution", "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2" },
+        { "type": "other", "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8" },
+        { "type": "other", "url": "https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2" }
+      ],
+      "properties": [
+        { "name": "samd:storage", "value": "PROPOSED, AWAITING OPERATOR SIGN-OFF: these weights are stored LOCAL-ONLY, not committed to version control (622 MiB exceeds GitHub's 100 MiB per-file limit and git-LFS was declined), so the per-file SHA-256 hashes recorded below are the single source of truth for which bytes shipped, not the git history." },
+        { "name": "samd:ci-limitation", "value": "PROPOSED, AWAITING OPERATOR SIGN-OFF: because these weights are not in the repository, CI cannot build or run anything that loads them — the flag-on ASR path is not and cannot be exercised in CI. That proof runs on-device (Pixel emulator-5554) in PR 4b instead. This is a known limitation of the storage decision, not a defect in the test suite." },
+        { "name": "samd:file/encoder.int8.onnx", "value": "a32b12d17bbbc309d0686fbbcc2987b5e9b8333a7da83fa6b089f0a2acd651ab; 652184296 bytes" },
+        { "name": "samd:file/decoder.int8.onnx", "value": "b6bb64963457237b900e496ee9994b59294526439fbcc1fecf705b31a15c6b4e; 7257753 bytes" },
+        { "name": "samd:file/joiner.int8.onnx", "value": "7946164367946e7f9f29a122407c3252b680dbae9a51343eb2488d057c3c43d2; 1739080 bytes" },
+        { "name": "samd:archive-sha256", "value": "157c157bc51155e03e37d2466522a3a737dd9c72bb25f36eb18912964161e1ad (sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2, 482468385 bytes)" },
+        { "name": "samd:on-disk-total", "value": "661190513 bytes vendored (622 MiB of it the encoder). This is the largest single fact about this release and it belongs in the size review, not only here." },
+        { "name": "samd:license-differs-from-runtime", "value": "CC-BY-4.0, NOT the Apache-2.0 of the sherpa-onnx runtime and NOT the Apache-2.0 the earlier Zipformer candidate would have carried. Verified on both the NVIDIA original and the k2-fsa ONNX re-export; they agree, so the shipped artifact's licence is the upstream one. The attribution obligation is item 5 below." },
+        { "name": "samd:decoding", "value": "offline transducer, greedy_search, int8, model_type=nemo_transducer" },
+        { "name": "samd:frozen", "value": "true; changes only with an app release" },
+        { "name": "samd:runtime-verification", "value": "SherpaOnnxTranscriptionServiceTest asserts these SHA-256 values against the bytes actually shipped in the APK, so the pin is re-checked by CI and not merely asserted here." }
+      ],
+      "modelCard": {
+        "considerations": {
+          "technicalLimitations": [
+            "Trained on English only. Predominantly read and US/Western-accented speech (nvidia/Granary, nvidia/nemo-asr-set-3.0).",
+            "NOT evaluated on Indian-accented English, and NOT evaluated on spontaneous clinical narrative. The deployment is a rural PHC in India. No accuracy figure is claimed anywhere in this release and none should be quoted from the upstream model card, which measures a different population.",
+            "An accented-speech evaluation set is outstanding and is a precondition of exposing this to a user, not a follow-up to it."
+          ],
+          "ethicalConsiderations": [
+            "Every transcript reaches the record only through the confirmation gate: it is shown as a suggestion, never written to the field until a worker confirms it. A wrong transcription is therefore a legibility problem in front of a human, not a silent data corruption. That is the control that makes an un-evaluated accent profile tolerable at all, and it is why partial hypotheses are not surfaced during capture."
+          ]
+        }
+      }
+    },
+    {
+      "type": "data",
+      "bom-ref": "model/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/tokens.txt",
+      "name": "tokens.txt",
+      "version": "int8",
+      "description": "SentencePiece vocabulary, 1025 entries, paired with the encoder above.",
+      "licenses": [{ "license": { "id": "CC-BY-4.0" } }],
+      "hashes": [
+        { "alg": "SHA-256", "content": "ec182b70dd42113aff6c5372c75cac58c952443eb22322f57bbd7f53977d497d" }
+      ],
+      "properties": [
+        {
+          "name": "samd:why-pinned-separately",
+          "value": "Not folded into the model entry, deliberately. A mismatched vocabulary does not raise an error: it produces fluent, plausible, wrong text. That is 9384 bytes whose corruption is silent and whose failure mode is exactly the hazard the confirmation gate exists to catch, so it gets its own line and its own hash."
+        }
+      ]
+    },
+    {
+      "type": "data",
+      "bom-ref": "model/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/training-provenance",
+      "name": "parakeet-tdt-0.6b-v2 training corpus provenance",
+      "version": "n/a",
+      "description": "Provenance record. Not shipped, not a file in the APK. Recorded because the weights are a derived work of these corpora and because the licence obligation below travels with them.",
+      "licenses": [{ "license": { "id": "CC-BY-4.0" } }],
+      "properties": [
+        { "name": "samd:training-data", "value": "nvidia/Granary and nvidia/nemo-asr-set-3.0, English." },
+        {
+          "name": "samd:attribution-obligation",
+          "value": "CC-BY-4.0 requires attribution of the model to NVIDIA, wherever the derived work is distributed. The app distributes the weights inside the APK, so the obligation attaches to the shipped app and not only to this record. PROPOSED placement: the app's open-source licences screen, alongside the existing third-party notices, naming 'NVIDIA Parakeet TDT 0.6B v2 (CC BY 4.0)' with a link to https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2. NOT IMPLEMENTED in this change. It is an operator decision whether the licences screen or this SOUP record alone discharges it, and the screen edit is a user-visible change that should not ride in on an engine swap."
+        },
+        {
+          "name": "samd:not-an-omission",
+          "value": "There is deliberately no entry for the platform speech recognizer. It was deleted in this change and it could never have had a row here: its version is whatever the handset happens to ship, so it cannot be pinned, cannot be hashed and cannot be validated. Shipping a component that cannot be given a row is the thing this discipline exists to prevent."
+        }
+      ]
+    }
+  ]
+}

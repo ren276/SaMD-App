@@ -31,13 +31,14 @@ object FeatureFlags {
     /** Voice-to-text affordances on the Consultation screen ("Voice" mode toggle, "Record main
      *  concern", "Record audio" attachment). Off = the controls are hidden, not merely disabled,
      *  and their handlers return before invoking [com.example.samdapp.domain.usecase.CaptureAudioAttachmentUseCase]
-     *  so [com.example.samdapp.data.transcription.AndroidSpeechRecognizerService] is never reached.
+     *  so [com.example.samdapp.data.transcription.SherpaOnnxTranscriptionService] is never
+     *  reached and its model is never loaded.
      *
-     *  Left off pending the sherpa-onnx on-device engine: the current implementation calls
-     *  Android's platform `SpeechRecognizer` via `createSpeechRecognizer` (not
-     *  `createOnDeviceSpeechRecognizer`), never sets `EXTRA_PREFER_OFFLINE`, and the app holds
-     *  `INTERNET`, so patient narrative may leave the device to a third-party recognizer with no
-     *  data-processing agreement and no coverage under H-11. See
+     *  The original reason for this flag is gone: the off-device transmission risk it was holding
+     *  the line against belonged to the platform speech recognizer, which has been deleted. It
+     *  stays off because these are the **High**-severity H-15 paths that reach
+     *  `/api/v1/evaluate`, and they are governed by no confirmation gate — unlike
+     *  [VOICE_FIELD_IMPACT_ENABLED], which has one. See
      *  `scratchpad/asr-usecase-research-memo.md` Task 0 and
      *  `scratchpad/asr-field-audit-memo.md` C-1/DECISION GATE item 5.
      *
@@ -50,12 +51,14 @@ object FeatureFlags {
      *  reach `/api/v1/evaluate`. Off = the mic is hidden and the suggestion surface never renders,
      *  same "hidden, not merely disabled" discipline as [VOICE_INPUT_ENABLED].
      *
-     *  Left off for the same reason [VOICE_INPUT_ENABLED] is: the platform recognizer PR 3 still
-     *  binds to (`AndroidSpeechRecognizerService`) can transmit off-device, and the confirmation
-     *  gate this flag would expose governs what enters the field, not where the audio goes, and
-     *  the two are orthogonal controls (`scratchpad/pr3-voice-gate-design-memo.md` Part E.2). This
-     *  flag flips to `true` only in PR 4, in the same change that swaps in the on-device engine
-     *  and removes that transmission risk.
+     *  The on-device engine is now bound (`SherpaOnnxTranscriptionService`) and the platform
+     *  recognizer is deleted, which closes the transmission half of the argument for keeping this
+     *  off. It stays `false` regardless, deliberately: "no off-device ASR path remains" is at this
+     *  point a claim about the code, and the flag does not flip on a claim. It flips in the change
+     *  that lands the evidence — the source-level absence scan and the `StrictMode` egress
+     *  assertion — and not before (`scratchpad/pr4-sherpa-onnx-design-memo.md` Part C.2/C.3).
+     *  Still outstanding at that point, and not a code matter: the model is trained on read,
+     *  predominantly US-accented English, and no Indian-accented evaluation has been run.
      *
      *  See [com.example.samdapp.presentation.consultation.ConsultationScreen]. */
     const val VOICE_FIELD_IMPACT_ENABLED = false
