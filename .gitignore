@@ -47,3 +47,11 @@ backend/graphify-out/
 .claude/settings.json.graphify-bak
 # Session notes: local continuity log, not for the shared repo.
 docs/session-notes/
+
+# --- ASR model weights (PR 4a, sherpa-onnx + Parakeet) ---
+# 622 MiB encoder alone; over GitHub's 100 MiB hard file limit. Not using git-LFS (free-tier
+# storage/bandwidth would not survive a second model version). Stored local-only; the SHA-256
+# manifest in docs/sbom/model-soup-2026-09-02-v1.0.json is the single source of truth for which
+# bytes shipped. The sherpa-onnx runtime AAR (app/libs/, 27 MB) is NOT covered by this and stays
+# tracked — it is under the size limit and has no Maven coordinate to fall back on.
+app/src/main/assets/asr/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/

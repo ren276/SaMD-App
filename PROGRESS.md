@@ -3909,3 +3909,235 @@ classifier/kernel/wire-to-model file touched. `.env`/`local.properties`/`BuildCo
 3a's repository refusal, 3b's state model, and 3c's UI are all unchanged. With 3d, all four PR 3
 sub-steps are complete; PR 4 is the on-device engine swap that finally flips
 `VOICE_FIELD_IMPACT_ENABLED`.
+
+## Android: ASR track PR 4a, on-device engine swap (Parakeet + sherpa-onnx), platform recognizer deleted (2026-09-02)
+
+**The flag is still `false`.** `VOICE_FIELD_IMPACT_ENABLED` and `VOICE_INPUT_ENABLED` are both
+untouched at `false`, so nothing here is reachable by a user and the model is never loaded in a
+shipped build. This step lands the engine, the weights, the deletion and the SOUP record. The
+egress proof and the flag flip are PR 4b and are deliberately not in this diff: "no off-device ASR
+path remains" is at this point a claim about the code, and the flag does not flip on a claim.
+
+**Model, per operator override on the design memo's decision gate item 1.** The memo recommended
+`sherpa-onnx-streaming-zipformer-en-20M-2023-02-17` (42 MB, streaming, Apache-2.0). The operator
+selected **NVIDIA Parakeet TDT 0.6B v2, int8, offline** instead. Everything else in the memo
+stands. Three consequences follow from the override and all three are real, not paperwork:
+
+- **Licence.** Parakeet is **CC-BY-4.0**, not Apache-2.0. Verified on both the NVIDIA original and
+  the k2-fsa ONNX re-export, which agree, so the shipped artifact carries the upstream licence.
+  **An attribution obligation attaches at APK distribution, not at the flag flip** — the weights
+  ship inside the APK regardless of `VOICE_FIELD_IMPACT_ENABLED`, so this is a **blocker on any
+  release build that includes this change**, not a follow-up item for 4b. Drafted but *not
+  implemented* in this change: no open-source-licences screen exists anywhere in this app today,
+  so this is a new UI surface, not a one-line edit (see Docs below).
+- **Size.** The vendored weights are **661,190,513 bytes**, 622 MiB of that the encoder alone. The
+  dev-debug APK goes from **25.4 MB to 750.1 MB**. That is the largest single fact about this
+  change and it is an operator decision, not an engineering one.
+- **Decoding mode.** Parakeet is an `OfflineRecognizer`, so it brings no endpoint detector. With a
+  streaming Zipformer the capture boundary would have come from the engine's own endpointing
+  rules; here it is this codebase's job, and it is now three named constants in
+  `SherpaOnnxTranscriptionService` (`TRAILING_SILENCE_MS`, `LEAD_IN_TIMEOUT_MS`, `MAX_CAPTURE_MS`)
+  plus an amplitude gate. They must be tuned against real recordings of the intended speakers.
+  Cutting a hesitant or elderly speaker off mid-sentence produces a truncated narrative that a
+  worker may then confirm, which is the H-15 failure the gate exists to catch, only quieter.
+
+**`SherpaOnnxTranscriptionService`, and what did not change around it.** `TranscriptionService`
+keeps its shape exactly: two suspend functions returning `Result`, no new callback, no
+`Flow<String>` of partial hypotheses. Surfacing partials would need an interface change, would
+touch 3b's state model and 3c's UI, and would put live unconfirmed text on screen during capture,
+which is the automation-bias surface the gate exists to avoid. The new implementation honours the
+deleted class's contract verbatim so the (still dark) `TranscriptionScreen` path keeps compiling
+and behaving: a synthetic `speech-session://<uuid>` key that points at nothing, an in-memory
+transcript map, and **no audio file written anywhere**. The pre-existing consequence — `transcribe`
+cannot answer after process death — carries over unchanged and is not this change's to fix.
+
+Model load is `@Singleton`, `Mutex`-guarded, on `Dispatchers.IO`, and **lazy on first use, never at
+app start**: in a flag-off build the 622 MiB encoder must never be loaded at all. Once built the
+recognizer is retained for the process lifetime; each capture creates only a lightweight
+`OfflineStream`. The named ceiling: the weights plus the ONNX Runtime arena stay resident from the
+first voice capture until the process dies. Releasing on `onTrimMemory` is the upgrade path and is
+not built on speculation.
+
+**A finding that changed the failure handling.** sherpa-onnx's native asset reader does **not**
+throw when a model file is missing. It logs and calls `_Exit(-1)` (`csrc/file-utils.cc` via the
+`SHERPA_ONNX_EXIT` macro), which kills the process outright — no exception, no `Result`, no crash
+dialog. Returning `Result.failure` for a packaging fault therefore required an explicit guard:
+the service opens every model asset before it constructs the recognizer. **The honest ceiling,
+stated rather than over-claimed:** this catches a *missing or unreadable* asset, not a *present
+but corrupt* one. A truncated or mis-quantised file still reaches ONNX Runtime and still ends in
+`_Exit`, which cannot be asserted from inside the process that dies. The guard for that case is
+the per-file SHA-256 pin, checked on-device before the model is trusted — not in CI, since the
+weights it hashes are stored local-only and are not in the tree CI checks out.
+
+3b's two honest-failure edges both still fire through the unchanged seam: an engine or model fault
+is `Result.failure`, and audio with nothing decodable in it is `Result.success("")`. The second one
+**becomes the common case** rather than a corner case: the platform recognizer raised an error code
+on no-speech, whereas an offline recognizer simply decodes nothing. Verified on the host against
+the real weights before any of this was written: a 7.4 s clip decodes in 0.3 s, three seconds of
+silence returns `""`.
+
+**Platform recognizer deleted.** `AndroidSpeechRecognizerService` is gone and
+`MockBoundaryModule` binds `SherpaOnnxTranscriptionService` for **all** flavors — it is the real
+engine, not a clinical mock, so nothing moves to a flavor module. No flavored fallback was kept.
+A fallback that can transmit would make "audio never leaves the device" conditional on build
+configuration, and the platform recognizer is unpinnable SOUP besides: its version is whatever the
+handset ships, so it can be given no row in an SBOM. `createSpeechRecognizer`, `RecognizerIntent`,
+`SpeechRecognizer` and `isRecognitionAvailable` now appear **nowhere in `app/src/main`, comments
+included** — the stale KDoc in `FeatureFlags`, `PermissionAction`, `TranscriptionService` and
+`ConsultationViewModel` was reworded rather than left to describe a deleted class, which is also
+what keeps 4b's source-absence scan a plain grep with no comment-stripping.
+
+**Audit constants filled.** `asrModelId` = `"sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8"` (the
+vendored asset directory verbatim) and `asrModelVersion` = `"sherpa-onnx-1.13.7"`. The split is the
+point: model id names the weights, model version names the code, and together they answer the one
+audit question these fields exist for. **No structural payload change** — `impactVoicePayload`
+keeps its key set, its ordering and its null-for-absent convention; two constant values changed and
+nothing else. `ConsultationVoiceGateBreadcrumbsTest`'s `assertNull` on the version became an
+`assertEquals`, asserted against the literal values rather than the constants, or the test would
+stop testing anything.
+
+**Build wiring.** sherpa-onnx **1.13.7** consumed as the GitHub release AAR at
+`app/libs/sherpa-onnx-1.13.7.aar`, not a Maven coordinate: Maven Central was searched on 2026-09-02
+for `com.k2fsa.sherpa.onnx` and returned zero artifacts, so the coordinate cited in third-party
+write-ups does not resolve. Consumed as `implementation(files(...))`, which needs no repository
+declaration under this project's `FAIL_ON_PROJECT_REPOS` mode. `abiFilters` restricted to
+`arm64-v8a` (the target device) and `x86_64` (kept solely so instrumented tests run on an
+emulator); `armeabi-v7a` and `x86` are filtered out. `noCompress += listOf("onnx")` was added
+**even though the upstream Android sample does not set it** — it is not required for correctness,
+it is there because deflating 622 MiB of int8 weights costs build time and a first-load inflate for
+a few percent of size.
+
+**Tests.** `testDevDebugUnitTest`: **299 passed, 0 failed**, unchanged in count from 3d — the two
+constant values are the only diff, and 3a's `ConsultationVoiceUnconfirmedRefusalTest`, 3b, 3c and
+3d's breadcrumb tests all stay green. `SherpaOnnxTranscriptionServiceTest` (androidTest, 4 tests)
+runs the real engine against the real vendored weights, with no canned-transcript double: a known
+clip must transcribe to text containing the spoken content words (content words, **not** the exact
+string, or the test is a word-error-rate tripwire that fails on a comma and gets silenced by
+whoever hits it); a silent clip must come back as `Result.success("")`; an absent model asset must
+fail the capture instead of killing the process; and the SHA-256 of every shipped model asset must
+equal the value pinned in the SBOM companion, which is what turns that pin from a claim into
+something re-checked on-device, though not by CI (the weights it hashes are stored local-only, per
+the follow-up entry below). **Run on emulator-5554 (Pixel 9 Pro API 37, x86_64): 4 passed, 0 failed**,
+three consecutive clean runs.
+
+**What that test run found, which is worth more than the pass.** The first version of it was
+roughly 50% flaky — the instrumentation process was SIGKILLed mid-run and whichever test happened
+to be reporting last was marked failed. Cause: each test method constructed its own service, and
+the service retains its recognizer for the process lifetime **by design**, so three copies of
+622 MiB of weights were resident at once in a 4 GB emulator. The fix was to share one instance
+across the decoding tests, mirroring the single `@Singleton` the app actually binds, after which
+three consecutive runs were clean. **The finding is the resident-memory ceiling, not the flake:**
+one loaded Parakeet recognizer is a large and permanent tenant in the process from the first voice
+capture onward, and this model makes that ceiling much closer than the 42 MB Zipformer would have.
+An `onTrimMemory` release path is the upgrade if it bites on the target device; it is not built
+here on speculation, and the RSS delta on the real Pixel is not yet measured.
+
+**Docs.** Two controlled-document drafts, both marked **PROPOSED, AWAITING OPERATOR SIGN-OFF**,
+neither marked approved. `docs/sbom/model-soup-2026-09-02-v1.0.json` is a hand-maintained CycloneDX
+1.6 companion with the five SOUP items: the sherpa-onnx runtime AAR (Apache-2.0, SHA-256), ONNX
+Runtime (MIT, **1.27.1 read off the consumed `.so`** — the sherpa-onnx docs say 1.17.1 and pinning
+that would have recorded a component that does not ship), the Parakeet weights (CC-BY-4.0, SHA-256
+per file), `tokens.txt` pinned separately because a mismatched vocabulary yields fluent wrong text
+rather than an error, and the training-corpus provenance carrying the CC-BY-4.0 attribution
+obligation. `docs/sbom/README.md` gains the amendment that a generated SBOM is now **necessary but
+not sufficient**: model weights in `assets/`, a file-dependency AAR and native libraries inside
+that AAR are all invisible to `cyclonedxBom`, so a release SBOM is the generated file *plus* this
+companion. The companion also records that a frozen bundled model is a design change under normal
+change control, **not** a post-deployment model update, so it does not engage the ACP gap in
+`docs/quality/qms-overview.md` — a property that holds only while there is no download-on-first-use,
+no model CDN and no remote config selecting a model, none of which exist here.
+
+**H-15 residual is NOT updated in this step**, deliberately. The row says the gate control exists in
+code and is not user-reachable, and that the residual risk to a user is therefore unchanged. Both
+halves of that are still true: the flag is still off. It becomes false at the flag flip, which is
+4b, and it is a substantive residual-risk re-evaluation there, not an append.
+
+**Known limitation, to be recorded at the flag flip, not closed here.** The model is trained on
+English that is predominantly read and US/Western-accented (`nvidia/Granary`,
+`nvidia/nemo-asr-set-3.0`). The deployment is Indian-accented English in a rural PHC. **No
+Indian-accent evaluation has been run and no accuracy figure is claimed anywhere in this change.**
+The eval set is a precondition of exposing this to a user, not a follow-up to it.
+
+**Not done in this step, by design.** No feature flag flipped. No egress test and no flag flip
+(both 4b). No `TranscriptionService` interface change. No download-on-first-use, model CDN or
+remote-config model selection. No voice navigation or keyword spotting. No classifier, kernel or
+wire-to-model file touched. `.env`/`local.properties`/`BuildConfig` untouched. The open-source
+licences screen is *not* edited: the CC-BY-4.0 attribution placement is drafted in the SOUP record
+and left as an operator call, because it is a user-visible change that should not ride in on an
+engine swap.
+
+## Android: ASR track PR 4a follow-up, weights gitignored local-only (2026-09-02)
+
+**Tracking-only change. No code, no flag, no build behavior changed.** The Parakeet weights
+vendored above (`app/src/main/assets/asr/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/`) cannot be
+committed: the encoder alone is 622 MiB, over GitHub's 100 MiB per-file limit. git-LFS was
+evaluated and declined by the operator — its free tier would not survive a second model version.
+
+**Decision: local-only, gitignored.** Added to root `.gitignore` (not `app/.gitignore`, which
+carries only `/build`) in its own commented block, matching the file's existing per-category
+convention. The four weight files remain on disk, byte-identical to the checkpoint
+(encoder 652,184,296 / decoder 7,257,753 / joiner 1,739,080 / tokens.txt 9,384 bytes) — verified
+after the gitignore edit, not just before it. `app/libs/sherpa-onnx-1.13.7.aar` (27 MB, under the
+limit, no Maven coordinate to fall back on) is **not** covered by this rule and stays tracked.
+
+**The SHA-256 manifest in `docs/sbom/model-soup-2026-09-02-v1.0.json` is now the single source of
+truth for which bytes shipped**, not the git history — the weights themselves leave no trail in
+`git log`. Both that file and `docs/sbom/README.md` gained a PROPOSED sentence recording this, and
+a second recording the consequence: CI has no access to the weights, so it cannot build or run
+anything on the flag-on ASR path. That egress proof stays where it already was planned — on-device
+(Pixel emulator-5554) in PR 4b — so this is a known limitation of the storage decision, not a new
+gap opened by it.
+
+**Flag state unchanged.** `VOICE_FIELD_IMPACT_ENABLED` and `VOICE_INPUT_ENABLED` both still `false`.
+This step touched no `.kt` file and no build script; `testDevDebugUnitTest` was re-run only to
+confirm the gitignore edit itself didn't disturb anything, not because logic changed.
+
+## Android: ASR track PR 4a, review fixes from PR #33 (2026-09-02)
+
+CodeRabbit flagged 4 actionable comments on the PR. All 4 addressed:
+
+**1. Capture cancellation (Major, real bug).** `AudioRecord.read()` is a plain blocking call with
+no suspension point, so cancelling the coroutine that owns a capture (e.g. the worker navigates
+away mid-recording) did not stop the microphone read — it kept blocking until a capture boundary,
+`LEAD_IN_TIMEOUT_MS`, or `MAX_CAPTURE_MS` fired naturally, seconds later. Fixed by making
+`record()`/`readUntilBoundary()` suspend and calling `ensureActive()` between each 100 ms chunk
+read, bounding cancellation latency to about one chunk. Added
+`cancelling_mid_capture_stops_the_microphone_read_promptly` (androidTest): launches a real capture,
+cancels it after 250 ms, asserts the cancel completes in under 2 s. **Deliberately does not**
+follow the reviewer's literal suggestion to gate this on `VOICE_INPUT_ENABLED` — that flag is a
+compile-time `const val`, flipping it would mean editing `FeatureFlags.kt`, which this fix does
+not touch. Tests the service directly instead. Run on emulator-5554, 3 consecutive clean runs,
+5/5 passing.
+
+**2. SBOM hash structure (Major).** The `machine-learning-model` and `onnxruntime-android`
+components each carried multiple SHA-256 hashes at the parent level — ambiguous under CycloneDX
+1.6, since a component's `hashes` array is meant to identify one distributable artifact, not
+several files bundled under one logical name. Restructured both into a parent with `file`-type
+sub-`components`, one hash per file: the model now nests `encoder.int8.onnx`, `decoder.int8.onnx`
+and `joiner.int8.onnx`; the runtime now nests the `arm64-v8a` and `x86_64` builds of
+`libonnxruntime.so` (previously the second hash lived only in a free-text property, easy to miss).
+Hash values themselves are unchanged.
+
+**3. CC-BY-4.0 attribution scope (Major).** The original wording tied the attribution obligation
+loosely to "the distributed app" without saying when it bites. Sharpened: **the obligation attaches
+at APK distribution, not at the flag flip** — the weights ship inside the APK regardless of
+`VOICE_FIELD_IMPACT_ENABLED`, so this is a blocker on any *release* build that includes this
+change, not a follow-up for 4b. Investigated whether adding the actual attribution is trivial
+before pushing back on implementing it: **no open-source-licences screen exists anywhere in this
+app** (no `AboutScreen`, `SettingsScreen`, `NOTICE` file, or licences infrastructure of any kind),
+so this is net-new UI, not a one-line edit to an existing screen, and stays out of scope for an
+ASR-engine swap per the design memo. Left as a documented, sharply-worded blocker for the operator
+rather than building a screen speculatively.
+
+**4. "Checked by CI" overclaim (Major, consistency).** The SBOM README's storage amendment says CI
+cannot access the local-only weights, but a sentence two paragraphs earlier still called the
+asset-hash test "checked by CI." Same overclaim existed in four more places written before that
+amendment was added: the SBOM JSON's `samd:runtime-verification` property, two `PROGRESS.md`
+sentences, and a KDoc comment in `SherpaOnnxTranscriptionService.kt`. Fixed all five to say
+"checked on-device" / "not a CI gate," consistently.
+
+Also ran `graphify update .` per the repo's nitpick convention (no tracked-file changes —
+`graphify-out/` is gitignored).
+
+`testDevDebugUnitTest`: still 299 passed, 0 failed. `SherpaOnnxTranscriptionServiceTest`: now 5
+tests (added the cancellation test), 3 consecutive clean runs on emulator-5554.

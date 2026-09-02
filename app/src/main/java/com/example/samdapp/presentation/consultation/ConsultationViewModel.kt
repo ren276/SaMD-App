@@ -36,9 +36,14 @@ data class PendingVoiceEdit(val originalSuggestion: String, val dwellMs: Long)
 
 private const val SLOT_IMPACT_ON_DAILY_ACTIVITIES = "IMPACT_ON_DAILY_ACTIVITIES"
 
-/** Honest engine identity for the audit payload's `asrModelId`, per
- *  `scratchpad/pr3-voice-gate-design-memo.md` C.2. PR 4's on-device engine replaces this. */
-private const val ASR_MODEL_ID_PLATFORM_RECOGNIZER = "android.speech.SpeechRecognizer"
+/** Honest engine identity for the audit payload. The two fields answer one audit question
+ *  between them — which weights plus which code produced this text — so they are split that way:
+ *  [ASR_MODEL_ID] names the weights and is the vendored asset directory verbatim, pinned per file
+ *  by SHA-256 in the SBOM model companion under `docs/sbom/`; [ASR_MODEL_VERSION] names the
+ *  runtime, which is what varies independently of the weights from release to release. The model
+ *  id already carries the model's own date, so repeating it as the version would say nothing. */
+private const val ASR_MODEL_ID = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8"
+private const val ASR_MODEL_VERSION = "sherpa-onnx-1.13.7"
 
 private fun dwellMillisSince(shownAtNanos: Long?): Long? =
     shownAtNanos?.let { (System.nanoTime() - it) / 1_000_000 }
@@ -227,8 +232,9 @@ class ConsultationViewModel @AssistedInject constructor(
      *    [ConsultationUiState.impactVoiceSuggestion] only, so nothing is committed until the
      *    worker acts on it.
      * 2. A **blank transcript on a successful recognition** is treated as a failed capture, not as
-     *    a suggestion. `AndroidSpeechRecognizerService` reads the results list and calls
-     *    `.orEmpty()`, so a success carrying "" is reachable, and entering Suggested with an empty
+     *    a suggestion. `SherpaOnnxTranscriptionService` returns `Result.success("")` when the
+     *    audio held nothing decodable — with an offline recognizer that is the *normal* outcome
+     *    of a mis-tapped mic, not a corner case — and entering Suggested with an empty
      *    suggestion would put the worker in front of a gate with nothing in it. This is the same
      *    shape as the empty-differential-200 bug this repo already fixed once
      *    ([AuditAction.KERNEL_EMPTY_DIFFERENTIAL]): a successful response carrying nothing usable
@@ -380,9 +386,11 @@ class ConsultationViewModel @AssistedInject constructor(
 
     /** `slot`, `provenance` and `asrModelId`/`asrModelVersion` are on every `VOICE_FIELD_*`
      *  payload; `charCount`, `editDistance` and `dwellMs` are passed only where the caller has
-     *  them, and appear as JSON null otherwise, matching `asrModelVersion`'s "not available yet"
-     *  convention rather than varying the payload's key set transition to transition. `slot` is a
-     *  plain `String`, not an enum: one voice-enabled field does not earn one yet (memo C.2),
+     *  them, and appear as JSON null otherwise, rather than varying the payload's key set
+     *  transition to transition. `asrModelVersion` is no longer among the nullable ones: it was
+     *  null only while the platform recognizer exposed no version, and the on-device engine has
+     *  a real one. `slot` is a plain `String`, not an enum: one voice-enabled field does not
+     *  earn one yet (memo C.2),
      *  promote when a second slot exists. Never a transcript, corrected text, URI or patient
      *  name (memo C.4); `patientId`/`caseRecordId` travel as [AuditLogger.log] parameters, same
      *  as every other call site in this class, not inside this payload. */
@@ -394,8 +402,8 @@ class ConsultationViewModel @AssistedInject constructor(
     ) = auditPayload(
         "slot" to SLOT_IMPACT_ON_DAILY_ACTIVITIES,
         "provenance" to provenance.name,
-        "asrModelId" to ASR_MODEL_ID_PLATFORM_RECOGNIZER,
-        "asrModelVersion" to null,
+        "asrModelId" to ASR_MODEL_ID,
+        "asrModelVersion" to ASR_MODEL_VERSION,
         "charCount" to charCount?.toString(),
         "editDistance" to editDistance?.toString(),
         "dwellMs" to dwellMs?.toString(),

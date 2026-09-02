@@ -5,7 +5,7 @@ import com.example.samdapp.data.config.AndroidSyncWindowProvider
 import com.example.samdapp.data.connectivity.AndroidNetworkMonitor
 import com.example.samdapp.data.doctor.MockDoctorPrescriptionInbox
 import com.example.samdapp.data.media.AndroidAilmentAudioRecorder
-import com.example.samdapp.data.transcription.AndroidSpeechRecognizerService
+import com.example.samdapp.data.transcription.SherpaOnnxTranscriptionService
 import com.example.samdapp.domain.config.DeviceInfoProvider
 import com.example.samdapp.domain.config.SyncWindowProvider
 import com.example.samdapp.domain.connectivity.NetworkMonitor
@@ -18,7 +18,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
 
-/** The only place outside [AndroidSpeechRecognizerService]/[AndroidNetworkMonitor] themselves
+/** The only place outside [SherpaOnnxTranscriptionService]/[AndroidNetworkMonitor] themselves
  * that references those concrete types — everywhere else touches only the domain interfaces.
  *
  * [com.example.samdapp.domain.vitalssource.VitalsSource] and
@@ -32,7 +32,12 @@ import javax.inject.Singleton
 abstract class MockBoundaryModule {
 
     @Binds @Singleton
-    abstract fun bindTranscriptionService(impl: AndroidSpeechRecognizerService): TranscriptionService
+    // Bound for every flavor, not just dev: sherpa-onnx is the real on-device engine, not a
+    // clinical mock, and there is deliberately no flavored fallback to the platform recognizer.
+    // A fallback that can transmit would make "audio never leaves the device" conditional on
+    // build configuration, and the platform recognizer is unpinnable SOUP besides — it has
+    // whatever version the handset happens to ship, so it can be given no row in the SBOM.
+    abstract fun bindTranscriptionService(impl: SherpaOnnxTranscriptionService): TranscriptionService
 
     @Binds @Singleton
     abstract fun bindNetworkMonitor(impl: AndroidNetworkMonitor): NetworkMonitor
