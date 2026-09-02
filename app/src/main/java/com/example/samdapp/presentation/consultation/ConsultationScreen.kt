@@ -113,13 +113,25 @@ internal fun ConsultationContent(uiState: ConsultationUiState, actions: Consulta
         rememberPermissionAction(Manifest.permission.RECORD_AUDIO, actions::onRecordChiefComplaintVoice)
     val requestVoiceForAttachment =
         rememberPermissionAction(Manifest.permission.RECORD_AUDIO, actions::onRecordAudioAttachment)
-    val requestVoiceForImpact =
-        rememberPermissionAction(Manifest.permission.RECORD_AUDIO, actions::onRecordImpactVoice)
-    val requestCameraForAffectedArea = rememberPermissionAction(Manifest.permission.CAMERA) {
-        val uri = createCameraOutputUri(context)
-        pendingCameraUri = uri
-        takePictureLauncher.launch(uri)
-    }
+    // onDenied is passed here and nowhere else on purpose: this is the one voice control a worker
+    // can actually reach (FeatureFlags.VOICE_FIELD_IMPACT_ENABLED is on), so a declined prompt has
+    // to say so instead of leaving a button that silently does nothing. The other two RECORD_AUDIO
+    // call sites stay on the helper's no-op default while VOICE_INPUT_ENABLED keeps them hidden.
+    val requestVoiceForImpact = rememberPermissionAction(
+        permission = Manifest.permission.RECORD_AUDIO,
+        onGranted = actions::onRecordImpactVoice,
+        onDenied = actions::onVoicePermissionDenied,
+    )
+    // Named, not a trailing lambda: `onDenied` is the last parameter now, so a trailing lambda
+    // would silently bind to it instead of to `onGranted`.
+    val requestCameraForAffectedArea = rememberPermissionAction(
+        permission = Manifest.permission.CAMERA,
+        onGranted = {
+            val uri = createCameraOutputUri(context)
+            pendingCameraUri = uri
+            takePictureLauncher.launch(uri)
+        },
+    )
 
     Scaffold(topBar = { TopAppBar(title = { Text("Consultation") }) }) { padding: PaddingValues ->
         LazyColumn(

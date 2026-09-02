@@ -4222,3 +4222,42 @@ confirmation gate) remain hidden.
 
 Outstanding non-code: model trained on read, predominantly US-accented English; no
 Indian-accented field evaluation run yet.
+
+### Commit 5 remainder: flag-on tests and the permission-denial dead end (2026-09-02)
+
+The flip itself landed in `30917b5` (one const). This entry covers what the flip made necessary
+and what the run taught, both of which are standing rules rather than one-off notes.
+
+**Tests inverted, not deleted.** `ConsultationVoiceGateUiTest.theMicButtonAndSuggestionSurfaceAreAbsentWhileTheFlagIsOff`
+was correct while the flag was off and false the moment it flipped, so it became
+`...RenderWhileTheFlagIsOn` with `assertExists()` in the same change rather than in a follow-up.
+A new test taps the mic entry point and asserts `onRecordImpactVoice` fires; it addresses the entry
+point by its `impact_voice_mic_button` test tag, never by its shape, so a later UI change of the
+control does not silently change what the test proves. Both scroll to the node first: the impact
+field sits below the fold of a `LazyColumn` on a phone viewport and an offscreen lazy item is not
+composed, so a bare `assertExists` would fail for a reason unrelated to the flag guard.
+
+**Permission denial was a silent dead end, fixed at the root.** `rememberPermissionAction` called
+`onGranted` on grant and did nothing on denial, across all four call sites. With the flag on, a
+worker who declines the microphone prompt would tap the mic and see nothing happen, forever, with
+no explanation. Fixed in the shared helper (one optional `onDenied`, defaulting to a no-op) rather
+than at the call site, so the other three requests are unchanged. The consultation screen passes
+the existing `errorMessage` path. One forced follow-on: the camera call site used a trailing
+lambda, which now binds to `onDenied` instead of `onGranted`, so it was made a named argument.
+
+**Standing discipline, from this run's findings, not one-off notes:**
+
+- `adb shell am kill-all` before any instrumented ASR run. The 622 MiB resident model plus a 4 GB
+  AVD hits the memory ceiling and crashes the run until the process table is cleared. This is 4a's
+  ceiling recurring, not a new defect, and it presents as a device-side failure that reads like a
+  code failure.
+- Any test that reads source files off disk must declare those files as Gradle `Test` task inputs.
+  Without it, up-to-date checking silently skips the task and a green "passed" is indistinguishable
+  from "did not run". This is the M3 mutation finding: the source-scan test reported success on a
+  tree it had never read. Fixed by declaring `src/main` as an input on the task.
+
+Measured on the x86_64 emulator: first-capture latency **2612 ms cold** (model load on first mic
+tap in a process), **613 ms warm**. Reported, not asserted: there is no agreed threshold, and the
+"Listening…" state covers the cold-load window.
+
+`testDevDebugUnitTest`: 307 passed, 0 failed.

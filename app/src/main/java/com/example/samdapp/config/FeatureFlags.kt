@@ -42,6 +42,11 @@ object FeatureFlags {
      *  `scratchpad/asr-usecase-research-memo.md` Task 0 and
      *  `scratchpad/asr-field-audit-memo.md` C-1/DECISION GATE item 5.
      *
+     *  PR 4b's egress evidence does not change this flag's state: it closes the transmission
+     *  question for both flags at once, and transmission is not what holds this one off. What
+     *  holds it off is an ungated **High**-severity field reaching a model, which no egress
+     *  proof speaks to (`scratchpad/pr4b-flag-flip-design-memo.md` B.2).
+     *
      *  See [com.example.samdapp.presentation.consultation.ConsultationScreen]. */
     const val VOICE_INPUT_ENABLED = false
 
