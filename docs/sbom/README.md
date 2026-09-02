@@ -50,9 +50,12 @@ population it was *not* evaluated on.
   1.27.1, read out of the consumed `.so`. The sherpa-onnx Android docs say 1.17.1. Pinning the
   documented value would have recorded a component that does not ship.
 
-**Checked by CI, not just asserted:** `SherpaOnnxTranscriptionServiceTest` hashes each shipped
-model asset and compares it against the pinned value, so the companion cannot silently drift from
-the APK.
+**Checked on-device, not just asserted — but not by CI.** `SherpaOnnxTranscriptionServiceTest`
+hashes each shipped model asset and compares it against the pinned value, so the companion cannot
+silently drift from the APK it actually shipped in. It runs on an emulator or device (`arm64-v8a`
+or `x86_64`), not in CI: the storage amendment below means the weights the test hashes are not in
+the repository CI checks out, so CI has nothing to hash. Do not describe this as a CI gate until
+that changes.
 
 **Amendment, PROPOSED 2026-09-02, AWAITING OPERATOR SIGN-OFF — storage decision.** The Parakeet
 weights themselves are stored LOCAL-ONLY (gitignored), not committed: the encoder alone is 622 MiB,

@@ -3925,8 +3925,11 @@ stands. Three consequences follow from the override and all three are real, not 
 
 - **Licence.** Parakeet is **CC-BY-4.0**, not Apache-2.0. Verified on both the NVIDIA original and
   the k2-fsa ONNX re-export, which agree, so the shipped artifact carries the upstream licence.
-  **An attribution obligation is now owed by the distributed app**, drafted but *not implemented*
-  in this change (see Docs below).
+  **An attribution obligation attaches at APK distribution, not at the flag flip** — the weights
+  ship inside the APK regardless of `VOICE_FIELD_IMPACT_ENABLED`, so this is a **blocker on any
+  release build that includes this change**, not a follow-up item for 4b. Drafted but *not
+  implemented* in this change: no open-source-licences screen exists anywhere in this app today,
+  so this is a new UI surface, not a one-line edit (see Docs below).
 - **Size.** The vendored weights are **661,190,513 bytes**, 622 MiB of that the encoder alone. The
   dev-debug APK goes from **25.4 MB to 750.1 MB**. That is the largest single fact about this
   change and it is an operator decision, not an engineering one.
@@ -3963,7 +3966,8 @@ the service opens every model asset before it constructs the recognizer. **The h
 stated rather than over-claimed:** this catches a *missing or unreadable* asset, not a *present
 but corrupt* one. A truncated or mis-quantised file still reaches ONNX Runtime and still ends in
 `_Exit`, which cannot be asserted from inside the process that dies. The guard for that case is
-the per-file SHA-256 pin, checked in CI before any device loads the bytes.
+the per-file SHA-256 pin, checked on-device before the model is trusted — not in CI, since the
+weights it hashes are stored local-only and are not in the tree CI checks out.
 
 3b's two honest-failure edges both still fire through the unchanged seam: an engine or model fault
 is `Result.failure`, and audio with nothing decodable in it is `Result.success("")`. The second one
@@ -4012,7 +4016,8 @@ string, or the test is a word-error-rate tripwire that fails on a comma and gets
 whoever hits it); a silent clip must come back as `Result.success("")`; an absent model asset must
 fail the capture instead of killing the process; and the SHA-256 of every shipped model asset must
 equal the value pinned in the SBOM companion, which is what turns that pin from a claim into
-something CI re-checks. **Run on emulator-5554 (Pixel 9 Pro API 37, x86_64): 4 passed, 0 failed**,
+something re-checked on-device, though not by CI (the weights it hashes are stored local-only, per
+the follow-up entry below). **Run on emulator-5554 (Pixel 9 Pro API 37, x86_64): 4 passed, 0 failed**,
 three consecutive clean runs.
 
 **What that test run found, which is worth more than the pass.** The first version of it was
@@ -4086,3 +4091,53 @@ gap opened by it.
 **Flag state unchanged.** `VOICE_FIELD_IMPACT_ENABLED` and `VOICE_INPUT_ENABLED` both still `false`.
 This step touched no `.kt` file and no build script; `testDevDebugUnitTest` was re-run only to
 confirm the gitignore edit itself didn't disturb anything, not because logic changed.
+
+## Android: ASR track PR 4a, review fixes from PR #33 (2026-09-02)
+
+CodeRabbit flagged 4 actionable comments on the PR. All 4 addressed:
+
+**1. Capture cancellation (Major, real bug).** `AudioRecord.read()` is a plain blocking call with
+no suspension point, so cancelling the coroutine that owns a capture (e.g. the worker navigates
+away mid-recording) did not stop the microphone read — it kept blocking until a capture boundary,
+`LEAD_IN_TIMEOUT_MS`, or `MAX_CAPTURE_MS` fired naturally, seconds later. Fixed by making
+`record()`/`readUntilBoundary()` suspend and calling `ensureActive()` between each 100 ms chunk
+read, bounding cancellation latency to about one chunk. Added
+`cancelling_mid_capture_stops_the_microphone_read_promptly` (androidTest): launches a real capture,
+cancels it after 250 ms, asserts the cancel completes in under 2 s. **Deliberately does not**
+follow the reviewer's literal suggestion to gate this on `VOICE_INPUT_ENABLED` — that flag is a
+compile-time `const val`, flipping it would mean editing `FeatureFlags.kt`, which this fix does
+not touch. Tests the service directly instead. Run on emulator-5554, 3 consecutive clean runs,
+5/5 passing.
+
+**2. SBOM hash structure (Major).** The `machine-learning-model` and `onnxruntime-android`
+components each carried multiple SHA-256 hashes at the parent level — ambiguous under CycloneDX
+1.6, since a component's `hashes` array is meant to identify one distributable artifact, not
+several files bundled under one logical name. Restructured both into a parent with `file`-type
+sub-`components`, one hash per file: the model now nests `encoder.int8.onnx`, `decoder.int8.onnx`
+and `joiner.int8.onnx`; the runtime now nests the `arm64-v8a` and `x86_64` builds of
+`libonnxruntime.so` (previously the second hash lived only in a free-text property, easy to miss).
+Hash values themselves are unchanged.
+
+**3. CC-BY-4.0 attribution scope (Major).** The original wording tied the attribution obligation
+loosely to "the distributed app" without saying when it bites. Sharpened: **the obligation attaches
+at APK distribution, not at the flag flip** — the weights ship inside the APK regardless of
+`VOICE_FIELD_IMPACT_ENABLED`, so this is a blocker on any *release* build that includes this
+change, not a follow-up for 4b. Investigated whether adding the actual attribution is trivial
+before pushing back on implementing it: **no open-source-licences screen exists anywhere in this
+app** (no `AboutScreen`, `SettingsScreen`, `NOTICE` file, or licences infrastructure of any kind),
+so this is net-new UI, not a one-line edit to an existing screen, and stays out of scope for an
+ASR-engine swap per the design memo. Left as a documented, sharply-worded blocker for the operator
+rather than building a screen speculatively.
+
+**4. "Checked by CI" overclaim (Major, consistency).** The SBOM README's storage amendment says CI
+cannot access the local-only weights, but a sentence two paragraphs earlier still called the
+asset-hash test "checked by CI." Same overclaim existed in four more places written before that
+amendment was added: the SBOM JSON's `samd:runtime-verification` property, two `PROGRESS.md`
+sentences, and a KDoc comment in `SherpaOnnxTranscriptionService.kt`. Fixed all five to say
+"checked on-device" / "not a CI gate," consistently.
+
+Also ran `graphify update .` per the repo's nitpick convention (no tracked-file changes —
+`graphify-out/` is gitignored).
+
+`testDevDebugUnitTest`: still 299 passed, 0 failed. `SherpaOnnxTranscriptionServiceTest`: now 5
+tests (added the cancellation test), 3 consecutive clean runs on emulator-5554.

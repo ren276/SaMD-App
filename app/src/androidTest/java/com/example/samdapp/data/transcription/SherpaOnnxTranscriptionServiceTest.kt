@@ -2,6 +2,10 @@ package com.example.samdapp.data.transcription
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -15,7 +19,9 @@ import java.security.MessageDigest
  * transcript double: a fake would assert that this file's own expectations are self-consistent,
  * which is not the thing anybody needs to know before shipping a recogniser.
  *
- * Requires an emulator or device with the `x86_64` or `arm64-v8a` ABI (see `abiFilters`).
+ * Requires an emulator or device with the `x86_64` or `arm64-v8a` ABI (see `abiFilters`), and
+ * `RECORD_AUDIO` granted — AGP installs the test APK with runtime permissions pre-granted by
+ * default, so no `GrantPermissionRule` is declared here.
  */
 @RunWith(AndroidJUnit4::class)
 class SherpaOnnxTranscriptionServiceTest {
@@ -79,6 +85,31 @@ class SherpaOnnxTranscriptionServiceTest {
         assertTrue(
             "expected a message naming the missing asset, got: ${result.exceptionOrNull()?.message}",
             result.exceptionOrNull()?.message.orEmpty().contains("missing or unreadable"),
+        )
+    }
+
+    /**
+     * Cancellation must reach the blocking `AudioRecord.read` loop within about one chunk
+     * (100 ms), not only at the next capture boundary. Before the `ensureActive()` fix this
+     * could stay open until [TRAILING_SILENCE_MS], [LEAD_IN_TIMEOUT_MS] or [MAX_CAPTURE_MS] —
+     * seconds, not milliseconds — every time a worker navigated away mid-capture.
+     *
+     * Exercises `captureAudioAttachment()` directly against the mic rather than going through
+     * `VOICE_INPUT_ENABLED` / the ViewModel: that flag is a compile-time `const val`, so a test
+     * cannot flip it without editing `FeatureFlags.kt`, which this change does not touch.
+     */
+    @Test
+    fun cancelling_mid_capture_stops_the_microphone_read_promptly() = runBlocking(Dispatchers.Default) {
+        val job = launch { service().captureAudioAttachment() }
+        delay(250)
+
+        val start = System.nanoTime()
+        job.cancelAndJoin()
+        val elapsedMs = (System.nanoTime() - start) / 1_000_000
+
+        assertTrue(
+            "cancellation took ${elapsedMs}ms; expected well under the multi-second capture timeouts",
+            elapsedMs < 2_000,
         )
     }
 

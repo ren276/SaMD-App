@@ -13,10 +13,12 @@ import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OfflineTransducerModelConfig
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.coroutineContext
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
@@ -209,8 +211,9 @@ class SherpaOnnxTranscriptionService internal constructor(
      *  Known ceiling, stated because it must not be over-claimed: this catches a **missing or
      *  unreadable** asset, not a **present but corrupt** one. A truncated or mis-quantized model
      *  file still reaches ONNX Runtime and still ends in `_Exit`. The guard against that is the
-     *  per-file SHA-256 pinned in the SBOM companion and asserted by an instrumented test, i.e.
-     *  it is caught in CI before a device ever loads it, not at runtime. */
+     *  per-file SHA-256 pinned in the SBOM companion and asserted by an instrumented test on the
+     *  device that loads it — not a CI gate, since the weights are stored local-only and are not
+     *  in the tree CI checks out. */
     private fun requireModelAssetsReadable() {
         MODEL_ASSET_FILES.forEach { name ->
             val path = "$modelAssetDir/$name"
@@ -225,8 +228,15 @@ class SherpaOnnxTranscriptionService internal constructor(
     /** Captures one utterance from the microphone into memory. Ends on [TRAILING_SILENCE_MS] of
      *  quiet once the speaker has started, on [LEAD_IN_TIMEOUT_MS] if they never do, or on
      *  [MAX_CAPTURE_MS] regardless. Audio is returned to the caller and then dropped; it is never
-     *  written to storage. */
-    private fun record(): FloatArray {
+     *  written to storage.
+     *
+     *  `AudioRecord.read` is a plain blocking call with no suspension point of its own, so a
+     *  cancelled [viewModelScope]-scoped job cannot interrupt it mid-read. It reads in
+     *  [CHUNK_SAMPLES] (100 ms) pieces specifically so [readUntilBoundary] can call
+     *  [ensureActive] between reads: cancellation is noticed within one chunk rather than only
+     *  after a capture boundary or [MAX_CAPTURE_MS] fires naturally. The recorder is stopped and
+     *  released exactly once in `finally` on every exit path, cancellation included. */
+    private suspend fun record(): FloatArray {
         val minBufferBytes = AudioRecord.getMinBufferSize(
             SAMPLE_RATE_HZ,
             AudioFormat.CHANNEL_IN_MONO,
@@ -257,7 +267,7 @@ class SherpaOnnxTranscriptionService internal constructor(
         }
     }
 
-    private fun readUntilBoundary(recorder: AudioRecord): FloatArray {
+    private suspend fun readUntilBoundary(recorder: AudioRecord): FloatArray {
         val captured = ArrayList<Float>(SAMPLE_RATE_HZ * 8)
         val chunk = ShortArray(CHUNK_SAMPLES)
         var elapsedMs = 0
@@ -265,6 +275,8 @@ class SherpaOnnxTranscriptionService internal constructor(
         var trailingSilenceMs = 0
 
         while (elapsedMs < MAX_CAPTURE_MS) {
+            coroutineContext.ensureActive()
+
             val read = recorder.read(chunk, 0, chunk.size)
             if (read <= 0) throw IllegalStateException("Microphone read failed (code $read)")
 
