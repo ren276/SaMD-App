@@ -13,6 +13,10 @@ data object Referrals
 /** Bottom-nav tab: signed-in worker's session info, audit summary, sync toggle, sign-out. */
 data object Profile
 
+/** Attribution screen for third-party/SOUP components (Parakeet CC BY 4.0 obligation and the
+ *  app's other dependency licences), reached from [Profile]'s "Open-source licences" button. */
+data object OpenSourceLicensesRoute
+
 data object AbhaEntry
 data object AbhaSignUp
 data object AbhaLogin
@@ -119,7 +123,8 @@ data class PatientAuditRoute(val patientId: String)
  * is applied for all of these (blocks screenshots/screen-recording, blanks the recent-apps
  * thumbnail) since this is a single-Activity app and the flag is window-wide, not per-screen.
  * Deliberately excludes [Home]/[Login]/[Patients] (names alone, lower sensitivity — the point
- * isn't to block screenshots there)/[AbhaEntry] (no data yet, just a menu)/[Profile].
+ * isn't to block screenshots there)/[AbhaEntry] (no data yet, just a menu)/[Profile]/
+ * [OpenSourceLicensesRoute] (static attribution text, no patient data).
  */
 private val SECURED_ROUTE_TYPES: Set<Class<out Any>> = setOf(
     AbhaSignUp::class.java,

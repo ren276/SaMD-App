@@ -207,6 +207,6 @@ tasks.named("cyclonedxBom", org.cyclonedx.gradle.CycloneDxTask::class) {
     setDestination(project.file("../docs/sbom"))
     setOutputName("sbom-latest")
     setOutputFormat("json")
-    setIncludeConfigs(listOf("releaseRuntimeClasspath"))
-    setSkipConfigs(listOf("releaseUnitTestRuntimeClasspath", "releaseAndroidTestRuntimeClasspath"))
+    setIncludeConfigs(listOf("devReleaseRuntimeClasspath"))
+    setSkipConfigs(listOf("devReleaseUnitTestRuntimeClasspath", "devReleaseAndroidTestRuntimeClasspath"))
 }

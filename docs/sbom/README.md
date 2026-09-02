@@ -98,4 +98,12 @@ is a build artifact and should not be committed (only the renamed, dated file).
 - `sbom-2026-07-20-v1.0.json` — first generated SBOM, `versionName = "1.0"`.
 - `model-soup-2026-09-02-v1.0.json` — **PROPOSED, awaiting operator sign-off.** First hand-maintained
   companion: sherpa-onnx runtime, ONNX Runtime, Parakeet weights, `tokens.txt`, training provenance.
-  A regenerated `sbom-<date>-v1.0.json` is still owed alongside it at the next tagged release.
+- `sbom-2026-09-02-v1.0.json` — regenerated during PR 4b-1. **Defect correction, not a routine
+  refresh:** `cyclonedxBom`'s `includeConfigs` still named `releaseRuntimeClasspath`, a
+  configuration that stopped existing once `flavorDimensions += "environment"` was added — every
+  run since produced an empty SBOM (`dependsOn: []`) while reporting `BUILD SUCCESSFUL`.
+  `sbom-2026-07-20-v1.0.json`, predating the flavor split, was the last real output; nothing
+  generated between the flavor split and this fix reflects real dependency data. Fixed
+  `includeConfigs`/`skipConfigs` to `devReleaseRuntimeClasspath`/`devReleaseAndroidTestRuntimeClasspath`
+  in `app/build.gradle.kts`. See `PROGRESS.md`'s PR 4b-1 entry for the controlled-doc flag this
+  raises for the next DHF/SBOM-claim review.
