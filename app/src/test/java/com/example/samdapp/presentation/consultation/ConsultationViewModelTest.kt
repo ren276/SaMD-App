@@ -15,10 +15,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
-/** fix/asr-offdevice-exposure: chiefComplaint stays fully keyboard-usable while
- *  FeatureFlags.VOICE_INPUT_ENABLED is off, and the voice handlers stop before ever reaching
- *  TranscriptionService (so the off-device SpeechRecognizer exposure described in
- *  scratchpad/asr-usecase-research-memo.md Task 0 cannot fire from this build). */
+/** chiefComplaint stays fully keyboard-usable while FeatureFlags.VOICE_INPUT_ENABLED is off, and
+ *  the voice handlers stop before ever reaching TranscriptionService.
+ *
+ *  Originally written for fix/asr-offdevice-exposure, when the risk being held back was the
+ *  platform recogniser's off-device transmission. PR 4a deleted that class outright and bound the
+ *  on-device engine in its place, so the exposure this comment used to name no longer exists.
+ *  VOICE_INPUT_ENABLED stays false for the reason its own KDoc gives: chiefComplaint reaches
+ *  /api/v1/evaluate and is governed by no confirmation gate. */
 @OptIn(ExperimentalCoroutinesApi::class)
 class ConsultationViewModelTest {
 

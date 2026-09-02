@@ -69,8 +69,9 @@ class SherpaOnnxTranscriptionServiceTest {
      *  Known ceiling: this covers a **missing** asset. A **present but corrupt** one still
      *  reaches ONNX Runtime and still ends in `_Exit`, which cannot be asserted from inside the
      *  process that dies. The guard for that case is
-     *  [shipped_model_assets_match_the_hashes_pinned_in_the_sbom_companion], which fails in CI
-     *  before any device loads it. */
+     *  [shipped_model_assets_match_the_hashes_pinned_in_the_sbom_companion], which runs
+     *  on-device before the model is trusted. Not a CI gate: the weights it hashes are stored
+     *  local-only and are not in the tree CI checks out. */
     @Test
     fun an_absent_model_asset_fails_the_capture_instead_of_killing_the_process() = runBlocking {
         val result = serviceFor("asr/no-such-model-dir")
@@ -109,7 +110,9 @@ class SherpaOnnxTranscriptionServiceTest {
     }
 
     /**
-     * Turns the SBOM model companion from a claim into something CI re-checks. `tokens.txt` is
+     * Turns the SBOM model companion from a claim into something re-checked on-device against
+     * the bytes actually installed. Not by CI: the weights are gitignored, so CI has nothing to
+     * hash. `tokens.txt` is
      * pinned in its own right and matters most: a mismatched vocabulary yields plausible wrong
      * text rather than an error, which is exactly the failure mode the confirmation gate exists
      * to catch and exactly the one nobody notices in review.
