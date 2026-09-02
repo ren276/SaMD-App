@@ -64,10 +64,23 @@ brand-name lookup only, never blocking, never patient-identifying data). No hard
 device interfacing.
 
 ## i) Speech-to-text (ASR) as a documentation aid [PROPOSED, AWAITING OPERATOR SIGN-OFF]
-**Drafted this session (`fix/asr-offdevice-exposure` PR 0b) from `scratchpad/asr-usecase-research-memo.md`
-sections C.1 and the FORMATTING BOUNDARY STATEMENT. Not yet operator-approved. As of this same
-session the voice affordance itself is disabled (`FeatureFlags.VOICE_INPUT_ENABLED = false`); this
-paragraph describes the intended framing for when it is re-enabled, not current shipped behavior.**
+**Drafted (`fix/asr-offdevice-exposure` PR 0b) from `scratchpad/asr-usecase-research-memo.md`
+sections C.1 and the FORMATTING BOUNDARY STATEMENT. Not yet operator-approved.**
+
+**AMENDED 2026-09-02 (PR 4b), PROPOSED, AWAITING OPERATOR SIGN-OFF. What the device does has
+changed, and this section exists to state what the device does.** The sentence above was written
+when no voice affordance was reachable at all. As of PR 4b the device has **one user-reachable
+voice input path**: `impactOnDailyActivities`, a narrative field, behind the confirmation gate
+described below (a transcript is proposed in separate state, never written to the field, and
+becomes a field value only on an explicit Use it or Edit tap that is recorded in the audit trail).
+Recognition is **on-device**: the platform speech recognizer is deleted and a vendored
+sherpa-onnx / Parakeet int8 model runs locally, with no network call on the transcription path
+(measured: zero bytes transmitted and received across a full decode, and an airplane-mode witness
+on the target arm64 device). `FeatureFlags.VOICE_INPUT_ENABLED` remains **`false`**, so
+`chiefComplaint`, the field that reaches `/api/v1/evaluate`, and the audio attachment have no
+voice path. Accuracy of the shipped int8 artifact for the intended speakers is **not established**
+(`docs/quality/risk-management-file.md` H-15, KNOWN LIMITATION); this amendment describes
+reachability, not fitness for clinical deployment.
 
 The speech-to-text function is a documentation aid. It proposes text for a human to read and
 affirmatively accept into a field. It performs no clinical interpretation, produces no diagnostic
