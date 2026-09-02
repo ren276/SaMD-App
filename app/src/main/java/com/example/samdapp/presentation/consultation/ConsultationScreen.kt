@@ -247,6 +247,10 @@ internal fun ConsultationContent(uiState: ConsultationUiState, actions: Consulta
                     item { ImpactVoiceSuggestionSurface(suggestion = suggestion, actions = actions) }
                 }
             }
+            // Rendered here, immediately below the impact mic control, rather than after the
+            // attachments section below: a permission denial (or any other error on this shared
+            // state field) must be visible without scrolling past the rest of the form.
+            uiState.errorMessage?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
             item { OutlinedTextField(uiState.relevantHistory, actions::onRelevantHistoryChange, label = { Text("Other relevant history") }, modifier = Modifier.fillMaxWidth()) }
 
             item { HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp)) }
@@ -280,8 +284,6 @@ internal fun ConsultationContent(uiState: ConsultationUiState, actions: Consulta
                     }
                 }
             }
-
-            uiState.errorMessage?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
 
             item {
                 Button(

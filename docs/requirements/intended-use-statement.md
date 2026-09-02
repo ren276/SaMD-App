@@ -72,7 +72,8 @@ changed, and this section exists to state what the device does.** The sentence a
 when no voice affordance was reachable at all. As of PR 4b the device has **one user-reachable
 voice input path**: `impactOnDailyActivities`, a narrative field, behind the confirmation gate
 described below (a transcript is proposed in separate state, never written to the field, and
-becomes a field value only on an explicit Use it or Edit tap that is recorded in the audit trail).
+becomes a field value only on an explicit Use it or Edit tap; the audit event is recorded later,
+when that value is saved during `onSend`, not at the tap itself).
 Recognition is **on-device**: the platform speech recognizer is deleted and a vendored
 sherpa-onnx / Parakeet int8 model runs locally, with no network call on the transcription path
 (measured: zero bytes transmitted and received across a full decode, and an airplane-mode witness

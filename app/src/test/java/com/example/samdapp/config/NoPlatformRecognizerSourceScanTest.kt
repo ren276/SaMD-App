@@ -135,6 +135,7 @@ class NoPlatformRecognizerSourceScanTest {
             TRANSCRIPTION_SERVICE_IMPL,
             "java/com/example/samdapp/domain/transcription/TranscriptionService.kt",
             "java/com/example/samdapp/domain/usecase/TranscribeAudioUseCase.kt",
+            "java/com/example/samdapp/presentation/consultation/ConsultationViewModel.kt",
         ).map { File(MAIN_SOURCES, it) }
 
         files.forEach {

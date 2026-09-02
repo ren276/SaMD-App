@@ -12,6 +12,7 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.core.content.ContextCompat
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.samdapp.domain.model.AttachmentType
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -144,7 +145,7 @@ class ConsultationVoiceGateUiTest {
             .performScrollToNode(hasTestTag("impact_voice_mic_button"))
         composeRule.onNodeWithTag("impact_voice_mic_button").performClick()
 
-        assert(actions.recordedImpactVoice) { "The mic entry point must call onRecordImpactVoice" }
+        assertTrue("The mic entry point must call onRecordImpactVoice", actions.recordedImpactVoice)
     }
 
     @Test

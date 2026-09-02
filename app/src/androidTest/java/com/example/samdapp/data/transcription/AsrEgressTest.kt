@@ -27,7 +27,8 @@ import java.lang.reflect.Modifier
  *
  * **What this class proves:** on this device, this build, this run, a complete transcription
  * happened, the app's UID moved zero bytes across it, no Java-layer socket was opened, and no file
- * appeared in the app's storage.
+ * appeared under `filesDir` or `cacheDir` (the snapshot in [storageSnapshot]; it does not cover
+ * `noBackupFilesDir`, `codeCacheDir` or external storage).
  * **What it does NOT prove:** it is an observation over one execution with one input, not a proof
  * over all executions. It cannot rule out a dormant network path in sherpa-onnx or ONNX Runtime
  * that different input or a different build would activate; the controls for that are the exact

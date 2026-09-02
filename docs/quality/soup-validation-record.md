@@ -49,7 +49,8 @@ x86_64-not-arm64 residue recorded against the earlier layers is therefore **clos
 assets on device differ, so a swapped or partially copied model is a red test, not a quiet
 behaviour change.
 
-**S-3, change control.** All five components are compiled into the APK. There is no
+**S-3, change control.** The shipped runtime and model files are compiled into the APK; the
+training-corpus provenance record is controlled documentation and is not shipped. There is no
 download-on-first-use, no model CDN, no silent refresh and no remote config selecting a model, and
 `TranscriptionPathHasNoNetworkDependencyTest` is what keeps that property from eroding. Any of
 those additions would reopen both the ACP question and the egress question at once.

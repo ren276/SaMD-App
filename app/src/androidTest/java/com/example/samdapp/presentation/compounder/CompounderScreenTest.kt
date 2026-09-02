@@ -45,6 +45,7 @@ private class FakeCompounderActions : CompounderActions {
     override fun onPrivateHandoffAcknowledged() = Unit
     override fun onPrivateHandoffCancelled() = Unit
     override fun onStartAilmentAudioRecording() = Unit
+    override fun onAilmentAudioPermissionDenied() = Unit
     override fun onStopAilmentAudioRecording() = Unit
     override fun onAddAilment() = Unit
     override fun onDeleteAilment(id: String, audioUri: String?) = Unit
