@@ -210,3 +210,16 @@ tasks.named("cyclonedxBom", org.cyclonedx.gradle.CycloneDxTask::class) {
     setIncludeConfigs(listOf("devReleaseRuntimeClasspath"))
     setSkipConfigs(listOf("devReleaseUnitTestRuntimeClasspath", "devReleaseAndroidTestRuntimeClasspath"))
 }
+// The egress-proof Layer 1/2 tests (NoPlatformRecognizerSourceScanTest,
+// TranscriptionPathHasNoNetworkDependencyTest) read app/src/main off disk rather than importing
+// it, so Gradle cannot infer the source tree as an input from the test classpath. Without this
+// declaration a comment-only edit to a main source file produces identical bytecode, the test
+// task is UP-TO-DATE, and the scan silently does not run on exactly the change it exists to
+// catch. Found the honest way: a mutation check that added `createSpeechRecognizer` in a comment
+// reported BUILD SUCCESSFUL until the task was forced to rerun, at which point it failed
+// correctly. Declared here so the gate cannot be skipped by an up-to-date check.
+tasks.withType<Test>().configureEach {
+    inputs.dir(layout.projectDirectory.dir("src/main"))
+        .withPropertyName("mainSourcesScannedByEgressProofTests")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+}
