@@ -29,6 +29,10 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -205,21 +209,39 @@ internal fun ConsultationContent(uiState: ConsultationUiState, actions: Consulta
             // Hidden, not merely disabled, while FeatureFlags.VOICE_FIELD_IMPACT_ENABLED is off:
             // see its KDoc. Independent of VOICE_INPUT_ENABLED (which stays off and gates
             // chiefComplaint voice + the audio attachment); this flag governs only this field.
-            if (FeatureFlags.VOICE_FIELD_IMPACT_ENABLED) {
-                item {
-                    OutlinedButton(
-                        onClick = requestVoiceForImpact,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
-                            .testTag("impact_voice_mic_button"),
-                    ) {
-                        Text(
-                            if (uiState.isCapturingImpactVoice) "Listening…" else "Record impact on daily activities",
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                    }
-                }
+            item {
+                // Typed val so Kotlin infers @Composable on the lambda correctly.
+                // trailingIcon is @Composable (() -> Unit)? — the if-expression below
+                // must resolve to that type; parenthesised lambdas alone don't carry
+                // the @Composable annotation without an explicit type ascription.
+                val micTrailingIcon: @Composable (() -> Unit)? =
+                    if (FeatureFlags.VOICE_FIELD_IMPACT_ENABLED) {
+                        {
+                            IconButton(
+                                onClick = requestVoiceForImpact,
+                                enabled = !uiState.isCapturingImpactVoice,
+                                modifier = Modifier.testTag("impact_voice_mic_button"),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Mic,
+                                    contentDescription = if (uiState.isCapturingImpactVoice)
+                                        "Listening…" else "Record impact on daily activities",
+                                    tint = if (uiState.isCapturingImpactVoice)
+                                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                    else
+                                        MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                    } else null
+                OutlinedTextField(
+                    value = uiState.impactOnDailyActivities,
+                    onValueChange = actions::onImpactChange,
+                    label = { Text("Impact on daily activities") },
+                    modifier = Modifier.fillMaxWidth(),
+                    trailingIcon = micTrailingIcon,
+                )
             }
-            item { OutlinedTextField(uiState.impactOnDailyActivities, actions::onImpactChange, label = { Text("Impact on daily activities") }, modifier = Modifier.fillMaxWidth()) }
             if (FeatureFlags.VOICE_FIELD_IMPACT_ENABLED) {
                 uiState.impactVoiceSuggestion?.let { suggestion ->
                     item { ImpactVoiceSuggestionSurface(suggestion = suggestion, actions = actions) }
