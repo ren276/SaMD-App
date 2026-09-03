@@ -134,7 +134,15 @@ class ConsultationDocumentRepositoryImpl @Inject constructor(
                     retractedAt = null,
                     retractionReason = null,
                 )
-                consultationDocumentDao.insert(document.toEntity(localModifiedAt = uploadedAt))
+                // Encryption already succeeded and destFile exists on disk at this point — if the
+                // metadata insert fails, the file must not linger with no row pointing at it
+                // (the "failure paths write nothing" contract this method documents).
+                try {
+                    consultationDocumentDao.insert(document.toEntity(localModifiedAt = uploadedAt))
+                } catch (e: Exception) {
+                    destFile.delete()
+                    throw e
+                }
                 document
             }
         }
@@ -160,13 +168,18 @@ class ConsultationDocumentRepositoryImpl @Inject constructor(
         val entity = consultationDocumentDao.getById(documentId)
             ?: return Result.failure(DataError.NotFound("Document"))
         return asDataResult {
-            val file = File(documentsDir(entity.consultationId), entity.storageKey)
-            // File.delete() on flash storage is not physical erasure — adequate here only because
-            // the plaintext never touched disk (H-18 risk entry). Best-effort: a delete failure
-            // does not block the metadata retraction, since the row (not the file) is the record
-            // of truth that this document was retracted.
-            file.delete()
+            // The metadata row is retracted FIRST, deliberately, before the file is touched: the
+            // row is the record of truth. If this write throws, asDataResult reports failure and
+            // the file is untouched (row still active, content still present — a consistent
+            // state). Only once the row is durably marked retracted do we attempt to delete the
+            // bytes; File.delete() on flash storage is not physical erasure — adequate here only
+            // because the plaintext never touched disk (H-18 risk entry) — and is best-effort: a
+            // delete failure leaves a correctly-retracted row pointing at bytes nothing will
+            // serve again (readDecrypted/observeForConsultation both already exclude retracted
+            // rows), rather than an active row with no content.
             consultationDocumentDao.retract(documentId, Instant.now(), reason, Instant.now())
+            val file = File(documentsDir(entity.consultationId), entity.storageKey)
+            file.delete()
         }
     }
 }

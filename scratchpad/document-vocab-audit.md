@@ -11,6 +11,17 @@ is either grounded in a real repo value (marked REPO-DERIVED) or explicitly not
 (OPERATOR-MUST-DEFINE). The clinical sign-off on the actual vocabulary belongs to the
 operator, per the brief.
 
+**UPDATE, post-audit, operator sign-off received:** the operator subsequently signed off on both
+vocabularies for Build 3a of the consultation-documents feature. `DepartmentCode` was confirmed as
+Option 1 below (the specialty/service-line list, all 17 REPO-DERIVED candidates, as-is).
+`RecordTypeCode` was operator-picked as 6 values (`LAB_REPORT`, `IMAGING`, `DISCHARGE_SUMMARY`,
+`EXT_PRESCRIPTION`, `REFERRAL`, `OTHER`) — **explicitly still marked provisional, pending clinical
+review**, per the operator's own instruction; this audit's finding that no repo source exists for
+a document-category taxonomy stands and is why the operator picked these values directly rather
+than this audit proposing them. Both vocabularies are implemented as Kotlin enums in
+`app/src/main/java/com/example/samdapp/domain/model/ConsultationDocument.kt`. See
+`scratchpad/consultation-documents-storage-build3a-readme.md` for what shipped.
+
 ---
 
 ## A. DepartmentCode candidates

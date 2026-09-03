@@ -1051,7 +1051,10 @@ async def test_document_retracted_audit_row_is_accepted_and_persisted(
                 "al-doc-retracted",
                 action="document_retracted",
                 case_record_id=None,
-                payload='{"documentId":"doc-1","reason":"wrong patient","actorRole":"DOCTOR","bytesDeleted":"1024"}',
+                payload=(
+                    '{"documentId":"doc-1","reason":"wrong patient","actorRole":"DOCTOR",'
+                    '"bytesDeleted":"1024"}'
+                ),
             )
         ],
     )

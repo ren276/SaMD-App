@@ -28,6 +28,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
@@ -84,6 +86,7 @@ class DocumentViewerViewModel @AssistedInject constructor(
     private var pdfRenderer: PdfRenderer? = null
     private var pdfFileDescriptor: ParcelFileDescriptor? = null
     private var viewedAudited = false
+    private val pdfPageMutex = Mutex()
 
     init {
         viewModelScope.launch {
@@ -166,12 +169,22 @@ class DocumentViewerViewModel @AssistedInject constructor(
     fun onNextPage() = changePdfPage(+1)
     fun onPreviousPage() = changePdfPage(-1)
 
+    /** `PdfRenderer.Page.render` is `@WorkerThread` (blocking, not safe on the main thread for a
+     *  large page) and `PdfRenderer` itself is not safe to use from two coroutines at once, so
+     *  page changes run on IO under [pdfPageMutex] rather than directly on the button's caller
+     *  thread — serialized, so a fast double-tap on Next/Previous can't overlap two renders
+     *  against the same renderer. */
     private fun changePdfPage(delta: Int) {
         val renderer = pdfRenderer ?: return
-        val current = (_uiState.value.content as? DocumentViewerContent.Pdf) ?: return
-        val next = (current.pageIndex + delta).coerceIn(0, renderer.pageCount - 1)
-        if (next == current.pageIndex) return
-        _uiState.update { it.copy(content = renderPdfPage(renderer, next)) }
+        viewModelScope.launch {
+            pdfPageMutex.withLock {
+                val current = (_uiState.value.content as? DocumentViewerContent.Pdf) ?: return@withLock
+                val next = (current.pageIndex + delta).coerceIn(0, renderer.pageCount - 1)
+                if (next == current.pageIndex) return@withLock
+                val rendered = withContext(Dispatchers.IO) { renderPdfPage(renderer, next) }
+                _uiState.update { it.copy(content = rendered) }
+            }
+        }
     }
 
     private fun extensionFor(mimeType: String): String = when (mimeType) {
