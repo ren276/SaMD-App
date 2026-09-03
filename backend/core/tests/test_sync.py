@@ -1002,9 +1002,7 @@ async def test_document_uploaded_audit_row_is_accepted_and_persisted(
     assert response.status_code == 200
 
     row = (
-        await session.execute(
-            select(AuditEvent).where(AuditEvent.action == "document_uploaded")
-        )
+        await session.execute(select(AuditEvent).where(AuditEvent.action == "document_uploaded"))
     ).scalar_one()
     assert row.origin == "DEVICE"
     # No worker-typed label reaches the server-side audit row either.
@@ -1031,9 +1029,7 @@ async def test_document_viewed_audit_row_is_accepted_and_persisted(
     assert response.status_code == 200
 
     row = (
-        await session.execute(
-            select(AuditEvent).where(AuditEvent.action == "document_viewed")
-        )
+        await session.execute(select(AuditEvent).where(AuditEvent.action == "document_viewed"))
     ).scalar_one()
     assert row.origin == "DEVICE"
 
@@ -1061,8 +1057,6 @@ async def test_document_retracted_audit_row_is_accepted_and_persisted(
     assert response.status_code == 200
 
     row = (
-        await session.execute(
-            select(AuditEvent).where(AuditEvent.action == "document_retracted")
-        )
+        await session.execute(select(AuditEvent).where(AuditEvent.action == "document_retracted"))
     ).scalar_one()
     assert row.origin == "DEVICE"
