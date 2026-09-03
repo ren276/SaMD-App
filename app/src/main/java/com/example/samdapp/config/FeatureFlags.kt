@@ -68,4 +68,22 @@ object FeatureFlags {
      *
      *  See [com.example.samdapp.presentation.consultation.ConsultationScreen]. */
     const val VOICE_FIELD_IMPACT_ENABLED = true
+
+    /** Hides the AI treatment recommendation (`EvaluateReportOutput`) from the worker-facing
+     *  report, and hides an AI-agreed/AI-modified/AI-rejected prescription's medication lines on
+     *  a doctor REJECT, until a physician decision has been committed for the case (AGREE /
+     *  MODIFY / REJECT via [com.example.samdapp.domain.usecase.SubmitDoctorDecisionUseCase]).
+     *  Also gates the `DoctorReviewCard` decision surface on
+     *  [com.example.samdapp.presentation.patientsummary.PatientSummaryScreen] to
+     *  `UserRole.DOCTOR` — see `PatientSummaryUiState.canOpenDoctorReview` — so flipping this
+     *  flag off restores the pre-gate demo behaviour (any role can open and submit the review) in
+     *  one place.
+     *
+     *  Off = prior behaviour: the `/api/v1/evaluate` treatment block and brand suggestion render
+     *  on the worker report unconditionally as soon as evaluate returns, a REJECTed case's manual
+     *  medication line renders like any other, and the decision surface has no role check.
+     *
+     *  Default ON: hidden-until-approved is the safe default. See
+     *  [com.example.samdapp.domain.report.ReportFormatter]. */
+    const val PRESCRIPTION_APPROVAL_GATE_ENABLED = true
 }

@@ -2,6 +2,12 @@ package com.example.samdapp.domain.report
 
 import com.example.samdapp.domain.model.AilmentEntry
 import com.example.samdapp.domain.model.Doctor
+import com.example.samdapp.domain.model.EvaluateBrandMapping
+import com.example.samdapp.domain.model.EvaluateDiagnosticSummary
+import com.example.samdapp.domain.model.EvaluateNlemTreatment
+import com.example.samdapp.domain.model.EvaluateReportOutput
+import com.example.samdapp.domain.model.EvaluateSafetyAndTriage
+import com.example.samdapp.domain.model.KernelDecision
 import com.example.samdapp.domain.model.MeasurementType
 import com.example.samdapp.domain.model.MedicationLine
 import com.example.samdapp.domain.model.Patient
@@ -51,13 +57,41 @@ class ReportFormatterTest {
         prescription: Prescription? = null,
         doctor: Doctor? = null,
         attachments: List<com.example.samdapp.domain.model.Attachment> = emptyList(),
+        evaluateOutput: EvaluateReportOutput? = null,
+        prescriptionApprovalGateEnabled: Boolean = false,
     ) = formatter.format(
         audience = audience, patient = patient, abhaProfile = null,
         consultationChiefComplaint = "Fever and body ache for two days", ailments = ailments,
         vitals = null, consultationAttachments = attachments, consultationRecordNo = "CR-001",
-        visitDateTime = Instant.EPOCH, kernelOutput = null, evaluateOutput = null, evaluateFailureCode = null,
+        visitDateTime = Instant.EPOCH, kernelOutput = null, evaluateOutput = evaluateOutput, evaluateFailureCode = null,
         prescription = prescription,
         prescribingDoctor = doctor,
+        prescriptionApprovalGateEnabled = prescriptionApprovalGateEnabled,
+    )
+
+    private fun evaluateOutput(recommendedDrug: String? = "Paracetamol") = EvaluateReportOutput(
+        id = "eval-1", caseRecordId = "CR-001",
+        diagnosticSummary = EvaluateDiagnosticSummary(primaryIcdCandidate = "J00", primaryAilmentName = "Common cold", differential = emptyList()),
+        nlemTreatment = EvaluateNlemTreatment(
+            recommendedDrug = recommendedDrug, levelOfHealthcare = null, availableAtPHC = true,
+            dosageForms = listOf("Tablet"), pediatricDose = null, citation = null, confidence = null,
+            referralReason = null, matchedDisease = null,
+        ),
+        brandMapping = null,
+        safetyAndTriage = EvaluateSafetyAndTriage(vitalsTriage = null, requiresHumanReview = false, pediatricReferralFlag = false, failureReason = null),
+        topIndianBrand = com.example.samdapp.domain.model.IndianBrandSuggestion("Crocin", "GSK"),
+        inferenceStartedAt = Instant.EPOCH, inferenceEndedAt = Instant.EPOCH,
+    )
+
+    private fun prescription(
+        kernelDecision: KernelDecision,
+        diagnosis: String = "Viral fever",
+        medications: List<MedicationLine> = listOf(
+            MedicationLine("Paracetamol", "Crocin", "500 mg", "1 tablet", "twice daily", "oral", "5 days", "10 tablets", "after food", null),
+        ),
+    ) = Prescription(
+        id = "rx1", patientId = "p", encounterId = "e", caseRecordId = "CR-001", doctorId = "doc-gen-001",
+        diagnosis = diagnosis, medications = medications, kernelDecision = kernelDecision, createdAt = Instant.EPOCH,
     )
 
     @Test
@@ -256,5 +290,93 @@ class ReportFormatterTest {
         assertEquals("Photo 1", report.attachments[0].label)
         assertEquals("Audio 1", report.attachments[1].label)
         assertEquals("Photo 2", report.attachments[2].label)
+    }
+
+    // -------------------------------------------------------------------
+    // H-16 prescription visibility gate (Build 1) — ReportFormatter seam
+    // -------------------------------------------------------------------
+
+    @Test
+    fun `gate on, no decision yet — WORKER sees no AI treatment block, no prescription, and a neutral awaiting-review line`() {
+        val report = format(ReportAudience.WORKER, evaluateOutput = evaluateOutput(), prescriptionApprovalGateEnabled = true)
+        assertNull(report.evaluateOutput)
+        assertTrue(report.prescription.isEmpty())
+        assertEquals("Awaiting physician review", report.diagnosis)
+    }
+
+    /** The mid-modification regression test the operator asked for: a draft MODIFY/REJECT lives
+     *  only in ViewModel UI state and is never persisted until the single atomic commit
+     *  (SubmitDoctorDecisionUseCase) — there is no draft table. So mid-edit is, at the formatter
+     *  level, indistinguishable from "no decision yet": no [Prescription] row exists. This test
+     *  pins that a [ClinicalReport] built in that state carries no prescription lines and no raw
+     *  AI treatment block, so a future draft-table refactor that starts persisting a partial
+     *  prescription cannot silently leak it through this seam. */
+    @Test
+    fun `mid-modification (uncommitted) is structurally invisible — no persisted Prescription means no prescription lines`() {
+        val report = format(ReportAudience.WORKER, evaluateOutput = evaluateOutput(), prescription = null, prescriptionApprovalGateEnabled = true)
+        assertTrue(report.prescription.isEmpty())
+        assertNull(report.evaluateOutput)
+        assertFalse(report.isFinal)
+    }
+
+    @Test
+    fun `gate on, AGREE — full prescription renders, the gate stops suppressing`() {
+        val report = format(ReportAudience.WORKER, prescription = prescription(KernelDecision.AGREE), evaluateOutput = evaluateOutput(), prescriptionApprovalGateEnabled = true)
+        assertEquals(1, report.prescription.size)
+        assertEquals("Viral fever", report.diagnosis)
+        assertEquals(KernelDecision.AGREE, report.kernelDecision)
+        // The raw AI evaluate section stays hidden from WORKER even post-decision — the approved
+        // Prescription (above) is the only worker-facing source of truth for what was prescribed.
+        assertNull(report.evaluateOutput)
+    }
+
+    @Test
+    fun `gate on, MODIFY — the doctor's modified prescription renders, the AI's original evaluate block is not shown alongside it`() {
+        val modified = listOf(
+            MedicationLine("Amoxicillin", null, "250 mg", "1 tablet", "thrice daily", "oral", "5 days", "15 tablets", null, null),
+        )
+        val report = format(
+            ReportAudience.WORKER,
+            prescription = prescription(KernelDecision.MODIFY, medications = modified),
+            evaluateOutput = evaluateOutput(recommendedDrug = "Paracetamol"),
+            prescriptionApprovalGateEnabled = true,
+        )
+        assertEquals(1, report.prescription.size)
+        assertTrue(report.prescription.single().text.startsWith("Amoxicillin"))
+        assertNull(report.evaluateOutput)
+    }
+
+    @Test
+    fun `gate on, REJECT — no medication lines, but the doctor's reasoning and the referral affordance are present`() {
+        val rejected = prescription(KernelDecision.REJECT, diagnosis = "Vitals inconsistent with AI candidate; refer for specialist review.", medications = listOf(
+            MedicationLine("N/A", null, "N/A", "N/A", "As advised by physician", "oral", "As advised by physician", "As advised by physician", null, null),
+        ))
+        val report = format(ReportAudience.WORKER, prescription = rejected, evaluateOutput = evaluateOutput(), prescriptionApprovalGateEnabled = true)
+        assertTrue(report.prescription.isEmpty())
+        assertEquals("Vitals inconsistent with AI candidate; refer for specialist review.", report.diagnosis)
+        assertEquals(KernelDecision.REJECT, report.kernelDecision)
+        assertTrue(report.suggestsReferral)
+        assertTrue(report.referralReasonSuggestion.contains("did not concur"))
+    }
+
+    @Test
+    fun `flag off restores prior behaviour — evaluateOutput and a REJECTed medication both render unconditionally`() {
+        val rejected = prescription(KernelDecision.REJECT)
+        val report = format(ReportAudience.WORKER, prescription = rejected, evaluateOutput = evaluateOutput(), prescriptionApprovalGateEnabled = false)
+        assertEquals(evaluateOutput().nlemTreatment.recommendedDrug, report.evaluateOutput?.nlemTreatment?.recommendedDrug)
+        assertEquals(1, report.prescription.size)
+    }
+
+    @Test
+    fun `flag off, no decision yet — no synthetic awaiting-review line, matching pre-gate behaviour`() {
+        val report = format(ReportAudience.WORKER, prescriptionApprovalGateEnabled = false)
+        assertNull(report.diagnosis)
+        assertTrue(report.prescription.isEmpty())
+    }
+
+    @Test
+    fun `PHYSICIAN audience is never gated, even with the flag on`() {
+        val report = format(ReportAudience.PHYSICIAN, evaluateOutput = evaluateOutput(), prescriptionApprovalGateEnabled = true)
+        assertEquals("Paracetamol", report.evaluateOutput?.nlemTreatment?.recommendedDrug)
     }
 }

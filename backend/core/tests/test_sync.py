@@ -881,3 +881,79 @@ async def test_voice_field_suggested_audit_row_is_accepted_and_persisted(
     # No transcript or corrected text reaches the server-side audit row (B.4: field-level
     # provenance only).
     assert "transcript" not in row.payload
+
+
+# ---------------------------------------------------------------------------
+# Prescription visibility gate (H-16, Build 1): PRESCRIPTION_APPROVED /
+# PRESCRIPTION_SURFACED_TO_WORKER audit actions
+# ---------------------------------------------------------------------------
+
+
+def test_prescription_gate_actions_are_in_the_accepted_device_action_set() -> None:
+    """Sourced from the checked-in mirror, not retyped, same as the kernel_empty_differential
+    assertion above.
+    """
+    assert "prescription_approved" in DEVICE_AUDIT_ACTIONS
+    assert "prescription_surfaced_to_worker" in DEVICE_AUDIT_ACTIONS
+
+
+async def test_prescription_approved_audit_row_is_accepted_and_persisted(
+    client: AsyncClient, auth_headers: dict[str, str], session: AsyncSession
+) -> None:
+    """A device-origin audit_log row carrying action=prescription_approved must sync-push
+    successfully and land in audit_events with that action verbatim, proving the accepted-set
+    widening takes effect end to end and not just that the Python set contains the string.
+    Asserts the persisted row via a fresh query, not the HTTP response, per this repo's rule that
+    a write-survived-a-failure-path test must check the DB, not the return value.
+    """
+    response = await push(
+        client,
+        auth_headers,
+        [
+            audit_record(
+                "al-rx-approved",
+                action="prescription_approved",
+                case_record_id="case-rx-1",
+                payload='{"kernelDecision":"AGREE","prescriptionId":"rx-1","medicationCount":"1"}',
+            )
+        ],
+    )
+    assert response.status_code == 200
+
+    row = (
+        await session.execute(
+            select(AuditEvent).where(AuditEvent.action == "prescription_approved")
+        )
+    ).scalar_one()
+    assert row.case_record_id == "case-rx-1"
+    assert row.origin == "DEVICE"
+    # No drug name reaches the server-side audit row either.
+    assert "Paracetamol" not in row.payload
+
+
+async def test_prescription_surfaced_to_worker_audit_row_is_accepted_and_persisted(
+    client: AsyncClient, auth_headers: dict[str, str], session: AsyncSession
+) -> None:
+    """Same proof for the second gate action, emitted once per gated-open report load."""
+    response = await push(
+        client,
+        auth_headers,
+        [
+            audit_record(
+                "al-rx-surfaced",
+                action="prescription_surfaced_to_worker",
+                case_record_id="case-rx-1",
+                payload='{"kernelDecision":"AGREE","viewerRole":"ASHA_WORKER","caseRecordId":"case-rx-1"}',
+            )
+        ],
+    )
+    assert response.status_code == 200
+
+    row = (
+        await session.execute(
+            select(AuditEvent).where(AuditEvent.action == "prescription_surfaced_to_worker")
+        )
+    ).scalar_one()
+    assert row.case_record_id == "case-rx-1"
+    assert row.origin == "DEVICE"
+    assert "Paracetamol" not in row.payload

@@ -1,11 +1,14 @@
 package com.example.samdapp.presentation.patientsummary
 
+import com.example.samdapp.domain.auth.UserRole
+import com.example.samdapp.domain.auth.UserSession
 import com.example.samdapp.domain.model.CaseRecord
 import com.example.samdapp.domain.model.CaseStatus
 import com.example.samdapp.domain.model.ConsultationHistoryEntry
 import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.domain.usecase.SubmitDoctorDecisionUseCase
 import com.example.samdapp.testutil.FakeAuditLogger
+import com.example.samdapp.testutil.FakeAuthSession
 import com.example.samdapp.testutil.FakeBrandLookupSource
 import com.example.samdapp.testutil.FakeCaseRecordRepository
 import com.example.samdapp.testutil.FakeDiagnosisFeedbackRepository
@@ -41,6 +44,10 @@ class PatientSummaryViewModelTest {
         caseRecordRepository: FakeCaseRecordRepository = FakeCaseRecordRepository(),
         kernelReportRepository: FakeKernelReportRepository = FakeKernelReportRepository(),
         evaluateReportRepository: FakeEvaluateReportRepository = FakeEvaluateReportRepository(),
+        // Defaults to a DOCTOR session so the H-16 role gate (canOpenDoctorReview) doesn't change
+        // the behaviour of every pre-existing test in this file; the gate itself is covered by a
+        // dedicated test below.
+        authSession: FakeAuthSession = FakeAuthSession(UserSession("doc-1", "Dr. Test", UserRole.DOCTOR)),
     ): PatientSummaryViewModel {
         val patientRepo = FakePatientRepository().apply { registered = testPatient(patientId) }
         return PatientSummaryViewModel(
@@ -58,6 +65,7 @@ class PatientSummaryViewModelTest {
                 diagnosisFeedbackRepository = FakeDiagnosisFeedbackRepository(),
                 auditLogger = FakeAuditLogger(),
             ),
+            authSession = authSession,
         )
     }
 
@@ -169,5 +177,57 @@ class PatientSummaryViewModelTest {
         val state = vm.uiState.value
         assertEquals("IOException", state.evaluateFailureCode)
         assertEquals(null, state.evaluateOutput)
+    }
+
+    /** H-16 (Build 1): the decision surface itself must be role-gated, not just the report
+     *  render — otherwise gating the render alone is a control that looks like a control and
+     *  isn't one (a non-doctor could still commit the decision they're shielded from seeing). */
+    @Test
+    fun `a non-doctor role cannot open the doctor review picker even when the case is sent to doctor`() = runTest(mainDispatcherRule.dispatcher) {
+        val caseRecord = CaseRecord(
+            id = "case-1", patientId = "p1", encounterId = "enc-1", status = CaseStatus.SENT_TO_DOCTOR,
+            assignedDoctorId = "doc-1", createdAt = java.time.Instant.EPOCH, updatedAt = java.time.Instant.EPOCH,
+        )
+        val vm = viewModel(
+            caseRecordRepository = FakeCaseRecordRepository(initial = listOf(caseRecord)),
+            authSession = FakeAuthSession(UserSession("worker-1", "A Worker", UserRole.ASHA_WORKER)),
+        )
+        advanceUntilIdle()
+
+        assertFalse(vm.uiState.value.canOpenDoctorReview)
+    }
+
+    @Test
+    fun `a doctor role can open the doctor review picker when the case is sent to doctor`() = runTest(mainDispatcherRule.dispatcher) {
+        val caseRecord = CaseRecord(
+            id = "case-1", patientId = "p1", encounterId = "enc-1", status = CaseStatus.SENT_TO_DOCTOR,
+            assignedDoctorId = "doc-1", createdAt = java.time.Instant.EPOCH, updatedAt = java.time.Instant.EPOCH,
+        )
+        val vm = viewModel(caseRecordRepository = FakeCaseRecordRepository(initial = listOf(caseRecord)))
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.canOpenDoctorReview)
+    }
+
+    /** H-16 (Build 1): REJECT is not confirmable without the free-text reason the worker will
+     *  see on the final report — "not blankness." */
+    @Test
+    fun `REJECT cannot be confirmed without a reject reason`() = runTest(mainDispatcherRule.dispatcher) {
+        val caseRecord = CaseRecord(
+            id = "case-1", patientId = "p1", encounterId = "enc-1", status = CaseStatus.SENT_TO_DOCTOR,
+            assignedDoctorId = "doc-1", createdAt = java.time.Instant.EPOCH, updatedAt = java.time.Instant.EPOCH,
+        )
+        val vm = viewModel(caseRecordRepository = FakeCaseRecordRepository(initial = listOf(caseRecord)))
+        advanceUntilIdle()
+        vm.onOpenDoctorReviewPicker()
+        advanceUntilIdle()
+
+        vm.onDecisionSelected(com.example.samdapp.domain.model.PhysicianDecision.REJECT)
+        vm.onManualDrugNameChange("N/A")
+        vm.onManualDosageChange("N/A")
+        assertFalse(vm.uiState.value.canConfirmDecision)
+
+        vm.onRejectReasonChange("Vitals inconsistent with the AI candidate; refer for specialist review.")
+        assertTrue(vm.uiState.value.canConfirmDecision)
     }
 }

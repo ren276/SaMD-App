@@ -1,5 +1,6 @@
 package com.example.samdapp.domain.usecase
 
+import com.example.samdapp.config.FeatureFlags
 import com.example.samdapp.domain.report.ClinicalReport
 import com.example.samdapp.domain.report.ReportAudience
 import com.example.samdapp.domain.report.ReportFormatter
@@ -73,6 +74,7 @@ class AssembleReportUseCase @Inject constructor(
                 evaluateFailureCode = evaluateFailureCode,
                 prescription = prescription,
                 prescribingDoctor = prescribingDoctor,
+                prescriptionApprovalGateEnabled = FeatureFlags.PRESCRIPTION_APPROVAL_GATE_ENABLED,
             ),
         )
     }

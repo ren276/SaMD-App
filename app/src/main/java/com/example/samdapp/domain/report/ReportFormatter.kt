@@ -64,7 +64,21 @@ class ReportFormatter @Inject constructor() {
         evaluateFailureCode: String?,
         prescription: Prescription?,
         prescribingDoctor: Doctor?,
+        /** H-16 prescription visibility gate (Build 1, `FeatureFlags.PRESCRIPTION_APPROVAL_GATE_ENABLED`,
+         *  passed in rather than read here so this class stays a pure function of its inputs).
+         *  When true and [audience] is [ReportAudience.WORKER]: [evaluateOutput] never renders
+         *  (the raw, physician-unreviewed AI treatment recommendation is never shown standalone —
+         *  only the physician-reviewed [prescription] is), a case with no committed
+         *  [Prescription.kernelDecision] shows a neutral "awaiting review" line instead of no
+         *  section at all, and a REJECTed case shows no medication lines. Gates rendering only —
+         *  [prescription] and [evaluateOutput] are read unmodified otherwise, nothing is nulled in
+         *  the DB, and [ReportAudience.PHYSICIAN] is never gated. When false: byte-identical to
+         *  pre-gate behaviour. */
+        prescriptionApprovalGateEnabled: Boolean = false,
     ): ClinicalReport {
+        val gateActive = prescriptionApprovalGateEnabled && audience == ReportAudience.WORKER
+        val decisionCommitted = prescription?.kernelDecision != null
+        val gatedEvaluateOutput = if (gateActive) null else evaluateOutput
         val isMinor = (patient.age ?: patient.dateOfBirth?.let { ageFrom(it) })?.let { it < 18 } ?: false
 
         val header = ReportHeader(
@@ -92,9 +106,23 @@ class ReportFormatter @Inject constructor() {
             .partition { it.measurementType == MeasurementType.MEASURABLE }
         val ailmentLines = (measurable + nonMeasurable).map { entry -> toReportLine(entry, audience) }
 
-        val prescriptionLines = prescription?.medications?.mapIndexed { i, line ->
-            ReportMedicationLine(index = i + 1, text = formatMedicationLine(line))
-        }.orEmpty()
+        val medicationsGated = gateActive && (!decisionCommitted || prescription?.kernelDecision == KernelDecision.REJECT)
+        val prescriptionLines = if (medicationsGated) {
+            emptyList()
+        } else {
+            prescription?.medications?.mapIndexed { i, line ->
+                ReportMedicationLine(index = i + 1, text = formatMedicationLine(line))
+            }.orEmpty()
+        }
+
+        /** A2 "no decision yet": a neutral line in place of the section, per H-16 — an absent
+         *  section carries no signal (the H-14 failure mode), and this is WORKER-only (gateActive
+         *  already restricts to that audience). */
+        val gatedDiagnosis = if (gateActive && !decisionCommitted) {
+            "Awaiting physician review"
+        } else {
+            prescription?.diagnosis
+        }
 
         val signature = prescription?.let {
             ReportSignatureBlock(
@@ -131,10 +159,10 @@ class ReportFormatter @Inject constructor() {
             ailments = ailmentLines,
             vitals = vitals?.let(::toVitalLines).orEmpty(),
             kernelOutput = kernelOutput,
-            evaluateOutput = evaluateOutput,
+            evaluateOutput = gatedEvaluateOutput,
             evaluateFailureCode = evaluateFailureCode,
             attachments = attachmentLines,
-            diagnosis = prescription?.diagnosis,
+            diagnosis = gatedDiagnosis,
             kernelDecision = prescription?.kernelDecision,
             prescription = prescriptionLines,
             signature = signature,

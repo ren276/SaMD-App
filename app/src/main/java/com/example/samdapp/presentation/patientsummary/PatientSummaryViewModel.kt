@@ -3,6 +3,9 @@ package com.example.samdapp.presentation.patientsummary
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.samdapp.config.FeatureFlags
+import com.example.samdapp.domain.auth.AuthSession
+import com.example.samdapp.domain.auth.UserRole
 import com.example.samdapp.domain.kernel.BrandLookupSource
 import com.example.samdapp.domain.model.CaseStatus
 import com.example.samdapp.domain.model.ConsultationChain
@@ -54,6 +57,10 @@ data class PatientSummaryUiState(
     val caseRecordId: String? = null,
     val encounterId: String? = null,
     val caseStatus: CaseStatus? = null,
+    /** H-16 prescription visibility gate (Build 1): the signed-in worker's role, read so
+     *  [canOpenDoctorReview] can require [UserRole.DOCTOR]. Self-asserted at login (H-06) — this
+     *  is an accountability/intent gate on the decision surface, not access control. */
+    val sessionRole: UserRole? = null,
     val showDoctorReviewPicker: Boolean = false,
     val evaluateOutput: EvaluateReportOutput? = null,
     /** H-14: set when `/api/v1/evaluate` was attempted and failed for this case — null once
@@ -78,6 +85,10 @@ data class PatientSummaryUiState(
     val correctedIcdCandidate: String? = null,
     /** MODIFY-only free-text audit note — captured for clinical record-keeping, never reimported. */
     val clinicalNoteText: String = "",
+    /** REJECT-only free-text reasoning (H-16, Build 1) — becomes [com.example.samdapp.domain.model.Prescription.diagnosis]
+     *  and is what the worker sees on the final report in place of the medication that was not
+     *  prescribed. Distinct from [clinicalNoteText]: this one is worker-facing by design. */
+    val rejectReasonText: String = "",
     /** Flat visit history, newest first — the source for the "mark as follow-up" picker (you follow
      *  up a specific prior visit, so this stays ungrouped). */
     val history: List<ConsultationHistoryEntry> = emptyList(),
@@ -87,7 +98,12 @@ data class PatientSummaryUiState(
     val chains: List<ConsultationChain> = emptyList(),
     val isLoadingHistory: Boolean = true,
 ) {
-    val canOpenDoctorReview: Boolean get() = caseStatus == CaseStatus.SENT_TO_DOCTOR && !showDoctorReviewPicker
+    /** H-16 (Build 1): case-status-gated as before, plus [UserRole.DOCTOR] when the gate flag is
+     *  on — so a non-doctor can no longer commit the decision the report gate is shielding them
+     *  from. Flag off restores the pre-gate demo behaviour (any role) in this one place. */
+    val canOpenDoctorReview: Boolean
+        get() = caseStatus == CaseStatus.SENT_TO_DOCTOR && !showDoctorReviewPicker &&
+            (!FeatureFlags.PRESCRIPTION_APPROVAL_GATE_ENABLED || sessionRole == UserRole.DOCTOR)
     val canViewReport: Boolean get() = caseRecordId != null
     /** True when [kernelInferenceSource] is anything other than real inference — the marker the
      *  physician review card renders. */
@@ -98,7 +114,7 @@ data class PatientSummaryUiState(
             null -> false
             PhysicianDecision.AGREE -> true
             PhysicianDecision.MODIFY -> manualDrugName.isNotBlank() && manualDosage.isNotBlank() && correctedIcdCandidate != null
-            PhysicianDecision.REJECT -> manualDrugName.isNotBlank() && manualDosage.isNotBlank()
+            PhysicianDecision.REJECT -> manualDrugName.isNotBlank() && manualDosage.isNotBlank() && rejectReasonText.isNotBlank()
         }
 }
 
@@ -112,6 +128,7 @@ interface PatientSummaryActions {
     fun onLookupBrand()
     fun onCorrectedIcdCandidateSelected(icdCode: String)
     fun onClinicalNoteChange(text: String)
+    fun onRejectReasonChange(text: String)
     fun onConfirmDoctorDecision()
 }
 
@@ -125,6 +142,7 @@ class PatientSummaryViewModel @AssistedInject constructor(
     private val kernelReportRepository: KernelReportRepository,
     private val brandLookupSource: BrandLookupSource,
     private val submitDoctorDecisionUseCase: SubmitDoctorDecisionUseCase,
+    private val authSession: AuthSession,
 ) : ViewModel(), PatientSummaryActions {
 
     @AssistedFactory
@@ -158,6 +176,11 @@ class PatientSummaryViewModel @AssistedInject constructor(
                 _uiState.update { it.copy(history = history, chains = history.groupIntoChains(), isLoadingHistory = false) }
             }
         }
+        viewModelScope.launch {
+            authSession.currentUser().collect { session ->
+                _uiState.update { it.copy(sessionRole = session?.role) }
+            }
+        }
     }
 
     override fun onOpenDoctorReviewPicker() {
@@ -187,6 +210,7 @@ class PatientSummaryViewModel @AssistedInject constructor(
     override fun onCorrectedIcdCandidateSelected(icdCode: String) =
         _uiState.update { it.copy(correctedIcdCandidate = icdCode) }
     override fun onClinicalNoteChange(text: String) = _uiState.update { it.copy(clinicalNoteText = text) }
+    override fun onRejectReasonChange(text: String) = _uiState.update { it.copy(rejectReasonText = text) }
 
     override fun onLookupBrand() {
         val drug = _uiState.value.manualDrugName.takeIf { it.isNotBlank() } ?: return
@@ -217,6 +241,7 @@ class PatientSummaryViewModel @AssistedInject constructor(
                 manualBrandName = state.manualBrandName,
                 correctedIcdCandidate = state.correctedIcdCandidate,
                 clinicalNote = state.clinicalNoteText,
+                rejectReason = state.rejectReasonText,
             )
             _uiState.update { it.copy(isSubmittingDecision = false, showDoctorReviewPicker = false) }
         }

@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.samdapp.domain.audit.AuditAction
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
+import com.example.samdapp.domain.auth.AuthSession
 import com.example.samdapp.domain.model.UrgencyLevel
 import com.example.samdapp.domain.report.ClinicalReport
 import com.example.samdapp.domain.report.ReportAudience
@@ -20,6 +21,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -66,6 +68,7 @@ class ReportViewModel @AssistedInject constructor(
     private val pdfExporter: ReportPdfExporter,
     private val createReferralUseCase: CreateReferralUseCase,
     private val auditLogger: AuditLogger,
+    private val authSession: AuthSession,
 ) : ViewModel(), ReportReferralActions {
 
     @AssistedFactory
@@ -84,6 +87,21 @@ class ReportViewModel @AssistedInject constructor(
             assembleReportUseCase(caseRecordId, ReportAudience.WORKER).fold(
                 onSuccess = { report ->
                     _uiState.update { it.copy(isLoading = false, report = report, referralReason = report.referralReasonSuggestion) }
+                    // H-16 (Build 1): only once the gate has actually resolved to "show" —
+                    // a committed physician decision — not on a preliminary, pre-decision load.
+                    // Never the drug name.
+                    if (report.kernelDecision != null) {
+                        val viewerRole = authSession.currentUser().first()?.role
+                        auditLogger.log(
+                            action = AuditAction.PRESCRIPTION_SURFACED_TO_WORKER,
+                            caseRecordId = caseRecordId,
+                            payload = auditPayload(
+                                "kernelDecision" to report.kernelDecision.name,
+                                "viewerRole" to viewerRole?.name,
+                                "caseRecordId" to caseRecordId,
+                            ),
+                        )
+                    }
                 },
                 onFailure = { e -> _uiState.update { it.copy(isLoading = false, errorMessage = e.message ?: "Could not build report") } },
             )
