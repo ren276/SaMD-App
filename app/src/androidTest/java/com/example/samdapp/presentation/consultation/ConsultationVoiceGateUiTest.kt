@@ -52,6 +52,7 @@ private class FakeConsultationActions : ConsultationActions {
     override fun onDocumentRecordTypeSelected(code: com.example.samdapp.domain.model.RecordTypeCode) = Unit
     override fun onDocumentLabelChange(text: String) = Unit
     override fun onDocumentPicked(uri: String, claimedMimeType: String?) = Unit
+    override fun onDismissDocumentUploadFailures() = Unit
     override fun onSend() = Unit
     override fun fillDemoData() = Unit
 }

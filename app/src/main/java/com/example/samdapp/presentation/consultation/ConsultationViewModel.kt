@@ -127,6 +127,14 @@ data class ConsultationUiState(
     val documentDraftLabel: String = "",
     val isSaving: Boolean = false,
     val errorMessage: String? = null,
+    /** H-18, Build 3a: non-empty means one or more documents failed to upload during send. The
+     *  consultation itself already saved successfully — this only holds the screen open (see
+     *  [pendingSentEffect]) until the worker acknowledges, so the failure is seen rather than
+     *  raced off-screen by an immediate navigation. */
+    val documentUploadFailures: List<String> = emptyList(),
+    /** The [ConsultationEffect.Sent] navigation held back while [documentUploadFailures] is
+     *  non-empty, dispatched by [ConsultationActions.onDismissDocumentUploadFailures]. */
+    val pendingSentEffect: ConsultationEffect.Sent? = null,
 ) {
     /** The file-pick affordance is enabled only once both controlled-vocabulary dropdowns are
      *  selected — a document is never queued with a guessed department or record type. */
@@ -204,6 +212,9 @@ interface ConsultationActions {
      *  (same layering as [onAddAttachment]) — not trusted, only carried through to the upload
      *  path's magic-byte cross-check. */
     fun onDocumentPicked(uri: String, claimedMimeType: String?)
+    /** Dismisses the "some documents failed to upload" notice and lets the already-completed
+     *  send proceed to navigate away. */
+    fun onDismissDocumentUploadFailures()
 
     fun onSend()
     /** Pre-fills the main concern + history-of-present-illness from [DemoPatientProfile] — demo only. */
@@ -628,8 +639,15 @@ class ConsultationViewModel @AssistedInject constructor(
             // H-18, Build 3a: documents are encrypted and inserted here, once `consultation.id`
             // exists as their foreign key — same deferred-commit shape as pendingAttachments
             // above. UploadConsultationDocumentUseCase emits its own DOCUMENT_UPLOADED audit row
-            // on success; a per-document failure is not fatal to the send (same leniency as
-            // attachments), surfaced only via errorMessage so the worker sees it happened.
+            // on success. A per-document failure does not block the send (documents are the
+            // optional "if any" affordance; the consultation itself already saved successfully
+            // above) — but it must not be silently lost either. Failures are collected rather
+            // than written straight to errorMessage, because the Sent effect below fires in the
+            // same coroutine and PatientSummaryScreen navigates away as soon as it's received —
+            // an errorMessage set right before that would be raced off-screen before the worker
+            // could ever read it, which is worse than not tracking it at all (it looks handled
+            // and isn't). See onDismissDocumentUploadFailures.
+            val documentFailures = mutableListOf<String>()
             if (current.pendingDocuments.isNotEmpty()) {
                 val session = authSession.currentUser().first()
                 current.pendingDocuments.forEach { pending ->
@@ -643,7 +661,8 @@ class ConsultationViewModel @AssistedInject constructor(
                         uploaderUserId = session?.userId ?: "phc_field_worker",
                         uploaderRole = session?.role?.name ?: "ASHA_WORKER",
                     ).onFailure { error ->
-                        _uiState.update { it.copy(errorMessage = "A document could not be uploaded: ${error.message}") }
+                        documentFailures += pending.label.ifBlank { pending.recordTypeCode.name } +
+                            ": " + (error.message ?: "upload failed")
                     }
                 }
             }
@@ -653,10 +672,23 @@ class ConsultationViewModel @AssistedInject constructor(
                 caseRecordId = caseRecordId,
                 payload = auditPayload("consultationId" to consultation.id, "chiefComplaint" to current.chiefComplaint),
             )
-            _uiState.update { it.copy(isSaving = false) }
-            _effects.send(
-                ConsultationEffect.Sent(patientId, encounterId, caseRecordId, consultation.id, current.hasAudioAttachment),
-            )
+            val sentEffect = ConsultationEffect.Sent(patientId, encounterId, caseRecordId, consultation.id, current.hasAudioAttachment)
+            if (documentFailures.isEmpty()) {
+                _uiState.update { it.copy(isSaving = false) }
+                _effects.send(sentEffect)
+            } else {
+                // Held until the worker explicitly acknowledges (see onDismissDocumentUploadFailures)
+                // instead of sent now — the consultation is already saved either way, this only
+                // delays the navigation away from this screen until the failure has actually
+                // been seen.
+                _uiState.update { it.copy(isSaving = false, documentUploadFailures = documentFailures, pendingSentEffect = sentEffect) }
+            }
         }
+    }
+
+    override fun onDismissDocumentUploadFailures() {
+        val pending = _uiState.value.pendingSentEffect ?: return
+        _uiState.update { it.copy(documentUploadFailures = emptyList(), pendingSentEffect = null) }
+        viewModelScope.launch { _effects.send(pending) }
     }
 }

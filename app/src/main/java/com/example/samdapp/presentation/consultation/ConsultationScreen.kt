@@ -103,6 +103,24 @@ internal fun ConsultationContent(uiState: ConsultationUiState, actions: Consulta
         )
     }
 
+    // H-18, Build 3a: a document upload failure holds the Sent navigation back
+    // (ConsultationViewModel.onSend) until this is explicitly dismissed, so the worker actually
+    // sees it rather than it being raced off-screen by an immediate navigation.
+    if (uiState.documentUploadFailures.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = actions::onDismissDocumentUploadFailures,
+            title = { Text("Some documents could not be uploaded") },
+            text = {
+                Column {
+                    uiState.documentUploadFailures.forEach { failure -> Text("• $failure") }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = actions::onDismissDocumentUploadFailures) { Text("Continue") }
+            },
+        )
+    }
+
     val pickVisualMediaLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
             val mimeType = context.contentResolver.getType(uri).orEmpty()
