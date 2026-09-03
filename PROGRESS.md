@@ -4261,3 +4261,39 @@ tap in a process), **613 ms warm**. Reported, not asserted: there is no agreed t
 "Listening…" state covers the cold-load window.
 
 `testDevDebugUnitTest`: 307 passed, 0 failed.
+
+## Prescription visibility gate + DOCTOR decision-surface gate (Build 1) — 2026-09-03
+
+Build 1 of the consultation-documents-and-prescription track (design memo:
+`scratchpad/consultation-documents-and-prescription-gate-memo.md`, Feature 2 / Part F Build 1).
+Branch `feat/prescription-approval-gate`. Full orientation for a developer picking this up:
+`scratchpad/prescription-approval-gate-build1-readme.md`.
+
+**What shipped.** A render-time gate on the worker-facing report (`ReportFormatter.format`, the
+same seam as the existing `ReportAudience.WORKER` private-ailment redaction) that hides the AI's
+raw treatment/brand recommendation from the worker until a physician decision is committed, plus a
+real `UserRole.DOCTOR` check on the decision surface (`PatientSummaryUiState.canOpenDoctorReview`)
+that did not exist before — closing the gap where gating the render alone would have been a control
+that looked like one and wasn't (a worker could still tap AGREE on the same screen). Both live
+behind one flag, `FeatureFlags.PRESCRIPTION_APPROVAL_GATE_ENABLED`, default `true`.
+
+**Beyond the memo's draft:** the operator added a free-text reject-reason field on the decision
+surface (`PatientSummaryUiState.rejectReasonText`, required to confirm REJECT) that flows to the
+worker-facing report as `Prescription.diagnosis` — the worker sees the physician's own reasoning,
+not a blank section or only a fixed string.
+
+**ID collision found and resolved.** The memo drafted the risk-file entry as H-16; that id was
+already taken in `docs/quality/risk-management-file.md` by an unrelated PHI-guard hazard added
+after the memo was written. Renumbered H-17, noted in the entry itself.
+
+Schema-free: DB stays at version 17, no migration. Two new `AuditAction` values
+(`prescription_approved`, `prescription_surfaced_to_worker`) landed on the device enum and
+`backend/core/app/domain/audit_actions_device.py` in the same commit, proven equal by
+`test_audit_actions_device.py` plus a real-insert-and-persist test in `test_sync.py`.
+
+`testDevDebugUnitTest`: 322 passed (307 + 15 new), 0 failed. Backend: `test_audit_actions_device.py`
++ `test_sync.py`, 27 passed.
+
+Risk file: H-17 drafted PROPOSED, AWAITING OPERATOR SIGN-OFF, not approved by the act of writing it.
+
+Not committed as of this entry — awaiting operator authorization per session instructions.

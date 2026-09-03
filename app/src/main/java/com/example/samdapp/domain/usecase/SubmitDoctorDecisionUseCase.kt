@@ -39,6 +39,10 @@ import javax.inject.Inject
  * from that field (never a drug/brand/company name, never free text — see [DiagnosisFeedback] KDoc).
  * [clinicalNote] is captured for audit purposes only and never touches [DiagnosisFeedback
  * .physicianFinalDiagnosis][DiagnosisFeedback] or any training reimport.
+ *
+ * [rejectReason] (H-17, Build 1) is REJECT-only and becomes [Prescription.diagnosis] — the
+ * physician's own reasoning, surfaced verbatim on the worker-facing report rather than the fixed
+ * fallback string, so the worker sees why nothing was prescribed instead of just that nothing was.
  */
 class SubmitDoctorDecisionUseCase @Inject constructor(
     private val caseRecordRepository: CaseRecordRepository,
@@ -61,13 +65,19 @@ class SubmitDoctorDecisionUseCase @Inject constructor(
         manualBrandName: String,
         correctedIcdCandidate: String? = null,
         clinicalNote: String? = null,
+        /** REJECT-only free-text reasoning, entered on the decision surface — flows verbatim to
+         *  the worker-facing report as [Prescription.diagnosis] (H-17: "not blankness," the
+         *  worker sees why, not just that nothing was prescribed). Falls back to the prior fixed
+         *  string when blank. Ignored for AGREE/MODIFY. */
+        rejectReason: String = "",
     ): Result<Prescription> = runCatching {
         val evaluateOutput = evaluateReportRepository.getForCase(caseRecordId)
         val treatment = evaluateOutput?.nlemTreatment
         val caseRecord = caseRecordRepository.observeCaseRecord(caseRecordId).first()
 
         val diagnosis = when (decision) {
-            PhysicianDecision.REJECT -> "Clinical assessment pending further evaluation (AI suggestion not clinically supported)"
+            PhysicianDecision.REJECT -> rejectReason.takeIf { it.isNotBlank() }
+                ?: "Clinical assessment pending further evaluation (AI suggestion not clinically supported)"
             else -> evaluateOutput?.diagnosticSummary?.primaryAilmentName
                 ?: "Clinical assessment pending further evaluation"
         }
@@ -149,6 +159,16 @@ class SubmitDoctorDecisionUseCase @Inject constructor(
                 "reimportable" to (finalDiagnosis != null || decision == PhysicianDecision.AGREE).toString(),
                 "medicationGenericName" to medication.genericName,
                 "medicationBrandName" to medication.brandName,
+            ),
+        )
+        auditLogger.log(
+            action = AuditAction.PRESCRIPTION_APPROVED,
+            patientId = patientId,
+            caseRecordId = caseRecordId,
+            payload = auditPayload(
+                "kernelDecision" to kernelDecision.name,
+                "prescriptionId" to prescription.id,
+                "medicationCount" to prescription.medications.size.toString(),
             ),
         )
 

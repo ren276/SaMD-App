@@ -323,7 +323,17 @@ private fun DoctorReviewCard(uiState: PatientSummaryUiState, actions: PatientSum
                     )
                     ManualPrescriptionFields(uiState, actions)
                 }
-                PhysicianDecision.REJECT -> ManualPrescriptionFields(uiState, actions)
+                PhysicianDecision.REJECT -> {
+                    // H-17 (Build 1): the worker sees this verbatim on the final report in place
+                    // of a medication — "not blankness" (see ReportFormatter's REJECT gating).
+                    OutlinedTextField(
+                        value = uiState.rejectReasonText,
+                        onValueChange = actions::onRejectReasonChange,
+                        label = { Text("Reason for rejecting AI assessment (shown to worker)") },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    ManualPrescriptionFields(uiState, actions)
+                }
                 null -> Unit
             }
             uiState.selectedDecision?.let { decision ->

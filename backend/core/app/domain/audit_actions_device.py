@@ -55,6 +55,11 @@ DEVICE_AUDIT_ACTIONS: frozenset[str] = frozenset(
         "medical_history_item_added",
         "medication_added",
         "patient_registered",
+        # Prescription visibility gate (H-17, Build 1): the physician's AGREE/MODIFY/REJECT
+        # decision commit, and a gated-open worker report load, respectively. Added with the
+        # Kotlin AuditAction values in the same commit, never the drug name in either payload.
+        "prescription_approved",
+        "prescription_surfaced_to_worker",
         "referral_created",
         "referral_status_changed",
         "report_exported",
