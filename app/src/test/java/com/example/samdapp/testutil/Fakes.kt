@@ -544,6 +544,8 @@ class FakeConsultationRepository(
     override suspend fun updateTranscription(consultationId: String, transcription: String): Result<Unit> = Result.success(Unit)
     override fun observeForEncounter(encounterId: String): Flow<com.example.samdapp.domain.model.Consultation?> =
         flowOf(byEncounter[encounterId])
+    override suspend fun getById(consultationId: String): com.example.samdapp.domain.model.Consultation? =
+        (saved + byEncounter.values.filterNotNull()).firstOrNull { it.id == consultationId }
 }
 
 fun testConsultation(
@@ -704,6 +706,57 @@ class FakeAuditLogDao : AuditLogDao {
     }
 
     override fun observeFailedSyncCount(): Flow<Int> = _failedSyncCount.asStateFlow()
+}
+
+class FakeConsultationDocumentRepository : com.example.samdapp.domain.repository.ConsultationDocumentRepository {
+    val saved = mutableMapOf<String, com.example.samdapp.domain.model.ConsultationDocument>()
+    var uploadResult: ((com.example.samdapp.domain.model.ConsultationDocument) -> Result<com.example.samdapp.domain.model.ConsultationDocument>)? = null
+    var retractResult: Result<Unit> = Result.success(Unit)
+    val deletedBytesFor = mutableListOf<String>()
+
+    override suspend fun upload(
+        consultationId: String,
+        sourceUri: String,
+        claimedMimeType: String?,
+        label: String,
+        departmentCode: com.example.samdapp.domain.model.DepartmentCode,
+        recordTypeCode: com.example.samdapp.domain.model.RecordTypeCode,
+        uploaderUserId: String,
+        uploaderRole: String,
+    ): Result<com.example.samdapp.domain.model.ConsultationDocument> {
+        val document = com.example.samdapp.domain.model.ConsultationDocument(
+            id = "doc-${saved.size + 1}", consultationId = consultationId, patientId = "p1", abhaNumber = null,
+            label = label, canonicalName = "canonical", departmentCode = departmentCode, recordTypeCode = recordTypeCode,
+            storageKey = "storage-key", mimeType = "application/pdf", sizeBytes = 100L, sha256 = "hash",
+            source = com.example.samdapp.domain.model.DocumentSource.DIRECT_FILE, uploadedAt = java.time.Instant.EPOCH,
+            uploaderUserId = uploaderUserId, uploaderRole = uploaderRole, retractedAt = null, retractionReason = null,
+        )
+        val result = uploadResult?.invoke(document) ?: Result.success(document)
+        result.onSuccess { saved[it.id] = it }
+        return result
+    }
+
+    override suspend fun getById(documentId: String): com.example.samdapp.domain.model.ConsultationDocument? = saved[documentId]
+
+    override fun observeForConsultation(consultationId: String): Flow<List<com.example.samdapp.domain.model.ConsultationDocument>> =
+        flowOf(saved.values.filter { it.consultationId == consultationId && it.retractedAt == null })
+
+    override fun observeIncludingRetracted(consultationId: String): Flow<List<com.example.samdapp.domain.model.ConsultationDocument>> =
+        flowOf(saved.values.filter { it.consultationId == consultationId })
+
+    override suspend fun readDecrypted(documentId: String, output: java.io.OutputStream) {
+        output.write("decrypted".toByteArray())
+    }
+
+    override suspend fun retract(documentId: String, reason: String?): Result<Unit> {
+        if (retractResult.isSuccess) {
+            saved[documentId]?.let { doc ->
+                deletedBytesFor += documentId
+                saved[documentId] = doc.copy(retractedAt = java.time.Instant.now(), retractionReason = reason)
+            }
+        }
+        return retractResult
+    }
 }
 
 class FakeAuditLogRepository(

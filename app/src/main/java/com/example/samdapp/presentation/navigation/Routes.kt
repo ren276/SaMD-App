@@ -118,6 +118,11 @@ data class DoctorAssignmentConfirmRoute(val caseRecordId: String)
  *  their record, reached from PatientSummary's "Who has seen your file" action. */
 data class PatientAuditRoute(val patientId: String)
 
+/** H-18, Build 3a: the safe in-app viewer for one consultation document — decrypts to a
+ *  `cacheDir` temp file for [android.graphics.pdf.PdfRenderer]/`BitmapFactory`, never an external
+ *  handler. Registered in [SECURED_ROUTE_TYPES] so `FLAG_SECURE` applies in staging/prod. */
+data class DocumentViewerRoute(val documentId: String)
+
 /**
  * Routes that show patient-identifying or clinical data — [FLAG_SECURE][android.view.WindowManager.LayoutParams.FLAG_SECURE]
  * is applied for all of these (blocks screenshots/screen-recording, blanks the recent-apps
@@ -152,6 +157,7 @@ private val SECURED_ROUTE_TYPES: Set<Class<out Any>> = setOf(
     ReportRoute::class.java,
     DoctorListRoute::class.java,
     Referrals::class.java,
+    DocumentViewerRoute::class.java,
 )
 
 fun requiresScreenSecurity(route: Any?): Boolean =

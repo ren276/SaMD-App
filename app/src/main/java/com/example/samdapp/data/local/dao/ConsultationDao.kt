@@ -42,4 +42,9 @@ interface ConsultationDao {
 
     @Query("SELECT * FROM consultations WHERE encounterId = :encounterId LIMIT 1")
     fun observeForEncounter(encounterId: String): Flow<ConsultationEntity?>
+
+    /** H-18, Build 3a: the one-shot lookup a consultation-document upload derives `patientId`
+     *  from, rather than trusting a caller-supplied value. */
+    @Query("SELECT * FROM consultations WHERE id = :consultationId")
+    suspend fun getById(consultationId: String): ConsultationEntity?
 }

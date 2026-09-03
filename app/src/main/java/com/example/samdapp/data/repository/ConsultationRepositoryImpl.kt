@@ -10,6 +10,7 @@ import com.example.samdapp.domain.model.Consultation
 import com.example.samdapp.domain.model.FieldProvenance
 import com.example.samdapp.domain.repository.ConsultationRepository
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -64,6 +65,12 @@ class ConsultationRepositoryImpl @Inject constructor(
         asDataResult {
             consultationDao.updateTranscription(consultationId, transcription, Instant.now())
         }
+
+    override suspend fun getById(consultationId: String): Consultation? {
+        val entity = consultationDao.getById(consultationId) ?: return null
+        val attachments = attachmentDao.observeForConsultation(entity.id).first().map { it.toDomain() }
+        return entity.toDomain(attachments)
+    }
 
     override fun observeForEncounter(encounterId: String): Flow<Consultation?> =
         consultationDao.observeForEncounter(encounterId).flatMapLatest { entity ->

@@ -475,3 +475,35 @@ val MIGRATION_16_17 = object : Migration(16, 17) {
         )
     }
 }
+
+/**
+ * H-18, Build 3a (consultation documents: storage, audit, retract, direct-file upload). Purely
+ * additive — one new table, no existing table altered, mirroring [MIGRATION_2_3]'s new-table
+ * shape. `departmentCode`/`recordTypeCode` are stored as their enum `.name` (TEXT), same
+ * convention as every other enum column in this schema (see `Converters`), and deliberately carry
+ * no CHECK constraint: [com.example.samdapp.domain.model.RecordTypeCode] is operator-signed
+ * PROVISIONAL, and a future code-list change must not require a migration.
+ */
+val MIGRATION_17_18 = object : Migration(17, 18) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL(
+            "CREATE TABLE IF NOT EXISTS `consultation_documents` (`id` TEXT NOT NULL, " +
+                "`consultationId` TEXT NOT NULL, `patientId` TEXT NOT NULL, `abhaNumber` TEXT, " +
+                "`label` TEXT NOT NULL, `canonicalName` TEXT NOT NULL, `departmentCode` TEXT NOT NULL, " +
+                "`recordTypeCode` TEXT NOT NULL, `storageKey` TEXT NOT NULL, `mimeType` TEXT NOT NULL, " +
+                "`sizeBytes` INTEGER NOT NULL, `sha256` TEXT NOT NULL, `source` TEXT NOT NULL, " +
+                "`uploadedAt` INTEGER NOT NULL, `uploaderUserId` TEXT NOT NULL, `uploaderRole` TEXT NOT NULL, " +
+                "`retractedAt` INTEGER, `retractionReason` TEXT, `syncState` TEXT NOT NULL, " +
+                "`serverVersion` INTEGER, `syncErrorCode` TEXT, `lastSyncAttemptAt` INTEGER, " +
+                "`localModifiedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        )
+        connection.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_consultation_documents_consultationId` " +
+                "ON `consultation_documents` (`consultationId`)",
+        )
+        connection.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_consultation_documents_patientId` " +
+                "ON `consultation_documents` (`patientId`)",
+        )
+    }
+}

@@ -37,6 +37,13 @@ DEVICE_AUDIT_ACTIONS: frozenset[str] = frozenset(
         "consultation_locked",
         "consultation_saved",
         "diagnosis_feedback_recorded",
+        # Consultation documents (H-18, Build 3a): upload, view (emitted only on actual decrypt
+        # + render, never a list draw), and retract (metadata row never deleted). Added with the
+        # Kotlin AuditAction values in the same commit, never the label or drug-adjacent free
+        # text in any payload.
+        "document_retracted",
+        "document_uploaded",
+        "document_viewed",
         "emergency_override",
         "encounter_resumed",
         "encounter_started",

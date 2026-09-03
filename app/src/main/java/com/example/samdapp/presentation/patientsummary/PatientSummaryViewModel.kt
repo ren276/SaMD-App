@@ -9,6 +9,7 @@ import com.example.samdapp.domain.auth.UserRole
 import com.example.samdapp.domain.kernel.BrandLookupSource
 import com.example.samdapp.domain.model.CaseStatus
 import com.example.samdapp.domain.model.ConsultationChain
+import com.example.samdapp.domain.model.ConsultationDocument
 import com.example.samdapp.domain.model.ConsultationHistoryEntry
 import com.example.samdapp.domain.model.EvaluateReportOutput
 import com.example.samdapp.domain.model.InferenceSource
@@ -16,6 +17,8 @@ import com.example.samdapp.domain.model.Patient
 import com.example.samdapp.domain.model.PhysicianDecision
 import com.example.samdapp.domain.model.groupIntoChains
 import com.example.samdapp.domain.repository.CaseRecordRepository
+import com.example.samdapp.domain.repository.ConsultationDocumentRepository
+import com.example.samdapp.domain.repository.ConsultationRepository
 import com.example.samdapp.domain.repository.EncounterRepository
 import com.example.samdapp.domain.repository.EvaluateReportRepository
 import com.example.samdapp.domain.repository.KernelReportRepository
@@ -29,6 +32,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -97,6 +102,11 @@ data class PatientSummaryUiState(
      *  chain, not one per follow-up). */
     val chains: List<ConsultationChain> = emptyList(),
     val isLoadingHistory: Boolean = true,
+    /** H-18, Build 3a: documents attached to the current visit's consultation. Not gated here —
+     *  the interim role gate (uploader or DOCTOR sees decrypted content, everyone else sees
+     *  metadata only) lives in [com.example.samdapp.presentation.documents.DocumentViewerViewModel],
+     *  reached by tapping a row; this list itself is metadata-only regardless of role. */
+    val documents: List<ConsultationDocument> = emptyList(),
 ) {
     /** H-17 (Build 1): case-status-gated as before, plus [UserRole.DOCTOR] when the gate flag is
      *  on — so a non-doctor can no longer commit the decision the report gate is shielding them
@@ -143,6 +153,8 @@ class PatientSummaryViewModel @AssistedInject constructor(
     private val brandLookupSource: BrandLookupSource,
     private val submitDoctorDecisionUseCase: SubmitDoctorDecisionUseCase,
     private val authSession: AuthSession,
+    private val consultationRepository: ConsultationRepository,
+    private val consultationDocumentRepository: ConsultationDocumentRepository,
 ) : ViewModel(), PatientSummaryActions {
 
     @AssistedFactory
@@ -180,6 +192,21 @@ class PatientSummaryViewModel @AssistedInject constructor(
             authSession.currentUser().collect { session ->
                 _uiState.update { it.copy(sessionRole = session?.role) }
             }
+        }
+        // H-18, Build 3a: documents are consultation-scoped, so this follows the same
+        // caseRecord -> encounterId -> consultation chain AssembleReportUseCase resolves, one
+        // reactive step further to the documents attached to that consultation.
+        viewModelScope.launch {
+            caseRecordRepository.observeLatestForPatient(patientId)
+                .flatMapLatest { caseRecord ->
+                    val encounterId = caseRecord?.encounterId ?: return@flatMapLatest flowOf(null)
+                    consultationRepository.observeForEncounter(encounterId)
+                }
+                .flatMapLatest { consultation ->
+                    val consultationId = consultation?.id ?: return@flatMapLatest flowOf(emptyList())
+                    consultationDocumentRepository.observeForConsultation(consultationId)
+                }
+                .collect { documents -> _uiState.update { it.copy(documents = documents) } }
         }
     }
 

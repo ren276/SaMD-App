@@ -5,7 +5,10 @@ import com.example.samdapp.domain.transcription.CapturedAudio
 import com.example.samdapp.domain.usecase.AddAttachmentUseCase
 import com.example.samdapp.domain.usecase.CaptureAudioAttachmentUseCase
 import com.example.samdapp.domain.usecase.SaveConsultationUseCase
+import com.example.samdapp.domain.usecase.UploadConsultationDocumentUseCase
 import com.example.samdapp.testutil.FakeAuditLogger
+import com.example.samdapp.testutil.FakeAuthSession
+import com.example.samdapp.testutil.FakeConsultationDocumentRepository
 import com.example.samdapp.testutil.FakeConsultationRepository
 import com.example.samdapp.testutil.FakeTranscriptionService
 import com.example.samdapp.testutil.MainDispatcherRule
@@ -44,6 +47,8 @@ class ConsultationVoiceGateTest {
         saveConsultationUseCase = SaveConsultationUseCase(consultationRepository),
         addAttachmentUseCase = AddAttachmentUseCase(consultationRepository),
         captureAudioAttachmentUseCase = CaptureAudioAttachmentUseCase(transcriptionService),
+        uploadConsultationDocumentUseCase = UploadConsultationDocumentUseCase(FakeConsultationDocumentRepository(), FakeAuditLogger()),
+        authSession = FakeAuthSession(),
         auditLogger = FakeAuditLogger(),
     )
 

@@ -4297,3 +4297,47 @@ Schema-free: DB stays at version 17, no migration. Two new `AuditAction` values
 Risk file: H-17 drafted PROPOSED, AWAITING OPERATOR SIGN-OFF, not approved by the act of writing it.
 
 Not committed as of this entry — awaiting operator authorization per session instructions.
+
+## Consultation documents: storage, audit, retract, direct-file upload, safe viewer (Build 3a) — 2026-09-03
+
+Build 3a of the consultation-documents-and-prescription track (design memo:
+`scratchpad/consultation-documents-and-prescription-gate-memo.md`, Feature 1, Parts B1/B3/B4/B5/B6/B8/B9).
+Branch `feat/consultation-documents-storage`. Full orientation:
+`scratchpad/consultation-documents-storage-build3a-readme.md`.
+
+**What shipped.** A `consultation_documents` table (`MIGRATION_17_18`, DB version 17 to 18, purely
+additive, schema JSON committed) storing encrypted clinical documents a worker picks and tags at
+upload. Encryption mirrors `DatabasePassphraseProvider`'s Keystore pattern under a separate key
+(`samd_document_key`); files live in `filesDir/documents/<consultationId>/`, never `cacheDir`,
+never external storage. Magic-byte validation (PDF/JPEG/PNG only, `DocumentTypeValidator`) rejects
+anything else before a byte is written, with the size cap (20 MB) enforced while streaming. Two
+controlled-vocabulary enums, `DepartmentCode` (17 values, derived from the existing
+doctor-specialty routing/seed data — see `scratchpad/document-vocab-audit.md`) and `RecordTypeCode`
+(6 values, operator-signed PROVISIONAL, no DB CHECK so the list can change without a migration).
+Naming: a display-only canonical name keyed on `Patient.id` (never ABHA, deliberately), and a
+separate non-identifying on-disk storage key. A safe in-app viewer (`PdfRenderer`/`BitmapFactory`,
+never an external handler) with its one plaintext-on-disk window (a `cacheDir` decrypt-to-temp)
+cleaned up on screen exit and swept at every app start. Retract is insert-only (metadata row never
+deleted, both audit rows preserved). Three new audit actions
+(`document_uploaded`/`document_viewed`/`document_retracted`) landed on the device enum and
+`audit_actions_device.py` in this commit. An interim, deliberately conservative role gate
+(uploader or `DOCTOR` sees content, everyone else sees metadata only) stands in until Build 3c's
+cadre-scope model replaces it.
+
+**ID collision, same pattern as Build 1.** The memo drafted this feature's risk entry as H-17;
+Build 1 already claimed that number. Renumbered to **H-18** (documents PHI-at-rest hazard); the
+memo's second entry (existing unencrypted image/video attachments) becomes **H-19**.
+
+Not wired: backend sync of the document row or its bytes (memo B8: byte-transport is a
+pre-production gate, not build-now) — the metadata row carries the standard sync columns for
+schema consistency, but nothing pushes them yet.
+
+`testDevDebugUnitTest`: 334 passed (322 + 12 new), 0 failed.
+`connectedDevDebugAndroidTest` (`emulator-5554`): `MigrationTest17To18`, 2/2 passed, against a real
+SQLCipher-encrypted database.
+Backend: `test_audit_actions_device.py` + `test_sync.py`, 31 passed (27 + 4 new).
+
+Risk file: H-18 and H-19 drafted PROPOSED, AWAITING OPERATOR SIGN-OFF, not approved by the act of
+writing them.
+
+Not committed as of this entry — awaiting operator authorization per session instructions.

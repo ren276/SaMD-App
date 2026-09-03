@@ -957,3 +957,109 @@ async def test_prescription_surfaced_to_worker_audit_row_is_accepted_and_persist
     assert row.case_record_id == "case-rx-1"
     assert row.origin == "DEVICE"
     assert "Paracetamol" not in row.payload
+
+
+# ---------------------------------------------------------------------------
+# Consultation documents (H-18, Build 3a): DOCUMENT_UPLOADED / DOCUMENT_VIEWED /
+# DOCUMENT_RETRACTED audit actions
+# ---------------------------------------------------------------------------
+
+
+def test_document_actions_are_in_the_accepted_device_action_set() -> None:
+    """Sourced from the checked-in mirror, not retyped, same as the kernel_empty_differential
+    assertion above.
+    """
+    assert "document_uploaded" in DEVICE_AUDIT_ACTIONS
+    assert "document_viewed" in DEVICE_AUDIT_ACTIONS
+    assert "document_retracted" in DEVICE_AUDIT_ACTIONS
+
+
+async def test_document_uploaded_audit_row_is_accepted_and_persisted(
+    client: AsyncClient, auth_headers: dict[str, str], session: AsyncSession
+) -> None:
+    """A device-origin audit_log row carrying action=document_uploaded must sync-push
+    successfully and land in audit_events with that action verbatim, proving the accepted-set
+    widening takes effect end to end and not just that the Python set contains the string.
+    Asserts the persisted row via a fresh query, not the HTTP response, per this repo's rule that
+    a write-survived-a-failure-path test must check the DB, not the return value.
+    """
+    response = await push(
+        client,
+        auth_headers,
+        [
+            audit_record(
+                "al-doc-uploaded",
+                action="document_uploaded",
+                case_record_id=None,
+                payload=(
+                    '{"documentId":"doc-1","source":"DIRECT_FILE","departmentCode":"CARDIO",'
+                    '"recordTypeCode":"LAB_REPORT","mimeType":"application/pdf","sizeBytes":"1024",'
+                    '"sha256":"deadbeef","uploaderRole":"ASHA_WORKER"}'
+                ),
+            )
+        ],
+    )
+    assert response.status_code == 200
+
+    row = (
+        await session.execute(
+            select(AuditEvent).where(AuditEvent.action == "document_uploaded")
+        )
+    ).scalar_one()
+    assert row.origin == "DEVICE"
+    # No worker-typed label reaches the server-side audit row either.
+    assert "Blood test" not in row.payload
+
+
+async def test_document_viewed_audit_row_is_accepted_and_persisted(
+    client: AsyncClient, auth_headers: dict[str, str], session: AsyncSession
+) -> None:
+    """Same proof for the view action, emitted only when content is actually decrypted and
+    rendered, never on a list-row draw."""
+    response = await push(
+        client,
+        auth_headers,
+        [
+            audit_record(
+                "al-doc-viewed",
+                action="document_viewed",
+                case_record_id=None,
+                payload='{"documentId":"doc-1","viewerRole":"DOCTOR"}',
+            )
+        ],
+    )
+    assert response.status_code == 200
+
+    row = (
+        await session.execute(
+            select(AuditEvent).where(AuditEvent.action == "document_viewed")
+        )
+    ).scalar_one()
+    assert row.origin == "DEVICE"
+
+
+async def test_document_retracted_audit_row_is_accepted_and_persisted(
+    client: AsyncClient, auth_headers: dict[str, str], session: AsyncSession
+) -> None:
+    """Same proof for the retract action. The metadata row itself is never deleted device-side;
+    this audit row is what stands alongside the still-standing document_uploaded row."""
+    response = await push(
+        client,
+        auth_headers,
+        [
+            audit_record(
+                "al-doc-retracted",
+                action="document_retracted",
+                case_record_id=None,
+                payload='{"documentId":"doc-1","reason":"wrong patient","actorRole":"DOCTOR","bytesDeleted":"1024"}',
+            )
+        ],
+    )
+    assert response.status_code == 200
+
+    row = (
+        await session.execute(
+            select(AuditEvent).where(AuditEvent.action == "document_retracted")
+        )
+    ).scalar_one()
+    assert row.origin == "DEVICE"

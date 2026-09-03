@@ -51,6 +51,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.example.samdapp.config.FeatureFlags
 import com.example.samdapp.domain.model.AttachmentType
+import com.example.samdapp.domain.model.DepartmentCode
+import com.example.samdapp.domain.model.RecordTypeCode
+import com.example.samdapp.presentation.common.DropdownField
 import com.example.samdapp.presentation.common.StepProgressIndicator
 import com.example.samdapp.presentation.common.rememberPermissionAction
 import java.io.File
@@ -105,6 +108,15 @@ internal fun ConsultationContent(uiState: ConsultationUiState, actions: Consulta
             val mimeType = context.contentResolver.getType(uri).orEmpty()
             val type = if (mimeType.startsWith("video")) AttachmentType.VIDEO else AttachmentType.IMAGE
             actions.onAddAttachment(type, uri.toString())
+        }
+    }
+    // H-18, Build 3a: PDF/JPEG/PNG only — a generic file picker (OpenDocument), not
+    // PickVisualMedia, since PDFs aren't visual media. The claimed MIME type from the picker is
+    // carried through only as a cross-check; the upload path validates the actual bytes by magic
+    // number and never trusts this.
+    val pickDocumentLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            actions.onDocumentPicked(uri.toString(), context.contentResolver.getType(uri))
         }
     }
     val takePictureLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { saved ->
@@ -283,6 +295,50 @@ internal fun ConsultationContent(uiState: ConsultationUiState, actions: Consulta
                         }
                     }
                 }
+            }
+
+            item { HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp)) }
+            item { Text("Upload reports, if any", style = MaterialTheme.typography.titleMedium) }
+            uiState.pendingDocuments.forEach { document ->
+                item {
+                    Text(
+                        "• ${document.label.ifBlank { document.recordTypeCode.name }} " +
+                            "(${document.departmentCode.name} · ${document.recordTypeCode.name})",
+                    )
+                }
+            }
+            item {
+                DropdownField(
+                    label = "Department",
+                    value = uiState.documentDraftDepartment?.name.orEmpty(),
+                    options = DepartmentCode.entries.map { it.name },
+                    onValueChange = { name -> actions.onDocumentDepartmentSelected(DepartmentCode.valueOf(name)) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            item {
+                DropdownField(
+                    label = "Record type",
+                    value = uiState.documentDraftRecordType?.name.orEmpty(),
+                    options = RecordTypeCode.entries.map { it.name },
+                    onValueChange = { name -> actions.onDocumentRecordTypeSelected(RecordTypeCode.valueOf(name)) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            item {
+                OutlinedTextField(
+                    value = uiState.documentDraftLabel,
+                    onValueChange = actions::onDocumentLabelChange,
+                    label = { Text("Label (optional)") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            item {
+                OutlinedButton(
+                    onClick = { pickDocumentLauncher.launch(arrayOf("application/pdf", "image/jpeg", "image/png")) },
+                    enabled = uiState.canPickDocument,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                ) { Text("Pick file (PDF, JPEG, or PNG)", style = MaterialTheme.typography.titleMedium) }
             }
 
             item {

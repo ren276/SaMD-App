@@ -48,6 +48,10 @@ private class FakeConsultationActions : ConsultationActions {
     override fun onRelevantHistoryChange(value: String) = Unit
     override fun onAddAttachment(type: AttachmentType, uri: String) = Unit
     override fun onRecordAudioAttachment() = Unit
+    override fun onDocumentDepartmentSelected(code: com.example.samdapp.domain.model.DepartmentCode) = Unit
+    override fun onDocumentRecordTypeSelected(code: com.example.samdapp.domain.model.RecordTypeCode) = Unit
+    override fun onDocumentLabelChange(text: String) = Unit
+    override fun onDocumentPicked(uri: String, claimedMimeType: String?) = Unit
     override fun onSend() = Unit
     override fun fillDemoData() = Unit
 }

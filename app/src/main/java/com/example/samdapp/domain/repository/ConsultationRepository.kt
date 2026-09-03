@@ -10,4 +10,8 @@ interface ConsultationRepository {
     suspend fun updateTranscription(consultationId: String, transcription: String): Result<Unit>
 
     fun observeForEncounter(encounterId: String): Flow<Consultation?>
+
+    /** H-18, Build 3a: one-shot lookup by the consultation's own id, used to derive
+     *  [Consultation.patientId] for a document upload rather than trusting a caller value. */
+    suspend fun getById(consultationId: String): Consultation?
 }
