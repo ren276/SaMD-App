@@ -209,10 +209,12 @@ class PatientSummaryViewModelTest {
         assertTrue(vm.uiState.value.canOpenDoctorReview)
     }
 
-    /** H-16 (Build 1): REJECT is not confirmable without the free-text reason the worker will
-     *  see on the final report — "not blankness." */
+    /** H-17 (Build 1): REJECT is not confirmable without the free-text reason the worker will
+     *  see on the final report ("not blankness"), and requires nothing else — REJECT has no
+     *  medication, so a doctor should never have to type placeholder drug/dosage values just to
+     *  submit a rejection (PR 36 review). */
     @Test
-    fun `REJECT cannot be confirmed without a reject reason`() = runTest(mainDispatcherRule.dispatcher) {
+    fun `REJECT cannot be confirmed without a reject reason, and needs nothing else`() = runTest(mainDispatcherRule.dispatcher) {
         val caseRecord = CaseRecord(
             id = "case-1", patientId = "p1", encounterId = "enc-1", status = CaseStatus.SENT_TO_DOCTOR,
             assignedDoctorId = "doc-1", createdAt = java.time.Instant.EPOCH, updatedAt = java.time.Instant.EPOCH,
@@ -223,10 +225,9 @@ class PatientSummaryViewModelTest {
         advanceUntilIdle()
 
         vm.onDecisionSelected(com.example.samdapp.domain.model.PhysicianDecision.REJECT)
-        vm.onManualDrugNameChange("N/A")
-        vm.onManualDosageChange("N/A")
         assertFalse(vm.uiState.value.canConfirmDecision)
 
+        // No manual drug name or dosage entered — REJECT has no medication, only the reason.
         vm.onRejectReasonChange("Vitals inconsistent with the AI candidate; refer for specialist review.")
         assertTrue(vm.uiState.value.canConfirmDecision)
     }

@@ -87,7 +87,7 @@ class ReportViewModel @AssistedInject constructor(
             assembleReportUseCase(caseRecordId, ReportAudience.WORKER).fold(
                 onSuccess = { report ->
                     _uiState.update { it.copy(isLoading = false, report = report, referralReason = report.referralReasonSuggestion) }
-                    // H-16 (Build 1): only once the gate has actually resolved to "show" —
+                    // H-17 (Build 1): only once the gate has actually resolved to "show" —
                     // a committed physician decision — not on a preliminary, pre-decision load.
                     // Never the drug name.
                     if (report.kernelDecision != null) {

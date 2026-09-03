@@ -64,7 +64,7 @@ class ReportFormatter @Inject constructor() {
         evaluateFailureCode: String?,
         prescription: Prescription?,
         prescribingDoctor: Doctor?,
-        /** H-16 prescription visibility gate (Build 1, `FeatureFlags.PRESCRIPTION_APPROVAL_GATE_ENABLED`,
+        /** H-17 prescription visibility gate (Build 1, `FeatureFlags.PRESCRIPTION_APPROVAL_GATE_ENABLED`,
          *  passed in rather than read here so this class stays a pure function of its inputs).
          *  When true and [audience] is [ReportAudience.WORKER]: [evaluateOutput] never renders
          *  (the raw, physician-unreviewed AI treatment recommendation is never shown standalone —
@@ -73,8 +73,11 @@ class ReportFormatter @Inject constructor() {
          *  section at all, and a REJECTed case shows no medication lines. Gates rendering only —
          *  [prescription] and [evaluateOutput] are read unmodified otherwise, nothing is nulled in
          *  the DB, and [ReportAudience.PHYSICIAN] is never gated. When false: byte-identical to
-         *  pre-gate behaviour. */
-        prescriptionApprovalGateEnabled: Boolean = false,
+         *  pre-gate behaviour.
+         *
+         *  No default: every caller must state the gate explicitly rather than silently
+         *  fail-open to "off" if a future caller forgets to pass it. */
+        prescriptionApprovalGateEnabled: Boolean,
     ): ClinicalReport {
         val gateActive = prescriptionApprovalGateEnabled && audience == ReportAudience.WORKER
         val decisionCommitted = prescription?.kernelDecision != null

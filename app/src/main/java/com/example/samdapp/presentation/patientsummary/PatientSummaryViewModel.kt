@@ -57,7 +57,7 @@ data class PatientSummaryUiState(
     val caseRecordId: String? = null,
     val encounterId: String? = null,
     val caseStatus: CaseStatus? = null,
-    /** H-16 prescription visibility gate (Build 1): the signed-in worker's role, read so
+    /** H-17 prescription visibility gate (Build 1): the signed-in worker's role, read so
      *  [canOpenDoctorReview] can require [UserRole.DOCTOR]. Self-asserted at login (H-06) — this
      *  is an accountability/intent gate on the decision surface, not access control. */
     val sessionRole: UserRole? = null,
@@ -85,7 +85,7 @@ data class PatientSummaryUiState(
     val correctedIcdCandidate: String? = null,
     /** MODIFY-only free-text audit note — captured for clinical record-keeping, never reimported. */
     val clinicalNoteText: String = "",
-    /** REJECT-only free-text reasoning (H-16, Build 1) — becomes [com.example.samdapp.domain.model.Prescription.diagnosis]
+    /** REJECT-only free-text reasoning (H-17, Build 1) — becomes [com.example.samdapp.domain.model.Prescription.diagnosis]
      *  and is what the worker sees on the final report in place of the medication that was not
      *  prescribed. Distinct from [clinicalNoteText]: this one is worker-facing by design. */
     val rejectReasonText: String = "",
@@ -98,7 +98,7 @@ data class PatientSummaryUiState(
     val chains: List<ConsultationChain> = emptyList(),
     val isLoadingHistory: Boolean = true,
 ) {
-    /** H-16 (Build 1): case-status-gated as before, plus [UserRole.DOCTOR] when the gate flag is
+    /** H-17 (Build 1): case-status-gated as before, plus [UserRole.DOCTOR] when the gate flag is
      *  on — so a non-doctor can no longer commit the decision the report gate is shielding them
      *  from. Flag off restores the pre-gate demo behaviour (any role) in this one place. */
     val canOpenDoctorReview: Boolean
@@ -114,7 +114,7 @@ data class PatientSummaryUiState(
             null -> false
             PhysicianDecision.AGREE -> true
             PhysicianDecision.MODIFY -> manualDrugName.isNotBlank() && manualDosage.isNotBlank() && correctedIcdCandidate != null
-            PhysicianDecision.REJECT -> manualDrugName.isNotBlank() && manualDosage.isNotBlank() && rejectReasonText.isNotBlank()
+            PhysicianDecision.REJECT -> rejectReasonText.isNotBlank()
         }
 }
 

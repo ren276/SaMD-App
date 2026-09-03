@@ -103,12 +103,12 @@ enum class AuditAction(val value: String) {
     VOICE_FIELD_EDITED("voice_field_edited"),
     VOICE_FIELD_REJECTED("voice_field_rejected"),
 
-    /** Prescription visibility gate (H-16, Build 1): the physician's AGREE/MODIFY/REJECT decision
+    /** Prescription visibility gate (H-17, Build 1): the physician's AGREE/MODIFY/REJECT decision
      *  was committed and the prescription became worker-visible. Emitted once, at the commit, by
      *  [com.example.samdapp.domain.usecase.SubmitDoctorDecisionUseCase] — never the drug name. */
     PRESCRIPTION_APPROVED("prescription_approved"),
 
-    /** Prescription visibility gate (H-16, Build 1): a worker-facing report was assembled with the
+    /** Prescription visibility gate (H-17, Build 1): a worker-facing report was assembled with the
      *  gate satisfied, i.e. an approved/modified/rejected prescription outcome was actually
      *  surfaced to a non-physician viewer. Emitted once per gated-open report load by
      *  [com.example.samdapp.presentation.report.ReportViewModel] — never the drug name. */

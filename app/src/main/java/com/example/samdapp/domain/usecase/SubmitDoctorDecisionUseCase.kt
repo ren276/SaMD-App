@@ -40,7 +40,7 @@ import javax.inject.Inject
  * [clinicalNote] is captured for audit purposes only and never touches [DiagnosisFeedback
  * .physicianFinalDiagnosis][DiagnosisFeedback] or any training reimport.
  *
- * [rejectReason] (H-16, Build 1) is REJECT-only and becomes [Prescription.diagnosis] — the
+ * [rejectReason] (H-17, Build 1) is REJECT-only and becomes [Prescription.diagnosis] — the
  * physician's own reasoning, surfaced verbatim on the worker-facing report rather than the fixed
  * fallback string, so the worker sees why nothing was prescribed instead of just that nothing was.
  */
@@ -66,7 +66,7 @@ class SubmitDoctorDecisionUseCase @Inject constructor(
         correctedIcdCandidate: String? = null,
         clinicalNote: String? = null,
         /** REJECT-only free-text reasoning, entered on the decision surface — flows verbatim to
-         *  the worker-facing report as [Prescription.diagnosis] (H-16: "not blankness," the
+         *  the worker-facing report as [Prescription.diagnosis] (H-17: "not blankness," the
          *  worker sees why, not just that nothing was prescribed). Falls back to the prior fixed
          *  string when blank. Ignored for AGREE/MODIFY. */
         rejectReason: String = "",

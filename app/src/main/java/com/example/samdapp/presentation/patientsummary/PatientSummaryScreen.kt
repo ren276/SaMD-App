@@ -324,7 +324,7 @@ private fun DoctorReviewCard(uiState: PatientSummaryUiState, actions: PatientSum
                     ManualPrescriptionFields(uiState, actions)
                 }
                 PhysicianDecision.REJECT -> {
-                    // H-16 (Build 1): the worker sees this verbatim on the final report in place
+                    // H-17 (Build 1): the worker sees this verbatim on the final report in place
                     // of a medication — "not blankness" (see ReportFormatter's REJECT gating).
                     OutlinedTextField(
                         value = uiState.rejectReasonText,
