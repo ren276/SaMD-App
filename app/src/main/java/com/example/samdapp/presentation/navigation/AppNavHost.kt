@@ -48,6 +48,7 @@ import com.example.samdapp.presentation.consultation.ConsultationScreen
 import com.example.samdapp.presentation.consultationchain.ConsultationChainScreen
 import com.example.samdapp.presentation.doctorassignment.DoctorAssignmentConfirmScreen
 import com.example.samdapp.presentation.doctorlist.DoctorListScreen
+import com.example.samdapp.presentation.documents.DocumentViewerScreen
 import com.example.samdapp.presentation.emergency.EmergencyOverrideScreen
 import com.example.samdapp.presentation.kernelassessment.KernelAssessmentScreen
 import com.example.samdapp.presentation.home.HomeScreen
@@ -255,11 +256,15 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
                     },
                     onOpenAuditTrail = { patientId -> backStack.add(PatientAuditRoute(patientId)) },
                     onOpenAbhaProfile = { abhaId -> backStack.add(AbhaProfileRoute(abhaId)) },
+                    onOpenDocumentViewer = { documentId -> backStack.add(DocumentViewerRoute(documentId)) },
                     bottomBar = bottomNavBar(current = null),
                 )
             }
             entry<PatientAuditRoute> { key ->
                 PatientAuditScreen(patientId = key.patientId)
+            }
+            entry<DocumentViewerRoute> { key ->
+                DocumentViewerScreen(documentId = key.documentId)
             }
             entry<AbhaProfileRoute> { key ->
                 AbhaProfileScreen(abhaId = key.abhaId)

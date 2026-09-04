@@ -4,6 +4,8 @@ import androidx.room.TypeConverter
 import com.example.samdapp.domain.model.AllergyCategory
 import com.example.samdapp.domain.model.AttachmentType
 import com.example.samdapp.domain.model.CaseStatus
+import com.example.samdapp.domain.model.DepartmentCode
+import com.example.samdapp.domain.model.DocumentSource
 import com.example.samdapp.domain.model.FieldProvenance
 import com.example.samdapp.domain.model.MeasurementType
 import com.example.samdapp.domain.model.MedicalHistoryCategory
@@ -11,6 +13,7 @@ import com.example.samdapp.domain.model.MedicationKind
 import com.example.samdapp.domain.model.ObservationSource
 import com.example.samdapp.domain.model.ObservationType
 import com.example.samdapp.domain.model.PhysicianDecision
+import com.example.samdapp.domain.model.RecordTypeCode
 import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.domain.model.KernelDecision
 import com.example.samdapp.domain.model.ReferralStatus
@@ -89,6 +92,15 @@ class Converters {
 
     @TypeConverter fun syncStateToString(value: SyncState): String = value.name
     @TypeConverter fun stringToSyncState(value: String): SyncState = SyncState.valueOf(value)
+
+    @TypeConverter fun departmentCodeToString(value: DepartmentCode): String = value.name
+    @TypeConverter fun stringToDepartmentCode(value: String): DepartmentCode = DepartmentCode.valueOf(value)
+
+    @TypeConverter fun recordTypeCodeToString(value: RecordTypeCode): String = value.name
+    @TypeConverter fun stringToRecordTypeCode(value: String): RecordTypeCode = RecordTypeCode.valueOf(value)
+
+    @TypeConverter fun documentSourceToString(value: DocumentSource): String = value.name
+    @TypeConverter fun stringToDocumentSource(value: String): DocumentSource = DocumentSource.valueOf(value)
 
     @TypeConverter fun stringListToJson(value: List<String>): String =
         Json.encodeToString(ListSerializer(String.serializer()), value)

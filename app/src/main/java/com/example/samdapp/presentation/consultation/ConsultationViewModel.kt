@@ -9,11 +9,16 @@ import com.example.samdapp.domain.audit.AuditAction
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.audit.levenshteinDistance
+import com.example.samdapp.domain.auth.AuthSession
 import com.example.samdapp.domain.model.AttachmentType
+import com.example.samdapp.domain.model.DepartmentCode
 import com.example.samdapp.domain.model.FieldProvenance
+import com.example.samdapp.domain.model.RecordTypeCode
 import com.example.samdapp.domain.usecase.AddAttachmentUseCase
 import com.example.samdapp.domain.usecase.CaptureAudioAttachmentUseCase
 import com.example.samdapp.domain.usecase.SaveConsultationUseCase
+import com.example.samdapp.domain.usecase.UploadConsultationDocumentUseCase
+import kotlinx.coroutines.flow.first
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
@@ -27,6 +32,18 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class PendingAttachment(val type: AttachmentType, val uri: String)
+
+/** H-18, Build 3a: a document the worker has picked and tagged, queued here (same deferred shape
+ *  as [PendingAttachment]) until [ConsultationUiState.canSend] and the real `consultationId` it
+ *  needs as a foreign key exist. [claimedMimeType] is what the picker/`ContentResolver` reports —
+ *  never trusted on its own; the upload path validates the actual bytes by magic number. */
+data class PendingDocument(
+    val uri: String,
+    val claimedMimeType: String?,
+    val label: String,
+    val departmentCode: DepartmentCode,
+    val recordTypeCode: RecordTypeCode,
+)
 
 /** The two facts `onSend` needs to emit `VOICE_FIELD_EDITED` honestly, captured at the Edit tap
  *  and carried in [ConsultationUiState.impactVoicePendingEdit] until save consumes them:
@@ -99,9 +116,29 @@ data class ConsultationUiState(
     val impactVoicePendingEdit: PendingVoiceEdit? = null,
     val relevantHistory: String = "",
     val pendingAttachments: List<PendingAttachment> = emptyList(),
+    /** H-18, Build 3a: documents already picked, tagged and queued (the "upload reports, if any"
+     *  affordance). Each entry's department/record-type were worker-selected from the controlled
+     *  vocabularies before it could be added — see [documentDraftDepartment]/[documentDraftRecordType]. */
+    val pendingDocuments: List<PendingDocument> = emptyList(),
+    /** In-progress selections for the next document to queue — reset after each add. Both must
+     *  be non-null (worker SELECTS, never a silent default) before a picked file can be added. */
+    val documentDraftDepartment: DepartmentCode? = null,
+    val documentDraftRecordType: RecordTypeCode? = null,
+    val documentDraftLabel: String = "",
     val isSaving: Boolean = false,
     val errorMessage: String? = null,
+    /** H-18, Build 3a: non-empty means one or more documents failed to upload during send. The
+     *  consultation itself already saved successfully — this only holds the screen open (see
+     *  [pendingSentEffect]) until the worker acknowledges, so the failure is seen rather than
+     *  raced off-screen by an immediate navigation. */
+    val documentUploadFailures: List<String> = emptyList(),
+    /** The [ConsultationEffect.Sent] navigation held back while [documentUploadFailures] is
+     *  non-empty, dispatched by [ConsultationActions.onDismissDocumentUploadFailures]. */
+    val pendingSentEffect: ConsultationEffect.Sent? = null,
 ) {
+    /** The file-pick affordance is enabled only once both controlled-vocabulary dropdowns are
+     *  selected — a document is never queued with a guessed department or record type. */
+    val canPickDocument: Boolean get() = documentDraftDepartment != null && documentDraftRecordType != null
     /** The added clauses are the voice gate (`pr3-voice-gate-design-memo.md` A.2 property 4).
      *  Because `ConsultationScreen` binds the send button to this, blocking here also blocks the
      *  H-08 review dialog the button opens, so an outstanding suggestion cannot be carried past
@@ -166,6 +203,19 @@ interface ConsultationActions {
     fun onRelevantHistoryChange(value: String)
     fun onAddAttachment(type: AttachmentType, uri: String)
     fun onRecordAudioAttachment()
+
+    // ── Consultation documents (H-18, Build 3a, PATH A direct-file upload) ────────────────────
+    fun onDocumentDepartmentSelected(code: DepartmentCode)
+    fun onDocumentRecordTypeSelected(code: RecordTypeCode)
+    fun onDocumentLabelChange(text: String)
+    /** [claimedMimeType] is `ContentResolver.getType(uri)` from the picker, read by the Screen
+     *  (same layering as [onAddAttachment]) — not trusted, only carried through to the upload
+     *  path's magic-byte cross-check. */
+    fun onDocumentPicked(uri: String, claimedMimeType: String?)
+    /** Dismisses the "some documents failed to upload" notice and lets the already-completed
+     *  send proceed to navigate away. */
+    fun onDismissDocumentUploadFailures()
+
     fun onSend()
     /** Pre-fills the main concern + history-of-present-illness from [DemoPatientProfile] — demo only. */
     fun fillDemoData()
@@ -180,6 +230,8 @@ class ConsultationViewModel @AssistedInject constructor(
     private val saveConsultationUseCase: SaveConsultationUseCase,
     private val addAttachmentUseCase: AddAttachmentUseCase,
     private val captureAudioAttachmentUseCase: CaptureAudioAttachmentUseCase,
+    private val uploadConsultationDocumentUseCase: UploadConsultationDocumentUseCase,
+    private val authSession: AuthSession,
     private val auditLogger: AuditLogger,
 ) : ViewModel(), ConsultationActions {
 
@@ -451,6 +503,27 @@ class ConsultationViewModel @AssistedInject constructor(
         _uiState.update { it.copy(pendingAttachments = it.pendingAttachments + PendingAttachment(type, uri)) }
     }
 
+    override fun onDocumentDepartmentSelected(code: DepartmentCode) =
+        _uiState.update { it.copy(documentDraftDepartment = code) }
+    override fun onDocumentRecordTypeSelected(code: RecordTypeCode) =
+        _uiState.update { it.copy(documentDraftRecordType = code) }
+    override fun onDocumentLabelChange(text: String) = _uiState.update { it.copy(documentDraftLabel = text) }
+
+    override fun onDocumentPicked(uri: String, claimedMimeType: String?) {
+        val state = _uiState.value
+        val department = state.documentDraftDepartment ?: return
+        val recordType = state.documentDraftRecordType ?: return
+        _uiState.update {
+            it.copy(
+                pendingDocuments = it.pendingDocuments + PendingDocument(uri, claimedMimeType, state.documentDraftLabel, department, recordType),
+                // Reset the draft so the next pick starts from an explicit selection again.
+                documentDraftDepartment = null,
+                documentDraftRecordType = null,
+                documentDraftLabel = "",
+            )
+        }
+    }
+
     override fun onRecordChiefComplaintVoice() {
         // Disabled pending the sherpa-onnx on-device engine and the confirmation-gate design
         // (scoped to PR 3/4): see FeatureFlags.VOICE_INPUT_ENABLED KDoc. The UI never shows the
@@ -563,16 +636,59 @@ class ConsultationViewModel @AssistedInject constructor(
                     )
                 }
             }
+            // H-18, Build 3a: documents are encrypted and inserted here, once `consultation.id`
+            // exists as their foreign key — same deferred-commit shape as pendingAttachments
+            // above. UploadConsultationDocumentUseCase emits its own DOCUMENT_UPLOADED audit row
+            // on success. A per-document failure does not block the send (documents are the
+            // optional "if any" affordance; the consultation itself already saved successfully
+            // above) — but it must not be silently lost either. Failures are collected rather
+            // than written straight to errorMessage, because the Sent effect below fires in the
+            // same coroutine and PatientSummaryScreen navigates away as soon as it's received —
+            // an errorMessage set right before that would be raced off-screen before the worker
+            // could ever read it, which is worse than not tracking it at all (it looks handled
+            // and isn't). See onDismissDocumentUploadFailures.
+            val documentFailures = mutableListOf<String>()
+            if (current.pendingDocuments.isNotEmpty()) {
+                val session = authSession.currentUser().first()
+                current.pendingDocuments.forEach { pending ->
+                    uploadConsultationDocumentUseCase(
+                        consultationId = consultation.id,
+                        sourceUri = pending.uri,
+                        claimedMimeType = pending.claimedMimeType,
+                        label = pending.label,
+                        departmentCode = pending.departmentCode,
+                        recordTypeCode = pending.recordTypeCode,
+                        uploaderUserId = session?.userId ?: "phc_field_worker",
+                        uploaderRole = session?.role?.name ?: "ASHA_WORKER",
+                    ).onFailure { error ->
+                        documentFailures += pending.label.ifBlank { pending.recordTypeCode.name } +
+                            ": " + (error.message ?: "upload failed")
+                    }
+                }
+            }
             auditLogger.log(
                 action = AuditAction.CONSULTATION_SAVED,
                 patientId = patientId,
                 caseRecordId = caseRecordId,
                 payload = auditPayload("consultationId" to consultation.id, "chiefComplaint" to current.chiefComplaint),
             )
-            _uiState.update { it.copy(isSaving = false) }
-            _effects.send(
-                ConsultationEffect.Sent(patientId, encounterId, caseRecordId, consultation.id, current.hasAudioAttachment),
-            )
+            val sentEffect = ConsultationEffect.Sent(patientId, encounterId, caseRecordId, consultation.id, current.hasAudioAttachment)
+            if (documentFailures.isEmpty()) {
+                _uiState.update { it.copy(isSaving = false) }
+                _effects.send(sentEffect)
+            } else {
+                // Held until the worker explicitly acknowledges (see onDismissDocumentUploadFailures)
+                // instead of sent now — the consultation is already saved either way, this only
+                // delays the navigation away from this screen until the failure has actually
+                // been seen.
+                _uiState.update { it.copy(isSaving = false, documentUploadFailures = documentFailures, pendingSentEffect = sentEffect) }
+            }
         }
+    }
+
+    override fun onDismissDocumentUploadFailures() {
+        val pending = _uiState.value.pendingSentEffect ?: return
+        _uiState.update { it.copy(documentUploadFailures = emptyList(), pendingSentEffect = null) }
+        viewModelScope.launch { _effects.send(pending) }
     }
 }

@@ -63,6 +63,7 @@ fun PatientSummaryScreen(
     onOpenChain: (patientId: String, rootEncounterId: String) -> Unit,
     onOpenAuditTrail: (patientId: String) -> Unit,
     onOpenAbhaProfile: (abhaId: String) -> Unit,
+    onOpenDocumentViewer: (documentId: String) -> Unit,
     bottomBar: @Composable () -> Unit = {},
     viewModel: PatientSummaryViewModel = hiltViewModel<PatientSummaryViewModel, PatientSummaryViewModel.Factory>(
         creationCallback = { factory -> factory.create(patientId) },
@@ -224,6 +225,32 @@ fun PatientSummaryScreen(
                     onClick = { onViewReport(uiState.caseRecordId!!) },
                     modifier = Modifier.padding(top = 12.dp),
                 ) { Text("View report") }
+            }
+
+            if (uiState.documents.isNotEmpty()) {
+                Text(
+                    text = "Documents",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 8.dp),
+                )
+                // H-18, Build 3a: metadata-only here, for every role — the interim role gate
+                // (uploader or DOCTOR sees decrypted content, everyone else sees metadata) is
+                // enforced inside the viewer screen this row navigates to, not by hiding the row.
+                uiState.documents.forEach { document ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp)
+                            .clickable { onOpenDocumentViewer(document.id) },
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(document.label.ifBlank { document.recordTypeCode.name }, style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "${document.departmentCode.name} · ${document.recordTypeCode.name}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
             }
 
             Text(

@@ -113,6 +113,23 @@ enum class AuditAction(val value: String) {
      *  surfaced to a non-physician viewer. Emitted once per gated-open report load by
      *  [com.example.samdapp.presentation.report.ReportViewModel] — never the drug name. */
     PRESCRIPTION_SURFACED_TO_WORKER("prescription_surfaced_to_worker"),
+
+    /** H-18, Build 3a (consultation documents). Emitted from
+     *  [com.example.samdapp.domain.usecase.UploadConsultationDocumentUseCase] once the encrypted
+     *  file and the metadata row both exist. Payload: `documentId`, `source`, `departmentCode`,
+     *  `recordTypeCode`, `mimeType`, `sizeBytes`, `sha256`, `uploaderRole` — never [label], which
+     *  is worker free text and may contain a patient name. */
+    DOCUMENT_UPLOADED("document_uploaded"),
+
+    /** H-18, Build 3a. Emitted only when the document's content is actually decrypted and
+     *  rendered (the [com.example.samdapp.presentation.documents] viewer), never when a list row
+     *  is drawn — a view audit that fires on scroll is noise. Payload: `documentId`, `viewerRole`. */
+    DOCUMENT_VIEWED("document_viewed"),
+
+    /** H-18, Build 3a. The metadata row is never deleted; this marks that it was retracted, by
+     *  whom, and why, alongside the still-standing [DOCUMENT_UPLOADED] row. Payload: `documentId`,
+     *  `reason`, `actorRole`, `bytesDeleted`. */
+    DOCUMENT_RETRACTED("document_retracted"),
 }
 
 /** Builds the JSON blob stored in AuditLogEntity.payload from a flat set of fields. */

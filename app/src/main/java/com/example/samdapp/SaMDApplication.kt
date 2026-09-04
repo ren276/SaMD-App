@@ -3,6 +3,7 @@ package com.example.samdapp
 import android.app.Application
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
+import com.example.samdapp.presentation.documents.sweepOrphanedViewerTempFiles
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
 
@@ -19,4 +20,12 @@ class SaMDApplication : Application(), Configuration.Provider {
         get() = Configuration.Builder()
             .setWorkerFactory(workerFactory)
             .build()
+
+    override fun onCreate() {
+        super.onCreate()
+        // H-18, Build 3a: a process death mid-view leaves a decrypted document-viewer temp file
+        // behind (the `finally`/onCleared cleanup only covers a clean exit) — swept here so
+        // plaintext PHI never outlives the app process that decrypted it.
+        sweepOrphanedViewerTempFiles(this)
+    }
 }

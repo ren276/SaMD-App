@@ -11,6 +11,8 @@ import com.example.samdapp.testutil.FakeAuditLogger
 import com.example.samdapp.testutil.FakeAuthSession
 import com.example.samdapp.testutil.FakeBrandLookupSource
 import com.example.samdapp.testutil.FakeCaseRecordRepository
+import com.example.samdapp.testutil.FakeConsultationDocumentRepository
+import com.example.samdapp.testutil.FakeConsultationRepository
 import com.example.samdapp.testutil.FakeDiagnosisFeedbackRepository
 import com.example.samdapp.testutil.FakeEncounterRepository
 import com.example.samdapp.testutil.FakeEvaluateReportRepository
@@ -66,6 +68,8 @@ class PatientSummaryViewModelTest {
                 auditLogger = FakeAuditLogger(),
             ),
             authSession = authSession,
+            consultationRepository = FakeConsultationRepository(),
+            consultationDocumentRepository = FakeConsultationDocumentRepository(),
         )
     }
 
