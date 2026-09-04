@@ -4341,3 +4341,85 @@ Risk file: H-18 and H-19 drafted PROPOSED, AWAITING OPERATOR SIGN-OFF, not appro
 writing them.
 
 Not committed as of this entry — awaiting operator authorization per session instructions.
+
+## Consultation documents: camera multi-capture to on-device PDF assembly (Build 3b) - 2026-09-04
+
+Build 3b of the consultation-documents-and-prescription track (design memo:
+`scratchpad/consultation-documents-and-prescription-gate-memo.md`, Feature 1 Part B2). Branch
+`feat/consultation-documents-camera`, off the merged Build 3a. Full orientation:
+`scratchpad/consultation-documents-camera-build3b-readme.md`.
+
+**What shipped.** PATH B: the worker selects department and record type exactly as for a direct
+file upload, taps "Scan report pages with camera", photographs page after page, reorders and
+deletes pages in a thumbnail strip, taps done, and the pages are consolidated on-device into ONE
+PDF using `android.graphics.pdf.PdfDocument` (no new dependency, no iText, REQ-RPT-02 intact),
+encrypted, and stored through Build 3a's storage path unchanged - same storage-key scheme, same
+canonical name, same metadata row, same `DOCUMENT_UPLOADED` audit action, same retract, same safe
+`PdfRenderer` viewer. The only differences on the row are `source = CAMERA_ASSEMBLED` and a
+non-null `pageCount`.
+
+**Schema: 3a shipped the documents table minus `pageCount`; 3b completes it.** The
+operator-signed memo (B3) lists `pageCount Int?` on `consultation_documents`; `MIGRATION_17_18`
+and the exported `18.json` omitted it. `MIGRATION_18_19` adds it (`ALTER TABLE ... ADD COLUMN
+pageCount INTEGER`), bumping the database to version 19. Nullable, no default, no backfill: every
+pre-3b row is a direct-file upload whose page count was never measured, so NULL is the honest
+value. Memo and shipped schema now reconcile. No backend change - no server-side documents table
+or endpoint exists yet (memo B8 keeps document transport as a pre-production gate).
+
+**One upload path, two byte provenances.** `ConsultationDocumentRepository.upload` now takes a
+`DocumentBytes` (`DirectFile` or `AssembledCapture`) instead of a URI plus a claimed MIME type.
+That branch is the only place the two paths differ; naming, the metadata row, the insert-or-roll-
+back, retract and the audit row are shared code below it. There is deliberately no second upload
+use case and no second audit action.
+
+**Encrypt-as-captured, never assemble-then-encrypt.** Each page is encrypted into
+`filesDir/documents/.capture/<sessionId>/` the moment the camera returns it and decrypted one at a
+time during assembly, so N plaintext JPEGs never coexist on disk. `DocumentEncryptionProvider`
+gained a push-mode `encryptToFile(destFile, maxBytes) { sink -> ... }` overload (the pull overload
+now delegates to it) because `PdfDocument.writeTo` takes an `OutputStream` and offers no
+`InputStream` - the assembled PDF streams straight into the cipher and never exists as a plaintext
+file or a whole `ByteArray`.
+
+**Memory.** `computeInSampleSize` was lifted out of the Build 3a viewer into
+`domain/document/ImageDownscale.kt` and is now shared: pages are downscaled AT DECODE to a 1600 px
+long edge, so a full-resolution 12 MP frame is never allocated. The assembly loop holds exactly
+one page at a time - decrypt, decode, `startPage`, draw, `finishPage`, `recycle` - and the page
+count is capped at 20.
+
+**An unreadable page aborts the whole assembly.** A page whose ciphertext fails GCM
+authentication, whose file is missing, or whose bytes will not decode throws
+`DocumentPageUnreadableException` naming the page index. The loop body contains no `catch`, no
+`continue` and no null-tolerant call, so there is no expression in it that can evaluate to "skip";
+the single catch sits outside the loop, deletes the partial output and returns a failure. No
+document is produced and no metadata row is written. A lab report silently missing page 3 is a
+clinical hazard, not an acceptable degradation.
+
+**Abandoning discards everything.** Back or cancel with pages captured asks "Discard N pages?"
+first; confirming deletes the session directory and every encrypted page in it. No draft is kept.
+Process death cannot run that path, so `SaMDApplication.onCreate` gained a second sweep,
+`sweepOrphanedCaptureSessions`, alongside Build 3a's viewer-temp sweep. Policy: delete every
+capture-session directory and every staging file unconditionally at app start - a session's page
+list lives only in ViewModel state, so nothing survivable exists to protect. Kept as a separate
+call rather than merged into 3a's sweep: the two cover disjoint directories and merging them would
+hide which one failed.
+
+**Camera primitive: reused, storage posture not.** `ActivityResultContracts.TakePicture` (the same
+primitive `ConsultationScreen`'s affected-area photo uses) hands a granted URI to a separate camera
+process, so one plaintext frame necessarily lands on disk before this app can touch it. It lands
+in its own `cacheDir/document_capture_staging/` directory - one new `file_paths.xml` entry, scoped
+to exactly that path - and is encrypted and deleted inside the same result callback, before the UI
+re-enables "add another page". CameraX would close that millisecond window entirely at the cost of
+four new dependencies and a self-built viewfinder; operator decision on 2026-09-04 was to keep
+`TakePicture` and record the residual. The existing affected-area path's plaintext `cacheDir`
+posture (H-19) was deliberately NOT copied.
+
+`testDevDebugUnitTest`: 355 passed (334 + 21 new), 0 failed.
+`connectedDevDebugAndroidTest` (`emulator-5554`, `notPackage=...data.transcription`): 90 passed,
+0 failed, including `MigrationTest18To19` (2), `DocumentCaptureAssemblyTest` (13) and
+`CameraAssembledDocumentStorageTest` (4). The ASR mic-hardware tests are excluded as a known
+pre-existing emulator flake, unrelated to this build.
+
+Risk file: the H-18 entry is extended with the camera-assembly controls and residuals. Still
+PROPOSED, AWAITING OPERATOR SIGN-OFF, not approved by the act of writing it.
+
+Not committed as of this entry - awaiting operator authorization per session instructions.

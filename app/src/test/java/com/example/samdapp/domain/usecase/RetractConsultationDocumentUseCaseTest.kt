@@ -24,7 +24,7 @@ class RetractConsultationDocumentUseCaseTest {
         id = "doc-1", consultationId = "c1", patientId = "p1", abhaNumber = null, label = "label",
         canonicalName = "canonical", departmentCode = DepartmentCode.ORTHO, recordTypeCode = RecordTypeCode.IMAGING,
         storageKey = "key", mimeType = "application/pdf", sizeBytes = 500L, sha256 = "hash",
-        source = DocumentSource.DIRECT_FILE, uploadedAt = Instant.EPOCH, uploaderUserId = uploaderUserId,
+        source = DocumentSource.DIRECT_FILE, pageCount = null, uploadedAt = Instant.EPOCH, uploaderUserId = uploaderUserId,
         uploaderRole = "ASHA_WORKER", retractedAt = null, retractionReason = null,
     )
 

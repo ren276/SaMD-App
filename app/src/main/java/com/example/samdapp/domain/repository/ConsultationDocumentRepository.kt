@@ -1,5 +1,6 @@
 package com.example.samdapp.domain.repository
 
+import com.example.samdapp.domain.document.DocumentBytes
 import com.example.samdapp.domain.model.ConsultationDocument
 import com.example.samdapp.domain.model.DepartmentCode
 import com.example.samdapp.domain.model.RecordTypeCode
@@ -14,20 +15,29 @@ import java.io.OutputStream
  */
 interface ConsultationDocumentRepository {
     /**
-     * [sourceUri] is an opaque content URI string, resolved to bytes only here in the data layer
-     * (same posture as [com.example.samdapp.domain.model.Attachment.uri] elsewhere in this app —
-     * a `Uri` never travels through the ViewModel/use-case layers as a typed Android object).
-     * Validates the resolved bytes by magic bytes (never [claimedMimeType], never a filename
-     * extension), enforces the size cap while streaming, encrypts the plaintext to
-     * `filesDir/documents/<consultationId>/`, and inserts the metadata row with `patientId`
-     * derived from the consultation (never from a caller-supplied value). Failure paths (oversized,
-     * unrecognised/mismatched type, unresolvable URI) write nothing — no partial row, no partial
-     * file.
+     * The single storage entry point for BOTH upload paths (Build 3b): [bytes] says where the
+     * document's content came from, and everything after that is identical - the same
+     * `<RecordTypeCode>_<epochMillis>_<uuid>.<ext>` storage key, the same
+     * `<UHID>_<Dept>_<YYYYMMDD>_<RecordType>.<ext>` canonical name, the same metadata row with
+     * `patientId` derived from the consultation (never from a caller-supplied value), the same
+     * retract, and the same `DOCUMENT_UPLOADED` audit row emitted by the one use case above this.
+     *
+     * - [DocumentBytes.DirectFile] (PATH A): an opaque content URI string, resolved to bytes only
+     *   here in the data layer (same posture as [com.example.samdapp.domain.model.Attachment.uri]
+     *   elsewhere in this app - a `Uri` never travels through the ViewModel/use-case layers as a
+     *   typed Android object). Validated by MAGIC BYTES, never by the claimed MIME type and never
+     *   by a filename extension, with the size cap enforced while streaming.
+     * - [DocumentBytes.AssembledCapture] (PATH B): an already-encrypted PDF this app assembled
+     *   from camera captures, moved out of its capture-session directory into the document store.
+     *   Its type needs no sniffing because this app produced it, and its plaintext size and
+     *   SHA-256 were measured by the same encryption pass that wrote it.
+     *
+     * Failure paths (oversized, unrecognised/mismatched type, unresolvable URI, a capture session
+     * whose assembled file is gone) write nothing - no partial row, no partial file.
      */
     suspend fun upload(
         consultationId: String,
-        sourceUri: String,
-        claimedMimeType: String?,
+        bytes: DocumentBytes,
         label: String,
         departmentCode: DepartmentCode,
         recordTypeCode: RecordTypeCode,

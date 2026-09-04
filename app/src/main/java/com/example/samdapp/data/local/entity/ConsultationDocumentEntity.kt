@@ -30,6 +30,9 @@ data class ConsultationDocumentEntity(
     val sizeBytes: Long,
     val sha256: String,
     val source: DocumentSource,
+    /** Non-null only for `CAMERA_ASSEMBLED` rows (Build 3b). Nullable with no default in SQL:
+     *  every pre-3b row is legitimately null, so `MIGRATION_18_19` backfills nothing. */
+    val pageCount: Int? = null,
     val uploadedAt: Instant,
     val uploaderUserId: String,
     val uploaderRole: String,

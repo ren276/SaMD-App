@@ -54,6 +54,7 @@ class ConsultationVoiceGateBreadcrumbsTest {
         addAttachmentUseCase = AddAttachmentUseCase(consultationRepository),
         captureAudioAttachmentUseCase = CaptureAudioAttachmentUseCase(transcriptionService),
         uploadConsultationDocumentUseCase = UploadConsultationDocumentUseCase(FakeConsultationDocumentRepository(), auditLogger),
+        documentCaptureStore = com.example.samdapp.testutil.FakeDocumentCaptureStore(),
         authSession = FakeAuthSession(),
         auditLogger = auditLogger,
     )

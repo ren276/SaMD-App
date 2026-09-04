@@ -17,6 +17,9 @@ import com.example.samdapp.domain.model.RecordTypeCode
 import com.example.samdapp.domain.usecase.AddAttachmentUseCase
 import com.example.samdapp.domain.usecase.CaptureAudioAttachmentUseCase
 import com.example.samdapp.domain.usecase.SaveConsultationUseCase
+import com.example.samdapp.domain.document.CapturedPage
+import com.example.samdapp.domain.document.DocumentBytes
+import com.example.samdapp.domain.document.DocumentCaptureStore
 import com.example.samdapp.domain.usecase.UploadConsultationDocumentUseCase
 import kotlinx.coroutines.flow.first
 import dagger.assisted.Assisted
@@ -28,22 +31,52 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.UUID
 
 data class PendingAttachment(val type: AttachmentType, val uri: String)
 
-/** H-18, Build 3a: a document the worker has picked and tagged, queued here (same deferred shape
- *  as [PendingAttachment]) until [ConsultationUiState.canSend] and the real `consultationId` it
- *  needs as a foreign key exist. [claimedMimeType] is what the picker/`ContentResolver` reports —
- *  never trusted on its own; the upload path validates the actual bytes by magic number. */
+/** H-18, Builds 3a and 3b: a document the worker has picked (PATH A) or scanned (PATH B) and
+ *  tagged, queued here (same deferred shape as [PendingAttachment]) until
+ *  [ConsultationUiState.canSend] and the real `consultationId` it needs as a foreign key exist.
+ *  [bytes] carries the provenance; both kinds go to the same upload use case unchanged. */
 data class PendingDocument(
-    val uri: String,
-    val claimedMimeType: String?,
+    val bytes: DocumentBytes,
     val label: String,
     val departmentCode: DepartmentCode,
     val recordTypeCode: RecordTypeCode,
 )
+
+/**
+ * H-18, Build 3b: an in-progress camera capture. Lives here rather than in a screen of its own
+ * because the department/record-type/label the document needs are already this screen's state,
+ * and because a capture must not outlive the consultation it belongs to.
+ *
+ * Holds only page IDS and small in-memory thumbnails: every captured page's real bytes are
+ * encrypted on disk under [sessionId] the moment the camera returns them, and nothing here is
+ * persisted. A process death therefore loses the capture, which is the intended posture - the
+ * startup sweep deletes the orphaned session directory rather than resurrecting a half-captured
+ * clinical document with no owner.
+ */
+data class DocumentCaptureUiState(
+    val sessionId: String,
+    val maxPages: Int,
+    val pages: List<CapturedPage> = emptyList(),
+    /** Non-null while the camera activity is capturing this page. */
+    val pendingPageId: String? = null,
+    val pendingStagingPath: String? = null,
+    val isAssembling: Boolean = false,
+    val pagesAssembled: Int = 0,
+    val errorMessage: String? = null,
+    /** R5: back or cancel with pages captured asks before throwing them away. */
+    val confirmDiscard: Boolean = false,
+) {
+    val canAddPage: Boolean get() = !isAssembling && pendingPageId == null && pages.size < maxPages
+    val canFinish: Boolean get() = !isAssembling && pendingPageId == null && pages.isNotEmpty()
+}
 
 /** The two facts `onSend` needs to emit `VOICE_FIELD_EDITED` honestly, captured at the Edit tap
  *  and carried in [ConsultationUiState.impactVoicePendingEdit] until save consumes them:
@@ -120,6 +153,8 @@ data class ConsultationUiState(
      *  affordance). Each entry's department/record-type were worker-selected from the controlled
      *  vocabularies before it could be added — see [documentDraftDepartment]/[documentDraftRecordType]. */
     val pendingDocuments: List<PendingDocument> = emptyList(),
+    /** Non-null while the multi-page camera capture surface is open (H-18, Build 3b). */
+    val documentCapture: DocumentCaptureUiState? = null,
     /** In-progress selections for the next document to queue — reset after each add. Both must
      *  be non-null (worker SELECTS, never a silent default) before a picked file can be added. */
     val documentDraftDepartment: DepartmentCode? = null,
@@ -212,6 +247,24 @@ interface ConsultationActions {
      *  (same layering as [onAddAttachment]) — not trusted, only carried through to the upload
      *  path's magic-byte cross-check. */
     fun onDocumentPicked(uri: String, claimedMimeType: String?)
+
+    // ── Multi-page camera capture (H-18, Build 3b, PATH B) ────────────────────────────────────
+    /** Opens the capture surface. Gated on the same controlled-vocabulary selections the file
+     *  picker is: a scanned document is never queued with a guessed department or record type. */
+    fun onStartDocumentCapture()
+    /** Allocates the next page and its staging path; the Screen launches the camera onto it. */
+    fun onAddDocumentPage()
+    /** [saved] is the camera contract's own result - false means the worker backed out. */
+    fun onDocumentPageCaptured(saved: Boolean)
+    fun onDeleteDocumentPage(pageId: String)
+    /** R7: page order is clinical meaning in a multi-page report, so it is worker-controlled. */
+    fun onMoveDocumentPage(from: Int, to: Int)
+    fun onFinishDocumentCapture()
+    fun onCancelDocumentAssembly()
+    fun onRequestDiscardDocumentCapture()
+    fun onDismissDiscardDocumentCapture()
+    fun onConfirmDiscardDocumentCapture()
+    fun onDismissDocumentCaptureError()
     /** Dismisses the "some documents failed to upload" notice and lets the already-completed
      *  send proceed to navigate away. */
     fun onDismissDocumentUploadFailures()
@@ -231,6 +284,7 @@ class ConsultationViewModel @AssistedInject constructor(
     private val addAttachmentUseCase: AddAttachmentUseCase,
     private val captureAudioAttachmentUseCase: CaptureAudioAttachmentUseCase,
     private val uploadConsultationDocumentUseCase: UploadConsultationDocumentUseCase,
+    private val documentCaptureStore: DocumentCaptureStore,
     private val authSession: AuthSession,
     private val auditLogger: AuditLogger,
 ) : ViewModel(), ConsultationActions {
@@ -515,12 +569,190 @@ class ConsultationViewModel @AssistedInject constructor(
         val recordType = state.documentDraftRecordType ?: return
         _uiState.update {
             it.copy(
-                pendingDocuments = it.pendingDocuments + PendingDocument(uri, claimedMimeType, state.documentDraftLabel, department, recordType),
+                pendingDocuments = it.pendingDocuments +
+                    PendingDocument(DocumentBytes.DirectFile(uri, claimedMimeType), state.documentDraftLabel, department, recordType),
                 // Reset the draft so the next pick starts from an explicit selection again.
                 documentDraftDepartment = null,
                 documentDraftRecordType = null,
                 documentDraftLabel = "",
             )
+        }
+    }
+
+    // ── Multi-page camera capture (H-18, Build 3b, PATH B) ────────────────────────────────────
+
+    /** Cancelling this cancels the assembly coroutine, which is what deletes the partial output
+     *  (R8) - the store's own cancellation handler owns the cleanup, not this field. */
+    private var assemblyJob: Job? = null
+
+    /** The in-flight page ingestion, held so a discard can WAIT for it rather than race it: the
+     *  store recreates the session directory on write, so a page that lands after `discardSession`
+     *  is encrypted PHI on disk with no session, no metadata row and no owner. */
+    private var ingestJob: Job? = null
+
+    override fun onStartDocumentCapture() {
+        val state = _uiState.value
+        if (!state.canPickDocument || state.documentCapture != null) return
+        _uiState.update {
+            it.copy(
+                documentCapture = DocumentCaptureUiState(
+                    sessionId = documentCaptureStore.newSession(),
+                    maxPages = documentCaptureStore.maxPages,
+                ),
+            )
+        }
+    }
+
+    override fun onAddDocumentPage() {
+        val capture = _uiState.value.documentCapture ?: return
+        if (!capture.canAddPage) return
+        val pageId = UUID.randomUUID().toString()
+        viewModelScope.launch {
+            val path = documentCaptureStore.stagingPathFor(capture.sessionId, pageId)
+            updateCapture { it.copy(pendingPageId = pageId, pendingStagingPath = path, errorMessage = null) }
+        }
+    }
+
+    /**
+     * R2's timing guarantee, at the one point in the app where a document page exists as
+     * plaintext. `ingestPage` encrypts the staging file into the capture session and deletes it
+     * in a `finally`, so the plaintext is gone before this coroutine resumes - and the UI does
+     * not offer "add another page" again until it has ([DocumentCaptureUiState.canAddPage] is
+     * false while `pendingPageId` is set), so page N+1 can never be captured while page N's
+     * plaintext is still on disk.
+     */
+    override fun onDocumentPageCaptured(saved: Boolean) {
+        val capture = _uiState.value.documentCapture ?: return
+        val pageId = capture.pendingPageId ?: return
+        ingestJob = viewModelScope.launch {
+            if (!saved) {
+                documentCaptureStore.discardStaging(capture.sessionId, pageId)
+                updateCapture { it.copy(pendingPageId = null, pendingStagingPath = null) }
+                return@launch
+            }
+            documentCaptureStore.ingestPage(capture.sessionId, pageId).fold(
+                onSuccess = { page ->
+                    updateCapture { it.copy(pages = it.pages + page, pendingPageId = null, pendingStagingPath = null) }
+                },
+                onFailure = { error ->
+                    updateCapture {
+                        it.copy(
+                            pendingPageId = null,
+                            pendingStagingPath = null,
+                            errorMessage = error.message ?: "That page could not be saved. Take it again.",
+                        )
+                    }
+                },
+            )
+        }
+    }
+
+    override fun onDeleteDocumentPage(pageId: String) {
+        val capture = _uiState.value.documentCapture ?: return
+        if (capture.isAssembling) return
+        viewModelScope.launch {
+            documentCaptureStore.deletePage(capture.sessionId, pageId)
+            updateCapture { state -> state.copy(pages = state.pages.filterNot { it.pageId == pageId }) }
+        }
+    }
+
+    override fun onMoveDocumentPage(from: Int, to: Int) {
+        updateCapture { capture ->
+            if (capture.isAssembling) return@updateCapture capture
+            if (from !in capture.pages.indices || to !in capture.pages.indices || from == to) {
+                return@updateCapture capture
+            }
+            val reordered = capture.pages.toMutableList()
+            reordered.add(to, reordered.removeAt(from))
+            capture.copy(pages = reordered)
+        }
+    }
+
+    /** The page list is read ONCE here, in its final worker-chosen order, and that list is what
+     *  the assembler iterates - there is no second ordering step anywhere downstream that could
+     *  disagree with what the thumbnail strip showed. */
+    override fun onFinishDocumentCapture() {
+        val state = _uiState.value
+        val capture = state.documentCapture ?: return
+        if (!capture.canFinish) return
+        val department = state.documentDraftDepartment ?: return
+        val recordType = state.documentDraftRecordType ?: return
+        val label = state.documentDraftLabel
+        val orderedPageIds = capture.pages.map { it.pageId }
+        assemblyJob = viewModelScope.launch {
+            updateCapture { it.copy(isAssembling = true, pagesAssembled = 0, errorMessage = null) }
+            val result = documentCaptureStore.assemble(capture.sessionId, orderedPageIds) { done, _ ->
+                updateCapture { it.copy(pagesAssembled = done) }
+            }
+            result.fold(
+                onSuccess = { assembled ->
+                    _uiState.update {
+                        it.copy(
+                            pendingDocuments = it.pendingDocuments +
+                                PendingDocument(assembled, label, department, recordType),
+                            documentCapture = null,
+                            // Same reset as the file-picker path: the next document starts from
+                            // an explicit selection again.
+                            documentDraftDepartment = null,
+                            documentDraftRecordType = null,
+                            documentDraftLabel = "",
+                        )
+                    }
+                },
+                onFailure = { error ->
+                    // R4 reaching the worker: the capture surface stays open with every page
+                    // intact and an explicit message. No document was produced, and none is
+                    // queued - a shorter PDF is never the fallback.
+                    updateCapture {
+                        it.copy(
+                            isAssembling = false,
+                            pagesAssembled = 0,
+                            errorMessage = error.message
+                                ?: "This document could not be assembled. Retake the page it named and try again.",
+                        )
+                    }
+                },
+            )
+        }
+    }
+
+    override fun onCancelDocumentAssembly() {
+        assemblyJob?.cancel()
+        assemblyJob = null
+        updateCapture { it.copy(isAssembling = false, pagesAssembled = 0) }
+    }
+
+    override fun onRequestDiscardDocumentCapture() {
+        val capture = _uiState.value.documentCapture ?: return
+        // Nothing captured yet means nothing to lose - asking would be noise.
+        if (capture.pages.isEmpty()) onConfirmDiscardDocumentCapture() else updateCapture { it.copy(confirmDiscard = true) }
+    }
+
+    override fun onDismissDiscardDocumentCapture() = updateCapture { it.copy(confirmDiscard = false) }
+
+    /** R5: abandoning discards everything. No draft is kept - encrypted PHI on disk with no
+     *  metadata row, no audit and no owner is a worse posture than losing the photos. */
+    override fun onConfirmDiscardDocumentCapture() {
+        val capture = _uiState.value.documentCapture ?: return
+        assemblyJob?.cancel()
+        assemblyJob = null
+        val ingest = ingestJob
+        ingestJob = null
+        _uiState.update { it.copy(documentCapture = null) }
+        viewModelScope.launch {
+            // Cancel first so an ingestion that has not started encrypting stops there, then JOIN:
+            // one already past its cancellation points still finishes its write, and the delete
+            // has to come after it or the page it wrote outlives the session.
+            ingest?.cancelAndJoin()
+            documentCaptureStore.discardSession(capture.sessionId)
+        }
+    }
+
+    override fun onDismissDocumentCaptureError() = updateCapture { it.copy(errorMessage = null) }
+
+    private fun updateCapture(transform: (DocumentCaptureUiState) -> DocumentCaptureUiState) {
+        _uiState.update { state ->
+            state.documentCapture?.let { state.copy(documentCapture = transform(it)) } ?: state
         }
     }
 
@@ -653,8 +885,7 @@ class ConsultationViewModel @AssistedInject constructor(
                 current.pendingDocuments.forEach { pending ->
                     uploadConsultationDocumentUseCase(
                         consultationId = consultation.id,
-                        sourceUri = pending.uri,
-                        claimedMimeType = pending.claimedMimeType,
+                        bytes = pending.bytes,
                         label = pending.label,
                         departmentCode = pending.departmentCode,
                         recordTypeCode = pending.recordTypeCode,

@@ -14,6 +14,7 @@ import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.auth.AuthSession
 import com.example.samdapp.domain.auth.UserRole
+import com.example.samdapp.domain.document.computeInSampleSize
 import com.example.samdapp.domain.model.ConsultationDocument
 import com.example.samdapp.domain.repository.ConsultationDocumentRepository
 import dagger.assisted.Assisted
@@ -191,14 +192,6 @@ class DocumentViewerViewModel @AssistedInject constructor(
         "application/pdf" -> "pdf"
         "image/png" -> "png"
         else -> "jpg"
-    }
-
-    private fun computeInSampleSize(width: Int, height: Int, maxDimension: Int): Int {
-        var sampleSize = 1
-        while (width / sampleSize > maxDimension || height / sampleSize > maxDimension) {
-            sampleSize *= 2
-        }
-        return sampleSize
     }
 
     override fun onCleared() {

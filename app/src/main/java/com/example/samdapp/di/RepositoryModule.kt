@@ -17,6 +17,7 @@ import com.example.samdapp.data.repository.AbhaProfileRepositoryImpl
 import com.example.samdapp.data.repository.AilmentRepositoryImpl
 import com.example.samdapp.data.repository.AuditLogRepositoryImpl
 import com.example.samdapp.data.repository.CaseRecordRepositoryImpl
+import com.example.samdapp.data.local.document.AndroidDocumentCaptureStore
 import com.example.samdapp.data.repository.ConsultationDocumentRepositoryImpl
 import com.example.samdapp.data.repository.DiagnosisFeedbackRepositoryImpl
 import com.example.samdapp.data.repository.EvaluateReportRepositoryImpl
@@ -36,6 +37,7 @@ import com.example.samdapp.domain.sync.SyncStatus
 import com.example.samdapp.domain.repository.AbhaProfileRepository
 import com.example.samdapp.domain.repository.AilmentRepository
 import com.example.samdapp.domain.repository.CaseRecordRepository
+import com.example.samdapp.domain.document.DocumentCaptureStore
 import com.example.samdapp.domain.repository.ConsultationDocumentRepository
 import com.example.samdapp.domain.repository.DiagnosisFeedbackRepository
 import com.example.samdapp.domain.repository.EvaluateReportRepository
@@ -129,4 +131,7 @@ abstract class RepositoryModule {
 
     @Binds @Singleton
     abstract fun bindConsultationDocumentRepository(impl: ConsultationDocumentRepositoryImpl): ConsultationDocumentRepository
+
+    @Binds @Singleton
+    abstract fun bindDocumentCaptureStore(impl: AndroidDocumentCaptureStore): DocumentCaptureStore
 }
