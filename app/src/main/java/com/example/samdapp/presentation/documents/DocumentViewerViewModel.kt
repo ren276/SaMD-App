@@ -14,6 +14,8 @@ import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.auth.AuthSession
 import com.example.samdapp.domain.auth.UserRole
+import com.example.samdapp.domain.document.DocumentAccessAuthorizer
+import com.example.samdapp.domain.document.DocumentAccessOutcome
 import com.example.samdapp.domain.document.computeInSampleSize
 import com.example.samdapp.domain.model.ConsultationDocument
 import com.example.samdapp.domain.repository.ConsultationDocumentRepository
@@ -56,9 +58,10 @@ sealed interface DocumentViewerContent {
 data class DocumentViewerUiState(
     val isLoading: Boolean = true,
     val document: ConsultationDocument? = null,
-    /** H-18 interim role gate (Build 3a; 3c replaces this with the cadre model): raw content is
-     *  rendered only for [UserRole.DOCTOR] or the uploader. Every other role sees [document]'s
-     *  metadata (label, department, record type, that it exists) but never [content]. */
+    /** H-18 cadre gate (Build 3c): [com.example.samdapp.domain.document.DocumentAccessAuthorizer]
+     *  decides — the uploader, or a [com.example.samdapp.domain.auth.CadreTier.PHYSICIAN], sees
+     *  raw content. Every other role sees [document]'s metadata (label, department, record type,
+     *  that it exists) but never [content]. */
     val canViewContent: Boolean = false,
     val content: DocumentViewerContent? = null,
     /** Explicit, never a blank view — set on a corrupt/tampered file
@@ -97,17 +100,30 @@ class DocumentViewerViewModel @AssistedInject constructor(
                 return@launch
             }
             val session = authSession.currentUser().first()
-            val canView = session?.role == UserRole.DOCTOR || session?.userId == document.uploaderUserId
-            _uiState.update { it.copy(document = document, canViewContent = canView) }
-            if (!canView) {
+            val outcome = session?.let { DocumentAccessAuthorizer.authorize(document, it) } ?: DocumentAccessOutcome.DENIED_TIER
+            _uiState.update { it.copy(document = document, canViewContent = outcome.granted) }
+            if (!outcome.granted) {
+                auditViewAttempt(document, session?.role, outcome)
                 _uiState.update { it.copy(isLoading = false) }
                 return@launch
             }
-            loadContent(document)
+            loadContent(document, session?.role, outcome)
         }
     }
 
-    private suspend fun loadContent(document: ConsultationDocument) {
+    private suspend fun auditViewAttempt(document: ConsultationDocument, viewerRole: UserRole?, outcome: DocumentAccessOutcome) {
+        auditLogger.log(
+            action = AuditAction.DOCUMENT_VIEWED,
+            patientId = document.patientId,
+            payload = auditPayload(
+                "documentId" to documentId,
+                "viewerRole" to viewerRole?.name,
+                "accessResult" to outcome.auditValue,
+            ),
+        )
+    }
+
+    private suspend fun loadContent(document: ConsultationDocument, viewerRole: UserRole?, outcome: DocumentAccessOutcome) {
         try {
             val content = withContext(Dispatchers.IO) {
                 val dir = File(context.cacheDir, VIEWER_TEMP_DIR).apply { mkdirs() }
@@ -122,12 +138,7 @@ class DocumentViewerViewModel @AssistedInject constructor(
             _uiState.update { it.copy(isLoading = false, content = content) }
             if (!viewedAudited) {
                 viewedAudited = true
-                val viewerRole = authSession.currentUser().first()?.role
-                auditLogger.log(
-                    action = AuditAction.DOCUMENT_VIEWED,
-                    patientId = document.patientId,
-                    payload = auditPayload("documentId" to documentId, "viewerRole" to viewerRole?.name),
-                )
+                auditViewAttempt(document, viewerRole, outcome)
             }
         } catch (e: DocumentDecryptionFailedException) {
             _uiState.update { it.copy(isLoading = false, errorMessage = "This document cannot be opened on this device") }

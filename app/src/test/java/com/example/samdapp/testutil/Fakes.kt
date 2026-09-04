@@ -750,7 +750,13 @@ class FakeConsultationDocumentRepository : com.example.samdapp.domain.repository
     override fun observeIncludingRetracted(consultationId: String): Flow<List<com.example.samdapp.domain.model.ConsultationDocument>> =
         flowOf(saved.values.filter { it.consultationId == consultationId })
 
+    /** H-18, Build 3c: lets a gate test assert decrypt was reached (or, load-bearing, was NOT
+     *  reached for a denied viewer) without depending on render succeeding downstream. */
+    var readDecryptedCallCount = 0
+        private set
+
     override suspend fun readDecrypted(documentId: String, output: java.io.OutputStream) {
+        readDecryptedCallCount++
         output.write("decrypted".toByteArray())
     }
 

@@ -102,10 +102,11 @@ data class PatientSummaryUiState(
      *  chain, not one per follow-up). */
     val chains: List<ConsultationChain> = emptyList(),
     val isLoadingHistory: Boolean = true,
-    /** H-18, Build 3a: documents attached to the current visit's consultation. Not gated here —
-     *  the interim role gate (uploader or DOCTOR sees decrypted content, everyone else sees
-     *  metadata only) lives in [com.example.samdapp.presentation.documents.DocumentViewerViewModel],
-     *  reached by tapping a row; this list itself is metadata-only regardless of role. */
+    /** H-18, Build 3a/3c: documents attached to the current visit's consultation. Not gated here —
+     *  the cadre gate (uploader or [com.example.samdapp.domain.auth.CadreTier.PHYSICIAN] sees
+     *  decrypted content, everyone else sees metadata only) lives in
+     *  [com.example.samdapp.presentation.documents.DocumentViewerViewModel], reached by tapping a
+     *  row; this list itself is metadata-only regardless of role. */
     val documents: List<ConsultationDocument> = emptyList(),
 ) {
     /** H-17 (Build 1): case-status-gated as before, plus [UserRole.DOCTOR] when the gate flag is

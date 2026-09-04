@@ -29,8 +29,9 @@ import com.example.samdapp.presentation.common.SamdLoadingIndicator
 /**
  * H-18, Build 3a: the safe in-app viewer — [android.graphics.pdf.PdfRenderer] for PDF,
  * `BitmapFactory` for JPEG/PNG, never an external handler and never `Intent.ACTION_VIEW`. The
- * interim role gate ([DocumentViewerUiState.canViewContent]) shows metadata to every role but
- * decrypted content only to the uploader or a [com.example.samdapp.domain.auth.UserRole.DOCTOR].
+ * cadre gate ([DocumentViewerUiState.canViewContent], Build 3c —
+ * [com.example.samdapp.domain.document.DocumentAccessAuthorizer]) shows metadata to every role but
+ * decrypted content only to the uploader or a [com.example.samdapp.domain.auth.CadreTier.PHYSICIAN].
  */
 @Composable
 fun DocumentViewerScreen(
@@ -81,13 +82,13 @@ fun DocumentViewerScreen(
     }
 }
 
-/** The interim role gate's non-content path: metadata (label, department, record type, that a
- *  document exists) is always visible, never the decrypted bytes. */
+/** The cadre gate's non-content path: metadata (label, department, record type, that a document
+ *  exists) is always visible, never the decrypted bytes. */
 @Composable
 private fun DocumentMetadataOnly(uiState: DocumentViewerUiState) {
     val document = uiState.document ?: return
     Column(modifier = Modifier.padding(16.dp)) {
-        Text("You do not have access to view this document's content.", style = MaterialTheme.typography.bodyMedium)
+        Text("You do not have permission to view this document's content.", style = MaterialTheme.typography.bodyMedium)
         Text("Label: ${document.label.ifBlank { "(none)" }}", modifier = Modifier.padding(top = 8.dp))
         Text("Department: ${document.departmentCode.name}")
         Text("Record type: ${document.recordTypeCode.name}")

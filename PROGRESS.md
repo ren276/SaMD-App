@@ -4423,3 +4423,68 @@ Risk file: the H-18 entry is extended with the camera-assembly controls and resi
 PROPOSED, AWAITING OPERATOR SIGN-OFF, not approved by the act of writing it.
 
 Not committed as of this entry - awaiting operator authorization per session instructions.
+
+## Consultation documents: cadre role-visibility gate (Build 3c) — 2026-09-04
+
+Build 3c of the consultation-documents track (design memo:
+`scratchpad/consultation-documents-and-prescription-gate-memo.md`, Feature 1 Part B7;
+`docs/domain/phc-workforce-scope.md`, the three-tier cadre model). Branch
+`feat/consultation-documents-cadre-gate`. Last piece of the documents feature: replaces Build 3a's
+interim uploader-or-`DOCTOR` gate with the operator-signed cadre mapping.
+
+**What shipped.** `CadreTier` (`PHYSICIAN`/`LICENSED_CLINICAL`/`COMMUNITY`, `AuthSession.kt`), an
+operator-signed mapping from the existing four `UserRole` values (`DOCTOR`→`PHYSICIAN`;
+`NURSE`/`COMPOUNDER`→`LICENSED_CLINICAL`; `ASHA_WORKER`→`COMMUNITY`), with a clearly-commented
+single insertion point for a future `CHO`→`PHYSICIAN` mapping — CHO stays deferred, not added.
+`DocumentAccessAuthorizer` (`domain/document/DocumentAccessAuthorizer.kt`) is the single
+authorization seam: `authorize(document, session)` returns `GRANTED_TIER` (physician),
+`GRANTED_UPLOADER` (the uploader, regardless of tier — a named, deliberate exception), or
+`DENIED_TIER` (everyone else). `DocumentViewerViewModel` calls this once and returns BEFORE
+`loadContent` for a denied outcome, so the decrypt/render path is never reached for a denied
+viewer — not merely hidden behind a UI flag. The viewer's non-content state now reads "You do not
+have permission to view this document's content." Tier-uniform for now: `LICENSED_CLINICAL` and
+`COMMUNITY` both get the metadata-only surface (label, department, record type, existence);
+per-`RecordTypeCode` gating is a deferred refinement, not built. The documents LIST is unaffected —
+it was already metadata-only for every role and stays that way; only whether tapping a row opens
+raw content changed.
+
+`document_viewed`'s audit payload is extended with `viewerRole` (already present) and a new
+`accessResult` (`granted`/`granted_uploader`/`denied_tier`), so a denied access attempt is now
+itself an audit-worthy event, not just a successful view. The `document_viewed` action string is
+unchanged, so the backend set-agreement test is unaffected — no new `AuditAction` was needed.
+
+**No exhaustive `when()` needed a behavioral decision.** The only `when(UserRole)` sites in `main`
+are this build's mechanical `UserRole.toCadreTier()` mapping and the pre-existing, purely cosmetic
+`UserRoleDisplay.kt` — neither required a STOP.
+
+**H-06 caveat, stated plainly:** `UserRole` is self-asserted at login (`MockAuthSession` has no
+credential check), so this gate is an accountability/intent control and an incidental-exposure
+control, not access control against a determined actor. It closes the "any role can open any
+document" surface and makes a bypass a deliberate act that leaves a userId in the audit trail.
+
+**Known gap, inherited from 3a, not introduced here:** no test (unit or instrumented) exercises the
+`document_viewed` audit firing on a *successful* render — `PdfRenderer`/`BitmapFactory` are Android
+stubs in the plain-JVM unit-test environment (no Robolectric in this module) and throw once
+actually invoked, and no androidTest for `DocumentViewerViewModel` existed before this build either.
+The load-bearing assertion (decrypt is NOT reached for a denied viewer, proven by a
+`FakeConsultationDocumentRepository.readDecryptedCallCount` of 0) and its positive-path counterpart
+(decrypt IS attempted for a granted viewer, call count 1) are both unit-tested; the audit-fires-on-
+denial payload contents are also unit-tested. Audit-fires-on-a-*successful*-render specifically
+would need a real device/emulator render pipeline and is not covered by this commit.
+
+`testDevDebugUnitTest`: 372 passed (355 + 17 new), 0 failed. New: `DocumentAccessAuthorizerTest` (7,
+pure gate-decision matrix), `DocumentViewerViewModelTest` (7, ViewModel wiring, load-bearing
+decrypt-not-reached assertion, denied-audit-payload), plus one addition to
+`PatientSummaryViewModelTest` (documents list still metadata-visible to a non-physician role).
+
+`connectedDevDebugAndroidTest` on `emulator-5554`: pending — this checkpoint is reporting before
+running the device suite; see the session report for status once run.
+
+No schema change: this is authorization logic over existing rows.
+
+Risk file: the H-18 entry is extended with the Build 3c cadre-gate controls (xvii-xxii) and two new
+opens (the tier-uniform mapping's divergence from the design memo's B7 lean, and CHO remaining
+deferred). `docs/domain/phc-workforce-scope.md` gets a short status-update note. Still PROPOSED,
+AWAITING OPERATOR SIGN-OFF, not approved by the act of writing it.
+
+Not committed as of this entry - awaiting operator authorization per session instructions.

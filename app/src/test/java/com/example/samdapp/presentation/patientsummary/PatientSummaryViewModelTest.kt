@@ -4,8 +4,12 @@ import com.example.samdapp.domain.auth.UserRole
 import com.example.samdapp.domain.auth.UserSession
 import com.example.samdapp.domain.model.CaseRecord
 import com.example.samdapp.domain.model.CaseStatus
+import com.example.samdapp.domain.model.ConsultationDocument
 import com.example.samdapp.domain.model.ConsultationHistoryEntry
+import com.example.samdapp.domain.model.DepartmentCode
+import com.example.samdapp.domain.model.DocumentSource
 import com.example.samdapp.domain.model.InferenceSource
+import com.example.samdapp.domain.model.RecordTypeCode
 import com.example.samdapp.domain.usecase.SubmitDoctorDecisionUseCase
 import com.example.samdapp.testutil.FakeAuditLogger
 import com.example.samdapp.testutil.FakeAuthSession
@@ -20,6 +24,7 @@ import com.example.samdapp.testutil.FakeKernelReportRepository
 import com.example.samdapp.testutil.FakePatientRepository
 import com.example.samdapp.testutil.FakePrescriptionRepository
 import com.example.samdapp.testutil.MainDispatcherRule
+import com.example.samdapp.testutil.testConsultation
 import com.example.samdapp.testutil.testKernelReportOutput
 import com.example.samdapp.testutil.testPatient
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -50,6 +55,8 @@ class PatientSummaryViewModelTest {
         // the behaviour of every pre-existing test in this file; the gate itself is covered by a
         // dedicated test below.
         authSession: FakeAuthSession = FakeAuthSession(UserSession("doc-1", "Dr. Test", UserRole.DOCTOR)),
+        consultationRepository: FakeConsultationRepository = FakeConsultationRepository(),
+        consultationDocumentRepository: FakeConsultationDocumentRepository = FakeConsultationDocumentRepository(),
     ): PatientSummaryViewModel {
         val patientRepo = FakePatientRepository().apply { registered = testPatient(patientId) }
         return PatientSummaryViewModel(
@@ -68,8 +75,8 @@ class PatientSummaryViewModelTest {
                 auditLogger = FakeAuditLogger(),
             ),
             authSession = authSession,
-            consultationRepository = FakeConsultationRepository(),
-            consultationDocumentRepository = FakeConsultationDocumentRepository(),
+            consultationRepository = consultationRepository,
+            consultationDocumentRepository = consultationDocumentRepository,
         )
     }
 
@@ -234,5 +241,34 @@ class PatientSummaryViewModelTest {
         // No manual drug name or dosage entered — REJECT has no medication, only the reason.
         vm.onRejectReasonChange("Vitals inconsistent with the AI candidate; refer for specialist review.")
         assertTrue(vm.uiState.value.canConfirmDecision)
+    }
+
+    /** H-18, Build 3c: the cadre gate lives entirely in the viewer ([DocumentViewerViewModel]) —
+     *  the list itself stays the ABSTRACTED/METADATA surface, visible to every role, so an
+     *  ASHA_WORKER must still see that a document exists, its label, department and type. */
+    @Test
+    fun `the documents list shows metadata to every role, not just physicians`() = runTest(mainDispatcherRule.dispatcher) {
+        val caseRecord = CaseRecord(
+            id = "case-1", patientId = "p1", encounterId = "enc-1", status = CaseStatus.SENT_TO_DOCTOR,
+            assignedDoctorId = null, createdAt = java.time.Instant.EPOCH, updatedAt = java.time.Instant.EPOCH,
+        )
+        val consultation = testConsultation(encounterId = "enc-1", patientId = "p1")
+        val document = ConsultationDocument(
+            id = "doc-1", consultationId = consultation.id, patientId = "p1", abhaNumber = null, label = "Blood test",
+            canonicalName = "canonical", departmentCode = DepartmentCode.CARDIO, recordTypeCode = RecordTypeCode.LAB_REPORT,
+            storageKey = "key", mimeType = "application/pdf", sizeBytes = 500L, sha256 = "hash",
+            source = DocumentSource.DIRECT_FILE, pageCount = null, uploadedAt = java.time.Instant.EPOCH,
+            uploaderUserId = "worker-1", uploaderRole = "ASHA_WORKER", retractedAt = null, retractionReason = null,
+        )
+        val vm = viewModel(
+            caseRecordRepository = FakeCaseRecordRepository(initial = listOf(caseRecord)),
+            authSession = FakeAuthSession(UserSession("worker-2", "An ASHA", UserRole.ASHA_WORKER)),
+            consultationRepository = FakeConsultationRepository(byEncounter = mapOf("enc-1" to consultation)),
+            consultationDocumentRepository = FakeConsultationDocumentRepository().apply { saved[document.id] = document },
+        )
+
+        advanceUntilIdle()
+
+        assertEquals(listOf("Blood test"), vm.uiState.value.documents.map { it.label })
     }
 }
