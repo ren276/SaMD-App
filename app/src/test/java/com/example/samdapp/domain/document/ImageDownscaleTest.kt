@@ -1,6 +1,7 @@
 package com.example.samdapp.domain.document
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -53,5 +54,12 @@ class ImageDownscaleTest {
     @Test
     fun `a degenerate zero dimension terminates instead of looping`() {
         assertEquals(1, computeInSampleSize(0, 0, 1600))
+    }
+
+    @Test
+    fun `a non-positive bound is rejected instead of looping forever`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            computeInSampleSize(3200, 2400, 0)
+        }
     }
 }

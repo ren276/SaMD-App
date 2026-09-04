@@ -11,8 +11,13 @@ package com.example.samdapp.domain.document
  *
  * Extracted from the Build 3a document viewer, which had the identical private copy, so the
  * viewer and the Build 3b assembler downscale by the same rule and one unit test covers both.
+ *
+ * [maxDimension] must be positive: a zero or negative bound has no sample size that satisfies it,
+ * so the loop below would never terminate. Every call site passes a compile-time constant, so this
+ * is a programming error rather than a runtime condition, and it fails loudly at the boundary.
  */
 fun computeInSampleSize(width: Int, height: Int, maxDimension: Int): Int {
+    require(maxDimension > 0) { "maxDimension must be positive, was $maxDimension" }
     var sampleSize = 1
     while (width / sampleSize > maxDimension || height / sampleSize > maxDimension) {
         sampleSize *= 2
