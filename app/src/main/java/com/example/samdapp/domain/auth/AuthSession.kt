@@ -12,6 +12,28 @@ import kotlinx.coroutines.flow.Flow
 enum class UserRole { ASHA_WORKER, NURSE, COMPOUNDER, DOCTOR }
 
 /**
+ * Scope-of-practice tier a [UserRole] maps to (H-18, Build 3c) — see
+ * `docs/domain/phc-workforce-scope.md`'s three-tier cadre model. The document-visibility gate
+ * ([com.example.samdapp.domain.document.DocumentAccessAuthorizer]) keys off this tier, not role
+ * identity, so a future cadre (e.g. CHO) is a one-line mapping change, not a gate rewrite.
+ */
+enum class CadreTier { PHYSICIAN, LICENSED_CLINICAL, COMMUNITY }
+
+/**
+ * Operator-selected mapping (H-18, Build 3c risk entry, proposed, not yet signed off). CHO is
+ * deferred — not a current [UserRole] value, so it is not mapped here. The insertion point for
+ * `UserRole.CHO -> CadreTier.PHYSICIAN`,
+ * when that role is added, is this `when` block; do not add CHO without a separate operator
+ * decision.
+ */
+fun UserRole.toCadreTier(): CadreTier = when (this) {
+    UserRole.DOCTOR -> CadreTier.PHYSICIAN
+    UserRole.NURSE, UserRole.COMPOUNDER -> CadreTier.LICENSED_CLINICAL
+    UserRole.ASHA_WORKER -> CadreTier.COMMUNITY
+    // CHO insertion point (deferred, not added): UserRole.CHO -> CadreTier.PHYSICIAN
+}
+
+/**
  * [userId] is a locally-generated opaque id, not the person's name — same data-minimization
  * shape as [com.example.samdapp.domain.model.Patient.id]/[com.example.samdapp.domain.model.CaseRecord.id]:
  * an ID for correlation, not a display value copied into every audit row. [name]/[role] are kept
