@@ -275,7 +275,7 @@ class AndroidDocumentCaptureStore @Inject constructor(
                 PdfDocument.PageInfo.Builder(PAGE_WIDTH_PT, PAGE_HEIGHT_PT, index + 1).create(),
             )
             try {
-                drawFitted(page.canvas, bitmap, exifRotationDegrees(ExifInterface(ByteArrayInputStream(plaintext))))
+                drawFitted(page.canvas, bitmap, exifRotationDegrees { ExifInterface(ByteArrayInputStream(plaintext)) })
             } finally {
                 document.finishPage(page)
             }
@@ -314,8 +314,13 @@ class AndroidDocumentCaptureStore @Inject constructor(
         canvas.restore()
     }
 
-    private fun exifRotationDegrees(exif: ExifInterface): Int = try {
-        when (exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
+    /**
+     * The reader is constructed INSIDE the `try`, not passed in: every `ExifInterface` constructor
+     * declares `IOException`, so building one at the call site would put the failure outside this
+     * fallback and let unreadable EXIF fail a page whose pixels decoded fine.
+     */
+    private fun exifRotationDegrees(openExif: () -> ExifInterface): Int = try {
+        when (openExif().getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
             ExifInterface.ORIENTATION_ROTATE_90 -> 90
             ExifInterface.ORIENTATION_ROTATE_180 -> 180
             ExifInterface.ORIENTATION_ROTATE_270 -> 270
@@ -338,7 +343,7 @@ class AndroidDocumentCaptureStore @Inject constructor(
             inSampleSize = computeInSampleSize(bounds.outWidth, bounds.outHeight, THUMBNAIL_MAX_DIMENSION)
         }
         val decoded = BitmapFactory.decodeFile(staging.absolutePath, options) ?: return null
-        val rotation = exifRotationDegrees(ExifInterface(staging.absolutePath))
+        val rotation = exifRotationDegrees { ExifInterface(staging.absolutePath) }
         val upright = if (rotation == 0) {
             decoded
         } else {

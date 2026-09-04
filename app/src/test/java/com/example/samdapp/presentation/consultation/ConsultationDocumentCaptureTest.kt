@@ -14,6 +14,7 @@ import com.example.samdapp.testutil.FakeConsultationRepository
 import com.example.samdapp.testutil.FakeDocumentCaptureStore
 import com.example.samdapp.testutil.FakeTranscriptionService
 import com.example.samdapp.testutil.MainDispatcherRule
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -245,7 +246,8 @@ class ConsultationDocumentCaptureTest {
     fun `an aborted assembly queues no document and keeps the pages for a retry`() =
         runTest(mainDispatcherRule.dispatcher) {
             val viewModel = newViewModel()
-            captureStore.assembleResult = { Result.failure(IllegalStateException("Captured page 2 could not be read")) }
+            captureStore.assembleResult =
+                { _, _ -> Result.failure(IllegalStateException("Captured page 2 could not be read")) }
             startCaptureWith(viewModel, pages = 3)
 
             viewModel.onFinishDocumentCapture()
@@ -268,4 +270,36 @@ class ConsultationDocumentCaptureTest {
         assertFalse(capture.canAddPage)
         assertTrue(capture.canFinish)
     }
+
+    /**
+     * R5 under a race: the camera result and the discard button are two coroutines, and the store
+     * recreates the session directory on write. A page that lands after `discardSession` would be
+     * encrypted PHI with no session, no metadata row and no owner - the exact posture R5 exists to
+     * prevent - so the discard has to wait for the in-flight ingestion, not merely start after it.
+     */
+    @Test
+    fun `discarding waits for an in-flight page ingestion before deleting the session`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val viewModel = newViewModel()
+            viewModel.onDocumentDepartmentSelected(DepartmentCode.CARDIO)
+            viewModel.onDocumentRecordTypeSelected(RecordTypeCode.LAB_REPORT)
+            viewModel.onStartDocumentCapture()
+            val sessionId = viewModel.uiState.value.documentCapture!!.sessionId
+
+            val stillEncrypting = CompletableDeferred<Unit>()
+            captureStore.ingestGate = stillEncrypting
+            viewModel.onAddDocumentPage()
+            advanceUntilIdle()
+            viewModel.onDocumentPageCaptured(saved = true)
+            advanceUntilIdle()
+
+            viewModel.onConfirmDiscardDocumentCapture()
+            advanceUntilIdle()
+            stillEncrypting.complete(Unit)
+            advanceUntilIdle()
+
+            assertTrue(captureStore.discardedSessions.contains(sessionId))
+            assertFalse(captureStore.sessions.containsKey(sessionId))
+            assertNull(viewModel.uiState.value.documentCapture)
+        }
 }

@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -584,6 +585,11 @@ class ConsultationViewModel @AssistedInject constructor(
      *  (R8) - the store's own cancellation handler owns the cleanup, not this field. */
     private var assemblyJob: Job? = null
 
+    /** The in-flight page ingestion, held so a discard can WAIT for it rather than race it: the
+     *  store recreates the session directory on write, so a page that lands after `discardSession`
+     *  is encrypted PHI on disk with no session, no metadata row and no owner. */
+    private var ingestJob: Job? = null
+
     override fun onStartDocumentCapture() {
         val state = _uiState.value
         if (!state.canPickDocument || state.documentCapture != null) return
@@ -618,7 +624,7 @@ class ConsultationViewModel @AssistedInject constructor(
     override fun onDocumentPageCaptured(saved: Boolean) {
         val capture = _uiState.value.documentCapture ?: return
         val pageId = capture.pendingPageId ?: return
-        viewModelScope.launch {
+        ingestJob = viewModelScope.launch {
             if (!saved) {
                 documentCaptureStore.discardStaging(capture.sessionId, pageId)
                 updateCapture { it.copy(pendingPageId = null, pendingStagingPath = null) }
@@ -730,8 +736,16 @@ class ConsultationViewModel @AssistedInject constructor(
         val capture = _uiState.value.documentCapture ?: return
         assemblyJob?.cancel()
         assemblyJob = null
+        val ingest = ingestJob
+        ingestJob = null
         _uiState.update { it.copy(documentCapture = null) }
-        viewModelScope.launch { documentCaptureStore.discardSession(capture.sessionId) }
+        viewModelScope.launch {
+            // Cancel first so an ingestion that has not started encrypting stops there, then JOIN:
+            // one already past its cancellation points still finishes its write, and the delete
+            // has to come after it or the page it wrote outlives the session.
+            ingest?.cancelAndJoin()
+            documentCaptureStore.discardSession(capture.sessionId)
+        }
     }
 
     override fun onDismissDocumentCaptureError() = updateCapture { it.copy(errorMessage = null) }

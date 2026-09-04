@@ -792,11 +792,15 @@ class FakeDocumentCaptureStore : com.example.samdapp.domain.document.DocumentCap
     var ingestResult: (String) -> Result<com.example.samdapp.domain.document.CapturedPage> = { pageId ->
         Result.success(com.example.samdapp.domain.document.CapturedPage(pageId, ByteArray(4)))
     }
-    var assembleResult: (List<String>) -> Result<com.example.samdapp.domain.document.DocumentBytes.AssembledCapture> =
-        { pageIds ->
+    /** Takes the session id as well as the page order so the DEFAULT result carries the session
+     *  that was actually assembled - a hardcoded one would queue the second capture of a test
+     *  under the first capture's id. A custom result is returned untouched. */
+    var assembleResult:
+        (String, List<String>) -> Result<com.example.samdapp.domain.document.DocumentBytes.AssembledCapture> =
+        { sessionId, pageIds ->
             Result.success(
                 com.example.samdapp.domain.document.DocumentBytes.AssembledCapture(
-                    captureSessionId = "session-1",
+                    captureSessionId = sessionId,
                     pageCount = pageIds.size,
                     sizeBytes = 1234L,
                     sha256 = "assembled-hash",
@@ -810,11 +814,17 @@ class FakeDocumentCaptureStore : com.example.samdapp.domain.document.DocumentCap
 
     override suspend fun stagingPathFor(sessionId: String, pageId: String): String = "/tmp/$sessionId/$pageId.jpg"
 
+    /** Held open by a test that needs an ingestion to still be in flight when something else -
+     *  a discard - happens. Null means ingestion completes immediately, as it does everywhere else. */
+    var ingestGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+
     override suspend fun ingestPage(
         sessionId: String,
         pageId: String,
-    ): Result<com.example.samdapp.domain.document.CapturedPage> =
-        ingestResult(pageId).onSuccess { sessions.getOrPut(sessionId) { mutableListOf() } += pageId }
+    ): Result<com.example.samdapp.domain.document.CapturedPage> {
+        ingestGate?.await()
+        return ingestResult(pageId).onSuccess { sessions.getOrPut(sessionId) { mutableListOf() } += pageId }
+    }
 
     override suspend fun discardStaging(sessionId: String, pageId: String) {
         discardedStaging += pageId
@@ -836,6 +846,6 @@ class FakeDocumentCaptureStore : com.example.samdapp.domain.document.DocumentCap
     ): Result<com.example.samdapp.domain.document.DocumentBytes.AssembledCapture> {
         assembledOrders += orderedPageIds
         orderedPageIds.forEachIndexed { index, _ -> onProgress(index + 1, orderedPageIds.size) }
-        return assembleResult(orderedPageIds)
+        return assembleResult(sessionId, orderedPageIds)
     }
 }

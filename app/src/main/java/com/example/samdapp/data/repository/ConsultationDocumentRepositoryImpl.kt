@@ -189,7 +189,15 @@ class ConsultationDocumentRepositoryImpl @Inject constructor(
             val destFile = File(documentsDir(consultationId), storageKey)
 
             if (!assembled.renameTo(destFile)) {
-                assembled.copyTo(destFile, overwrite = true)
+                // A copy that throws part-way leaves encrypted PHI at `destFile` with no metadata
+                // row to own it, and the capture session's own cleanup cannot reach into the
+                // document directory. The half-written file is deleted before the failure escapes.
+                try {
+                    assembled.copyTo(destFile, overwrite = true)
+                } catch (error: Exception) {
+                    destFile.delete()
+                    throw error
+                }
                 assembled.delete()
             }
 
