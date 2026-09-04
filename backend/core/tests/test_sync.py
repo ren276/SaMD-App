@@ -1038,7 +1038,9 @@ async def test_document_retracted_audit_row_is_accepted_and_persisted(
     client: AsyncClient, auth_headers: dict[str, str], session: AsyncSession
 ) -> None:
     """Same proof for the retract action. The metadata row itself is never deleted device-side;
-    this audit row is what stands alongside the still-standing document_uploaded row."""
+    this audit row is what stands alongside the still-standing document_uploaded row. `reason` is
+    a controlled RetractionReasonCode, never worker free text (PR 37 review) — the payload here
+    matches that shape."""
     response = await push(
         client,
         auth_headers,
@@ -1048,7 +1050,7 @@ async def test_document_retracted_audit_row_is_accepted_and_persisted(
                 action="document_retracted",
                 case_record_id=None,
                 payload=(
-                    '{"documentId":"doc-1","reason":"wrong patient","actorRole":"DOCTOR",'
+                    '{"documentId":"doc-1","reason":"WRONG_PATIENT","actorRole":"DOCTOR",'
                     '"bytesDeleted":"1024"}'
                 ),
             )
@@ -1060,3 +1062,4 @@ async def test_document_retracted_audit_row_is_accepted_and_persisted(
         await session.execute(select(AuditEvent).where(AuditEvent.action == "document_retracted"))
     ).scalar_one()
     assert row.origin == "DEVICE"
+    assert "wrong patient" not in row.payload.lower()

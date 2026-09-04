@@ -34,6 +34,21 @@ enum class RecordTypeCode {
 }
 
 /**
+ * Controlled reason vocabulary for retracting a document (H-18, Build 3a — added on review of PR
+ * 37). The **audit trail** (`AuditAction.DOCUMENT_RETRACTED`'s `reason` payload field) carries
+ * only this code, never worker free text — same rule every other audit payload in this schema
+ * already follows (label, drug name, transcripts are all excluded for the same reason: free text
+ * a worker types can contain another patient's name, and the audit trail is durable and, once
+ * synced, hash-chained). A free-text elaboration is still allowed on the **local, unsynced**
+ * [ConsultationDocument] metadata row itself
+ * ([RetractConsultationDocumentUseCase]'s `reasonText` parameter) — that column was already part
+ * of the operator-signed schema and is not touched by this change.
+ */
+enum class RetractionReasonCode {
+    WRONG_PATIENT, WRONG_CONSULTATION, DUPLICATE, UPLOADED_IN_ERROR, OTHER,
+}
+
+/**
  * How a [ConsultationDocument]'s bytes were produced. Only [DIRECT_FILE] is emitted by Build 3a
  * (PATH A, an existing PDF/JPEG/PNG the worker already has). [CAMERA_ASSEMBLED] is Build 3b's
  * multi-page camera capture, pre-declared here (same reasoning as `AuditAction.KERNEL_EMPTY_DIFFERENTIAL`

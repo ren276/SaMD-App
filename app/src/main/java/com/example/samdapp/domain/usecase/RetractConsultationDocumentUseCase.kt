@@ -6,6 +6,7 @@ import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.auth.AuthSession
 import com.example.samdapp.domain.auth.UserRole
+import com.example.samdapp.domain.model.RetractionReasonCode
 import com.example.samdapp.domain.repository.ConsultationDocumentRepository
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
@@ -19,13 +20,24 @@ import javax.inject.Inject
  * sign-in PIN), so this is an accountability/intent gate on who is recorded as retracting a
  * document, not access control. Same caveat as the `UserRole.DOCTOR` decision-surface gate
  * (H-17, Build 1, `PatientSummaryViewModel.canOpenDoctorReview`).
+ *
+ * [reasonCode] and [reasonText] are deliberately separate (added on review of PR 37, same
+ * reasoning as [com.example.samdapp.domain.model.RetractionReasonCode]'s KDoc): [reasonCode] is
+ * what reaches the durable `DOCUMENT_RETRACTED` audit row; [reasonText] is optional free-text
+ * elaboration persisted only on the local, unsynced [com.example.samdapp.domain.model.ConsultationDocument]
+ * row (`ConsultationDocumentRepository.retract`'s existing `reason` parameter), never the audit
+ * trail.
  */
 class RetractConsultationDocumentUseCase @Inject constructor(
     private val repository: ConsultationDocumentRepository,
     private val authSession: AuthSession,
     private val auditLogger: AuditLogger,
 ) {
-    suspend operator fun invoke(documentId: String, reason: String?): Result<Unit> {
+    suspend operator fun invoke(
+        documentId: String,
+        reasonCode: RetractionReasonCode,
+        reasonText: String? = null,
+    ): Result<Unit> {
         val session = authSession.currentUser().first()
             ?: return Result.failure(IllegalStateException("No signed-in session"))
         val document = repository.getById(documentId)
@@ -42,14 +54,14 @@ class RetractConsultationDocumentUseCase @Inject constructor(
             )
         }
 
-        val result = repository.retract(documentId, reason)
+        val result = repository.retract(documentId, reasonText)
         result.onSuccess {
             auditLogger.log(
                 action = AuditAction.DOCUMENT_RETRACTED,
                 patientId = document.patientId,
                 payload = auditPayload(
                     "documentId" to documentId,
-                    "reason" to reason,
+                    "reason" to reasonCode.name,
                     "actorRole" to session.role.name,
                     "bytesDeleted" to document.sizeBytes.toString(),
                 ),
