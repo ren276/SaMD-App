@@ -128,6 +128,16 @@ this gate is built, belongs in `docs/quality/risk-management-file.md` as a separ
 operator-signed entry; this document supplies the clinical facts that entry would reason from, not
 the entry itself.
 
+**Status update (Build 3c, 2026-09-04):** the document-visibility gate this section anticipates is
+now built (`CadreTier`, `DocumentAccessAuthorizer`, H-18 in the risk file), but only against the
+four roles the app actually has today — `DOCTOR → PHYSICIAN`, `NURSE`/`COMPOUNDER →
+LICENSED_CLINICAL`, `ASHA_WORKER → COMMUNITY`. CHO is still not a `UserRole` value, so the tier-1
+CHO nuance this document describes (full for lab reports, scope-advisory for raw imaging) is not
+yet buildable or testable; a clearly-commented insertion point exists in `UserRole.toCadreTier()`
+for the day CHO is added. The shipped gate is also tier-uniform (no per-`RecordTypeCode` split)
+rather than the lab-report/imaging distinction this section's lean describes — a deliberate
+narrower first cut, recorded as an open item on H-18, not a rejection of the distinction.
+
 ## Regulatory framing
 
 This tier structure sits inside the app's existing IPHS 2022 / HWC-PHC operating context and the
