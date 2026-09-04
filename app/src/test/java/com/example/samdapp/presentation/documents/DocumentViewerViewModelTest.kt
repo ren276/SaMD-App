@@ -61,11 +61,20 @@ class DocumentViewerViewModelTest {
     /** [DocumentViewerViewModel.loadContent] hops to the real `Dispatchers.IO` thread pool, which
      *  [MainDispatcherRule]'s virtual test scheduler cannot see — `advanceUntilIdle()` drains the
      *  Main queue only, so a granted-path assertion racing the real IO thread needs a real-time
-     *  poll instead. The denied path never reaches this hop (it returns before `loadContent`), so
-     *  it needs no such wait — that asymmetry is itself part of what these tests prove. */
-    private fun awaitDecryptAttempt(repo: FakeConsultationDocumentRepository, timeoutMs: Long = 2000) {
+     *  wait instead. The denied path never reaches this hop (it returns before `loadContent`), so
+     *  it needs no such wait — that asymmetry is itself part of what these tests prove.
+     *
+     *  Waiting only for [FakeConsultationDocumentRepository.readDecryptedCallCount] to move is not
+     *  enough: `readDecrypted` is called partway through `loadContent`, so the coroutine can still
+     *  be mid-render when that count changes. If the test method returns before the coroutine
+     *  finishes and resumes onto Main to update `uiState`, `MainDispatcherRule.finished()` has
+     *  already reset Main by the time it does — that resume then hits the real (Looper-backed)
+     *  Main dispatcher on a plain-JVM test and throws, corrupting whatever test runs next in the
+     *  same forked JVM. Waiting for [DocumentViewerUiState.isLoading] to clear proves the whole
+     *  coroutine, including that final Main-thread resume, is actually done. */
+    private fun awaitLoaded(vm: DocumentViewerViewModel, timeoutMs: Long = 2000) {
         val deadline = System.currentTimeMillis() + timeoutMs
-        while (repo.readDecryptedCallCount == 0 && System.currentTimeMillis() < deadline) {
+        while (vm.uiState.value.isLoading && System.currentTimeMillis() < deadline) {
             Thread.sleep(5)
         }
     }
@@ -88,7 +97,7 @@ class DocumentViewerViewModelTest {
         val vm = viewModel(repo, UserSession("doc-9", "Dr. Someone", UserRole.DOCTOR))
 
         advanceUntilIdle()
-        awaitDecryptAttempt(repo)
+        awaitLoaded(vm)
 
         assertTrue(vm.uiState.value.canViewContent)
         assertEquals(1, repo.readDecryptedCallCount)
@@ -138,7 +147,7 @@ class DocumentViewerViewModelTest {
         val vm = viewModel(repo, UserSession("worker-2", "A Nurse", UserRole.NURSE))
 
         advanceUntilIdle()
-        awaitDecryptAttempt(repo)
+        awaitLoaded(vm)
 
         assertTrue(vm.uiState.value.canViewContent)
         assertEquals(1, repo.readDecryptedCallCount)
@@ -150,7 +159,7 @@ class DocumentViewerViewModelTest {
         val vm = viewModel(repo, UserSession("worker-2", "An ASHA", UserRole.ASHA_WORKER))
 
         advanceUntilIdle()
-        awaitDecryptAttempt(repo)
+        awaitLoaded(vm)
 
         assertTrue(vm.uiState.value.canViewContent)
         assertEquals(1, repo.readDecryptedCallCount)
