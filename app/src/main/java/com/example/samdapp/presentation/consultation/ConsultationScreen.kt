@@ -143,6 +143,30 @@ internal fun ConsultationContent(uiState: ConsultationUiState, actions: Consulta
         }
     }
 
+    // H-18, Build 3b. Same platform `TakePicture` primitive as the affected-area photo above, but
+    // deliberately NOT its storage posture: that path hands the camera a `cacheDir/attachments`
+    // JPEG and leaves it there in plaintext (the H-19 gap). Here the frame lands in its own
+    // staging directory and `onDocumentPageCaptured` encrypts it into the capture session and
+    // deletes the plaintext before the next page can be taken.
+    val takeDocumentPageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { saved ->
+        actions.onDocumentPageCaptured(saved)
+    }
+    val capture = uiState.documentCapture
+    LaunchedEffect(capture?.pendingPageId) {
+        val stagingPath = capture?.pendingStagingPath ?: return@LaunchedEffect
+        takeDocumentPageLauncher.launch(
+            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", File(stagingPath)),
+        )
+    }
+    if (capture != null) {
+        LaunchFirstCapturePage(capture = capture, actions = actions)
+        DocumentCaptureSurface(capture = capture, actions = actions)
+    }
+    val requestCameraForDocumentScan = rememberPermissionAction(
+        permission = Manifest.permission.CAMERA,
+        onGranted = actions::onStartDocumentCapture,
+    )
+
     val requestVoiceForChiefComplaint =
         rememberPermissionAction(Manifest.permission.RECORD_AUDIO, actions::onRecordChiefComplaintVoice)
     val requestVoiceForAttachment =
@@ -357,6 +381,15 @@ internal fun ConsultationContent(uiState: ConsultationUiState, actions: Consulta
                     enabled = uiState.canPickDocument,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
                 ) { Text("Pick file (PDF, JPEG, or PNG)", style = MaterialTheme.typography.titleMedium) }
+            }
+            item {
+                // H-18, Build 3b, PATH B. Gated on the same controlled-vocabulary selections as
+                // the file picker: a scanned report is never queued with a guessed department.
+                OutlinedButton(
+                    onClick = requestCameraForDocumentScan,
+                    enabled = uiState.canPickDocument && uiState.documentCapture == null,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("scanReportPages"),
+                ) { Text("Scan report pages with camera", style = MaterialTheme.typography.titleMedium) }
             }
 
             item {

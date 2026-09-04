@@ -507,3 +507,22 @@ val MIGRATION_17_18 = object : Migration(17, 18) {
         )
     }
 }
+
+/**
+ * H-18, Build 3b. Adds the `pageCount` column the Build 3a table shipped without.
+ *
+ * The operator-signed design memo (`scratchpad/consultation-documents-and-prescription-gate-memo.md`,
+ * B3) listed `pageCount Int?` in the `consultation_documents` column table; `MIGRATION_17_18` and
+ * the exported `18.json` omitted it. Build 3b needs it: `DocumentSource.CAMERA_ASSEMBLED` rows
+ * record how many captured pages were consolidated into the assembled PDF, and the
+ * `DOCUMENT_UPLOADED` audit payload carries that number at write time.
+ *
+ * Purely additive and nullable with no default: every existing row is `DIRECT_FILE`, for which a
+ * page count was never measured, so NULL is the honest value and there is nothing to backfill.
+ * `ALTER TABLE ... ADD COLUMN` on a nullable column is SQLite's one always-safe alter.
+ */
+val MIGRATION_18_19 = object : Migration(18, 19) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL("ALTER TABLE `consultation_documents` ADD COLUMN `pageCount` INTEGER")
+    }
+}

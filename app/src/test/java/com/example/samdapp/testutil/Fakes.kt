@@ -716,8 +716,7 @@ class FakeConsultationDocumentRepository : com.example.samdapp.domain.repository
 
     override suspend fun upload(
         consultationId: String,
-        sourceUri: String,
-        claimedMimeType: String?,
+        bytes: com.example.samdapp.domain.document.DocumentBytes,
         label: String,
         departmentCode: com.example.samdapp.domain.model.DepartmentCode,
         recordTypeCode: com.example.samdapp.domain.model.RecordTypeCode,
@@ -728,7 +727,14 @@ class FakeConsultationDocumentRepository : com.example.samdapp.domain.repository
             id = "doc-${saved.size + 1}", consultationId = consultationId, patientId = "p1", abhaNumber = null,
             label = label, canonicalName = "canonical", departmentCode = departmentCode, recordTypeCode = recordTypeCode,
             storageKey = "storage-key", mimeType = "application/pdf", sizeBytes = 100L, sha256 = "hash",
-            source = com.example.samdapp.domain.model.DocumentSource.DIRECT_FILE, uploadedAt = java.time.Instant.EPOCH,
+            source = when (bytes) {
+                is com.example.samdapp.domain.document.DocumentBytes.DirectFile ->
+                    com.example.samdapp.domain.model.DocumentSource.DIRECT_FILE
+                is com.example.samdapp.domain.document.DocumentBytes.AssembledCapture ->
+                    com.example.samdapp.domain.model.DocumentSource.CAMERA_ASSEMBLED
+            },
+            pageCount = (bytes as? com.example.samdapp.domain.document.DocumentBytes.AssembledCapture)?.pageCount,
+            uploadedAt = java.time.Instant.EPOCH,
             uploaderUserId = uploaderUserId, uploaderRole = uploaderRole, retractedAt = null, retractionReason = null,
         )
         val result = uploadResult?.invoke(document) ?: Result.success(document)
@@ -767,4 +773,69 @@ class FakeAuditLogRepository(
 
     override fun observeForPatient(patientId: String): Flow<List<AuditLogEntry>> =
         flowOf(entries.filter { it.patientId == patientId })
+}
+
+/**
+ * H-18, Build 3b. An in-memory capture store: page bytes are never real, so this fake is only
+ * good for the ORDER, MEMBERSHIP and LIFECYCLE assertions the ViewModel owns. The bytes-level
+ * guarantees (encrypt-as-captured, one bitmap at a time, an unreadable page aborting the
+ * assembly) need real Keystore/BitmapFactory/PdfDocument and live in `androidTest`.
+ */
+class FakeDocumentCaptureStore : com.example.samdapp.domain.document.DocumentCaptureStore {
+    override val maxPages: Int = 20
+
+    var sessions = mutableMapOf<String, MutableList<String>>()
+    val discardedSessions = mutableListOf<String>()
+    val discardedStaging = mutableListOf<String>()
+    /** The page order `assemble` was actually handed, per call. */
+    val assembledOrders = mutableListOf<List<String>>()
+    var ingestResult: (String) -> Result<com.example.samdapp.domain.document.CapturedPage> = { pageId ->
+        Result.success(com.example.samdapp.domain.document.CapturedPage(pageId, ByteArray(4)))
+    }
+    var assembleResult: (List<String>) -> Result<com.example.samdapp.domain.document.DocumentBytes.AssembledCapture> =
+        { pageIds ->
+            Result.success(
+                com.example.samdapp.domain.document.DocumentBytes.AssembledCapture(
+                    captureSessionId = "session-1",
+                    pageCount = pageIds.size,
+                    sizeBytes = 1234L,
+                    sha256 = "assembled-hash",
+                ),
+            )
+        }
+
+    private var nextSession = 0
+
+    override fun newSession(): String = "session-${++nextSession}".also { sessions[it] = mutableListOf() }
+
+    override suspend fun stagingPathFor(sessionId: String, pageId: String): String = "/tmp/$sessionId/$pageId.jpg"
+
+    override suspend fun ingestPage(
+        sessionId: String,
+        pageId: String,
+    ): Result<com.example.samdapp.domain.document.CapturedPage> =
+        ingestResult(pageId).onSuccess { sessions.getOrPut(sessionId) { mutableListOf() } += pageId }
+
+    override suspend fun discardStaging(sessionId: String, pageId: String) {
+        discardedStaging += pageId
+    }
+
+    override suspend fun deletePage(sessionId: String, pageId: String) {
+        sessions[sessionId]?.remove(pageId)
+    }
+
+    override suspend fun discardSession(sessionId: String) {
+        discardedSessions += sessionId
+        sessions.remove(sessionId)
+    }
+
+    override suspend fun assemble(
+        sessionId: String,
+        orderedPageIds: List<String>,
+        onProgress: (Int, Int) -> Unit,
+    ): Result<com.example.samdapp.domain.document.DocumentBytes.AssembledCapture> {
+        assembledOrders += orderedPageIds
+        orderedPageIds.forEachIndexed { index, _ -> onProgress(index + 1, orderedPageIds.size) }
+        return assembleResult(orderedPageIds)
+    }
 }

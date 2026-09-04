@@ -7,6 +7,7 @@ import com.example.samdapp.domain.usecase.UploadConsultationDocumentUseCase
 import com.example.samdapp.testutil.FakeAuditLogger
 import com.example.samdapp.testutil.FakeAuthSession
 import com.example.samdapp.testutil.FakeConsultationDocumentRepository
+import com.example.samdapp.testutil.FakeDocumentCaptureStore
 import com.example.samdapp.testutil.FakeConsultationRepository
 import com.example.samdapp.testutil.FakeTranscriptionService
 import com.example.samdapp.testutil.MainDispatcherRule
@@ -36,6 +37,7 @@ class ConsultationViewModelTest {
         consultationRepository: FakeConsultationRepository = FakeConsultationRepository(),
         transcriptionService: FakeTranscriptionService = FakeTranscriptionService(),
         auditLogger: FakeAuditLogger = FakeAuditLogger(),
+        documentCaptureStore: FakeDocumentCaptureStore = FakeDocumentCaptureStore(),
     ) = ConsultationViewModel(
         patientId = "p1",
         encounterId = "enc1",
@@ -45,6 +47,7 @@ class ConsultationViewModelTest {
         addAttachmentUseCase = AddAttachmentUseCase(consultationRepository),
         captureAudioAttachmentUseCase = CaptureAudioAttachmentUseCase(transcriptionService),
         uploadConsultationDocumentUseCase = UploadConsultationDocumentUseCase(FakeConsultationDocumentRepository(), auditLogger),
+        documentCaptureStore = documentCaptureStore,
         authSession = FakeAuthSession(),
         auditLogger = auditLogger,
     )

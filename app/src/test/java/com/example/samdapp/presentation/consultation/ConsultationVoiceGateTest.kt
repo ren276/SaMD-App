@@ -48,6 +48,7 @@ class ConsultationVoiceGateTest {
         addAttachmentUseCase = AddAttachmentUseCase(consultationRepository),
         captureAudioAttachmentUseCase = CaptureAudioAttachmentUseCase(transcriptionService),
         uploadConsultationDocumentUseCase = UploadConsultationDocumentUseCase(FakeConsultationDocumentRepository(), FakeAuditLogger()),
+        documentCaptureStore = com.example.samdapp.testutil.FakeDocumentCaptureStore(),
         authSession = FakeAuthSession(),
         auditLogger = FakeAuditLogger(),
     )

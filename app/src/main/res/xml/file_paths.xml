@@ -2,4 +2,11 @@
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <cache-path name="attachments" path="attachments/" />
     <cache-path name="reports" path="reports/" />
+    <!-- H-18, Build 3b. The camera app is a separate process and can only write through a granted
+         URI, so a document page necessarily lands as plaintext once before this app can encrypt
+         it. Scoped to its own directory so the grant covers exactly the staging file and nothing
+         else; each staging file is encrypted into the capture session and deleted in the same
+         callback, and anything a process death strands is swept at the next app start. Recorded
+         as the residual on the H-18 risk entry, not claimed as zero-plaintext. -->
+    <cache-path name="document_capture_staging" path="document_capture_staging/" />
 </paths>

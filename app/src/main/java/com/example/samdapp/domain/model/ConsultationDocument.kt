@@ -92,6 +92,17 @@ data class ConsultationDocument(
     val sizeBytes: Long,
     val sha256: String,
     val source: DocumentSource,
+    /**
+     * Number of captured pages consolidated into this document. Non-null only for
+     * [DocumentSource.CAMERA_ASSEMBLED] (Build 3b); null for [DocumentSource.DIRECT_FILE], where
+     * the app never parsed the file's own page count and must not invent one.
+     *
+     * A write-time integrity fact, deliberately stored rather than derived at read time from
+     * `PdfRenderer.pageCount`: the audit row needs it at the moment of upload, and a later
+     * re-derivation could only ever report what the file says now, not what the worker captured
+     * then. This is the H-18 "a page silently lost from an assembled report" hazard's witness.
+     */
+    val pageCount: Int?,
     val uploadedAt: Instant,
     val uploaderUserId: String,
     val uploaderRole: String,

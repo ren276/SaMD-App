@@ -4,7 +4,7 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import java.io.File
 import java.io.InputStream
-import java.security.DigestInputStream
+import java.io.OutputStream
 import java.security.KeyStore
 import java.security.MessageDigest
 import java.util.Locale
@@ -52,22 +52,53 @@ class DocumentEncryptionProvider @Inject constructor() {
      *  [maxBytes] is enforced while streaming, not just checked up front. On any failure
      *  (including [DocumentTooLargeException]), [destFile] is deleted — never left partially
      *  written. */
-    fun encryptToFile(input: InputStream, destFile: File, maxBytes: Long): DocumentEncryptResult {
+    fun encryptToFile(input: InputStream, destFile: File, maxBytes: Long): DocumentEncryptResult =
+        encryptToFile(destFile, maxBytes) { plaintextSink -> input.copyTo(plaintextSink) }
+
+    /**
+     * Push-mode counterpart of the [InputStream] overload above, for producers that write rather
+     * than being read: [android.graphics.pdf.PdfDocument.writeTo] takes an [OutputStream] and
+     * offers no [InputStream], so the assembled PDF of Build 3b can only reach the cipher this
+     * way. [writePlaintext] receives a sink that is measured, hashed, size-capped and encrypted
+     * as it is written, so the whole document never has to exist as a `ByteArray` in memory
+     * (H-18 memory discipline: a 20-page assembly must not materialise its own output).
+     *
+     * Identical guarantees to the pull overload, which now delegates here: same key, same
+     * per-file random IV written as the first 12 bytes, plaintext [DocumentEncryptResult.sizeBytes]
+     * and [DocumentEncryptResult.sha256] measured in the same single pass, and [destFile] deleted
+     * on any failure rather than left partially written.
+     */
+    fun encryptToFile(destFile: File, maxBytes: Long, writePlaintext: (OutputStream) -> Unit): DocumentEncryptResult {
         try {
             val digest = MessageDigest.getInstance("SHA-256")
-            val digestInput = DigestInputStream(input, digest)
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(Cipher.ENCRYPT_MODE, getOrCreateSecretKey())
             val iv = cipher.iv
 
-            val plainBytesWritten = destFile.outputStream().use { fos ->
+            var plainBytesWritten = 0L
+            destFile.outputStream().use { fos ->
                 fos.write(iv)
-                CipherOutputStream(fos, cipher).use { cos -> copyWithLimit(digestInput, cos, maxBytes) }
+                CipherOutputStream(fos, cipher).use { cos ->
+                    val measured = object : OutputStream() {
+                        override fun write(b: Int) = write(byteArrayOf(b.toByte()), 0, 1)
+
+                        override fun write(b: ByteArray, off: Int, len: Int) {
+                            plainBytesWritten += len
+                            if (plainBytesWritten > maxBytes) throw DocumentTooLargeException(maxBytes)
+                            digest.update(b, off, len)
+                            cos.write(b, off, len)
+                        }
+                    }
+                    writePlaintext(measured)
+                    measured.flush()
+                }
             }
 
             val sha256Hex = digest.digest().joinToString("") { "%02x".format(Locale.ROOT, it) }
             return DocumentEncryptResult(sizeBytes = plainBytesWritten, sha256 = sha256Hex)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            // Throwable, not Exception: a cancelled assembly coroutine unwinds through here as a
+            // CancellationException, and a half-written ciphertext file must not survive it.
             destFile.delete()
             throw e
         }
@@ -76,7 +107,7 @@ class DocumentEncryptionProvider @Inject constructor() {
     /** Decrypts [srcFile]'s plaintext bytes into [output]. Throws
      *  [DocumentDecryptionFailedException] on a truncated IV or a failed GCM auth tag check —
      *  callers must surface this as an explicit "cannot be opened" error, never a blank view. */
-    fun decryptToStream(srcFile: File, output: java.io.OutputStream) {
+    fun decryptToStream(srcFile: File, output: OutputStream) {
         try {
             srcFile.inputStream().use { fis ->
                 val iv = ByteArray(GCM_IV_LENGTH_BYTES)
@@ -95,19 +126,6 @@ class DocumentEncryptionProvider @Inject constructor() {
         } catch (e: Exception) {
             throw DocumentDecryptionFailedException(e)
         }
-    }
-
-    private fun copyWithLimit(input: InputStream, output: java.io.OutputStream, maxBytes: Long): Long {
-        val buffer = ByteArray(8192)
-        var total = 0L
-        while (true) {
-            val read = input.read(buffer)
-            if (read == -1) break
-            total += read
-            if (total > maxBytes) throw DocumentTooLargeException(maxBytes)
-            output.write(buffer, 0, read)
-        }
-        return total
     }
 
     private fun getOrCreateSecretKey(): SecretKey {
