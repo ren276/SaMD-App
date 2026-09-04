@@ -24,6 +24,7 @@ import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -111,16 +112,25 @@ class DocumentViewerViewModel @AssistedInject constructor(
         }
     }
 
+    /** Audit persistence failing must never crash this coroutine or corrupt the view state the
+     *  gate already decided (granted/denied, rendered/error) — losing one audit row is bad,
+     *  wiping an already-successfully-rendered document because logging it failed is worse. */
     private suspend fun auditViewAttempt(document: ConsultationDocument, viewerRole: UserRole?, outcome: DocumentAccessOutcome) {
-        auditLogger.log(
-            action = AuditAction.DOCUMENT_VIEWED,
-            patientId = document.patientId,
-            payload = auditPayload(
-                "documentId" to documentId,
-                "viewerRole" to viewerRole?.name,
-                "accessResult" to outcome.auditValue,
-            ),
-        )
+        try {
+            auditLogger.log(
+                action = AuditAction.DOCUMENT_VIEWED,
+                patientId = document.patientId,
+                payload = auditPayload(
+                    "documentId" to documentId,
+                    "viewerRole" to viewerRole?.name,
+                    "accessResult" to outcome.auditValue,
+                ),
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // Swallowed deliberately - see KDoc above.
+        }
     }
 
     private suspend fun loadContent(document: ConsultationDocument, viewerRole: UserRole?, outcome: DocumentAccessOutcome) {

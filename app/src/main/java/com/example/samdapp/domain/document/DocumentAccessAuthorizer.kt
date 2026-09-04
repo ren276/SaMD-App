@@ -20,7 +20,7 @@ import com.example.samdapp.domain.model.ConsultationDocument
  * gate and the H-17 `canOpenDoctorReview` gate.
  */
 enum class DocumentAccessOutcome(val auditValue: String, val granted: Boolean) {
-    /** Uploader exception (operator-signed, named — not a hole): whoever captured/uploaded a
+    /** Uploader exception (operator-selected, named, not a hole): whoever captured/uploaded a
      *  document can always open it, regardless of their tier. Blocking an ASHA from a document she
      *  photographed herself would be hostile and pointless. */
     GRANTED_UPLOADER("granted_uploader", granted = true),

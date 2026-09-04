@@ -751,12 +751,14 @@ class FakeConsultationDocumentRepository : com.example.samdapp.domain.repository
         flowOf(saved.values.filter { it.consultationId == consultationId })
 
     /** H-18, Build 3c: lets a gate test assert decrypt was reached (or, load-bearing, was NOT
-     *  reached for a denied viewer) without depending on render succeeding downstream. */
-    var readDecryptedCallCount = 0
-        private set
+     *  reached for a denied viewer) without depending on render succeeding downstream.
+     *  [DocumentViewerViewModel] hops onto the real `Dispatchers.IO` thread pool to call this, so
+     *  a test thread polling this count needs a real atomic, not a plain `var`. */
+    private val _readDecryptedCallCount = java.util.concurrent.atomic.AtomicInteger(0)
+    val readDecryptedCallCount: Int get() = _readDecryptedCallCount.get()
 
     override suspend fun readDecrypted(documentId: String, output: java.io.OutputStream) {
-        readDecryptedCallCount++
+        _readDecryptedCallCount.incrementAndGet()
         output.write("decrypted".toByteArray())
     }
 

@@ -20,8 +20,9 @@ enum class UserRole { ASHA_WORKER, NURSE, COMPOUNDER, DOCTOR }
 enum class CadreTier { PHYSICIAN, LICENSED_CLINICAL, COMMUNITY }
 
 /**
- * Operator-signed mapping (H-18, Build 3c risk entry). CHO is deferred — not a current [UserRole]
- * value, so it is not mapped here. The insertion point for `UserRole.CHO -> CadreTier.PHYSICIAN`,
+ * Operator-selected mapping (H-18, Build 3c risk entry, proposed, not yet signed off). CHO is
+ * deferred — not a current [UserRole] value, so it is not mapped here. The insertion point for
+ * `UserRole.CHO -> CadreTier.PHYSICIAN`,
  * when that role is added, is this `when` block; do not add CHO without a separate operator
  * decision.
  */

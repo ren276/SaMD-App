@@ -4430,10 +4430,10 @@ Build 3c of the consultation-documents track (design memo:
 `scratchpad/consultation-documents-and-prescription-gate-memo.md`, Feature 1 Part B7;
 `docs/domain/phc-workforce-scope.md`, the three-tier cadre model). Branch
 `feat/consultation-documents-cadre-gate`. Last piece of the documents feature: replaces Build 3a's
-interim uploader-or-`DOCTOR` gate with the operator-signed cadre mapping.
+interim uploader-or-`DOCTOR` gate with the operator-selected cadre mapping.
 
 **What shipped.** `CadreTier` (`PHYSICIAN`/`LICENSED_CLINICAL`/`COMMUNITY`, `AuthSession.kt`), an
-operator-signed mapping from the existing four `UserRole` values (`DOCTOR`→`PHYSICIAN`;
+operator-selected mapping from the existing four `UserRole` values (`DOCTOR`→`PHYSICIAN`;
 `NURSE`/`COMPOUNDER`→`LICENSED_CLINICAL`; `ASHA_WORKER`→`COMMUNITY`), with a clearly-commented
 single insertion point for a future `CHO`→`PHYSICIAN` mapping — CHO stays deferred, not added.
 `DocumentAccessAuthorizer` (`domain/document/DocumentAccessAuthorizer.kt`) is the single
