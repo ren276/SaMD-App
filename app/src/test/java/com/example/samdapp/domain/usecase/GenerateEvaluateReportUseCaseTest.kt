@@ -144,4 +144,31 @@ class GenerateEvaluateReportUseCaseTest {
         )
         assertNull(repo.getForCase("case-1"))
     }
+
+    @Test
+    fun `punctuation-only symptom input is treated as no symptom text`() = runTest {
+        val repo = FakeEvaluateReportRepository()
+        val source = NeverCalledEvaluateSource()
+        val useCase = GenerateEvaluateReportUseCase(repo, source, NoBrandLookupSource)
+
+        val result = useCase("case-1", payload(chiefComplaint = "???"))
+
+        assertTrue(result.isFailure)
+        assertEquals(0, source.callCount)
+        assertEquals(
+            GenerateEvaluateReportUseCase.EMPTY_SYMPTOM_INPUT,
+            repo.getFailureCodeForCase("case-1"),
+        )
+    }
+
+    @Test
+    fun `transcription text alone is enough to pass the guard when chief complaint is blank`() = runTest {
+        val repo = FakeEvaluateReportRepository()
+        val useCase = GenerateEvaluateReportUseCase(repo, WorkingEvaluateSource(), NoBrandLookupSource)
+
+        val result = useCase("case-1", payload(chiefComplaint = "").copy(transcription = "fever"))
+
+        assertTrue(result.isSuccess)
+        assertNull(repo.getFailureCodeForCase("case-1"))
+    }
 }
