@@ -4488,3 +4488,151 @@ deferred). `docs/domain/phc-workforce-scope.md` gets a short status-update note.
 AWAITING OPERATOR SIGN-OFF, not approved by the act of writing it.
 
 Not committed as of this entry - awaiting operator authorization per session instructions.
+
+## Classifier / dataset / NLEM / doctor-loop audit + production architecture research (STEP 1, read-only) — 2026-09-05
+
+**Two read-only STEP-1 investigations, no code written.** Nothing in `app/`, `backend/`, the
+standalone `SaMDClassifier` repo, or the `drishti_pipeline` dataset generator was created, edited or
+deleted. No training, no dataset generation, no model download, no side-effecting command. The only
+code executed was in-memory through the classifier's own `.venv` (`joblib.load`, a `TfidfVectorizer`
+refit, pandas reads); nothing persisted. No `.env` or credential file was opened at any point. Three
+files changed in total: two scratchpad memos and this entry.
+
+**Record-keeping note, stated so the gap is in the record rather than silent.** The audit ran and was
+gate-approved earlier on 2026-09-05, and its approved write was interrupted before it landed. The
+memo was written later the same day by transcribing the approved plan at full evidence density, after
+a drift check confirmed all three repositories (`cab78ae` / `63e85af` / `d32a197`) and all three key
+artifact mtimes unchanged since the audit ran. No figure was re-derived, re-estimated or
+gap-filled — transcription only.
+
+### What the audit found (`scratchpad/classifier-dataset-nlem-audit-memo.md`)
+
+*Classifier.* Shipped `symptom-clf-v0.2-enriched-symptom-pool`: word TF-IDF (1,2) vocab 2374 + char
+`char_wb` (3,5) vocab 2166, dim 4540, 18 ICD classes, 15,105 rows, accuracy 0.9212, f1_macro 0.7983.
+Refitting the checked-in script's pipeline on today's corpus reproduces 2374/2166/4540/15,105
+exactly — but `scripts/train_symptom_classifier.py:17` still declares
+`MODEL_VERSION = "symptom-clf-v0.1-tfidf-xgboost"`, so running it would stamp the v0.2 artifact as
+v0.1. The version identifier is not under configuration control with the artifact it names, an
+IEC 62304 §8 defect against the repo's own stated rule. The three weakest classes are the three most
+dangerous: J22 F1 0.3636 (25 rows), A91 0.3810 (54), B50 0.4000 (21).
+
+*Dataset.* 22,215 rows; labelled class mix runs E66 41.82% down to B50 0.14%, a 300:1 imbalance with
+E66+M17 at 64.98% of every labelled row. The produced prevalence is neither Madhya Pradesh's nor
+national India's nor America's — it is authored, by a uniform quota over `abnormal_params`
+combinations in `step3._balanced_sample()`, uncited hand-set `ICD_MAPPING` weights, and a SHA-256
+`fever_pattern` flag. Documented fever rate 8%/22%; realized 28.13% overall and 45.0% in monsoon,
+with the hash verified matching the stored flag on 22,215/22,215 rows, so selection moved it, not the
+code. `synthea-international/in/` contains exactly one file (`biometrics.yml`, value ranges only);
+everything else stays Massachusetts, including Synthea's own US disease-module prevalence. The
+compounding result: a US-shaped BMI distribution through a WHO-Asian cutoff marks 67.1% of
+BMI-bearing rows abnormal, which is why Obesity dominates.
+
+*New hazards, neither previously registered.* Glucose missingness leaks the label (present-rate 1.000
+for E11, 0.000 for A91/B50/J22). And `RetrofitEvaluateSource.kt:38-66` fabricates
+`bmi=22.0 / 120 / 80 / 72 / 98` when vitals are absent, with nothing persisted to distinguish a
+measured 120/80 from a defaulted one. Also confirmed still unregistered in the risk file: the
+empty-input E66-at-74.95% prior measured on 2026-08-31.
+
+*NLEM.* No generative LLM anywhere in diagnose or prescribe — confirmed. Physician gate structurally
+in the loop, with `age < 18` an unconditional hard-fail. But the path is embedding retrieval over
+ChromaDB with a 0.6 cosine gate, not the "deterministic lookup, not RAG" the locked architecture
+describes. Reconcile the wording or the implementation.
+
+*Doctor loop.* The corrected label is recoverable and correctly disciplined (MODIFY-to-a-trained-class
+only). But nothing links it to the features the classifier saw, no model version is captured on the
+evaluate path (`KernelReportOutput` has no such field, and Classifier B's version is recorded
+nowhere), and both report tables replace one row per case on retry, so re-assessment destroys the
+evidence. The backend model's own docstring: "Stored, never consumed." **The retraining flywheel is
+not buildable on the current schema — it needs new capture, not new queries.**
+
+### What the architecture research concluded (`scratchpad/production-classifier-architecture-memo.md`)
+
+Written against the question of what happens when chief-complaint input changes from a closed
+118-term pipe-joined pool to open-vocabulary Indic ASR prose.
+
+**The label space is wrong before the input representation is wrong.** Against the ICPC-3 Odisha
+study (PLOS Glob Public Health, n=2,565, 20 facilities, the only real Indian PHC presenting-complaint
+distribution found with usable provenance), the primary-level reason-for-encounter mix is General
+45.6% / Digestive 17.7% / Musculoskeletal 12.0%, fever commonest, 65% presenting as symptoms rather
+than diseases. The model's largest class is Obesity — a finding, not a reason for encounter. Relabel
+to reason-for-encounter first, re-architect second.
+
+**Recommended architecture:** deterministic Indic normalization of ASR prose (negation/uncertainty
+detection, controlled-vocabulary term mapping, IMCI/CBAC branching untouched) → a narrow calibrated
+boosted head over the normalized representation → deterministic late fusion with a conformal
+abstention gate wired to `InferenceSource.UNAVAILABLE`. An Indic encoder (MuRIL-class) is used only
+as nearest-trained-term lookup, never as the diagnosis classifier. This is the shape the existing
+narrow-modules lock already mandates. End-to-end encoder classification is rejected on validation
+burden (every retrain revalidates an opaque 236M-parameter model) and because it breaks that lock.
+
+**MedASR verdict:** Parakeet stands; MedASR warrants a dedicated future on-device evaluation PR,
+gated on legal review first. It is 105M parameters against Parakeet's ~600M — real headroom when
+co-resident with an encoder or an SLM — but it is English-only documented, so it changes the
+fine-tuning starting point, not the language coverage. The HAI-DEF Terms of Use are the sharper
+issue: they condition clinical use on regulatory authorization, forbid use that could cause Google
+to be deemed a medical-device *manufacturer*, and impose an indemnity — materially different from
+Parakeet's CC-BY-4.0 attribution. **Flagged for operator legal review.** No weights downloaded.
+
+**One lock tension needing an operator ruling:** Layer 2 introduces a second embedding model
+(the NLEM path already has one). My reading is that nearest-term lookup is normalization rather than
+branching, so "deterministic branching stays rule-based" holds — but that is the operator's call to
+confirm, not mine to assume.
+
+### Tracked upcoming work — no build order committed
+
+Surfaced by these two investigations, sequenced by dependency where dependencies exist, but **not
+scheduled and not authorized**:
+
+- **Dataset strategy** — relabel to ICPC-3 reason-for-encounter; calibrate distribution against
+  NFHS-5 Indore/Dhar, ICMR-INDIAB MP, IDSP/NVBDCP seasonal returns, Nikshay, HMIS OPD; hold volume
+  flat rather than scaling a biased distribution; build the perturbation and out-of-distribution eval
+  sets that do not currently exist.
+- **Controlled retraining flywheel** — append-only evidence capture at inference time (exact
+  `symptom_string`, vitals with measured-vs-imputed flags, both model versions, full ranked
+  differential, `inference_source`), with retraining as a deliberate offline gated version-bumping
+  event under IEC 62304 change control and the CDSCO ACP that `qms-overview.md` still lists as TODO.
+  On-device and automatic self-retraining are rejected outright: uncontrolled algorithm change,
+  unvalidatable against a physician label that is itself under test, and class-escalation risk.
+- **ASR field expansion** — the narrative fields cleared as PR5 candidates (`onset`,
+  `durationBucket`, `severityScore`, `aggravatingFactors`, `relievingFactors`,
+  `impactOnDailyActivities`, `relevantHistory`, `clinicalNote`, `rejectReason`) versus the
+  classifier-input fields that must not become casual dropdowns without pulling retraining forward
+  (`chiefComplaint`, which *is* `symptom_string`, and every vital).
+- **Parked** — clinical knowledge graph; imaging/photo/video/audio modalities including MedSigLIP and
+  HeAR; the MedGemma / Gemma-3-4B-IT on-device SLM assistant workstream; MedASR evaluation pending
+  legal review.
+
+### Decisions that are the operator's, not mine
+
+The v0.1/v0.2 version-stamping defect; whether the empty/OOV-input hazard is registered in the risk
+file and gated to `UNAVAILABLE`; whether the NLEM path's wording or its implementation is
+reconciled; whether a second embedding model at Layer 2 is compatible with the branching lock; and
+whether the HAI-DEF manufacturer clause permits MedASR in a CDSCO-registered device.
+
+Not committed as of this entry - awaiting operator authorization per session instructions.
+
+## Empty-symptom-input guard, Part A of the demo constrained-capture track (Branch 1) — 2026-09-06
+
+Built against `scratchpad/demo-dropdowns-and-empty-input-guard-memo.md`, on branch
+`fix/evaluate-empty-symptom-guard`. Closes the H-20 hazard from the classifier audit: an empty
+`symptom_string` measures a confident E66 (Obesity) differential at 74.95%, the model's training
+prior rather than an assessment of the patient.
+
+**Commit 1 (code, two files).** `GenerateEvaluateReportUseCase.kt` gains `EMPTY_SYMPTOM_INPUT` and
+a private `KernelPayload.hasNoSymptomText()` guard (widened form: no letter-or-digit in either
+`chiefComplaint` or `transcription`), checked before the `try` block and short-circuiting to the
+existing `saveFailure` marker mechanism - no new plumbing, no DTO change, no migration. The measured
+case is the empty string; the all-punctuation case is an unmeasured precaution, both noted in the
+guard's own KDoc. `GenerateEvaluateReportUseCaseTest.kt` gains one test asserting the classifier is
+never called, the persisted failure code is `EMPTY_SYMPTOM_INPUT`, and `getForCase` returns null.
+`testDevDebugUnitTest` green, full suite.
+
+**Commit 2 (docs, separate).** H-20 appended to `docs/quality/risk-management-file.md`, PROPOSED
+pending operator sign-off, plus this entry.
+
+**Not touched, by design**: `EvaluateRequestDto`, `RetrofitEvaluateSource`'s `symptomString` build,
+the dataset, or the model - the falsifiable out-of-scope line the memo sets in §3. Branch 2 (Part B,
+constrained dropdowns/chips on the consultation screen) is scoped in the same memo and awaits
+operator authorization to start.
+
+Not pushed as of this entry.
