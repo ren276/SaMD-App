@@ -84,7 +84,35 @@ fun ConsultationScreen(
     ConsultationContent(uiState = uiState, actions = viewModel)
 }
 
-private val DURATION_BUCKETS = listOf("today", "few_days", "week_plus", "chronic")
+private val DURATION_BUCKETS = listOf("today", "few_days", "week_plus", "month_plus", "chronic")
+
+private val ONSET_OPTIONS = listOf(
+    "Sudden (minutes to hours)",
+    "Acute (1-3 days)",
+    "Gradual (days to weeks)",
+    "Insidious (weeks to months)",
+    "Intermittent / episodic",
+    "Not known",
+)
+
+private val HISTORY_CHIPS = listOf(
+    "Diabetes", "Hypertension", "TB (past or current)", "Asthma / COPD",
+    "Heart disease", "Thyroid disorder", "Pregnancy", "Known drug allergy",
+    "Tobacco / alcohol use", "No known history",
+)
+
+private val IMPACT_CHIPS = listOf(
+    "Unable to work / farm", "Missing school", "Cannot do household chores",
+    "Bedridden", "Sleep disturbed", "Reduced appetite", "No impact on daily activity",
+)
+
+/** Appends [clause] to [current] as a comma-joined list, skipping a repeat tap of the same clause
+ * (case-insensitive). Shared by the history and impact chip rows. */
+internal fun appendClause(current: String, clause: String): String = when {
+    current.isBlank() -> clause
+    current.split(",").any { it.trim().equals(clause, ignoreCase = true) } -> current
+    else -> "$current, $clause"
+}
 
 @Composable
 internal fun ConsultationContent(uiState: ConsultationUiState, actions: ConsultationActions) {
@@ -237,7 +265,15 @@ internal fun ConsultationContent(uiState: ConsultationUiState, actions: Consulta
 
             item { HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp)) }
             item { Text("History of present illness", style = MaterialTheme.typography.titleMedium) }
-            item { OutlinedTextField(uiState.onset, actions::onOnsetChange, label = { Text("Symptom onset") }, modifier = Modifier.fillMaxWidth()) }
+            item {
+                DropdownField(
+                    label = "Symptom onset",
+                    value = uiState.onset,
+                    options = ONSET_OPTIONS,
+                    onValueChange = actions::onOnsetChange,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     DURATION_BUCKETS.forEach { bucket ->
@@ -288,6 +324,16 @@ internal fun ConsultationContent(uiState: ConsultationUiState, actions: Consulta
                             }
                         }
                     } else null
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    IMPACT_CHIPS.forEach { chip ->
+                        FilterChip(
+                            selected = false,
+                            enabled = !uiState.isCapturingImpactVoice,
+                            onClick = { actions.onImpactChange(appendClause(uiState.impactOnDailyActivities, chip)) },
+                            label = { Text(chip) },
+                        )
+                    }
+                }
                 OutlinedTextField(
                     value = uiState.impactOnDailyActivities,
                     onValueChange = actions::onImpactChange,
@@ -305,6 +351,17 @@ internal fun ConsultationContent(uiState: ConsultationUiState, actions: Consulta
             // attachments section below: a permission denial (or any other error on this shared
             // state field) must be visible without scrolling past the rest of the form.
             uiState.errorMessage?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HISTORY_CHIPS.forEach { chip ->
+                        FilterChip(
+                            selected = false,
+                            onClick = { actions.onRelevantHistoryChange(appendClause(uiState.relevantHistory, chip)) },
+                            label = { Text(chip) },
+                        )
+                    }
+                }
+            }
             item { OutlinedTextField(uiState.relevantHistory, actions::onRelevantHistoryChange, label = { Text("Other relevant history") }, modifier = Modifier.fillMaxWidth()) }
 
             item { HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp)) }
