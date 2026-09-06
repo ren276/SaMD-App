@@ -26,6 +26,17 @@ private class OfflineEvaluateSource : EvaluateKernelSource {
     }
 }
 
+/** Stub EvaluateKernelSource that fails the test if ever called — asserts the guard short-circuits. */
+private class NeverCalledEvaluateSource : EvaluateKernelSource {
+    var callCount = 0
+        private set
+
+    override suspend fun evaluate(payload: KernelPayload, patientAge: Int, patientSex: String): EvaluateResult {
+        callCount++
+        throw AssertionError("evaluate() must never be called for empty symptom input")
+    }
+}
+
 /** Stub EvaluateKernelSource that always succeeds. */
 private class WorkingEvaluateSource : EvaluateKernelSource {
     override suspend fun evaluate(payload: KernelPayload, patientAge: Int, patientSex: String): EvaluateResult =
@@ -115,5 +126,49 @@ class GenerateEvaluateReportUseCaseTest {
             repo.getFailureCodeForCase("case-1"),
         )
         assertEquals(output, repo.getForCase("case-1"))
+    }
+
+    @Test
+    fun `empty symptom input never reaches the classifier and persists a failure marker`() = runTest {
+        val repo = FakeEvaluateReportRepository()
+        val source = NeverCalledEvaluateSource()
+        val useCase = GenerateEvaluateReportUseCase(repo, source, NoBrandLookupSource)
+
+        val result = useCase("case-1", payload(chiefComplaint = ""))
+
+        assertTrue(result.isFailure)
+        assertEquals(0, source.callCount)
+        assertEquals(
+            GenerateEvaluateReportUseCase.EMPTY_SYMPTOM_INPUT,
+            repo.getFailureCodeForCase("case-1"),
+        )
+        assertNull(repo.getForCase("case-1"))
+    }
+
+    @Test
+    fun `punctuation-only symptom input is treated as no symptom text`() = runTest {
+        val repo = FakeEvaluateReportRepository()
+        val source = NeverCalledEvaluateSource()
+        val useCase = GenerateEvaluateReportUseCase(repo, source, NoBrandLookupSource)
+
+        val result = useCase("case-1", payload(chiefComplaint = "???"))
+
+        assertTrue(result.isFailure)
+        assertEquals(0, source.callCount)
+        assertEquals(
+            GenerateEvaluateReportUseCase.EMPTY_SYMPTOM_INPUT,
+            repo.getFailureCodeForCase("case-1"),
+        )
+    }
+
+    @Test
+    fun `transcription text alone is enough to pass the guard when chief complaint is blank`() = runTest {
+        val repo = FakeEvaluateReportRepository()
+        val useCase = GenerateEvaluateReportUseCase(repo, WorkingEvaluateSource(), NoBrandLookupSource)
+
+        val result = useCase("case-1", payload(chiefComplaint = "").copy(transcription = "fever"))
+
+        assertTrue(result.isSuccess)
+        assertNull(repo.getFailureCodeForCase("case-1"))
     }
 }

@@ -26,7 +26,19 @@ class GenerateEvaluateReportUseCase @Inject constructor(
 ) {
     companion object {
         private val logger = Logger.getLogger("EvaluateUseCase")
+        const val EMPTY_SYMPTOM_INPUT = "EMPTY_SYMPTOM_INPUT"
     }
+
+    /**
+     * True when neither field has a single letter or digit — the exact logical complement of the
+     * `symptomString` build at RetrofitEvaluateSource:45-48, widened past strict blankness to also
+     * catch an all-punctuation input (e.g. "???"). See docs/quality/risk-management-file.md H-20:
+     * an empty symptom_string measured a confident E66 (Obesity) differential at 74.95% — the
+     * model's training prior, not an assessment of this patient. The all-punctuation case is an
+     * unmeasured precaution, not the measured hazard.
+     */
+    private fun KernelPayload.hasNoSymptomText(): Boolean =
+        chiefComplaint.none(Char::isLetterOrDigit) && transcription.orEmpty().none(Char::isLetterOrDigit)
 
     suspend operator fun invoke(
         caseRecordId: String,
@@ -35,6 +47,13 @@ class GenerateEvaluateReportUseCase @Inject constructor(
         patientSex: String? = null,
     ): Result<EvaluateReportOutput> {
         val inferenceStartedAt = Instant.now()
+
+        if (payload.hasNoSymptomText()) {
+            logger.warning("Empty symptom input for case $caseRecordId — evaluate not called.")
+            evaluateReportRepository.saveFailure(caseRecordId, EMPTY_SYMPTOM_INPUT)
+            return Result.failure(IllegalStateException(EMPTY_SYMPTOM_INPUT))
+        }
+
         return try {
             val result = evaluateKernelSource.evaluate(
                 payload = payload,
