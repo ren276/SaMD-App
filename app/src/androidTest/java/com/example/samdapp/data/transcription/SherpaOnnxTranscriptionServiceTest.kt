@@ -90,9 +90,9 @@ class SherpaOnnxTranscriptionServiceTest {
      * could stay open until [TRAILING_SILENCE_MS], [LEAD_IN_TIMEOUT_MS] or [MAX_CAPTURE_MS] —
      * seconds, not milliseconds — every time a worker navigated away mid-capture.
      *
-     * Exercises `captureAudioAttachment()` directly against the mic rather than going through
-     * `VOICE_INPUT_ENABLED` / the ViewModel: that flag is a compile-time `const val`, so a test
-     * cannot flip it without editing `FeatureFlags.kt`, which this change does not touch.
+     * Exercises `captureAudioAttachment()` directly against the mic rather than going through a
+     * feature flag / the ViewModel: those flags are compile-time `const val`s, so a test cannot
+     * flip one without editing `FeatureFlags.kt`, which this change does not touch.
      */
     @Test
     fun cancelling_mid_capture_stops_the_microphone_read_promptly() = runBlocking(Dispatchers.Default) {
