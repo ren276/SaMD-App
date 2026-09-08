@@ -42,6 +42,7 @@ class ConsultationVoiceFieldExpansionBreadcrumbsTest {
 
     private data class FieldGate(
         val slot: String,
+        val value: (ConsultationUiState) -> String,
         val record: ConsultationActions.() -> Unit,
         val use: ConsultationActions.() -> Unit,
         val edit: ConsultationActions.() -> Unit,
@@ -52,6 +53,7 @@ class ConsultationVoiceFieldExpansionBreadcrumbsTest {
     private val fieldGates = listOf(
         FieldGate(
             slot = "AGGRAVATING_FACTORS",
+            value = { it.aggravatingFactors },
             record = { onRecordAggravatingVoice() },
             use = { onUseAggravatingSuggestion() },
             edit = { onEditAggravatingSuggestion() },
@@ -60,6 +62,7 @@ class ConsultationVoiceFieldExpansionBreadcrumbsTest {
         ),
         FieldGate(
             slot = "RELIEVING_FACTORS",
+            value = { it.relievingFactors },
             record = { onRecordRelievingVoice() },
             use = { onUseRelievingSuggestion() },
             edit = { onEditRelievingSuggestion() },
@@ -68,6 +71,7 @@ class ConsultationVoiceFieldExpansionBreadcrumbsTest {
         ),
         FieldGate(
             slot = "RELEVANT_HISTORY",
+            value = { it.relevantHistory },
             record = { onRecordRelevantHistoryVoice() },
             use = { onUseRelevantHistorySuggestion() },
             edit = { onEditRelevantHistorySuggestion() },
@@ -133,6 +137,7 @@ class ConsultationVoiceFieldExpansionBreadcrumbsTest {
 
                 val entry = auditLogger.logged.last()
                 assertEquals(gate.slot, "voice_field_confirmed", entry.action)
+                assertEquals(gate.slot, "worse at night", gate.value(viewModel.uiState.value))
                 val dwellMs = payloadFields(entry.payload)["dwellMs"]?.toLongOrNull()
                 assertTrue(gate.slot, dwellMs != null && dwellMs >= 0)
             }
@@ -175,6 +180,7 @@ class ConsultationVoiceFieldExpansionBreadcrumbsTest {
                 val entry = auditLogger.logged.last()
                 assertEquals(gate.slot, "voice_field_rejected", entry.action)
                 assertEquals(gate.slot, "VOICE_UNCONFIRMED", payloadFields(entry.payload)["provenance"])
+                assertEquals(gate.slot, "", gate.value(viewModel.uiState.value))
             }
         }
 

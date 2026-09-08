@@ -216,6 +216,16 @@ data class ConsultationUiState(
             relievingVoiceSuggestion == null && !isCapturingRelievingVoice &&
             relevantHistoryVoiceSuggestion == null && !isCapturingRelevantHistoryVoice
     val hasAudioAttachment: String? get() = pendingAttachments.firstOrNull { it.type == AttachmentType.AUDIO }?.uri
+
+    /** One microphone and one recognizer runtime back every `VOICE_FIELD_*` gate
+     *  ([com.example.samdapp.domain.usecase.CaptureAudioAttachmentUseCase]), so a capture in
+     *  flight for any field must block a capture for another - two overlapping sessions on one
+     *  microphone would produce a transcript that is not attributable to the field that asked for
+     *  it, and would race on the shared [errorMessage]. Checked at the top of every
+     *  `onRecord*Voice` handler. */
+    val isCapturingAnyVoice: Boolean
+        get() = isCapturingImpactVoice || isCapturingAggravatingVoice ||
+            isCapturingRelievingVoice || isCapturingRelevantHistoryVoice
 }
 
 sealed interface ConsultationEffect {
@@ -415,7 +425,7 @@ class ConsultationViewModel @AssistedInject constructor(
      */
     override fun onRecordImpactVoice() {
         val current = _uiState.value
-        if (current.isCapturingImpactVoice || current.impactVoiceSuggestion != null) return
+        if (current.isCapturingAnyVoice || current.impactVoiceSuggestion != null) return
         viewModelScope.launch {
             _uiState.update { it.copy(isCapturingImpactVoice = true, errorMessage = null) }
             captureAudioAttachmentUseCase().fold(
@@ -604,7 +614,7 @@ class ConsultationViewModel @AssistedInject constructor(
 
     override fun onRecordAggravatingVoice() {
         val current = _uiState.value
-        if (current.isCapturingAggravatingVoice || current.aggravatingVoiceSuggestion != null) return
+        if (current.isCapturingAnyVoice || current.aggravatingVoiceSuggestion != null) return
         viewModelScope.launch {
             _uiState.update { it.copy(isCapturingAggravatingVoice = true, errorMessage = null) }
             captureAudioAttachmentUseCase().fold(
@@ -740,7 +750,7 @@ class ConsultationViewModel @AssistedInject constructor(
 
     override fun onRecordRelievingVoice() {
         val current = _uiState.value
-        if (current.isCapturingRelievingVoice || current.relievingVoiceSuggestion != null) return
+        if (current.isCapturingAnyVoice || current.relievingVoiceSuggestion != null) return
         viewModelScope.launch {
             _uiState.update { it.copy(isCapturingRelievingVoice = true, errorMessage = null) }
             captureAudioAttachmentUseCase().fold(
@@ -876,7 +886,7 @@ class ConsultationViewModel @AssistedInject constructor(
 
     override fun onRecordRelevantHistoryVoice() {
         val current = _uiState.value
-        if (current.isCapturingRelevantHistoryVoice || current.relevantHistoryVoiceSuggestion != null) return
+        if (current.isCapturingAnyVoice || current.relevantHistoryVoiceSuggestion != null) return
         viewModelScope.launch {
             _uiState.update { it.copy(isCapturingRelevantHistoryVoice = true, errorMessage = null) }
             captureAudioAttachmentUseCase().fold(

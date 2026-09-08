@@ -199,10 +199,9 @@ internal fun ConsultationContent(uiState: ConsultationUiState, actions: Consulta
         rememberPermissionAction(Manifest.permission.RECORD_AUDIO, actions::onRecordChiefComplaintVoice)
     val requestVoiceForAttachment =
         rememberPermissionAction(Manifest.permission.RECORD_AUDIO, actions::onRecordAudioAttachment)
-    // onDenied is passed here and nowhere else on purpose: this is the one voice control a worker
-    // can actually reach (FeatureFlags.VOICE_FIELD_IMPACT_ENABLED is on), so a declined prompt has
-    // to say so instead of leaving a button that silently does nothing. The other two RECORD_AUDIO
-    // call sites stay on the helper's no-op default while VOICE_INPUT_ENABLED keeps them hidden.
+    // Every VOICE_FIELD_* mic passes onDenied: a declined prompt has to say so instead of leaving
+    // a button that silently does nothing. The chiefComplaint and audio-attachment call sites
+    // stay on the helper's no-op default while VOICE_INPUT_ENABLED keeps them hidden.
     val requestVoiceForImpact = rememberPermissionAction(
         permission = Manifest.permission.RECORD_AUDIO,
         onGranted = actions::onRecordImpactVoice,
@@ -443,6 +442,7 @@ internal fun ConsultationContent(uiState: ConsultationUiState, actions: Consulta
                     HISTORY_CHIPS.forEach { chip ->
                         FilterChip(
                             selected = false,
+                            enabled = !uiState.isCapturingRelevantHistoryVoice,
                             onClick = { actions.onRelevantHistoryChange(appendClause(uiState.relevantHistory, chip)) },
                             label = { Text(chip) },
                         )
