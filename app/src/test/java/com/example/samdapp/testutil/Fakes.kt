@@ -121,12 +121,20 @@ class FakeTranscriptionService(
     var captureAudioAttachmentCallCount = 0
         private set
 
+    /** Counted so a test can assert the transcribe path never ran, rather than only that its
+     *  caller returned a failure. */
+    var transcribeCallCount = 0
+        private set
+
     override suspend fun captureAudioAttachment(): Result<com.example.samdapp.domain.transcription.CapturedAudio> {
         captureAudioAttachmentCallCount++
         return result
     }
 
-    override suspend fun transcribe(audioUri: String): Result<String> = result.map { it.transcript }
+    override suspend fun transcribe(audioUri: String): Result<String> {
+        transcribeCallCount++
+        return result.map { it.transcript }
+    }
 }
 
 class FakeAuditLogger : AuditLogger {
@@ -541,7 +549,14 @@ class FakeConsultationRepository(
         return Result.success(Unit)
     }
     override suspend fun addAttachment(attachment: com.example.samdapp.domain.model.Attachment): Result<Unit> = Result.success(Unit)
-    override suspend fun updateTranscription(consultationId: String, transcription: String): Result<Unit> = Result.success(Unit)
+    /** Counted so a test can assert nothing was written, not merely that a call returned failure. */
+    var updateTranscriptionCallCount = 0
+        private set
+
+    override suspend fun updateTranscription(consultationId: String, transcription: String): Result<Unit> {
+        updateTranscriptionCallCount++
+        return Result.success(Unit)
+    }
     override fun observeForEncounter(encounterId: String): Flow<com.example.samdapp.domain.model.Consultation?> =
         flowOf(byEncounter[encounterId])
     override suspend fun getById(consultationId: String): com.example.samdapp.domain.model.Consultation? =

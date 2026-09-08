@@ -92,7 +92,8 @@ private class FakeConsultationActions : ConsultationActions {
  *
  * `VOICE_FIELD_IMPACT_ENABLED` is a compile-time `const val`, so exactly one side of the guard is
  * testable per build: the assertion that both are absent was correct while the flag was off and is
- * false now, the same limitation `ConsultationViewModelTest` documents for `VOICE_INPUT_ENABLED`.
+ * false now, the same limitation `ConsultationViewModelTest` documents for the chiefComplaint and
+ * audio-attachment flags.
  * The suggestion surface's own rendering and its three actions are proven separately by calling
  * `ImpactVoiceSuggestionSurface` directly, the same pattern `CompounderScreenTest` uses for
  * `CompounderContent`: both composables are `internal`, not `private`, for exactly this. Those

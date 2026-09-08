@@ -1289,11 +1289,11 @@ class ConsultationViewModel @AssistedInject constructor(
     }
 
     override fun onRecordChiefComplaintVoice() {
-        // Disabled pending the sherpa-onnx on-device engine and the confirmation-gate design
-        // (scoped to PR 3/4): see FeatureFlags.VOICE_INPUT_ENABLED KDoc. The UI never shows the
-        // control that calls this while the flag is off, so this return is a second, independent
-        // stop, not the only one.
-        if (!FeatureFlags.VOICE_INPUT_ENABLED) return
+        // Disabled pending the confirmation gate and a provenance column for this field: see
+        // FeatureFlags.VOICE_FIELD_CHIEF_COMPLAINT_ENABLED KDoc. The UI never shows the control
+        // that calls this while the flag is off, so this return is a second, independent stop,
+        // not the only one.
+        if (!FeatureFlags.VOICE_FIELD_CHIEF_COMPLAINT_ENABLED) return
         viewModelScope.launch {
             _uiState.update { it.copy(isRecordingVoice = true) }
             captureAudioAttachmentUseCase().fold(
@@ -1321,7 +1321,10 @@ class ConsultationViewModel @AssistedInject constructor(
     }
 
     override fun onRecordAudioAttachment() {
-        if (!FeatureFlags.VOICE_INPUT_ENABLED) return
+        // Second, independent stop behind the hidden button. The same flag gates what the
+        // resulting attachment feeds: AppNavHost's TranscriptionRoute branch and the persist in
+        // TranscribeAudioUseCase. See FeatureFlags.VOICE_AUDIO_ATTACHMENT_ENABLED KDoc.
+        if (!FeatureFlags.VOICE_AUDIO_ATTACHMENT_ENABLED) return
         viewModelScope.launch {
             _uiState.update { it.copy(isRecordingVoice = true) }
             captureAudioAttachmentUseCase().fold(

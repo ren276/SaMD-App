@@ -4636,3 +4636,54 @@ constrained dropdowns/chips on the consultation screen) is scoped in the same me
 operator authorization to start.
 
 Not pushed as of this entry.
+
+## Voice flag split: one conflated safety control becomes two, and the ungated transcribe path gets a guard - 2026-09-08
+
+Built against `scratchpad/chief-complaint-voice-flip-design-memo.md` sections 5 and 3.1(ii), on
+branch `feat/voice-field-expansion`. Pure refactor of a safety control plus one new guard. **No
+behaviour change: both new flags are `false`, so every affordance stays exactly as hidden as it was.**
+
+**Why.** `VOICE_INPUT_ENABLED` gated two affordances with different risk profiles and different
+missing controls, and there was no way to enable one without the other. The flip memo's verdict was
+NOT-YET, and its decisive blocker was not `chiefComplaint` at all: it was that the same flag also
+enabled the audio attachment, whose transcript is auto-persisted into `Consultation.transcription`
+with no confirmation gate, no provenance, and an explicit exemption from the `VOICE_UNCONFIRMED`
+write refusal, then concatenated into `symptom_string` and sent to `/api/v1/evaluate`. That is risk
+row H-15.C2, registered in `docs/quality/risk-management-file.md` in the preceding commit.
+
+**The split.** `VOICE_INPUT_ENABLED` is retired. `FeatureFlags.kt` now carries
+`VOICE_FIELD_CHIEF_COMPLAINT_ENABLED` (the field mic only) and `VOICE_AUDIO_ATTACHMENT_ENABLED`
+(the attachment button plus everything the resulting attachment feeds), both `false`. The
+`VOICE_FIELD_IMPACT_ENABLED` and `VOICE_FIELD_AGGRAVATING_ENABLED` KDocs were updated where they
+cross-referenced the retired flag by name.
+
+**The guard, in three places on purpose.** The attachment button is hidden
+(`ConsultationScreen.kt`); `onRecordAudioAttachment` returns before capturing
+(`ConsultationViewModel.kt`); the `KernelAssessment` screen does not route to `TranscriptionRoute`
+(`AppNavHost.kt`); and `TranscribeAudioUseCase` refuses with `VOICE_ATTACHMENT_DISABLED` before it
+transcribes or persists anything. The use-case guard is the load-bearing one and is why it lives
+there rather than only in the screen: the persist has to be unreachable from any caller, including
+the second caller that does not exist yet. Same reasoning as the repository's `VOICE_UNCONFIRMED`
+refusal, one layer up. Refused rather than dropped, so the screen cannot show a transcript that is
+not in the database.
+
+**Test.** New `TranscribeAudioUseCaseTest` asserts the failure code AND that neither
+`transcribe` nor `updateTranscription` was called, via two new call counters on the existing fakes.
+Asserting the write never happened rather than only the returned `Result` is the device-side reading
+of CLAUDE.md's persisted-row rule. The test asserts the flag is off first, so it fails loudly rather
+than silently passing if the flag is ever flipped without revisiting it. `testDevDebugUnitTest`
+green, full suite.
+
+**`CaptureAudioAttachmentUseCase` deliberately untouched.** It shares a file with
+`TranscribeAudioUseCase` but is also the capture path for the live `VOICE_FIELD_IMPACT_ENABLED`
+gate, so gating it would have turned off a shipped, operator-approved affordance. Only the
+transcribe-and-persist use case is guarded.
+
+**Not touched, by design**: no confirmation gate, no `FieldProvenance` column, no migration, no
+entity, no DTO, no backend. The memo scopes those as the parked follow-up build (sections 4 and 9,
+conditions X/Y/Z) and this session's brief was to stop if the split appeared to need any of them.
+It did not. The historical references to the retired flag name in `docs/quality/`,
+`scratchpad/` and earlier `PROGRESS.md` entries are also untouched: those are records of what was
+true when written, and this file's convention is not to retroactively edit them.
+
+Not pushed as of this entry.

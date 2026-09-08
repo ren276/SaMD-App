@@ -319,7 +319,12 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
                 KernelAssessmentScreen(
                     caseRecordId = key.caseRecordId,
                     onContinue = {
-                        if (key.audioUri != null) {
+                        // The transcription screen auto-transcribes and PERSISTS the result with no
+                        // confirmation gate and no provenance (H-15.C2), so it is gated by the same
+                        // flag as the attachment that produces audioUri. Belt and braces: with the
+                        // flag off nothing can create an AUDIO attachment in the first place, and
+                        // TranscribeAudioUseCase refuses independently of this branch.
+                        if (key.audioUri != null && FeatureFlags.VOICE_AUDIO_ATTACHMENT_ENABLED) {
                             backStack.add(TranscriptionRoute(key.consultationId, key.audioUri, key.caseRecordId))
                         } else {
                             backStack.add(AcknowledgementRoute(key.caseRecordId))

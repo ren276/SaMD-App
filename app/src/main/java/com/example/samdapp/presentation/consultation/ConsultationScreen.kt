@@ -200,8 +200,9 @@ internal fun ConsultationContent(uiState: ConsultationUiState, actions: Consulta
     val requestVoiceForAttachment =
         rememberPermissionAction(Manifest.permission.RECORD_AUDIO, actions::onRecordAudioAttachment)
     // Every VOICE_FIELD_* mic passes onDenied: a declined prompt has to say so instead of leaving
-    // a button that silently does nothing. The chiefComplaint and audio-attachment call sites
-    // stay on the helper's no-op default while VOICE_INPUT_ENABLED keeps them hidden.
+    // a button that silently does nothing. The chiefComplaint and audio-attachment call sites stay
+    // on the helper's no-op default while their own flags (VOICE_FIELD_CHIEF_COMPLAINT_ENABLED,
+    // VOICE_AUDIO_ATTACHMENT_ENABLED) keep them hidden.
     val requestVoiceForImpact = rememberPermissionAction(
         permission = Manifest.permission.RECORD_AUDIO,
         onGranted = actions::onRecordImpactVoice,
@@ -251,11 +252,12 @@ internal fun ConsultationContent(uiState: ConsultationUiState, actions: Consulta
                 }
             }
             item { Text("Main concern", style = MaterialTheme.typography.titleMedium) }
-            // Voice affordance hidden, not merely disabled, while FeatureFlags.VOICE_INPUT_ENABLED
-            // is off (see its KDoc): the off-device recognizer exposure means no dead button
-            // should sit here for a worker to tap. chiefComplaint stays fully keyboard-editable
-            // via the OutlinedTextField below, unaffected by this flag.
-            if (FeatureFlags.VOICE_INPUT_ENABLED) {
+            // Voice affordance hidden, not merely disabled, while
+            // FeatureFlags.VOICE_FIELD_CHIEF_COMPLAINT_ENABLED is off (see its KDoc): no dead
+            // button should sit here for a worker to tap. chiefComplaint stays fully
+            // keyboard-editable via the OutlinedTextField below, unaffected by this flag.
+            // This flag governs this field only; the audio attachment below has its own.
+            if (FeatureFlags.VOICE_FIELD_CHIEF_COMPLAINT_ENABLED) {
                 item {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(selected = !uiState.isVoiceMode, onClick = { if (uiState.isVoiceMode) actions.onToggleVoiceMode() }, label = { Text("Text") })
@@ -383,8 +385,8 @@ internal fun ConsultationContent(uiState: ConsultationUiState, actions: Consulta
                 }
             }
             // Hidden, not merely disabled, while FeatureFlags.VOICE_FIELD_IMPACT_ENABLED is off:
-            // see its KDoc. Independent of VOICE_INPUT_ENABLED (which stays off and gates
-            // chiefComplaint voice + the audio attachment); this flag governs only this field.
+            // see its KDoc. Independent of VOICE_FIELD_CHIEF_COMPLAINT_ENABLED and
+            // VOICE_AUDIO_ATTACHMENT_ENABLED (both stay off); this flag governs only this field.
             item {
                 // Typed val so Kotlin infers @Composable on the lambda correctly.
                 // trailingIcon is @Composable (() -> Unit)? — the if-expression below
@@ -505,9 +507,12 @@ internal fun ConsultationContent(uiState: ConsultationUiState, actions: Consulta
                     ) {
                         Text("Affected area photo", style = MaterialTheme.typography.titleMedium)
                     }
-                    // Hidden, not merely disabled, while FeatureFlags.VOICE_INPUT_ENABLED is off:
-                    // see its KDoc for the off-device recognizer exposure this defers to.
-                    if (FeatureFlags.VOICE_INPUT_ENABLED) {
+                    // Hidden, not merely disabled, while
+                    // FeatureFlags.VOICE_AUDIO_ATTACHMENT_ENABLED is off. That flag also gates the
+                    // auto-transcribe path this attachment feeds (AppNavHost's TranscriptionRoute
+                    // branch and TranscribeAudioUseCase); see its KDoc for why the two must move
+                    // together.
+                    if (FeatureFlags.VOICE_AUDIO_ATTACHMENT_ENABLED) {
                         OutlinedButton(
                             onClick = requestVoiceForAttachment,
                             modifier = Modifier.weight(1f).heightIn(min = 56.dp),

@@ -19,14 +19,18 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
-/** chiefComplaint stays fully keyboard-usable while FeatureFlags.VOICE_INPUT_ENABLED is off, and
- *  the voice handlers stop before ever reaching TranscriptionService.
+/** chiefComplaint stays fully keyboard-usable while FeatureFlags.VOICE_FIELD_CHIEF_COMPLAINT_ENABLED
+ *  is off, and the voice handlers stop before ever reaching TranscriptionService.
  *
  *  Originally written for fix/asr-offdevice-exposure, when the risk being held back was the
  *  platform recogniser's off-device transmission. PR 4a deleted that class outright and bound the
  *  on-device engine in its place, so the exposure this comment used to name no longer exists.
- *  VOICE_INPUT_ENABLED stays false for the reason its own KDoc gives: chiefComplaint reaches
- *  /api/v1/evaluate and is governed by no confirmation gate. */
+ *  The flag stays false for the reason its own KDoc gives: chiefComplaint reaches
+ *  /api/v1/evaluate and is governed by no confirmation gate.
+ *
+ *  These two handlers were gated by one shared flag until 2026-09-08; they now have one flag each
+ *  (VOICE_FIELD_CHIEF_COMPLAINT_ENABLED, VOICE_AUDIO_ATTACHMENT_ENABLED), both false, so both
+ *  tests below assert exactly what they asserted before the split. */
 @OptIn(ExperimentalCoroutinesApi::class)
 class ConsultationViewModelTest {
 
@@ -92,7 +96,7 @@ class ConsultationViewModelTest {
 
 // Note: the onSuccess-branch fix in onRecordChiefComplaintVoice (dropping the transcript instead
 // of writing it into chiefComplaint, field-audit memo C-1) is defense-in-depth for a branch this
-// build cannot reach, because FeatureFlags.VOICE_INPUT_ENABLED is a compile-time const and the
-// guard above returns before that branch runs. It is verified here by code inspection, not by a
+// build cannot reach, because FeatureFlags.VOICE_FIELD_CHIEF_COMPLAINT_ENABLED is a compile-time
+// const and the guard above returns before that branch runs. It is verified here by code inspection, not by a
 // dedicated unit test, since making the flag injectable to exercise that branch in isolation
 // would be scope beyond this fix. Re-verify it directly once PR 3/4 flips the flag on.

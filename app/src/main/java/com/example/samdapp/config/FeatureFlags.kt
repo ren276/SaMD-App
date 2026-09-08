@@ -28,32 +28,66 @@ object FeatureFlags {
      *  See [com.example.samdapp.presentation.common.DeviceResourceCheck]. */
     const val DEVICE_RESOURCE_CHECK_ENABLED = true
 
-    /** Voice-to-text affordances on the Consultation screen ("Voice" mode toggle, "Record main
-     *  concern", "Record audio" attachment). Off = the controls are hidden, not merely disabled,
-     *  and their handlers return before invoking [com.example.samdapp.domain.usecase.CaptureAudioAttachmentUseCase]
-     *  so [com.example.samdapp.data.transcription.SherpaOnnxTranscriptionService] is never
-     *  reached and its model is never loaded.
+    /** The mic affordance on `chiefComplaint` only (the "Voice" mode toggle and the "Record main
+     *  concern" button). Off = the controls are hidden, not merely disabled, and
+     *  [com.example.samdapp.presentation.consultation.ConsultationViewModel.onRecordChiefComplaintVoice]
+     *  returns before invoking [com.example.samdapp.domain.usecase.CaptureAudioAttachmentUseCase],
+     *  so [com.example.samdapp.data.transcription.SherpaOnnxTranscriptionService] is never reached
+     *  for this field and its model is never loaded on this path.
      *
-     *  The original reason for this flag is gone: the off-device transmission risk it was holding
-     *  the line against belonged to the platform speech recognizer, which has been deleted. It
-     *  stays off because these are the **High**-severity H-15 paths that reach
-     *  `/api/v1/evaluate`, and they are governed by no confirmation gate — unlike
-     *  [VOICE_FIELD_IMPACT_ENABLED], which has one. See
-     *  `scratchpad/asr-usecase-research-memo.md` Task 0 and
-     *  `scratchpad/asr-field-audit-memo.md` C-1/DECISION GATE item 5.
+     *  **Split out of the retired single voice flag** (2026-09-08,
+     *  `scratchpad/chief-complaint-voice-flip-design-memo.md` section 5). That flag gated two
+     *  affordances with different missing controls and no way to enable one without the other:
+     *  this field mic, and the audio attachment plus its auto-transcribe path
+     *  ([VOICE_AUDIO_ATTACHMENT_ENABLED]). The split is a refactor only. Both halves stay `false`,
+     *  so nothing a worker can reach changed at the split.
      *
-     *  PR 4b's egress evidence does not change this flag's state: it closes the transmission
-     *  question for both flags at once, and transmission is not what holds this one off. What
-     *  holds it off is an ungated **High**-severity field reaching a model, which no egress
-     *  proof speaks to (`scratchpad/pr4b-flag-flip-design-memo.md` B.2).
+     *  Stays `false`: `chiefComplaint` is the **High**-severity H-15 path that reaches
+     *  `/api/v1/evaluate`, it is governed by no confirmation gate (unlike
+     *  [VOICE_FIELD_IMPACT_ENABLED], which has one), it has no persisted
+     *  [com.example.samdapp.domain.model.FieldProvenance] column, and per the memo's section 2 the
+     *  live evaluate path applies no abstention of any kind to the text it is given. Flipping this
+     *  is not a flag change: it requires the confirmation gate, a provenance migration across two
+     *  repositories, and its own memo (memo section 9, conditions X/Y/Z).
      *
      *  See [com.example.samdapp.presentation.consultation.ConsultationScreen]. */
-    const val VOICE_INPUT_ENABLED = false
+    const val VOICE_FIELD_CHIEF_COMPLAINT_ENABLED = false
+
+    /** The audio attachment ("Record audio" on the Consultation screen) **and** the transcription
+     *  path it feeds. Off = the button is hidden, not merely disabled;
+     *  [com.example.samdapp.presentation.consultation.ConsultationViewModel.onRecordAudioAttachment]
+     *  returns before capturing; the `KernelAssessment` screen never routes to
+     *  [com.example.samdapp.presentation.navigation.TranscriptionRoute]; and
+     *  [com.example.samdapp.domain.usecase.TranscribeAudioUseCase] refuses before it can transcribe
+     *  or persist anything.
+     *
+     *  **Split out of the retired single voice flag, and it is the half that needed splitting**
+     *  (`scratchpad/chief-complaint-voice-flip-design-memo.md` section 3.1(ii), registered as risk
+     *  row H-15.C2). This path writes a raw ASR transcript straight into
+     *  `Consultation.transcription` via `updateTranscription`, with no confirmation gate, no
+     *  provenance column, and an explicit exemption from the `VOICE_UNCONFIRMED` write refusal in
+     *  [com.example.samdapp.data.repository.ConsultationRepositoryImpl]. That value is then
+     *  concatenated into `symptom_string` by
+     *  [com.example.samdapp.data.remote.RetrofitEvaluateSource] and reaches the model. The
+     *  Transcription screen shows the transcript only after it has already been persisted, and its
+     *  only affordance is Continue.
+     *
+     *  While the two affordances shared one flag there was no way to enable the gated field
+     *  without enabling this ungated path in the same build. That is why this flag exists
+     *  separately, and why the guard in [com.example.samdapp.domain.usecase.TranscribeAudioUseCase]
+     *  exists in addition to the navigation and capture guards: the persist has to be unreachable
+     *  from any caller, not just from the screen that has one today.
+     *
+     *  Stays `false`. Making it flippable is the parked build (confirmation gate plus provenance),
+     *  not a flag change.
+     *
+     *  See [com.example.samdapp.presentation.consultation.ConsultationScreen]. */
+    const val VOICE_AUDIO_ATTACHMENT_ENABLED = false
 
     /** The voice confirmation gate on `impactOnDailyActivities` only (mic button and the
-     *  suggestion surface). Independent of [VOICE_INPUT_ENABLED], which stays `false` and gates
-     *  `chiefComplaint` voice plus the audio attachment, the **High**-severity H-15 paths that
-     *  reach `/api/v1/evaluate`.
+     *  suggestion surface). Independent of [VOICE_FIELD_CHIEF_COMPLAINT_ENABLED] and
+     *  [VOICE_AUDIO_ATTACHMENT_ENABLED], which both stay `false` and gate the **High**-severity
+     *  H-15 paths that reach `/api/v1/evaluate`.
      *
      *  **Flipped `true` — commit 5, authorized.** Transmission proof complete: L2.3 (reflection
      *  scan, no platform recognizer in bytecode), L3.1 (decode produces real output), L3.2
@@ -70,7 +104,8 @@ object FeatureFlags {
     const val VOICE_FIELD_IMPACT_ENABLED = true
 
     /** The voice confirmation gate on `aggravatingFactors` only (mic button and its suggestion
-     *  surface). Independent of every other `VOICE_FIELD_*` flag and of [VOICE_INPUT_ENABLED],
+     *  surface). Independent of every other `VOICE_FIELD_*` flag and of
+     *  [VOICE_AUDIO_ATTACHMENT_ENABLED],
      *  same posture as [VOICE_FIELD_IMPACT_ENABLED] at its introduction (PR 3c): default `false`,
      *  not yet transmission-proofed for this field.
      *
