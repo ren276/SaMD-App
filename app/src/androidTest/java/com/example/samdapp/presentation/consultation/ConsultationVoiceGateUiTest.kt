@@ -45,6 +45,21 @@ private class FakeConsultationActions : ConsultationActions {
         discardedSuggestion = true
     }
     override fun onVoicePermissionDenied() = Unit
+    override fun onRecordAggravatingVoice() = Unit
+    override fun onUseAggravatingSuggestion() = Unit
+    override fun onEditAggravatingSuggestion() = Unit
+    override fun onDiscardAggravatingSuggestion() = Unit
+    override fun onAggravatingVoicePermissionDenied() = Unit
+    override fun onRecordRelievingVoice() = Unit
+    override fun onUseRelievingSuggestion() = Unit
+    override fun onEditRelievingSuggestion() = Unit
+    override fun onDiscardRelievingSuggestion() = Unit
+    override fun onRelievingVoicePermissionDenied() = Unit
+    override fun onRecordRelevantHistoryVoice() = Unit
+    override fun onUseRelevantHistorySuggestion() = Unit
+    override fun onEditRelevantHistorySuggestion() = Unit
+    override fun onDiscardRelevantHistorySuggestion() = Unit
+    override fun onRelevantHistoryVoicePermissionDenied() = Unit
     override fun onRelevantHistoryChange(value: String) = Unit
     override fun onAddAttachment(type: AttachmentType, uri: String) = Unit
     override fun onRecordAudioAttachment() = Unit
