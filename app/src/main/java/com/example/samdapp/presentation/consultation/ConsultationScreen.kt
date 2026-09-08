@@ -208,6 +208,23 @@ internal fun ConsultationContent(uiState: ConsultationUiState, actions: Consulta
         onGranted = actions::onRecordImpactVoice,
         onDenied = actions::onVoicePermissionDenied,
     )
+    // PR5, voice field-expansion: same shape as requestVoiceForImpact above, one per
+    // independently-flagged field.
+    val requestVoiceForAggravating = rememberPermissionAction(
+        permission = Manifest.permission.RECORD_AUDIO,
+        onGranted = actions::onRecordAggravatingVoice,
+        onDenied = actions::onAggravatingVoicePermissionDenied,
+    )
+    val requestVoiceForRelieving = rememberPermissionAction(
+        permission = Manifest.permission.RECORD_AUDIO,
+        onGranted = actions::onRecordRelievingVoice,
+        onDenied = actions::onRelievingVoicePermissionDenied,
+    )
+    val requestVoiceForRelevantHistory = rememberPermissionAction(
+        permission = Manifest.permission.RECORD_AUDIO,
+        onGranted = actions::onRecordRelevantHistoryVoice,
+        onDenied = actions::onRelevantHistoryVoicePermissionDenied,
+    )
     // Named, not a trailing lambda: `onDenied` is the last parameter now, so a trailing lambda
     // would silently bind to it instead of to `onGranted`.
     val requestCameraForAffectedArea = rememberPermissionAction(
@@ -294,8 +311,78 @@ internal fun ConsultationContent(uiState: ConsultationUiState, actions: Consulta
                     steps = 9,
                 )
             }
-            item { OutlinedTextField(uiState.aggravatingFactors, actions::onAggravatingFactorsChange, label = { Text("Aggravating factors") }, modifier = Modifier.fillMaxWidth()) }
-            item { OutlinedTextField(uiState.relievingFactors, actions::onRelievingFactorsChange, label = { Text("Relieving factors") }, modifier = Modifier.fillMaxWidth()) }
+            // Hidden, not merely disabled, while FeatureFlags.VOICE_FIELD_AGGRAVATING_ENABLED is
+            // off: same posture as the impactOnDailyActivities mic above.
+            item {
+                val aggravatingMicTrailingIcon: @Composable (() -> Unit)? =
+                    if (FeatureFlags.VOICE_FIELD_AGGRAVATING_ENABLED) {
+                        {
+                            IconButton(
+                                onClick = requestVoiceForAggravating,
+                                enabled = !uiState.isCapturingAggravatingVoice,
+                                modifier = Modifier.testTag("aggravating_voice_mic_button"),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Mic,
+                                    contentDescription = if (uiState.isCapturingAggravatingVoice)
+                                        "Listening…" else "Record aggravating factors",
+                                    tint = if (uiState.isCapturingAggravatingVoice)
+                                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                    else
+                                        MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                    } else null
+                OutlinedTextField(
+                    value = uiState.aggravatingFactors,
+                    onValueChange = actions::onAggravatingFactorsChange,
+                    label = { Text("Aggravating factors") },
+                    modifier = Modifier.fillMaxWidth(),
+                    trailingIcon = aggravatingMicTrailingIcon,
+                )
+            }
+            if (FeatureFlags.VOICE_FIELD_AGGRAVATING_ENABLED) {
+                uiState.aggravatingVoiceSuggestion?.let { suggestion ->
+                    item { AggravatingVoiceSuggestionSurface(suggestion = suggestion, actions = actions) }
+                }
+            }
+            // Hidden, not merely disabled, while FeatureFlags.VOICE_FIELD_RELIEVING_ENABLED is
+            // off: same posture as the impactOnDailyActivities mic above.
+            item {
+                val relievingMicTrailingIcon: @Composable (() -> Unit)? =
+                    if (FeatureFlags.VOICE_FIELD_RELIEVING_ENABLED) {
+                        {
+                            IconButton(
+                                onClick = requestVoiceForRelieving,
+                                enabled = !uiState.isCapturingRelievingVoice,
+                                modifier = Modifier.testTag("relieving_voice_mic_button"),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Mic,
+                                    contentDescription = if (uiState.isCapturingRelievingVoice)
+                                        "Listening…" else "Record relieving factors",
+                                    tint = if (uiState.isCapturingRelievingVoice)
+                                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                    else
+                                        MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                    } else null
+                OutlinedTextField(
+                    value = uiState.relievingFactors,
+                    onValueChange = actions::onRelievingFactorsChange,
+                    label = { Text("Relieving factors") },
+                    modifier = Modifier.fillMaxWidth(),
+                    trailingIcon = relievingMicTrailingIcon,
+                )
+            }
+            if (FeatureFlags.VOICE_FIELD_RELIEVING_ENABLED) {
+                uiState.relievingVoiceSuggestion?.let { suggestion ->
+                    item { RelievingVoiceSuggestionSurface(suggestion = suggestion, actions = actions) }
+                }
+            }
             // Hidden, not merely disabled, while FeatureFlags.VOICE_FIELD_IMPACT_ENABLED is off:
             // see its KDoc. Independent of VOICE_INPUT_ENABLED (which stays off and gates
             // chiefComplaint voice + the audio attachment); this flag governs only this field.
@@ -362,7 +449,42 @@ internal fun ConsultationContent(uiState: ConsultationUiState, actions: Consulta
                     }
                 }
             }
-            item { OutlinedTextField(uiState.relevantHistory, actions::onRelevantHistoryChange, label = { Text("Other relevant history") }, modifier = Modifier.fillMaxWidth()) }
+            // Hidden, not merely disabled, while FeatureFlags.VOICE_FIELD_RELEVANT_HISTORY_ENABLED
+            // is off: same posture as the impactOnDailyActivities mic above.
+            item {
+                val relevantHistoryMicTrailingIcon: @Composable (() -> Unit)? =
+                    if (FeatureFlags.VOICE_FIELD_RELEVANT_HISTORY_ENABLED) {
+                        {
+                            IconButton(
+                                onClick = requestVoiceForRelevantHistory,
+                                enabled = !uiState.isCapturingRelevantHistoryVoice,
+                                modifier = Modifier.testTag("relevant_history_voice_mic_button"),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Mic,
+                                    contentDescription = if (uiState.isCapturingRelevantHistoryVoice)
+                                        "Listening…" else "Record other relevant history",
+                                    tint = if (uiState.isCapturingRelevantHistoryVoice)
+                                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                    else
+                                        MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                    } else null
+                OutlinedTextField(
+                    value = uiState.relevantHistory,
+                    onValueChange = actions::onRelevantHistoryChange,
+                    label = { Text("Other relevant history") },
+                    modifier = Modifier.fillMaxWidth(),
+                    trailingIcon = relevantHistoryMicTrailingIcon,
+                )
+            }
+            if (FeatureFlags.VOICE_FIELD_RELEVANT_HISTORY_ENABLED) {
+                uiState.relevantHistoryVoiceSuggestion?.let { suggestion ->
+                    item { RelevantHistoryVoiceSuggestionSurface(suggestion = suggestion, actions = actions) }
+                }
+            }
 
             item { HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp)) }
             item { Text("Attachments", style = MaterialTheme.typography.titleMedium) }
@@ -529,6 +651,102 @@ internal fun ImpactVoiceSuggestionSurface(suggestion: String, actions: Consultat
                 OutlinedButton(
                     onClick = actions::onDiscardImpactSuggestion,
                     modifier = Modifier.weight(1f).heightIn(min = 56.dp).testTag("impact_voice_discard_button"),
+                ) { Text("Discard") }
+            }
+        }
+    }
+}
+
+/** PR5, voice field-expansion. Same shape and same equal-weight-actions rationale as
+ *  [ImpactVoiceSuggestionSurface] - see its KDoc. */
+@Composable
+internal fun AggravatingVoiceSuggestionSurface(suggestion: String, actions: ConsultationActions) {
+    Card(modifier = Modifier.fillMaxWidth().testTag("aggravating_voice_suggestion_surface")) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("Voice suggestion", style = MaterialTheme.typography.labelLarge)
+            Text(suggestion, style = MaterialTheme.typography.bodyLarge)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(
+                    onClick = actions::onUseAggravatingSuggestion,
+                    modifier = Modifier.weight(1f).heightIn(min = 56.dp).testTag("aggravating_voice_use_button"),
+                ) { Text("Use it") }
+                OutlinedButton(
+                    onClick = actions::onEditAggravatingSuggestion,
+                    modifier = Modifier.weight(1f).heightIn(min = 56.dp).testTag("aggravating_voice_edit_button"),
+                ) { Text("Edit") }
+                OutlinedButton(
+                    onClick = actions::onDiscardAggravatingSuggestion,
+                    modifier = Modifier.weight(1f).heightIn(min = 56.dp).testTag("aggravating_voice_discard_button"),
+                ) { Text("Discard") }
+            }
+        }
+    }
+}
+
+/** PR5, voice field-expansion. Same shape and same equal-weight-actions rationale as
+ *  [ImpactVoiceSuggestionSurface] - see its KDoc. */
+@Composable
+internal fun RelievingVoiceSuggestionSurface(suggestion: String, actions: ConsultationActions) {
+    Card(modifier = Modifier.fillMaxWidth().testTag("relieving_voice_suggestion_surface")) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("Voice suggestion", style = MaterialTheme.typography.labelLarge)
+            Text(suggestion, style = MaterialTheme.typography.bodyLarge)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(
+                    onClick = actions::onUseRelievingSuggestion,
+                    modifier = Modifier.weight(1f).heightIn(min = 56.dp).testTag("relieving_voice_use_button"),
+                ) { Text("Use it") }
+                OutlinedButton(
+                    onClick = actions::onEditRelievingSuggestion,
+                    modifier = Modifier.weight(1f).heightIn(min = 56.dp).testTag("relieving_voice_edit_button"),
+                ) { Text("Edit") }
+                OutlinedButton(
+                    onClick = actions::onDiscardRelievingSuggestion,
+                    modifier = Modifier.weight(1f).heightIn(min = 56.dp).testTag("relieving_voice_discard_button"),
+                ) { Text("Discard") }
+            }
+        }
+    }
+}
+
+/** PR5, voice field-expansion. Same shape and same equal-weight-actions rationale as
+ *  [ImpactVoiceSuggestionSurface] - see its KDoc. */
+@Composable
+internal fun RelevantHistoryVoiceSuggestionSurface(suggestion: String, actions: ConsultationActions) {
+    Card(modifier = Modifier.fillMaxWidth().testTag("relevant_history_voice_suggestion_surface")) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("Voice suggestion", style = MaterialTheme.typography.labelLarge)
+            Text(suggestion, style = MaterialTheme.typography.bodyLarge)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(
+                    onClick = actions::onUseRelevantHistorySuggestion,
+                    modifier = Modifier.weight(1f).heightIn(min = 56.dp).testTag("relevant_history_voice_use_button"),
+                ) { Text("Use it") }
+                OutlinedButton(
+                    onClick = actions::onEditRelevantHistorySuggestion,
+                    modifier = Modifier.weight(1f).heightIn(min = 56.dp).testTag("relevant_history_voice_edit_button"),
+                ) { Text("Edit") }
+                OutlinedButton(
+                    onClick = actions::onDiscardRelevantHistorySuggestion,
+                    modifier = Modifier.weight(1f).heightIn(min = 56.dp).testTag("relevant_history_voice_discard_button"),
                 ) { Text("Discard") }
             }
         }

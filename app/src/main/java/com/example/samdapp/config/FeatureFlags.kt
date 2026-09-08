@@ -69,6 +69,33 @@ object FeatureFlags {
      *  See [com.example.samdapp.presentation.consultation.ConsultationScreen]. */
     const val VOICE_FIELD_IMPACT_ENABLED = true
 
+    /** The voice confirmation gate on `aggravatingFactors` only (mic button and its suggestion
+     *  surface). Independent of every other `VOICE_FIELD_*` flag and of [VOICE_INPUT_ENABLED],
+     *  same posture as [VOICE_FIELD_IMPACT_ENABLED] at its introduction (PR 3c): default `false`,
+     *  not yet transmission-proofed for this field.
+     *
+     *  Unlike [VOICE_FIELD_IMPACT_ENABLED], a confirmed or edited value here is not stamped with a
+     *  persisted [com.example.samdapp.domain.model.FieldProvenance] column - `aggravatingFactors`
+     *  has no such column, and adding one is a migration/wire-contract change out of scope for
+     *  this flag's introduction (PR5, voice field-expansion). The four `VOICE_FIELD_*` audit
+     *  breadcrumbs still fire on every transition; the audit log is this field's provenance
+     *  record, not the database row.
+     *
+     *  See [com.example.samdapp.presentation.consultation.ConsultationScreen]. */
+    const val VOICE_FIELD_AGGRAVATING_ENABLED = false
+
+    /** The voice confirmation gate on `relievingFactors` only. Same posture and same DB-provenance
+     *  asymmetry as [VOICE_FIELD_AGGRAVATING_ENABLED] - see its KDoc.
+     *
+     *  See [com.example.samdapp.presentation.consultation.ConsultationScreen]. */
+    const val VOICE_FIELD_RELIEVING_ENABLED = false
+
+    /** The voice confirmation gate on `relevantHistory` only. Same posture and same DB-provenance
+     *  asymmetry as [VOICE_FIELD_AGGRAVATING_ENABLED] - see its KDoc.
+     *
+     *  See [com.example.samdapp.presentation.consultation.ConsultationScreen]. */
+    const val VOICE_FIELD_RELEVANT_HISTORY_ENABLED = false
+
     /** Hides the AI treatment recommendation (`EvaluateReportOutput`) from the worker-facing
      *  report, and hides an AI-agreed/AI-modified/AI-rejected prescription's medication lines on
      *  a doctor REJECT, until a physician decision has been committed for the case (AGREE /

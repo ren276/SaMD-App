@@ -85,6 +85,9 @@ data class DocumentCaptureUiState(
 data class PendingVoiceEdit(val originalSuggestion: String, val dwellMs: Long)
 
 private const val SLOT_IMPACT_ON_DAILY_ACTIVITIES = "IMPACT_ON_DAILY_ACTIVITIES"
+private const val SLOT_AGGRAVATING_FACTORS = "AGGRAVATING_FACTORS"
+private const val SLOT_RELIEVING_FACTORS = "RELIEVING_FACTORS"
+private const val SLOT_RELEVANT_HISTORY = "RELEVANT_HISTORY"
 
 /** Honest engine identity for the audit payload. The two fields answer one audit question
  *  between them — which weights plus which code produced this text — so they are split that way:
@@ -147,6 +150,32 @@ data class ConsultationUiState(
      *  fresh voice capture superseded it before save (in which case `VOICE_FIELD_EDITED` still
      *  emits, honestly, without those two keys, rather than reusing stale metrics). */
     val impactVoicePendingEdit: PendingVoiceEdit? = null,
+
+    // ── Voice confirmation gate for aggravatingFactors, relievingFactors, relevantHistory ───────
+    // PR5, voice field-expansion. Same shape and same transitions as the impactOnDailyActivities
+    // gate above, minus a persisted FieldProvenance column: these three fields have none, and
+    // adding one is a migration this PR deliberately does not make (see
+    // FeatureFlags.VOICE_FIELD_AGGRAVATING_ENABLED). The provenance held here is ephemeral,
+    // ViewModel-only, kept only long enough to shape the VOICE_FIELD_EDITED breadcrumb at save.
+
+    val aggravatingVoiceSuggestion: String? = null,
+    val isCapturingAggravatingVoice: Boolean = false,
+    val aggravatingProvenance: FieldProvenance? = null,
+    val aggravatingVoiceSuggestionShownAtNanos: Long? = null,
+    val aggravatingVoicePendingEdit: PendingVoiceEdit? = null,
+
+    val relievingVoiceSuggestion: String? = null,
+    val isCapturingRelievingVoice: Boolean = false,
+    val relievingProvenance: FieldProvenance? = null,
+    val relievingVoiceSuggestionShownAtNanos: Long? = null,
+    val relievingVoicePendingEdit: PendingVoiceEdit? = null,
+
+    val relevantHistoryVoiceSuggestion: String? = null,
+    val isCapturingRelevantHistoryVoice: Boolean = false,
+    val relevantHistoryProvenance: FieldProvenance? = null,
+    val relevantHistoryVoiceSuggestionShownAtNanos: Long? = null,
+    val relevantHistoryVoicePendingEdit: PendingVoiceEdit? = null,
+
     val relevantHistory: String = "",
     val pendingAttachments: List<PendingAttachment> = emptyList(),
     /** H-18, Build 3a: documents already picked, tagged and queued (the "upload reports, if any"
@@ -182,7 +211,10 @@ data class ConsultationUiState(
      *  failure mode H-02 already records for AGREE. */
     val canSend: Boolean
         get() = chiefComplaint.isNotBlank() && !isSaving &&
-            impactVoiceSuggestion == null && !isCapturingImpactVoice
+            impactVoiceSuggestion == null && !isCapturingImpactVoice &&
+            aggravatingVoiceSuggestion == null && !isCapturingAggravatingVoice &&
+            relievingVoiceSuggestion == null && !isCapturingRelievingVoice &&
+            relevantHistoryVoiceSuggestion == null && !isCapturingRelevantHistoryVoice
     val hasAudioAttachment: String? get() = pendingAttachments.firstOrNull { it.type == AttachmentType.AUDIO }?.uri
 }
 
@@ -234,6 +266,29 @@ interface ConsultationActions {
      *  [ConsultationUiState.errorMessage] path so the mic is not a silent dead end
      *  (`scratchpad/pr4b-flag-flip-design-memo.md` D.3). */
     fun onVoicePermissionDenied()
+
+    // ── Voice confirmation gate for aggravatingFactors, relievingFactors, relevantHistory ───────
+    // PR5, voice field-expansion. Same shape as the impactOnDailyActivities gate above, each
+    // independently behind its own flag (FeatureFlags.VOICE_FIELD_AGGRAVATING_ENABLED /
+    // VOICE_FIELD_RELIEVING_ENABLED / VOICE_FIELD_RELEVANT_HISTORY_ENABLED).
+
+    fun onRecordAggravatingVoice()
+    fun onUseAggravatingSuggestion()
+    fun onEditAggravatingSuggestion()
+    fun onDiscardAggravatingSuggestion()
+    fun onAggravatingVoicePermissionDenied()
+
+    fun onRecordRelievingVoice()
+    fun onUseRelievingSuggestion()
+    fun onEditRelievingSuggestion()
+    fun onDiscardRelievingSuggestion()
+    fun onRelievingVoicePermissionDenied()
+
+    fun onRecordRelevantHistoryVoice()
+    fun onUseRelevantHistorySuggestion()
+    fun onEditRelevantHistorySuggestion()
+    fun onDiscardRelevantHistorySuggestion()
+    fun onRelevantHistoryVoicePermissionDenied()
 
     fun onRelevantHistoryChange(value: String)
     fun onAddAttachment(type: AttachmentType, uri: String)
@@ -310,8 +365,6 @@ class ConsultationViewModel @AssistedInject constructor(
     override fun onOnsetChange(value: String) = _uiState.update { it.copy(onset = value) }
     override fun onDurationBucketChange(value: String) = _uiState.update { it.copy(durationBucket = value) }
     override fun onSeverityScoreChange(value: Int) = _uiState.update { it.copy(severityScore = value) }
-    override fun onAggravatingFactorsChange(value: String) = _uiState.update { it.copy(aggravatingFactors = value) }
-    override fun onRelievingFactorsChange(value: String) = _uiState.update { it.copy(relievingFactors = value) }
     /**
      * Keyboard edits carry the provenance transitions from the design memo's A.3:
      * clearing the field to empty resets provenance to null (an empty field has no provenance to
@@ -517,13 +570,14 @@ class ConsultationViewModel @AssistedInject constructor(
      *  promote when a second slot exists. Never a transcript, corrected text, URI or patient
      *  name (memo C.4); `patientId`/`caseRecordId` travel as [AuditLogger.log] parameters, same
      *  as every other call site in this class, not inside this payload. */
-    private fun impactVoicePayload(
+    private fun voiceFieldPayload(
+        slot: String,
         provenance: FieldProvenance,
         charCount: Int? = null,
         editDistance: Int? = null,
         dwellMs: Long? = null,
     ) = auditPayload(
-        "slot" to SLOT_IMPACT_ON_DAILY_ACTIVITIES,
+        "slot" to slot,
         "provenance" to provenance.name,
         "asrModelId" to ASR_MODEL_ID,
         "asrModelVersion" to ASR_MODEL_VERSION,
@@ -531,7 +585,469 @@ class ConsultationViewModel @AssistedInject constructor(
         "editDistance" to editDistance?.toString(),
         "dwellMs" to dwellMs?.toString(),
     )
-    override fun onRelevantHistoryChange(value: String) = _uiState.update { it.copy(relevantHistory = value) }
+
+    private fun impactVoicePayload(
+        provenance: FieldProvenance,
+        charCount: Int? = null,
+        editDistance: Int? = null,
+        dwellMs: Long? = null,
+    ) = voiceFieldPayload(SLOT_IMPACT_ON_DAILY_ACTIVITIES, provenance, charCount, editDistance, dwellMs)
+
+    // ── Voice confirmation gate for aggravatingFactors, relievingFactors, relevantHistory ───────
+    // PR5, voice field-expansion. Each handler below is the same three-property shape
+    // onRecordImpactVoice documents (never mutates the field directly, a blank transcript on a
+    // successful recognition routes to the honest-failure edge, an error leaves the field
+    // untouched) with one deliberate difference: no persisted FieldProvenance column exists for
+    // these fields (FeatureFlags.VOICE_FIELD_AGGRAVATING_ENABLED KDoc), so onUse*/onEdit* stamp
+    // only the ephemeral in-memory provenance used to shape the VOICE_FIELD_EDITED breadcrumb at
+    // save, never a value handed to saveConsultationUseCase.
+
+    override fun onRecordAggravatingVoice() {
+        val current = _uiState.value
+        if (current.isCapturingAggravatingVoice || current.aggravatingVoiceSuggestion != null) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isCapturingAggravatingVoice = true, errorMessage = null) }
+            captureAudioAttachmentUseCase().fold(
+                onSuccess = { captured ->
+                    if (captured.transcript.isBlank()) {
+                        auditLogger.log(
+                            action = AuditAction.VOICE_FIELD_REJECTED,
+                            patientId = patientId,
+                            caseRecordId = caseRecordId,
+                            payload = voiceFieldPayload(
+                                SLOT_AGGRAVATING_FACTORS,
+                                provenance = FieldProvenance.VOICE_UNCONFIRMED,
+                                charCount = 0,
+                            ),
+                        )
+                        _uiState.update {
+                            it.copy(
+                                isCapturingAggravatingVoice = false,
+                                errorMessage = "Nothing was heard. Please try again or type the answer.",
+                            )
+                        }
+                    } else {
+                        auditLogger.log(
+                            action = AuditAction.VOICE_FIELD_SUGGESTED,
+                            patientId = patientId,
+                            caseRecordId = caseRecordId,
+                            payload = voiceFieldPayload(
+                                SLOT_AGGRAVATING_FACTORS,
+                                provenance = FieldProvenance.VOICE_UNCONFIRMED,
+                                charCount = captured.transcript.length,
+                            ),
+                        )
+                        _uiState.update {
+                            it.copy(
+                                isCapturingAggravatingVoice = false,
+                                aggravatingVoiceSuggestion = captured.transcript,
+                                aggravatingVoiceSuggestionShownAtNanos = System.nanoTime(),
+                            )
+                        }
+                    }
+                },
+                onFailure = { error ->
+                    auditLogger.log(
+                        action = AuditAction.VOICE_FIELD_REJECTED,
+                        patientId = patientId,
+                        caseRecordId = caseRecordId,
+                        payload = voiceFieldPayload(SLOT_AGGRAVATING_FACTORS, provenance = FieldProvenance.VOICE_UNCONFIRMED),
+                    )
+                    _uiState.update {
+                        it.copy(
+                            isCapturingAggravatingVoice = false,
+                            errorMessage = error.message ?: "Voice capture failed",
+                        )
+                    }
+                },
+            )
+        }
+    }
+
+    override fun onUseAggravatingSuggestion() {
+        val state = _uiState.value
+        val suggestion = state.aggravatingVoiceSuggestion ?: return
+        viewModelScope.launch {
+            auditLogger.log(
+                action = AuditAction.VOICE_FIELD_CONFIRMED,
+                patientId = patientId,
+                caseRecordId = caseRecordId,
+                payload = voiceFieldPayload(
+                    SLOT_AGGRAVATING_FACTORS,
+                    provenance = FieldProvenance.VOICE_CONFIRMED,
+                    charCount = suggestion.length,
+                    dwellMs = dwellMillisSince(state.aggravatingVoiceSuggestionShownAtNanos),
+                ),
+            )
+        }
+        _uiState.update {
+            it.copy(
+                aggravatingFactors = suggestion,
+                aggravatingProvenance = FieldProvenance.VOICE_CONFIRMED,
+                aggravatingVoiceSuggestion = null,
+                aggravatingVoiceSuggestionShownAtNanos = null,
+                aggravatingVoicePendingEdit = null,
+            )
+        }
+    }
+
+    override fun onEditAggravatingSuggestion() = _uiState.update { state ->
+        val suggestion = state.aggravatingVoiceSuggestion ?: return@update state
+        state.copy(
+            aggravatingFactors = suggestion,
+            aggravatingProvenance = FieldProvenance.VOICE_EDITED,
+            aggravatingVoiceSuggestion = null,
+            aggravatingVoiceSuggestionShownAtNanos = null,
+            aggravatingVoicePendingEdit = PendingVoiceEdit(
+                originalSuggestion = suggestion,
+                dwellMs = dwellMillisSince(state.aggravatingVoiceSuggestionShownAtNanos) ?: 0L,
+            ),
+        )
+    }
+
+    override fun onDiscardAggravatingSuggestion() {
+        val state = _uiState.value
+        val suggestion = state.aggravatingVoiceSuggestion
+        if (suggestion != null) {
+            viewModelScope.launch {
+                auditLogger.log(
+                    action = AuditAction.VOICE_FIELD_REJECTED,
+                    patientId = patientId,
+                    caseRecordId = caseRecordId,
+                    payload = voiceFieldPayload(
+                        SLOT_AGGRAVATING_FACTORS,
+                        provenance = FieldProvenance.VOICE_UNCONFIRMED,
+                        charCount = suggestion.length,
+                        dwellMs = dwellMillisSince(state.aggravatingVoiceSuggestionShownAtNanos),
+                    ),
+                )
+            }
+        }
+        _uiState.update {
+            it.copy(aggravatingVoiceSuggestion = null, aggravatingVoiceSuggestionShownAtNanos = null)
+        }
+    }
+
+    override fun onAggravatingVoicePermissionDenied() {
+        _uiState.update {
+            it.copy(
+                isCapturingAggravatingVoice = false,
+                errorMessage = "Microphone permission was declined. Allow it to record, " +
+                    "or type the answer.",
+            )
+        }
+    }
+
+    override fun onRecordRelievingVoice() {
+        val current = _uiState.value
+        if (current.isCapturingRelievingVoice || current.relievingVoiceSuggestion != null) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isCapturingRelievingVoice = true, errorMessage = null) }
+            captureAudioAttachmentUseCase().fold(
+                onSuccess = { captured ->
+                    if (captured.transcript.isBlank()) {
+                        auditLogger.log(
+                            action = AuditAction.VOICE_FIELD_REJECTED,
+                            patientId = patientId,
+                            caseRecordId = caseRecordId,
+                            payload = voiceFieldPayload(
+                                SLOT_RELIEVING_FACTORS,
+                                provenance = FieldProvenance.VOICE_UNCONFIRMED,
+                                charCount = 0,
+                            ),
+                        )
+                        _uiState.update {
+                            it.copy(
+                                isCapturingRelievingVoice = false,
+                                errorMessage = "Nothing was heard. Please try again or type the answer.",
+                            )
+                        }
+                    } else {
+                        auditLogger.log(
+                            action = AuditAction.VOICE_FIELD_SUGGESTED,
+                            patientId = patientId,
+                            caseRecordId = caseRecordId,
+                            payload = voiceFieldPayload(
+                                SLOT_RELIEVING_FACTORS,
+                                provenance = FieldProvenance.VOICE_UNCONFIRMED,
+                                charCount = captured.transcript.length,
+                            ),
+                        )
+                        _uiState.update {
+                            it.copy(
+                                isCapturingRelievingVoice = false,
+                                relievingVoiceSuggestion = captured.transcript,
+                                relievingVoiceSuggestionShownAtNanos = System.nanoTime(),
+                            )
+                        }
+                    }
+                },
+                onFailure = { error ->
+                    auditLogger.log(
+                        action = AuditAction.VOICE_FIELD_REJECTED,
+                        patientId = patientId,
+                        caseRecordId = caseRecordId,
+                        payload = voiceFieldPayload(SLOT_RELIEVING_FACTORS, provenance = FieldProvenance.VOICE_UNCONFIRMED),
+                    )
+                    _uiState.update {
+                        it.copy(
+                            isCapturingRelievingVoice = false,
+                            errorMessage = error.message ?: "Voice capture failed",
+                        )
+                    }
+                },
+            )
+        }
+    }
+
+    override fun onUseRelievingSuggestion() {
+        val state = _uiState.value
+        val suggestion = state.relievingVoiceSuggestion ?: return
+        viewModelScope.launch {
+            auditLogger.log(
+                action = AuditAction.VOICE_FIELD_CONFIRMED,
+                patientId = patientId,
+                caseRecordId = caseRecordId,
+                payload = voiceFieldPayload(
+                    SLOT_RELIEVING_FACTORS,
+                    provenance = FieldProvenance.VOICE_CONFIRMED,
+                    charCount = suggestion.length,
+                    dwellMs = dwellMillisSince(state.relievingVoiceSuggestionShownAtNanos),
+                ),
+            )
+        }
+        _uiState.update {
+            it.copy(
+                relievingFactors = suggestion,
+                relievingProvenance = FieldProvenance.VOICE_CONFIRMED,
+                relievingVoiceSuggestion = null,
+                relievingVoiceSuggestionShownAtNanos = null,
+                relievingVoicePendingEdit = null,
+            )
+        }
+    }
+
+    override fun onEditRelievingSuggestion() = _uiState.update { state ->
+        val suggestion = state.relievingVoiceSuggestion ?: return@update state
+        state.copy(
+            relievingFactors = suggestion,
+            relievingProvenance = FieldProvenance.VOICE_EDITED,
+            relievingVoiceSuggestion = null,
+            relievingVoiceSuggestionShownAtNanos = null,
+            relievingVoicePendingEdit = PendingVoiceEdit(
+                originalSuggestion = suggestion,
+                dwellMs = dwellMillisSince(state.relievingVoiceSuggestionShownAtNanos) ?: 0L,
+            ),
+        )
+    }
+
+    override fun onDiscardRelievingSuggestion() {
+        val state = _uiState.value
+        val suggestion = state.relievingVoiceSuggestion
+        if (suggestion != null) {
+            viewModelScope.launch {
+                auditLogger.log(
+                    action = AuditAction.VOICE_FIELD_REJECTED,
+                    patientId = patientId,
+                    caseRecordId = caseRecordId,
+                    payload = voiceFieldPayload(
+                        SLOT_RELIEVING_FACTORS,
+                        provenance = FieldProvenance.VOICE_UNCONFIRMED,
+                        charCount = suggestion.length,
+                        dwellMs = dwellMillisSince(state.relievingVoiceSuggestionShownAtNanos),
+                    ),
+                )
+            }
+        }
+        _uiState.update {
+            it.copy(relievingVoiceSuggestion = null, relievingVoiceSuggestionShownAtNanos = null)
+        }
+    }
+
+    override fun onRelievingVoicePermissionDenied() {
+        _uiState.update {
+            it.copy(
+                isCapturingRelievingVoice = false,
+                errorMessage = "Microphone permission was declined. Allow it to record, " +
+                    "or type the answer.",
+            )
+        }
+    }
+
+    override fun onRecordRelevantHistoryVoice() {
+        val current = _uiState.value
+        if (current.isCapturingRelevantHistoryVoice || current.relevantHistoryVoiceSuggestion != null) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isCapturingRelevantHistoryVoice = true, errorMessage = null) }
+            captureAudioAttachmentUseCase().fold(
+                onSuccess = { captured ->
+                    if (captured.transcript.isBlank()) {
+                        auditLogger.log(
+                            action = AuditAction.VOICE_FIELD_REJECTED,
+                            patientId = patientId,
+                            caseRecordId = caseRecordId,
+                            payload = voiceFieldPayload(
+                                SLOT_RELEVANT_HISTORY,
+                                provenance = FieldProvenance.VOICE_UNCONFIRMED,
+                                charCount = 0,
+                            ),
+                        )
+                        _uiState.update {
+                            it.copy(
+                                isCapturingRelevantHistoryVoice = false,
+                                errorMessage = "Nothing was heard. Please try again or type the answer.",
+                            )
+                        }
+                    } else {
+                        auditLogger.log(
+                            action = AuditAction.VOICE_FIELD_SUGGESTED,
+                            patientId = patientId,
+                            caseRecordId = caseRecordId,
+                            payload = voiceFieldPayload(
+                                SLOT_RELEVANT_HISTORY,
+                                provenance = FieldProvenance.VOICE_UNCONFIRMED,
+                                charCount = captured.transcript.length,
+                            ),
+                        )
+                        _uiState.update {
+                            it.copy(
+                                isCapturingRelevantHistoryVoice = false,
+                                relevantHistoryVoiceSuggestion = captured.transcript,
+                                relevantHistoryVoiceSuggestionShownAtNanos = System.nanoTime(),
+                            )
+                        }
+                    }
+                },
+                onFailure = { error ->
+                    auditLogger.log(
+                        action = AuditAction.VOICE_FIELD_REJECTED,
+                        patientId = patientId,
+                        caseRecordId = caseRecordId,
+                        payload = voiceFieldPayload(SLOT_RELEVANT_HISTORY, provenance = FieldProvenance.VOICE_UNCONFIRMED),
+                    )
+                    _uiState.update {
+                        it.copy(
+                            isCapturingRelevantHistoryVoice = false,
+                            errorMessage = error.message ?: "Voice capture failed",
+                        )
+                    }
+                },
+            )
+        }
+    }
+
+    override fun onUseRelevantHistorySuggestion() {
+        val state = _uiState.value
+        val suggestion = state.relevantHistoryVoiceSuggestion ?: return
+        viewModelScope.launch {
+            auditLogger.log(
+                action = AuditAction.VOICE_FIELD_CONFIRMED,
+                patientId = patientId,
+                caseRecordId = caseRecordId,
+                payload = voiceFieldPayload(
+                    SLOT_RELEVANT_HISTORY,
+                    provenance = FieldProvenance.VOICE_CONFIRMED,
+                    charCount = suggestion.length,
+                    dwellMs = dwellMillisSince(state.relevantHistoryVoiceSuggestionShownAtNanos),
+                ),
+            )
+        }
+        _uiState.update {
+            it.copy(
+                relevantHistory = suggestion,
+                relevantHistoryProvenance = FieldProvenance.VOICE_CONFIRMED,
+                relevantHistoryVoiceSuggestion = null,
+                relevantHistoryVoiceSuggestionShownAtNanos = null,
+                relevantHistoryVoicePendingEdit = null,
+            )
+        }
+    }
+
+    override fun onEditRelevantHistorySuggestion() = _uiState.update { state ->
+        val suggestion = state.relevantHistoryVoiceSuggestion ?: return@update state
+        state.copy(
+            relevantHistory = suggestion,
+            relevantHistoryProvenance = FieldProvenance.VOICE_EDITED,
+            relevantHistoryVoiceSuggestion = null,
+            relevantHistoryVoiceSuggestionShownAtNanos = null,
+            relevantHistoryVoicePendingEdit = PendingVoiceEdit(
+                originalSuggestion = suggestion,
+                dwellMs = dwellMillisSince(state.relevantHistoryVoiceSuggestionShownAtNanos) ?: 0L,
+            ),
+        )
+    }
+
+    override fun onDiscardRelevantHistorySuggestion() {
+        val state = _uiState.value
+        val suggestion = state.relevantHistoryVoiceSuggestion
+        if (suggestion != null) {
+            viewModelScope.launch {
+                auditLogger.log(
+                    action = AuditAction.VOICE_FIELD_REJECTED,
+                    patientId = patientId,
+                    caseRecordId = caseRecordId,
+                    payload = voiceFieldPayload(
+                        SLOT_RELEVANT_HISTORY,
+                        provenance = FieldProvenance.VOICE_UNCONFIRMED,
+                        charCount = suggestion.length,
+                        dwellMs = dwellMillisSince(state.relevantHistoryVoiceSuggestionShownAtNanos),
+                    ),
+                )
+            }
+        }
+        _uiState.update {
+            it.copy(relevantHistoryVoiceSuggestion = null, relevantHistoryVoiceSuggestionShownAtNanos = null)
+        }
+    }
+
+    override fun onRelevantHistoryVoicePermissionDenied() {
+        _uiState.update {
+            it.copy(
+                isCapturingRelevantHistoryVoice = false,
+                errorMessage = "Microphone permission was declined. Allow it to record, " +
+                    "or type the answer.",
+            )
+        }
+    }
+
+    /** Same provenance-transition rule as [onImpactChange]: a hand-correction of a
+     *  `VOICE_CONFIRMED` value becomes `VOICE_EDITED`, and clearing the field drops provenance and
+     *  any pending-edit metrics. Ephemeral only - see the gate's own KDoc above for why. */
+    override fun onAggravatingFactorsChange(value: String) = _uiState.update {
+        it.copy(
+            aggravatingFactors = value,
+            aggravatingProvenance = when {
+                value.isBlank() -> null
+                it.aggravatingProvenance == FieldProvenance.VOICE_CONFIRMED -> FieldProvenance.VOICE_EDITED
+                else -> it.aggravatingProvenance
+            },
+            aggravatingVoicePendingEdit = if (value.isBlank()) null else it.aggravatingVoicePendingEdit,
+        )
+    }
+
+    override fun onRelievingFactorsChange(value: String) = _uiState.update {
+        it.copy(
+            relievingFactors = value,
+            relievingProvenance = when {
+                value.isBlank() -> null
+                it.relievingProvenance == FieldProvenance.VOICE_CONFIRMED -> FieldProvenance.VOICE_EDITED
+                else -> it.relievingProvenance
+            },
+            relievingVoicePendingEdit = if (value.isBlank()) null else it.relievingVoicePendingEdit,
+        )
+    }
+
+    override fun onRelevantHistoryChange(value: String) = _uiState.update {
+        it.copy(
+            relevantHistory = value,
+            relevantHistoryProvenance = when {
+                value.isBlank() -> null
+                it.relevantHistoryProvenance == FieldProvenance.VOICE_CONFIRMED -> FieldProvenance.VOICE_EDITED
+                else -> it.relevantHistoryProvenance
+            },
+            relevantHistoryVoicePendingEdit = if (value.isBlank()) null else it.relevantHistoryVoicePendingEdit,
+        )
+    }
 
     /** Investor-demo shortcut: fills every HPI field from [DemoPatientProfile] in one tap. */
     override fun fillDemoData() {
@@ -548,7 +1064,13 @@ class ConsultationViewModel @AssistedInject constructor(
                 // text it does not describe; it stamps TYPED at save like any other typed value.
                 impactProvenance = null,
                 impactVoicePendingEdit = null,
+                aggravatingProvenance = null,
+                aggravatingVoicePendingEdit = null,
+                relievingProvenance = null,
+                relievingVoicePendingEdit = null,
                 relevantHistory = DemoPatientProfile.RELEVANT_HISTORY,
+                relevantHistoryProvenance = null,
+                relevantHistoryVoicePendingEdit = null,
             )
         }
     }
@@ -853,6 +1375,60 @@ class ConsultationViewModel @AssistedInject constructor(
                         // superseded the metrics this value's Edit tap originally recorded.
                         editDistance = pending?.let {
                             levenshteinDistance(it.originalSuggestion, current.impactOnDailyActivities)
+                        },
+                        dwellMs = pending?.dwellMs,
+                    ),
+                )
+            }
+            // Same VOICE_FIELD_EDITED-at-save rule as impactOnDailyActivities above, for the three
+            // fields with no persisted provenance column (FeatureFlags.VOICE_FIELD_AGGRAVATING_ENABLED
+            // KDoc): the breadcrumb still fires off the ephemeral in-memory provenance, honestly.
+            if (current.aggravatingProvenance == FieldProvenance.VOICE_EDITED) {
+                val pending = current.aggravatingVoicePendingEdit
+                auditLogger.log(
+                    action = AuditAction.VOICE_FIELD_EDITED,
+                    patientId = patientId,
+                    caseRecordId = caseRecordId,
+                    payload = voiceFieldPayload(
+                        SLOT_AGGRAVATING_FACTORS,
+                        provenance = FieldProvenance.VOICE_EDITED,
+                        charCount = current.aggravatingFactors.length,
+                        editDistance = pending?.let {
+                            levenshteinDistance(it.originalSuggestion, current.aggravatingFactors)
+                        },
+                        dwellMs = pending?.dwellMs,
+                    ),
+                )
+            }
+            if (current.relievingProvenance == FieldProvenance.VOICE_EDITED) {
+                val pending = current.relievingVoicePendingEdit
+                auditLogger.log(
+                    action = AuditAction.VOICE_FIELD_EDITED,
+                    patientId = patientId,
+                    caseRecordId = caseRecordId,
+                    payload = voiceFieldPayload(
+                        SLOT_RELIEVING_FACTORS,
+                        provenance = FieldProvenance.VOICE_EDITED,
+                        charCount = current.relievingFactors.length,
+                        editDistance = pending?.let {
+                            levenshteinDistance(it.originalSuggestion, current.relievingFactors)
+                        },
+                        dwellMs = pending?.dwellMs,
+                    ),
+                )
+            }
+            if (current.relevantHistoryProvenance == FieldProvenance.VOICE_EDITED) {
+                val pending = current.relevantHistoryVoicePendingEdit
+                auditLogger.log(
+                    action = AuditAction.VOICE_FIELD_EDITED,
+                    patientId = patientId,
+                    caseRecordId = caseRecordId,
+                    payload = voiceFieldPayload(
+                        SLOT_RELEVANT_HISTORY,
+                        provenance = FieldProvenance.VOICE_EDITED,
+                        charCount = current.relevantHistory.length,
+                        editDistance = pending?.let {
+                            levenshteinDistance(it.originalSuggestion, current.relevantHistory)
                         },
                         dwellMs = pending?.dwellMs,
                     ),
