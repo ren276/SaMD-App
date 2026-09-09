@@ -4997,3 +4997,100 @@ business. The memo itself stays PROPOSED - building its sanitizer is not an appr
 feature.
 
 Not committed as of this entry.
+
+## SLM stage 3b-0: sanitizer vocabulary correction - 2026-09-09
+
+Corrects a fail-open defect in the stage-3a stream sanitizer, found by stage 3b's task 0. Branch
+`fix/slm-sanitizer-vocabulary` off `feat/slm-stream-sanitizer`. Two files changed, the sanitizer
+and its test. **The engine, the seam, the delimiter logic, the UI, the flag and the audit path are
+all untouched.** No runtime bound, no artifact downloaded.
+
+**What task 0 found.** Stage 3a took its control-token set from the inherited Gemma vocabulary plus
+the harness F6 observation, and said so in its own KDoc. Read against
+`google/medgemma-1.5-4b-it`'s `tokenizer.json` (6415 added tokens), two of the three assumptions
+were wrong.
+
+**Defect 1, the reserved range, fail-open.** The `<unused*>` range is not `<unused0>..<unused98>`.
+It is `<unused0>..<unused6241>`, in two disjoint id blocks: a low block at ids 6..104
+(`<unused0>..<unused98>`) and a high block at ids 256001..262143 (`<unused99>..<unused6241>`). The
+two are contiguous in name and far apart in id, which is how stage 3a missed the second one
+entirely. 6143 reserved tokens, 98 percent of the range, matched nothing and would have rendered
+as visible text next to an approved prescription, breaking section 6.1's fail-closed rule for
+unknown control tokens. The set now covers both blocks.
+
+**Defect 2, the structural guard, too narrow.** Reserved token id 5 is `[multimodal]`, sitting
+between `<mask>` (4) and `<unused0>` (6), in square brackets. Stage 3a's guard required every
+matched literal to be `<...>`, so it would have rejected a genuine reserved token and left the
+sanitizer rendering it. The guard is re-expressed rather than the token omitted, and the
+re-expression is deliberately narrow: a literal opens with `<` or `[`, closes with the matching
+`>` or `]`, and its interior is non-empty with no whitespace and no bracket character. A phrase
+cannot satisfy that, because a phrase has spaces and no brackets, so `filterDisclaimers()` is still
+un-addable as data. Admitting a second bracket pair widens which vocabulary literals are
+expressible; it does not widen the guard toward meaning. The rule is now a named function,
+`isControlTokenShaped`, so the guard test and a future reader apply the same rule rather than two
+drifting copies.
+
+**Confirmed correct, and left alone.** `<unused94>` (id 100) and `<unused95>` (id 101) are the
+right delimiters. There is no `<start_of_thought>`-style token anywhere in the vocabulary, so the
+word "thought" the harness saw is ordinary text inside the span, not a token, and span-stripping
+between the delimiters handles it. The `drain` loop, the span accounting and the two fail-closed
+rules are byte-identical to stage 3a. Worth recording: a rule keyed on the tokenizer's `special`
+flag would have missed the reasoning channel completely, because only `<pad>`, `<eos>`, `<bos>`,
+`<unk>`, `<start_of_turn>` and `<end_of_turn>` carry that flag and the entire `<unused*>` range
+does not. The literal-set approach was right; only its contents were wrong.
+
+**One implementation change the widening forced.** Stage 3a matched by looping the token set and
+calling `indexOf` per entry. Over 109 literals that was fine; over 6253 it would be roughly 6253
+buffer scans per arriving chunk, on a field phone, on the streaming path. The matcher now asks the
+mirrored question, "at each position that could open a token, is this one", at one hash lookup per
+candidate length per bracket character. Same match, same semantics, still exact string membership
+against a fixed set of literals, still no regex and nothing that reads the surrounding words.
+Lengths are probed longest first: no token in this vocabulary is a proper prefix of another, so it
+makes no difference today, and it is the fail-closed direction if a future vocabulary changes that.
+The end-of-stream prefix check was narrowed the same way, to the last opener in the hold-back
+window, since a control token contains no bracket after its first character.
+
+**Regression tests, six new (17 to 23).** A high-block token (`<unused99>`, `<unused6241>`) is
+dropped rather than rendered, and one straddling a chunk boundary is held back like any other.
+`[multimodal]` is dropped. Ordinary square brackets in clinical prose are untouched, which is the
+other half of admitting `[` as an opener: `"Amoxicillin 500 mg [as needed] for 5 days. See note [2]
+and consult your doctor."` passes through with nothing suppressed. The shape rule is exercised
+directly against both real vocabulary literals and eleven prose or malformed cases. The range test
+asserts the full low block, spot-checks the high block at both ends, asserts `<unused6242>` is
+absent, and pins the set size, so a future narrowing turns it red.
+
+**Mutation checks, seven, all confirmed red.** The five from stage 3a were re-run after the guard
+was re-expressed and all still go red: sanitizer bypassed in the seam, hold-back window removed,
+unterminated span flushed, unknown tokens rendered, and "consult your doctor" added to the match
+set. Two new ones cover this stage: narrowing the range back to `(0..98)`, which is the stage-3a
+defect reintroduced, fails the high-block tests and the range test; removing `[multimodal]` fails
+the square-bracket test and the range test.
+
+**One honest change in what the hedge mutation proves.** Under stage 3a, adding "consult your
+doctor" to the match set broke the hedge tests behaviourally, because the matcher searched for
+every entry anywhere in the buffer. It no longer does, because the matcher only probes at a `<` or
+`[`, so a prose entry sitting in the set is now inert rather than active. That is a stronger
+fail-safe, not a weaker one, but it moves the detector: the mutation is now caught by the shape
+test and the set-size test rather than by the hedge tests. Both still go red, and the hedge tests
+still pass verbatim on the real code. Written down rather than left for a reader to discover.
+
+**Open precondition, not discharged here.** This verification read the upstream PyTorch repo,
+`google/medgemma-1.5-4b-it`, not the shipped `litert-community/MedGemma-1.5-4B-IT` `.litertlm`
+export, which is not on the build machine. Under the H-15 artifact-versus-family standard that is
+family evidence: one step closer than stage 3a's assumption, and still not evidence about the
+shipped build. **An export-level re-verification of this vocabulary against the shipped
+`.litertlm`'s own tokenizer remains a required precondition of the `SLM_READBACK_ENABLED` flag
+flip, and belongs to stage 3b-1.** It sits alongside that stage's two other flag-flip
+preconditions, the section 10.3 egress proof and the H-25 on-device measurement, both of which are
+also blocked: the artifact is not present and no physical arm64 device is attached (`adb devices`
+shows only an x86_64 emulator).
+
+**Test.** `SlmStreamSanitizerTest` 23 tests. `testDevDebugUnitTest` green, 449 tests, full suite,
+run with `--rerun-tasks`.
+
+**Not touched, by design**: `SlmEngine`, `SlmReadbackUseCase`, `presentation/`, the DI modules,
+`FeatureFlags`, `AuditAction` and its backend mirror, and `docs/`. H-23's mitigation column still
+says "design-stage only, no code exists" and stays that way until a controlled-docs commit updates
+it. The memo stays PROPOSED.
+
+Not committed as of this entry.

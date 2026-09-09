@@ -129,6 +129,65 @@ class SlmStreamSanitizerTest {
         assertEquals(0, sanitizer.suppression.spans)
     }
 
+    /**
+     * **The stage-3a defect, as a test.** `<unused99>` is the first token of the high id block
+     * (256001), which stage 3a's `(0..98)` range did not cover: it would have rendered here as
+     * visible text next to an approved prescription. `<unused6241>` is the last token of that
+     * block (262143).
+     */
+    @Test
+    fun `a reserved token from the high id block is dropped rather than rendered`() {
+        val (visible, sanitizer) = run("Take it <unused99>after<unused6241> food.")
+
+        assertEquals("Take it after food.", visible)
+        assertEquals(2, sanitizer.suppression.droppedTokens)
+        assertEquals("<unused99>".length + "<unused6241>".length, sanitizer.suppression.characters)
+    }
+
+    /** A high-block token straddling a chunk boundary is held back like any other. */
+    @Test
+    fun `a high-block reserved token straddling chunks is never emitted as visible text`() {
+        val sanitizer = SlmStreamSanitizer()
+        val emitted = StringBuilder()
+        val prefixes = mutableListOf<String>()
+
+        listOf("Take it <unu", "sed6241", "> after food.").forEach {
+            emitted.append(sanitizer.accept(it))
+            prefixes += emitted.toString()
+        }
+        emitted.append(sanitizer.finish())
+
+        assertEquals("Take it  after food.", emitted.toString())
+        prefixes.forEach { assertFalse("a partial reserved token was displayed: '$it'", it.contains("<unu")) }
+    }
+
+    /**
+     * `[multimodal]` is a reserved token at id 5 and it uses square brackets, so stage 3a's guard
+     * would have refused to carry it and the sanitizer would have rendered it. It is dropped like
+     * any other reserved token.
+     */
+    @Test
+    fun `the square-bracket reserved token is dropped rather than rendered`() {
+        val (visible, sanitizer) = run("Take it [multimodal]after food.")
+
+        assertEquals("Take it after food.", visible)
+        assertEquals(1, sanitizer.suppression.droppedTokens)
+    }
+
+    /**
+     * The other half of admitting `[`: ordinary square brackets in clinical prose are not tokens
+     * and must survive. A bracket is now a position the matcher probes, not a character it eats.
+     */
+    @Test
+    fun `ordinary square brackets in clinical text are untouched`() {
+        val text = "Amoxicillin 500 mg [as needed] for 5 days. See note [2] and consult your doctor."
+
+        val (visible, sanitizer) = run(text)
+
+        assertEquals(text, visible)
+        assertEquals(SlmSuppression.NONE, sanitizer.suppression)
+    }
+
     /** A close delimiter with no open is not a structure the sanitizer recognizes, so it goes. */
     @Test
     fun `a close delimiter with no open is dropped`() {
@@ -233,10 +292,7 @@ class SlmStreamSanitizerTest {
     fun `every string the sanitizer matches on is a bracketed control-token literal`() {
         assertTrue("the control-token set is empty, so this assertion proves nothing", CONTROL_TOKENS.isNotEmpty())
 
-        val notControlTokens = CONTROL_TOKENS.filterNot { token ->
-            token.length > 2 && token.startsWith("<") && token.endsWith(">") &&
-                token.drop(1).dropLast(1).none { it == '<' || it == '>' || it.isWhitespace() }
-        }
+        val notControlTokens = CONTROL_TOKENS.filterNot { isControlTokenShaped(it) }
 
         assertEquals(
             "A non-control-token string was added to the sanitizer's match set. Memo section 6.2: " +
@@ -247,6 +303,55 @@ class SlmStreamSanitizerTest {
         )
         assertTrue("the delimiters under test are not in the matched set", THOUGHT_OPEN in CONTROL_TOKENS)
         assertTrue("the delimiters under test are not in the matched set", THOUGHT_CLOSE in CONTROL_TOKENS)
+    }
+
+    /**
+     * The shape rule itself, exercised directly rather than only through the set, because stage
+     * 3b-0 widened it and a widening is exactly where a guard quietly stops guarding.
+     *
+     * Admitting square brackets was forced by a real vocabulary entry: `[multimodal]` is a
+     * reserved token at id 5, between `<mask>` and `<unused0>`. Stage 3a's guard required `<...>`,
+     * so it would have rejected a genuine reserved token and left the sanitizer rendering it.
+     *
+     * What the widening must not do is admit prose. Every rejection case below is the shape of
+     * something `filterDisclaimers()` would need: a phrase, a fragment of one, a bare word, or a
+     * bracket wrapped around a phrase.
+     */
+    @Test
+    fun `the shape rule admits vocabulary literals and still rejects prose`() {
+        listOf("[multimodal]", "<unused94>", "<unused6241>", "<pad>", "<image_soft_token>", "<start_of_turn>")
+            .forEach { assertTrue("a real vocabulary literal was rejected: $it", isControlTokenShaped(it)) }
+
+        listOf(
+            "consult your doctor",
+            "[consult your doctor]",
+            "<consult your doctor>",
+            "consult",
+            "not medical advice",
+            "",
+            "<>",
+            "[]",
+            "<a<b>>",
+            "<unused94",
+            "unused94>",
+        ).forEach { assertFalse("prose or a malformed literal was admitted: '$it'", isControlTokenShaped(it)) }
+    }
+
+    /**
+     * The vocabulary the set claims to cover, asserted against the ids recorded in
+     * `tokenizer.json` (stage 3b task 0). This is the test that would have caught the stage-3a
+     * defect: it hardcoded `(0..98)` from the low id block and missed the 6143-token high block.
+     */
+    @Test
+    fun `the reserved range covers both disjoint id blocks in full`() {
+        // Low block, ids 6..104.
+        (0..98).forEach { assertTrue("<unused$it> is missing from the matched set", "<unused$it>" in CONTROL_TOKENS) }
+        // High block, ids 256001..262143. Stage 3a covered none of these.
+        listOf(99, 100, 500, 3000, 6240, 6241)
+            .forEach { assertTrue("<unused$it> is missing from the matched set", "<unused$it>" in CONTROL_TOKENS) }
+
+        assertFalse("the range runs past the vocabulary", "<unused6242>" in CONTROL_TOKENS)
+        assertEquals("the reserved range is not the verified size", 6242 + 11, CONTROL_TOKENS.size)
     }
 
     /**

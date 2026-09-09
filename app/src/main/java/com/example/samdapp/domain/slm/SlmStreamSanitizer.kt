@@ -33,26 +33,56 @@ data class SlmSuppression(
  * The reasoning channel's delimiters, as harness finding F6 observed them leaking into visible
  * output: `<unused94>thought ... <unused95>`.
  *
- * **Provenance, and the part of it that is not yet verified.** `<unused94>` and `<unused95>` are
- * reserved tokens in the Gemma tokenizer vocabulary this export inherits, and the memo records
- * them as the observed delimiters. The exact vocabulary of the shipped `.litertlm` artifact has
- * not been read in this stage, because the artifact is not in this repo and the engine is not
- * bound. **Stage 3b must re-verify this set against the shipped export's tokenizer and correct it
- * if it differs.** Until then [SlmSuppression] is the detector: a generation whose spans count
- * stays zero while the model is known to emit a channel is the signal that this set is wrong.
+ * **Verified (stage 3b task 0).** Both are present in `google/medgemma-1.5-4b-it`'s
+ * `tokenizer.json`, at ids 100 and 101. There is no `<start_of_thought>`-style token anywhere in
+ * that vocabulary, so the word "thought" the harness saw is ordinary text emitted inside the span
+ * rather than a token of its own, and stripping between these two delimiters is what handles it.
+ * A rule keyed on the tokenizer's `special` flag would have missed the channel entirely: only
+ * `<pad>`, `<eos>`, `<bos>`, `<unk>`, `<start_of_turn>` and `<end_of_turn>` carry that flag, and
+ * the whole `<unused*>` range does not.
+ *
+ * **The residual, which this stage does not discharge.** That verification read the upstream
+ * PyTorch repo, not the shipped `litert-community/MedGemma-1.5-4B-IT` `.litertlm` export, which is
+ * not on the build machine. Under the H-15 artifact-versus-family standard that is family
+ * evidence, one step closer than stage 3a's assumption but still not evidence about the shipped
+ * build. **An export-level re-verification of this vocabulary remains a precondition of the flag
+ * flip and belongs to stage 3b-1.** Until then [SlmSuppression] is the detector: a generation
+ * whose spans count stays zero while the model is known to emit a channel is the signal that this
+ * set is wrong for the shipped artifact.
  */
 internal const val THOUGHT_OPEN = "<unused94>"
 internal const val THOUGHT_CLOSE = "<unused95>"
 
-/** The reserved range `<unused0>`..`<unused98>` of the Gemma vocabulary. */
-private val RESERVED_UNUSED: List<String> = (0..98).map { "<unused$it>" }
+/**
+ * The reserved `<unused*>` range, **verified in full against `tokenizer.json` (stage 3b task 0)**.
+ *
+ * It is `<unused0>` through `<unused6241>`, and it lives in two disjoint id blocks: a low block at
+ * ids 6..104 (`<unused0>`..`<unused98>`) and a high block at ids 256001..262143
+ * (`<unused99>`..`<unused6241>`). The two blocks are contiguous in *name* and far apart in *id*,
+ * which is exactly how stage 3a got it wrong: it hardcoded `(0..98)` from the low block alone and
+ * left 6143 reserved tokens, 98 percent of the range, matching nothing and rendering as visible
+ * text. That is a fail-open defect against §6.1's "fail-closed on an unknown control token".
+ *
+ * Ids are deliberately not modelled here. This class matches on the token's **text**, because
+ * text is what arrives in a decoded chunk; the id blocks are recorded above so a future reader can
+ * re-verify the range against a tokenizer dump without re-deriving which ids to look at.
+ */
+private val RESERVED_UNUSED: List<String> = (0..6241).map { "<unused$it>" }
 
 /**
- * The named special tokens of the same vocabulary. Same provenance caveat as [THOUGHT_OPEN], and
- * the same stage-3b verification requirement.
+ * The named reserved tokens of the same vocabulary, at the head of the id space: `<pad>` 0,
+ * `<eos>` 1, `<bos>` 2, `<unk>` 3, `<mask>` 4, `[multimodal]` 5, then the low `<unused*>` block,
+ * then `<start_of_turn>` 105 and `<end_of_turn>` 106. `<start_of_image>`, `<end_of_image>` and
+ * `<image_soft_token>` are the multimodal set, the last at 262144.
+ *
+ * **`[multimodal]` is the one that does not look like the others.** It is a genuine reserved token
+ * at id 5, sitting between `<mask>` and `<unused0>`, and it uses square brackets. Stage 3a's
+ * structural guard required every matched literal to be `<...>`, so it would have rejected this
+ * token, and the sanitizer would have rendered a reserved token as visible text rather than
+ * dropping it. The guard is re-expressed rather than the token omitted: see [CONTROL_TOKENS].
  */
-private val NAMED_SPECIALS: List<String> = listOf(
-    "<pad>", "<bos>", "<eos>", "<unk>", "<mask>",
+private val NAMED_RESERVED: List<String> = listOf(
+    "<pad>", "<bos>", "<eos>", "<unk>", "<mask>", "[multimodal]",
     "<start_of_turn>", "<end_of_turn>",
     "<start_of_image>", "<end_of_image>", "<image_soft_token>",
 )
@@ -64,13 +94,44 @@ private val NAMED_SPECIALS: List<String> = listOf(
  *
  * That assertion is the §6.2 line made structural. The memo's test for any filter proposal is
  * "if the rule cannot be written without referring to what the words mean, it is on the forbidden
- * side": `<unused94>` is a token identity, "consult your doctor" is a meaning. A set that may
- * only contain `<...>` literals cannot express a meaning.
+ * side": `<unused94>` is a token identity, "consult your doctor" is a meaning.
+ *
+ * **The shape the guard enforces**, widened in stage 3b-0 to admit `[multimodal]` without letting
+ * prose in: a literal opens with `<` or `[`, closes with the matching `>` or `]`, and its interior
+ * is non-empty and contains no whitespace and no bracket character. A phrase cannot satisfy that,
+ * because a phrase has spaces and no brackets, so `filterDisclaimers()` is still un-addable as
+ * data and would have to arrive as a visibly new mechanism. Admitting a second bracket pair
+ * widens *which vocabulary literals* are expressible; it does not widen the guard toward meaning.
  */
-internal val CONTROL_TOKENS: Set<String> = (RESERVED_UNUSED + NAMED_SPECIALS).toSet()
+internal val CONTROL_TOKENS: Set<String> = (RESERVED_UNUSED + NAMED_RESERVED).toSet()
 
 /** Length of the hold-back window: no control token is longer than this. */
 internal val MAX_CONTROL_TOKEN_LENGTH: Int = CONTROL_TOKENS.maxOf { it.length }
+
+/** Shortest control token. Nothing below this length can be one, so matching starts here. */
+private val MIN_CONTROL_TOKEN_LENGTH: Int = CONTROL_TOKENS.minOf { it.length }
+
+/**
+ * The characters a control token can start with. Matching only probes the set at a position
+ * beginning with one of these, which is what keeps a 6253-literal set cheap enough for a
+ * per-chunk streaming path.
+ */
+private fun isTokenOpener(c: Char): Boolean = c == '<' || c == '['
+
+/**
+ * The §6.2 shape rule, as a function, so the guard test and a future reader apply the same rule.
+ * True when [literal] is shaped like a control token from the vocabulary and not like prose.
+ */
+internal fun isControlTokenShaped(literal: String): Boolean {
+    val closer = when (literal.firstOrNull()) {
+        '<' -> '>'
+        '[' -> ']'
+        else -> return false
+    }
+    if (literal.length < 3 || literal.last() != closer) return false
+    val interior = literal.substring(1, literal.length - 1)
+    return interior.none { it.isWhitespace() || it == '<' || it == '>' || it == '[' || it == ']' }
+}
 
 /**
  * Deterministic control-token stripping on a token stream (§6.1). Sits at §9.1 pipeline stage 7,
@@ -210,28 +271,48 @@ class SlmStreamSanitizer {
 
     /**
      * Earliest complete control token in the buffer, with its offset, or null. Exact string
-     * matching against a fixed set - no regex, and nothing that depends on what the surrounding
-     * text says.
+     * membership against a fixed set of literals - no regex, and nothing that depends on what the
+     * surrounding text says.
+     *
+     * **Direction of the scan, and why it changed in stage 3b-0.** Stage 3a asked "where is each
+     * token", looping the set and calling `indexOf` per entry. That was tolerable over 109
+     * literals and is not over 6253: it would be roughly 6253 buffer scans per arriving chunk, on
+     * a field phone, on the streaming path. This asks the mirrored question - "at each position
+     * that could open a token, is this one" - which is the same match with the same semantics, at
+     * one hash lookup per candidate length per bracket character. No control token contains a
+     * bracket after its first character, so a position that does not start with one cannot begin
+     * a token and is skipped.
+     *
+     * Lengths are probed longest first. No token in this vocabulary is a proper prefix of another
+     * (the closing bracket terminates every one), so longest-first and shortest-first agree here;
+     * it is written this way so that a future vocabulary where they disagree still takes the
+     * longer match, which is the fail-closed direction.
      */
     private fun firstControlToken(): Pair<Int, String>? {
-        var bestAt = -1
-        var bestToken: String? = null
-        for (token in CONTROL_TOKENS) {
-            val at = buffer.indexOf(token)
-            if (at < 0) continue
-            if (bestAt < 0 || at < bestAt || (at == bestAt && token.length > bestToken!!.length)) {
-                bestAt = at
-                bestToken = token
+        for (at in 0 until buffer.length) {
+            if (!isTokenOpener(buffer[at])) continue
+            val longest = minOf(MAX_CONTROL_TOKEN_LENGTH, buffer.length - at)
+            for (length in longest downTo MIN_CONTROL_TOKEN_LENGTH) {
+                val candidate = buffer.substring(at, at + length)
+                if (candidate in CONTROL_TOKENS) return at to candidate
             }
         }
-        return bestToken?.let { bestAt to it }
+        return null
     }
 
-    /** Length of the trailing run that is a proper prefix of some control token, or 0. */
+    /**
+     * Length of the trailing run that is a proper prefix of some control token, or 0.
+     *
+     * Only the last opener in the hold-back window can begin such a run: a control token contains
+     * no bracket after its first character, so an earlier opener whose text is already fixed and
+     * followed by more characters cannot still be completing.
+     */
     private fun trailingControlTokenPrefixLength(): Int {
-        for (length in minOf(MAX_CONTROL_TOKEN_LENGTH - 1, buffer.length) downTo 1) {
-            val tail = buffer.substring(buffer.length - length)
-            if (CONTROL_TOKENS.any { it.length > length && it.startsWith(tail) }) return length
+        val earliest = maxOf(0, buffer.length - (MAX_CONTROL_TOKEN_LENGTH - 1))
+        for (at in buffer.length - 1 downTo earliest) {
+            if (!isTokenOpener(buffer[at])) continue
+            val tail = buffer.substring(at)
+            return if (CONTROL_TOKENS.any { it.length > tail.length && it.startsWith(tail) }) tail.length else 0
         }
         return 0
     }
