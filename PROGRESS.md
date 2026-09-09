@@ -4759,3 +4759,117 @@ this one. The memo itself stays PROPOSED - building its input contract is not an
 feature.
 
 Not committed as of this entry.
+
+## SLM stage 2: the guardrail seam and the two scope gates - 2026-09-09
+
+Built against `scratchpad/slm-guardrail-service-contract-memo.md` sections 4.4, 5.4, 7 and 9.1, on
+branch `feat/slm-guardrail-seam`, consuming stage 1's `ApprovedRecordReader`. Three new files in
+`domain/slm`, two new test files. **Still no behaviour change anywhere in the app: nothing calls
+the seam, and the engine interface has no implementation and no Hilt binding.** No engine runtime,
+no stream sanitizer, no chat UI, no feature flag, no audit action. Those are later stages and were
+deliberately not started.
+
+**`SlmReadbackUseCase` is the seam** (section 9.1): the single domain entry point, structured as
+the full pipeline with the later stages left as named, empty slots so a later commit fills a slot
+rather than re-cutting the flow. Built here: input hard rejects, the snapshot via the stage-1
+reader, the prompt budget, tier resolution, the input scope gate, the engine call against an
+unbound interface, the output scope gate. Left as commented seams in pipeline order: the stream
+sanitizer (section 6.1) and audit (section 9.4).
+
+**The engine is a declared-but-unbound interface.** `SlmEngine.generate(prompt, maxOutputTokens)`
+is thin and knows nothing about clinical scope, because every control in the memo lives outside the
+model - harness F4 is that this artifact refuses nothing on its own, so an instruction inside the
+prompt is not a control. It is a plain suspend call rather than a stream: section 8 requires
+streaming and section 6.1 requires the stripper to run on the stream, but a stage with no engine
+and no sanitizer has no stream to shape, and shaping one now would be guessing at the LiteRT-LM
+chunk contract. `SlmEngineIsUnreachableFromPresentationTest` is the enforcement of section 9.1's
+"no injection of the engine into presentation, ever": Kotlin cannot express that with a visibility
+modifier, since `internal` is module-scoped and `presentation/` is in the same module, so the rule
+is a source scan on the `NoPlatformRecognizerSourceScanTest` pattern - no file under
+`presentation/` may name `SlmEngine`, and across the whole shipped module only the interface and
+the seam may. It carries the same three non-vacuity guards (roots resolve, file-count floor,
+positive control).
+
+**Single-turn is in the type system** (section 7). `SlmInvocation` carries one snapshot and one
+question. There is no history field, no list-of-messages field, and a structural test asserts the
+exact field list, that neither field is a collection, map or array, and that no field name looks
+like conversation state. The seam's `invoke` takes a case id and a question and nothing else. The
+check the memo names is included: two sequential invocations with the same snapshot and question
+produce prompts that are identical byte for byte, asserted on the UTF-8 bytes of the two prompts
+the recording engine captured.
+
+**Input hard rejects** (section 4.4), each with a test asserting the engine call count is zero:
+empty question, whitespace-only question, question over `MAX_QUESTION_CHARS`, no committed
+`kernelDecision` (delegated to the stage-1 reader, not re-implemented), unresolvable case, report
+assembly failure, and an assembled prompt over `MAX_PROMPT_CHARS` - refused rather than truncated,
+because a record silently cut inside the prompt is one the model answers about incompletely with no
+signal that it did. A boundary test asserts a question exactly at the budget is not refused for
+length. The budgets are conservative placeholders, and the KDoc says so: section 4.4 says the build
+session sets them from measurement, and there is no generation measurement yet because the engine
+is unbound. What is fixed now is that both bounds exist and are enforced in one place.
+
+**The input scope gate** (section 5.4, pre-model, worker tier) has the three deterministic
+mechanisms the memo names, checked in the order that makes the reason code most informative: a
+phrasing denylist (interaction, alternative, contraindication, prognosis, "what else could"), an
+intent allowlist of readback shapes, and entity containment - a drug-shaped or dose-shaped token in
+the question that is absent from the record. Each has its own refusal reason, which is what a later
+stage's audit row will carry. It is a coarse instrument and the KDoc says that plainly, including
+that the drug lexicon is openly incomplete; it is chosen anyway because a model judging its own
+scope has been measured not to work and because the failure direction of a coarse deterministic
+gate is refusal.
+
+**The worked case is harness F7.** "is ibuprofen safe with lisinopril", against a record whose
+medication lines contain neither drug, is refused for all three worker-tier cadres - `ASHA_WORKER`
+(COMMUNITY), `NURSE` and `COMPOUNDER` (LICENSED_CLINICAL) - and the assertion that carries the
+safety claim is `callCount == 0` on the engine. The model is never reached, so nothing is generated
+and there is no answer to leak. All three cadres are asserted because section 5.1's decision to put
+LICENSED_CLINICAL in the worker tier is the one most likely to be quietly reversed later.
+
+**The output scope gate** (section 5.4, post-model, worker tier) is tested against synthetic
+generations, since no engine exists. A grounded output passes through untouched - asserted with
+`assertSame`, so the seam is proved to return the engine's own string rather than a reconstructed
+one, which is the strongest available statement that no editing occurred. An output that introduces
+a drug absent from the medication lines, or a dosing numeral absent from the record, is suppressed
+entirely: the result is a refusal, and the refusal type is asserted to carry a reason code and no
+text, so there is no half-answer to leak. `outputIsGrounded` returns a boolean and no string at
+all, asserted reflectively - "suppress whole or pass whole" is a property of the API, not of the
+current call site, because section 6.2 forbids meaning-level rewriting and an editing helper is
+exactly what a later stage would reach for. The H-17 interaction is a test of its own: a REJECTed
+case carries no medication lines for a worker, so any drug named in the generation is ungrounded
+and the whole output is suppressed.
+
+**Tier resolution** reuses `UserRole.toCadreTier()`, the same keying function as the H-18 document
+gate; no new tier concept. `UserSession?.isOpenSlmTier()` is `internal`, derived from the live
+session and never a parameter, and is fail-closed: only `PHYSICIAN` is open, and a null session is
+a worker. Both are tested at the helper and again through the whole pipeline, where a null session
+asking the F7 question is refused with the engine untouched. A physician asking the same question
+reaches the engine and gets the answer back, which is what makes the tier split real rather than
+decorative.
+
+**Deviation to flag, memo versus operator brief.** The brief said the physician tier "STILL gets
+the output-side controls that exist at this stage". Section 5.4 scopes output *grounding* to the
+worker tier, and grounding a physician's free-form answer against a record they did not ask about
+would refuse every open query and cancel decision D4 by the back door. So grounding is worker-tier
+only, as the memo has it, and the doctor tier's output-side controls are the ones section 5.3 lists
+- sanitizer, hedge preservation, single-turn, audit - of which only single-turn and the no-editing
+rule exist at this stage; both apply at every tier here. The rest arrive with their stages. Written
+down rather than resolved silently.
+
+**Test.** `SlmReadbackUseCaseTest` (27 tests) and `SlmEngineIsUnreachableFromPresentationTest`
+(3 tests). Independent sourcing per CLAUDE.md: every behavioural test drives the REAL
+`ApprovedRecordReader` over the REAL `AssembleReportUseCase` and `ReportFormatter` with only the
+repositories faked, so the record the gates see is the record production would hand them, and
+expected medication text is recomputed via `formatMedicationLine` rather than copied from the value
+under test. There is no write on this path, so the persisted-row rule has nothing to bite on; its
+sibling, assert the content rather than the return code, is what the pass-untouched and suppression
+tests do. Both gates were mutation-checked before this entry was written: disabling the input gate
+and the output gate makes the suite go red rather than stay green, so the call-count and
+suppression assertions are load-bearing. `testDevDebugUnitTest` green, 426 tests, full suite.
+
+**Not touched, by design**: `presentation/`, the DI modules, `FeatureFlags`, `AuditAction` and its
+backend mirror, and `docs/`. The seam is constructor-injectable but has no consumer and its engine
+has no binding, which is the correct end state for this stage. The section 12 hazard rows remain
+PROPOSED and unwritten; they belong to a separate controlled-docs commit. The memo itself stays
+PROPOSED - building its gates is not an approval of the feature.
+
+Not committed as of this entry.
