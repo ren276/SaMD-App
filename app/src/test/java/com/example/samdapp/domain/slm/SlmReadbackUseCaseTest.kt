@@ -24,11 +24,12 @@ import com.example.samdapp.testutil.FakePrescriptionRepository
 import com.example.samdapp.testutil.FakeVitalsRepository
 import com.example.samdapp.testutil.testAilmentEntry
 import com.example.samdapp.testutil.testPatient
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
-import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.lang.reflect.Modifier
@@ -59,16 +60,18 @@ class SlmReadbackUseCaseTest {
     private class RecordingSlmEngine(
         private val output: String = "",
         private val failure: Throwable? = null,
+        /** Chunk boundaries the engine hands the seam. One whole chunk unless a test says otherwise. */
+        private val chunks: List<String> = listOf(output),
     ) : SlmEngine {
         var callCount = 0
             private set
         val prompts = mutableListOf<String>()
 
-        override suspend fun generate(prompt: String, maxOutputTokens: Int): String {
+        override fun generate(prompt: String, maxOutputTokens: Int): Flow<String> = flow {
             callCount++
             prompts += prompt
             failure?.let { throw it }
-            return output
+            chunks.forEach { emit(it) }
         }
     }
 
@@ -452,7 +455,10 @@ class SlmReadbackUseCaseTest {
             "case-1", "Explain what the doctor prescribed in plain language",
         )
 
-        assertEquals(SlmReadbackResult.Answer(groundedOutput, PROMPT_TEMPLATE_VERSION), result)
+        assertEquals(
+            SlmReadbackResult.Answer(groundedOutput, PROMPT_TEMPLATE_VERSION, SlmSuppression.NONE),
+            result,
+        )
         assertEquals(1, engine.callCount)
     }
 
@@ -477,7 +483,10 @@ class SlmReadbackUseCaseTest {
 
         val result = useCase(session(UserRole.DOCTOR), engine)("case-1", "is ibuprofen safe with lisinopril")
 
-        assertEquals(SlmReadbackResult.Answer(openAnswer, PROMPT_TEMPLATE_VERSION), result)
+        assertEquals(
+            SlmReadbackResult.Answer(openAnswer, PROMPT_TEMPLATE_VERSION, SlmSuppression.NONE),
+            result,
+        )
         assertEquals(1, engine.callCount)
     }
 
@@ -492,24 +501,77 @@ class SlmReadbackUseCaseTest {
         assertEquals(0, engine.callCount)
     }
 
-    // ----------------------------------------------------------------- output scope gate (§5.4)
+    // ------------------------------------------------------ stream sanitizer at stage 7 (§6.1)
 
     /**
-     * Pass whole: a grounded generation is returned byte-for-byte as the engine produced it.
-     * `assertSame` is deliberate - it proves the seam returned the engine's own string rather than
-     * a reconstructed one, which is the strongest available statement of "no editing occurred"
-     * (§6.2 forbids meaning-level rewriting, including of the hedges this model volunteers, F3).
+     * The sanitizer is in the pipeline, and it is upstream of the output scope gate.
+     *
+     * `SlmStreamSanitizerTest` proves what the sanitizer does; this proves the seam actually runs
+     * it, which no test in this file did before stage 3a. Two claims, and the second is the reason
+     * for the drug name inside the span:
+     *
+     * 1. The `<unused94>thought ... <unused95>` span harness F6 measured is gone from the answer,
+     *    and its counts are carried on the answer for the audit stage (§9.4).
+     * 2. The result is an [SlmReadbackResult.Answer] rather than an `OUTPUT_NOT_GROUNDED` refusal.
+     *    The span names ibuprofen, which is absent from the record, so if the sanitizer ran after
+     *    the gate - or not at all - the gate would see an ungrounded drug and suppress the whole
+     *    readback. Passing is only possible if the text was sanitized before the gate saw it.
      */
     @Test
-    fun `a grounded output passes through untouched`() = runTest {
-        val engine = RecordingSlmEngine(output = groundedOutput)
+    fun `the seam strips the thought channel before the output gate sees the text`() = runTest {
+        val span = "<unused94>thought: the worker might be after ibuprofen instead<unused95>"
+        val engine = RecordingSlmEngine(
+            chunks = listOf(
+                "The doctor approved Amoxicillin 500 mg by mouth, ",
+                span,
+                "three times a day, for 5 days, 15 in total.",
+            ),
+        )
 
         val result = useCase(session(UserRole.ASHA_WORKER), engine)(
             "case-1", "Explain what the doctor prescribed in plain language",
         )
 
         val answer = result as SlmReadbackResult.Answer
-        assertSame("the output was rebuilt rather than passed through", groundedOutput, answer.text)
+        assertFalse("the reasoning channel reached the answer", answer.text.contains("thought"))
+        assertFalse("the reasoning channel reached the answer", answer.text.contains("ibuprofen"))
+        assertFalse(answer.text.contains("<unused"))
+        assertEquals(
+            "The doctor approved Amoxicillin 500 mg by mouth, three times a day, for 5 days, 15 in total.",
+            answer.text,
+        )
+        assertEquals("the suppression counts did not reach the answer", 1, answer.suppression.spans)
+        assertEquals(span.length, answer.suppression.characters)
+    }
+
+    // ----------------------------------------------------------------- output scope gate (§5.4)
+
+    /**
+     * Pass whole: a grounded generation arrives byte-for-byte as the engine produced it, across
+     * awkward chunk boundaries that fall mid-word.
+     *
+     * This test asserted `assertSame` before stage 3a, on the argument that identity is the
+     * strongest available statement of "no editing occurred". Identity is no longer available and
+     * cannot be: the engine now streams chunks (§8) and the seam assembles the visible text from
+     * them through [SlmStreamSanitizer], so the answer is a new string by construction. The
+     * equivalent claim in a streaming world is asserted instead - the assembled text equals the
+     * concatenation of exactly what the engine emitted, and the sanitizer reports that it removed
+     * nothing - which together say the same thing: no character was added, dropped or rewritten
+     * (§6.2 forbids meaning-level rewriting, including of the hedges this model volunteers, F3).
+     */
+    @Test
+    fun `a grounded output passes through untouched across chunk boundaries`() = runTest {
+        val chunks = groundedOutput.chunked(7)
+        val engine = RecordingSlmEngine(output = groundedOutput, chunks = chunks)
+
+        val result = useCase(session(UserRole.ASHA_WORKER), engine)(
+            "case-1", "Explain what the doctor prescribed in plain language",
+        )
+
+        val answer = result as SlmReadbackResult.Answer
+        assertTrue("the chunking under test was not actually split", chunks.size > 10)
+        assertEquals("the output was edited on the way through", chunks.joinToString(""), answer.text)
+        assertEquals("the sanitizer removed something from a clean generation", SlmSuppression.NONE, answer.suppression)
         assertTrue("the model's own hedge was stripped", answer.text.contains("Ask the doctor"))
     }
 

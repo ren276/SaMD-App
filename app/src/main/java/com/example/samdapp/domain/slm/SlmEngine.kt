@@ -1,5 +1,7 @@
 package com.example.samdapp.domain.slm
 
+import kotlinx.coroutines.flow.Flow
+
 /**
  * The on-device generation engine, as the guardrail seam sees it
  * (`scratchpad/slm-guardrail-service-contract-memo.md` §9.1/§9.2).
@@ -27,11 +29,14 @@ package com.example.samdapp.domain.slm
  * reviewed, reproduced in an incident investigation, or regression-tested. The parameter set here
  * carries no sampling knob because there is nothing to tune.
  *
- * Stage 3 note: §8 requires token-by-token streaming and §6.1 requires the thought-channel
- * stripper to run on the stream rather than on a finished string, so the return type becomes a
- * flow of chunks plus a terminal result when the engine is actually bound. It is a plain suspend
- * call here because a stage with no engine and no sanitizer has no stream to shape, and shaping
- * one now would be guessing at the LiteRT-LM chunk contract.
+ * **Streaming, since stage 3a.** §8 requires tokens to be surfaced as they are produced and
+ * §6.1 requires the thought-channel stripper to run on the stream rather than on a finished
+ * string, so [generate] returns a cold flow of chunks. Chunk boundaries are the engine's business
+ * and are explicitly not assumed to fall on token or word boundaries: [SlmStreamSanitizer] holds
+ * back a window precisely because a control token may straddle two chunks. The terminal result the
+ * memo names is [SlmReadbackResult], produced by the seam; a failure arrives here as an exception
+ * from the flow and the seam turns it into [SlmRefusal.ENGINE_FAILED], because §9.2 requires that
+ * a failure is shown as a failure with no substitute output.
  */
 interface SlmEngine {
 
@@ -40,6 +45,10 @@ interface SlmEngine {
      *   Prompt construction never happens in the UI (§9.2).
      * @param maxOutputTokens hard bound, enforced by the engine. §9.2 also requires a wall-clock
      *   timeout and cancellability; both belong to the binding, not to this signature.
+     * @return a cold flow: collecting it starts a generation, and cancelling the collection
+     *   cancels that generation (§8, cancellation is real and releases the engine). Nothing is
+     *   generated until it is collected, which is what §8's "nothing generates speculatively"
+     *   requires of this signature.
      */
-    suspend fun generate(prompt: String, maxOutputTokens: Int): String
+    fun generate(prompt: String, maxOutputTokens: Int): Flow<String>
 }

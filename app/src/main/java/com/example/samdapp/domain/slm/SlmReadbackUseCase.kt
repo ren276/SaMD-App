@@ -5,6 +5,7 @@ import com.example.samdapp.domain.auth.CadreTier
 import com.example.samdapp.domain.auth.UserSession
 import com.example.samdapp.domain.auth.toCadreTier
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 
@@ -84,8 +85,18 @@ sealed interface SlmReadbackResult {
      * [promptTemplateVersion] travels with the answer because §9.2 requires the template version
      * on every invocation, on the H-12 `derivation_rule_version` precedent: an auditor has to be
      * able to separate a template change from a model change.
+     *
+     * [suppression] is what [SlmStreamSanitizer] removed on the way here (§6.1, "Not silent").
+     * It travels with the answer rather than being dropped at the seam because the audit stage
+     * has to record it: a model version bump that changes the reasoning channel's token identities
+     * shows up as a spans count that quietly falls to zero, and nothing else would show it. Counts
+     * only - never the suppressed text (§9.4).
      */
-    data class Answer(val text: String, val promptTemplateVersion: String) : SlmReadbackResult
+    data class Answer(
+        val text: String,
+        val promptTemplateVersion: String,
+        val suppression: SlmSuppression,
+    ) : SlmReadbackResult
 
     data class Refused(val reason: SlmRefusal) : SlmReadbackResult
 }
@@ -106,8 +117,9 @@ sealed interface SlmReadbackResult {
  * 3. Prompt budget (§4.4).
  * 4. Tier resolution from the live `UserSession` (§5.1), fail-closed.
  * 5. Input scope gate (§5.4), WORKER tier only. **On a refusal the engine is never called.**
- * 6. [SlmEngine.generate] - *unbound interface at this stage*; stage 3 binds it.
- * 7. Stream sanitizer (§6.1) - *later stage*, and it must run before anything is displayed.
+ * 6. [SlmEngine.generate] - *unbound interface at this stage*; stage 3b binds it.
+ * 7. [SlmStreamSanitizer] (§6.1) - control-token stripping on every chunk, before anything is
+ *    displayed and before the output gate sees the text.
  * 8. Output scope gate (§5.4), WORKER tier. Suppress whole or pass whole, never edit.
  * 9. Audit (§9.4) - *later stage*; needs new `AuditAction` values and the backend enum mirror in
  *    the same commit, so it is deliberately not started here.
@@ -118,8 +130,9 @@ sealed interface SlmReadbackResult {
  * answer against a record they did not ask about would refuse every open query, cancelling D4 by
  * the back door. The output-side controls §5.3 does give the doctor tier are the sanitizer (§6.1),
  * the hedge-preservation prohibition (§6.2), single-turn (§7) and audit (§9.4). Of those, only
- * single-turn and the no-editing rule exist at this stage; both apply to every tier here. The
- * sanitizer and audit arrive with their stages.
+ * single-turn, the no-editing rule and (since stage 3a) the sanitizer exist at this stage; all
+ * three apply to every tier here. Audit arrives with its stage. The sanitizer being tier-blind is
+ * deliberate: the reasoning channel is not an answer for a physician either.
  *
  * **H-06 caveat, same as every other tier gate in this app.** This makes reaching the open tier
  * visible and attributable. It does not make it hard: the role comes from the backend account
@@ -166,29 +179,41 @@ class SlmReadbackUseCase @Inject constructor(
             inputScopeRefusal(invocation)?.let { return SlmReadbackResult.Refused(it) }
         }
 
-        // 6. The engine. Unbound at this stage: no implementation and no Hilt binding exists.
-        val generated = try {
-            engine.generate(prompt, MAX_OUTPUT_TOKENS)
+        // 6 and 7. The engine, still an unbound interface, collected through the sanitizer. The
+        //    two are one step because §6.1 requires the stripping to happen on the stream: there
+        //    is no point between them where an unsanitized chunk exists as displayable text.
+        //    A mid-stream engine failure discards what was already sanitized - a partial readback
+        //    presented as an answer is the substitute output §9.2 forbids.
+        val sanitizer = SlmStreamSanitizer()
+        val visible = StringBuilder()
+        try {
+            engine.generate(prompt, MAX_OUTPUT_TOKENS).collect { chunk ->
+                visible.append(sanitizer.accept(chunk))
+            }
+            visible.append(sanitizer.finish())
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
             return SlmReadbackResult.Refused(SlmRefusal.ENGINE_FAILED)
         }
+        val generated = visible.toString()
 
-        // 7. Stream sanitizer seam (§6.1, later stage). Nothing sits here yet, and the gap is
-        //    real: the harness saw <unused94>thought spans leak into visible output (F6), so no
-        //    generation may be displayed until this slot is filled.
-
-        // 8. Output scope gate. Whole or nothing; the text below is never rewritten.
+        // 8. Output scope gate, over the sanitized text: it must judge what will be displayed,
+        //    not what the model emitted. Whole or nothing; the text below is never rewritten.
         if (!openTier && !outputIsGrounded(generated, snapshot)) {
             return SlmReadbackResult.Refused(SlmRefusal.OUTPUT_NOT_GROUNDED)
         }
 
         // 9. Audit seam (§9.4, later stage): an invocation row, an input-refusal row, an
         //    output-suppression row and a sanitizer row, each with measured metadata only, and the
-        //    backend enum mirror updated in the same commit.
+        //    backend enum mirror updated in the same commit. The sanitizer row's payload is
+        //    already computed and carried on the answer below; only the recording is missing.
 
-        return SlmReadbackResult.Answer(text = generated, promptTemplateVersion = PROMPT_TEMPLATE_VERSION)
+        return SlmReadbackResult.Answer(
+            text = generated,
+            promptTemplateVersion = PROMPT_TEMPLATE_VERSION,
+            suppression = sanitizer.suppression,
+        )
     }
 }
 

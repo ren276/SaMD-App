@@ -4873,3 +4873,127 @@ PROPOSED and unwritten; they belong to a separate controlled-docs commit. The me
 PROPOSED - building its gates is not an approval of the feature.
 
 Not committed as of this entry.
+
+## SLM stage 3a: the stream sanitizer - 2026-09-09
+
+Built against `scratchpad/slm-guardrail-service-contract-memo.md` sections 6.1 and 6.2, on branch
+`feat/slm-stream-sanitizer` off `feat/slm-guardrail-seam`. One new source file
+(`domain/slm/SlmStreamSanitizer.kt`), one new test file, plus the streaming refinement of
+`SlmEngine` and the wiring of the sanitizer into the seam's pipeline slot 7. **Still no behaviour
+change anywhere in the app: nothing calls the seam, and the engine still has no implementation and
+no Hilt binding.** No LiteRT-LM runtime, no model load, no chat UI, no feature flag, no egress
+proof, no audit action. Those are stage 3b and later and were deliberately not started.
+
+**Where the sanitizer sits.** Section 9.1 pipeline stage 7, between the engine's chunks and the
+output scope gate. It is not a step the seam takes after the engine returns; the engine's flow is
+collected *through* it, so there is no point in the pipeline where an unsanitized chunk exists as
+displayable text. The output scope gate then runs over the sanitized text, which is the only
+correct order: the gate has to judge what will be displayed, not what the model emitted. A
+seam-level test proves that ordering rather than asserting it - the suppressed span names a drug
+absent from the record, so if the sanitizer ran after the gate, or not at all, the gate would see
+an ungrounded drug and suppress the whole readback. Getting an answer back is only possible if the
+text was sanitized first.
+
+**The engine is still a fake.** `SlmEngine` remains a declared, unimplemented, unbound interface;
+every test drives it with `RecordingSlmEngine`, which emits a synthetic chunk list. That is the
+point of doing this stage now: a real engine cannot be asked to split a control token across a
+chunk boundary on demand, and the straddling case is the one the hold-back window exists for.
+
+**Minimal interface refinement, anticipated by stage 2.** `generate` returns `Flow<String>` rather
+than a `String`. Stage 2's own KDoc said the return type becomes a flow of chunks when the engine
+is bound and the sanitizer exists; both conditions are now half-met (the sanitizer exists), and the
+sanitizer cannot be tested on stream safety against a signature that has no stream. Nothing else on
+the interface changed: prompt and decode bound in, chunks out, no clinical-scope knowledge, no
+sampling knob. The terminal result the memo names stays `SlmReadbackResult`, produced by the seam;
+an engine failure arrives as an exception from the flow and becomes `ENGINE_FAILED`, and a
+mid-stream failure discards what was already sanitized rather than presenting a partial readback,
+which would be the substitute output section 9.2 forbids.
+
+**The control tokens matched, and the part of their provenance that is not yet verified.**
+`<unused94>` opens and `<unused95>` closes, exactly as harness F6 recorded the channel leaking.
+The full match set is the reserved range `<unused0>`..`<unused98>` plus the named specials of the
+same vocabulary (`<pad>`, `<bos>`, `<eos>`, `<unk>`, `<mask>`, `<start_of_turn>`, `<end_of_turn>`,
+`<start_of_image>`, `<end_of_image>`, `<image_soft_token>`). **Flagged, not glossed: the shipped
+`.litertlm` artifact is not in this repo and the engine is unbound, so this set was not read off
+that export's tokenizer. It is the vocabulary this export inherits plus the memo's own observation.
+Stage 3b must re-verify it against the shipped artifact and correct it if it differs.** The
+suppression counts are the interim detector: a generation whose spans count stays zero while the
+model is known to emit a channel is the signal that this set is wrong.
+
+**Matching is token-string-only.** The sanitizer holds a `Set<String>` of exact literals and calls
+`indexOf` on them. There is no regex anywhere in the file, no scan of prose, and nothing that
+depends on what the surrounding words say.
+
+**The hold-back window.** Every emission withholds a trailing window as long as the longest control
+token in the set, so a half-arrived `<unused94>` is held rather than printed and then erased. The
+straddling test splits the open delimiter across three chunks so that no single chunk contains it,
+and asserts on every prefix of the emitted stream as it is produced, not only on the final string:
+no partial token and no reasoning text is ever visible at any point, and the emitted stream only
+ever grows, so nothing on screen was retracted. A test that inspected only the final answer would
+pass on an implementation that printed `<unu` and took it back. A separate test replays the same
+stream split at every one of its character positions and asserts the result is identical, so chunk
+boundaries cannot change the answer.
+
+**The two fail-closed behaviours.** A stream that ends inside a thought span has the span's content
+discarded, not flushed - tested both for a span opened and abandoned in one chunk and for one that
+spans several. Any control token that is not the open delimiter is dropped from the visible stream
+rather than rendered: an unrecognized reserved token, a close delimiter with no matching open, and
+a control token truncated by end of stream, each with its own test. That last one has no explicit
+rule in the memo, and the reading taken is that section 6.1's "a partially arrived control token is
+never rendered as visible text" has no exception for end of stream.
+
+**The 6.2 preservation proof.** A generation dense with the hedges F3 measured this model
+volunteering - "not medical advice", "please consult your doctor", "I am not a substitute for a
+clinician" - passes through byte for byte with the suppression counts reporting nothing removed,
+and a hedge sitting immediately adjacent to a suppressed span survives the span's removal intact.
+
+**The forbidden line is structural, not only absent.** Two tests make it so. The first asserts a
+property of the match set itself: every string the sanitizer matches on is a bracketed
+control-token literal with no whitespace and no nested brackets. A phrase from clinical prose
+cannot satisfy that shape, so `filterDisclaimers()` cannot be smuggled in by adding an entry to the
+existing list - it would have to arrive as a visibly new mechanism. That is the memo's own test
+("if the rule cannot be written without referring to what the words mean, it is on the forbidden
+side") made executable. The second asserts reflectively that the class exposes no `Regex`, no
+`Pattern` and no function-typed parameter or field anywhere in its API or its state, and that its
+constructor takes no arguments at all, so there is nothing a caller could pass to make it judge
+content.
+
+**Suppression counts** are produced as part of the sanitizer's output and carried on
+`SlmReadbackResult.Answer` for the audit stage to record: spans entered (an unterminated span
+counts, because it was still a span), characters removed from the visible stream including
+delimiters, and standalone control tokens dropped. Counts only, never the suppressed text, per
+section 9.4. Expected values in the tests are recomputed from the span strings the test itself fed
+in rather than read off the object under test. **The audit action itself was not built** - it needs
+new `AuditAction` values and the backend enum mirror updated in the same commit, which is its own
+stage.
+
+**One stage-2 assertion was deliberately weakened, and here is why.** The pass-through test used
+`assertSame` on the argument that string identity is the strongest available statement that no
+editing occurred. Identity is no longer available and cannot be: the engine streams chunks and the
+seam assembles the visible text from them, so the answer is a new string by construction. The test
+now delivers the same generation in mid-word chunks and asserts that the assembled text equals the
+concatenation of exactly what the engine emitted and that the sanitizer reports nothing removed,
+which together say the same thing - no character added, dropped or rewritten - in a form streaming
+can support.
+
+**Mutation checks, five, all confirmed red before this entry was written.** (a) Bypassing the
+sanitizer in the seam lets the thought channel reach the answer: the seam-level ordering test
+fails. (b) Removing the hold-back window fails the straddling test, the truncated-token test and
+the chunk-boundary-invariance test. (c) Flushing an unterminated span instead of discarding it
+fails all three unterminated-span tests. (d) Rendering unrecognized reserved tokens instead of
+dropping them fails both drop tests. (e) Adding "consult your doctor" to the match set - the
+forbidden `filterDisclaimers()`, smuggled in as data rather than as code - fails both hedge tests
+and the match-set shape test. Every control in this stage is therefore load-bearing on the suite.
+
+**Test.** `SlmStreamSanitizerTest` (17 tests) and one new test in `SlmReadbackUseCaseTest`, which
+is now 28. `testDevDebugUnitTest` green, 443 tests, full suite, run with `--rerun-tasks`. The
+stage-2 entry recorded 426 for the base; the arithmetic here implies 425, and I did not re-run the
+base to reconcile that one test. The delta is exact and accounted for: +17 new test methods.
+
+**Not touched, by design**: `presentation/`, the DI modules, `FeatureFlags`, `AuditAction` and its
+backend mirror, and `docs/`. H-23's mitigation column still says "design-stage only, no code
+exists" and stays that way until a controlled-docs commit updates it; that is not this commit's
+business. The memo itself stays PROPOSED - building its sanitizer is not an approval of the
+feature.
+
+Not committed as of this entry.
