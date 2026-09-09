@@ -4687,3 +4687,75 @@ It did not. The historical references to the retired flag name in `docs/quality/
 true when written, and this file's convention is not to retroactively edit them.
 
 Not pushed as of this entry.
+
+## SLM stage 1: the approved-record input contract, and nothing else - 2026-09-09
+
+Built against `scratchpad/slm-guardrail-service-contract-memo.md` sections 4.1, 4.2 and 10.2, on
+branch `feat/slm-approved-record-reader`. Two new files in a new `domain/slm` package, one test
+file. **No behaviour change anywhere in the app: nothing calls the reader yet.** No engine, no
+seam, no scope gate, no sanitizer, no feature flag, no UI, no audit action, no DI module. Those are
+later stages and were deliberately not started.
+
+**Why this stage exists alone.** The memo's section 4.2 finding is that the reader the SLM needs
+does not exist: `AssembleReportUseCase` produces a `ClinicalReport` for rendering, and that object
+carries the full `ReportPatientBlock` (`fullName`, `address`, `mobileNumber`, `abhaNumberFormatted`).
+Handing it to a model would put patient identity at the model boundary. Building the input contract
+first, with its own tests, means the PHI-exclusion guarantee is proved before anything exists that
+could consume it.
+
+**`ApprovedRecordSnapshot`** carries five fields and only five: `caseRecordId`, `kernelDecision`,
+`diagnosis`, `medicationLines`, `suggestsReferral`. No field of type `Patient`, none of type
+`ReportPatientBlock`, no name, no ABHA number, no mobile number, no address - the H-10 construction
+guarantee that `KernelPayload` already carries for the clinical kernel, applied to a second
+boundary. `kernelDecision` is non-null in the type, so an unapproved record is not merely refused,
+it is unrepresentable. Age/sex was left out: section 4.2 admits it "only if the readback genuinely
+needs it", and nothing in this stage establishes that need, so it is a deliberate absence rather
+than an oversight. The ailment lines, chief complaint, vitals and raw kernel output are absent for
+the same reason - the section 4.2 field list is a whitelist, not a starting point.
+
+**`ApprovedRecordReader(caseRecordId)`** takes a case record id, never a `Patient`. It resolves the
+case, derives the audience, assembles, requires a committed `kernelDecision`, and returns
+`ApprovedRecordResult.Available` or `ApprovedRecordResult.Refused(SnapshotRefusal)`. Three refusal
+reasons, each with a test: `CASE_UNRESOLVABLE` (no such case), `ASSEMBLY_FAILED` (the case resolves
+but the report cannot be built - a missing patient row, or `formatMedicationLine`'s REQ-RX-02
+`require` throwing on a banned Latin abbreviation), `NOT_APPROVED` (no committed decision). A
+refusal is never an empty snapshot: harness finding F5 is that an empty input to this model
+produces confident fabrication rather than an abstention, so the empty-snapshot state had to be
+made impossible rather than merely avoided.
+
+**The audience is derived, not passed.** `UserSession?.toReportAudience()` is `internal`, total,
+and fail-closed: only `CadreTier.PHYSICIAN` yields `ReportAudience.PHYSICIAN`; every other tier and
+a null session yield `WORKER`. Section 10.2's failure mode is a later stage passing `PHYSICIAN` for
+an ASHA and the model then speaking aloud exactly the PRIVATE-ailment content REQ-AIL-02 redaction
+exists to withhold. There is no audience parameter on the reader for such a caller to set, and a
+reflection test asserts that stays true.
+
+**Test.** New `ApprovedRecordReaderTest`, 10 tests. Two are structural in the H-10 style: the
+snapshot's instance field list is asserted exactly (so adding a field fails the test and forces a
+re-justification against section 4.2), each field's type is checked against `Patient`/
+`ReportPatientBlock`/`ClinicalReport`, and each field name against identity-shaped fragments; the
+reader's `invoke` is asserted to take `String` plus the suspend continuation and nothing else, with
+`Patient` and `ReportAudience` forbidden across every method and constructor parameter. The
+behavioural tests run the REAL `ReportFormatter` and REAL `AssembleReportUseCase` over the existing
+fakes, so what is asserted is what the production assembly path produces, and expected medication
+text is recomputed via `formatMedicationLine` rather than copied from the value under test.
+
+The audience test asserts content, not the enum. A REJECTed case is the one where the WORKER
+audience visibly changes the assembled record: the H-17 gate strips the medication lines for a
+worker and leaves them for a physician. The same case read by an ASHA session and by a DOCTOR
+session gives an empty `medicationLines` and a populated one respectively, which proves the derived
+audience actually reached the formatter. The PRIVATE-ailment assertion is a canary over the whole
+snapshot rather than a redaction check, and the reason is worth stating plainly: the snapshot
+carries no ailment field at all, so private ailment text has no field to arrive in. That is the
+stronger guarantee, and the canary is what fails if a later stage adds one. Patient identity
+canaries (name, mobile, ABHA, village) are asserted absent from both viewers' snapshots the same
+way. `testDevDebugUnitTest` green, 395 tests, full suite.
+
+**Not touched, by design**: `ClinicalReport`, `ReportFormatter`, `AssembleReportUseCase`,
+`ReportViewModel`, `FeatureFlags`, the DI modules, and `docs/`. The reader is constructor-injectable
+but has no consumer, which is the correct end state for this stage. The section 12 hazard rows the
+memo drafts remain PROPOSED and unwritten; they belong to a separate controlled-docs commit, not
+this one. The memo itself stays PROPOSED - building its input contract is not an approval of the
+feature.
+
+Not committed as of this entry.
