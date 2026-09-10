@@ -268,18 +268,67 @@ class CompounderViewModelTest {
             assertEquals(1, audit.logged.count { it.action == AuditAction.VITALS_RECORDED.value })
         }
 
-    /** PR5 adds VITALS_DEVICE_READING_RECEIVED and _FAILED. Until the backend mirror lands in the
-     *  same commit, an acquisition emits no audit row of its own, and this pins that. */
+    // --- PR5: VITALS_DEVICE_READING_RECEIVED / _FAILED ------------------------------------------
+
     @Test
-    fun `acquisition emits no device-reading audit action yet`() = runTest(mainDispatcherRule.dispatcher) {
-        val source = FakeVitalsSource().apply { nextResult = bpAccepted() }
-        val vm = viewModel(source)
-        val before = audit.logged.size
+    fun `an accepted acquisition logs exactly one VITALS_DEVICE_READING_RECEIVED, never VITALS_RECORDED`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val source = FakeVitalsSource().apply { nextResult = bpAccepted() }
+            val vm = viewModel(source)
 
-        vm.onStartAcquisition()
+            vm.onStartAcquisition()
 
-        assertEquals(before, audit.logged.size)
-    }
+            assertEquals(
+                1,
+                audit.logged.count { it.action == AuditAction.VITALS_DEVICE_READING_RECEIVED.value },
+            )
+            assertTrue(audit.logged.none { it.action == AuditAction.VITALS_RECORDED.value })
+        }
+
+    @Test
+    fun `no measured vital value string appears in the RECEIVED payload`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            // A distinctive value unlikely to collide with any provenance/control-evidence field
+            // (session id, device type, field names) that legitimately belongs in the payload.
+            val source = FakeVitalsSource().apply { nextResult = bpAccepted(systolic = 173) }
+            val vm = viewModel(source)
+
+            vm.onStartAcquisition()
+
+            val entry = audit.logged.single { it.action == AuditAction.VITALS_DEVICE_READING_RECEIVED.value }
+            assertTrue("payload must never carry the measured value", "173" !in entry.payload)
+        }
+
+    @Test
+    fun `every rejection reason logs exactly one VITALS_DEVICE_READING_FAILED with the matching reason`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            for (reason in RejectReason.entries) {
+                val source = FakeVitalsSource().apply { nextResult = AcquisitionResult.Rejected(reason) }
+                val vm = viewModel(source)
+                val sizeBefore = audit.logged.size
+
+                vm.onStartAcquisition()
+
+                val newEntries = audit.logged.drop(sizeBefore)
+                val failures = newEntries.filter { it.action == AuditAction.VITALS_DEVICE_READING_FAILED.value }
+                assertEquals("reason $reason", 1, failures.size)
+                assertTrue("reason $reason missing from payload", reason.name in failures.single().payload)
+            }
+        }
+
+    @Test
+    fun `no measured vital value string appears in the FAILED payload`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val source = FakeVitalsSource().apply { nextResult = bpAccepted() }
+            val vm = viewModel(source)
+            vm.onStartAcquisition()
+            source.nextResult = AcquisitionResult.Rejected(RejectReason.QUALITY_STATUS_NOT_OK)
+
+            vm.onStartAcquisition()
+
+            val entry = audit.logged.last { it.action == AuditAction.VITALS_DEVICE_READING_FAILED.value }
+            assertTrue("payload must never carry the measured value", "174" !in entry.payload)
+        }
 
     // --- Rejection paths -----------------------------------------------------------------------
 
