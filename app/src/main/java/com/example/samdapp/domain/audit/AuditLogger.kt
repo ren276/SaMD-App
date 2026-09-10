@@ -55,6 +55,20 @@ enum class AuditAction(val value: String) {
     TRANSCRIPTION_COMPLETED("transcription_completed"),
     VITALS_RECORDED("vitals_recorded"),
 
+    /** PR4a/PR4b's Pi gateway acquisition seam: one row per instrument reading the gateway
+     *  accepted (quality_status OK, session id and device type both matched the request). Payload
+     *  carries session id, device type, instrument, synthetic flag, timestamp, and the names of the
+     *  fields the reading populated plus their provenance label, never a measured value; the
+     *  measured value itself only ever reaches the record through [VITALS_RECORDED]/[onContinue]. */
+    VITALS_DEVICE_READING_RECEIVED("vitals_device_reading_received"),
+
+    /** The gateway acquisition's counterpart to [VITALS_DEVICE_READING_RECEIVED]: the request was
+     *  refused (permission denied, unreachable, quality/session/device mismatch, and so on). No
+     *  field is ever written on this path (RC-4); payload carries the session id if one existed,
+     *  the requested instrument, and the [com.example.samdapp.domain.vitalssource.RejectReason],
+     *  never a measured value. */
+    VITALS_DEVICE_READING_FAILED("vitals_device_reading_failed"),
+
     /** Full raw `/api/v1/evaluate` response dump (inference start/end timestamps, diagnostic
      *  summary, NLEM treatment, brand mapping, safety/triage) — the complete backend data, not
      *  just the curated subset shown on the prescription page. Insert-only audit trail per

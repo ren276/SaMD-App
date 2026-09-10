@@ -545,11 +545,23 @@ class CompounderViewModel @AssistedInject constructor(
         acquisitionJob = viewModelScope.launch {
             when (val result = acquireDeviceVitalsUseCase(request)) {
                 is AcquisitionResult.Accepted -> {
-                    applyAcceptedReading(result)
-                    // TODO(PR5): emit VITALS_DEVICE_READING_RECEIVED here, carrying the
-                    // field-to-provenance map as names only, never a measured value. The action
-                    // value and its backend mirror in audit_actions_device.py have to land in one
-                    // commit, so neither is added in this PR.
+                    val writtenFields = applyAcceptedReading(result)
+                    auditLogger.log(
+                        action = AuditAction.VITALS_DEVICE_READING_RECEIVED,
+                        patientId = patientId,
+                        caseRecordId = current.caseRecordId,
+                        payload = auditPayload(
+                            "sessionId" to result.sessionId,
+                            "deviceType" to result.deviceType,
+                            "instrument" to result.instrument.name,
+                            "synthetic" to result.synthetic?.toString(),
+                            "measuredAt" to result.measuredAt,
+                            "fieldsPopulated" to writtenFields.joinToString(",") { it.name },
+                            "fieldProvenance" to writtenFields.joinToString(",") {
+                                "${it.name}:${VitalsFieldProvenance.DEVICE.name}"
+                            },
+                        ),
+                    )
                 }
 
                 is AcquisitionResult.Rejected -> {
@@ -558,8 +570,16 @@ class CompounderViewModel @AssistedInject constructor(
                     _uiState.update {
                         it.copy(acquiringInstrument = null, acquisitionError = rejectionMessage(result.reason))
                     }
-                    // TODO(PR5): emit VITALS_DEVICE_READING_FAILED here with the matching
-                    // rejectReason. Same one-commit-with-the-mirror rule as above.
+                    auditLogger.log(
+                        action = AuditAction.VITALS_DEVICE_READING_FAILED,
+                        patientId = patientId,
+                        caseRecordId = current.caseRecordId,
+                        payload = auditPayload(
+                            "sessionId" to current.activeSessionId,
+                            "instrumentRequested" to request.instrument.name,
+                            "rejectReason" to result.reason.name,
+                        ),
+                    )
                 }
             }
         }
@@ -604,20 +624,23 @@ class CompounderViewModel @AssistedInject constructor(
      * zero. Every written field is marked DEVICE, replacing any earlier DEVICE_EDITED mark, because
      * the new instrument value has replaced whatever was there.
      */
-    private fun applyAcceptedReading(accepted: AcquisitionResult.Accepted) {
+    /** Returns the fields this reading actually populated, as [VitalsField] names only, so the
+     *  caller can log which fields arrived without this function knowing anything about audit
+     *  payloads and without the caller re-deriving the same null checks a second time. */
+    private fun applyAcceptedReading(accepted: AcquisitionResult.Accepted): Set<VitalsField> {
         val reading = accepted.reading
+        val written = buildMap {
+            reading.pulseBpm?.let { put(VitalsField.PULSE_BPM, it.toString()) }
+            reading.bpSystolic?.let { put(VitalsField.BP_SYSTOLIC, it.toString()) }
+            reading.bpDiastolic?.let { put(VitalsField.BP_DIASTOLIC, it.toString()) }
+            reading.spo2Percent?.let { put(VitalsField.SPO2_PERCENT, it.toString()) }
+            reading.temperatureCelsius?.let { put(VitalsField.TEMPERATURE_CELSIUS, it.toString()) }
+            reading.respiratoryRate?.let { put(VitalsField.RESPIRATORY_RATE, it.toString()) }
+            reading.weightKg?.let { put(VitalsField.WEIGHT_KG, it.toString()) }
+            reading.heightCm?.let { put(VitalsField.HEIGHT_CM, it.toString()) }
+            reading.bloodGlucoseMgDl?.let { put(VitalsField.BLOOD_GLUCOSE_MG_DL, it.toString()) }
+        }
         _uiState.update { state ->
-            val written = buildMap {
-                reading.pulseBpm?.let { put(VitalsField.PULSE_BPM, it.toString()) }
-                reading.bpSystolic?.let { put(VitalsField.BP_SYSTOLIC, it.toString()) }
-                reading.bpDiastolic?.let { put(VitalsField.BP_DIASTOLIC, it.toString()) }
-                reading.spo2Percent?.let { put(VitalsField.SPO2_PERCENT, it.toString()) }
-                reading.temperatureCelsius?.let { put(VitalsField.TEMPERATURE_CELSIUS, it.toString()) }
-                reading.respiratoryRate?.let { put(VitalsField.RESPIRATORY_RATE, it.toString()) }
-                reading.weightKg?.let { put(VitalsField.WEIGHT_KG, it.toString()) }
-                reading.heightCm?.let { put(VitalsField.HEIGHT_CM, it.toString()) }
-                reading.bloodGlucoseMgDl?.let { put(VitalsField.BLOOD_GLUCOSE_MG_DL, it.toString()) }
-            }
             state.copy(
                 acquiringInstrument = null,
                 activeSessionId = accepted.sessionId,
@@ -638,6 +661,7 @@ class CompounderViewModel @AssistedInject constructor(
                 fieldProvenance = state.fieldProvenance + written.keys.associateWith { VitalsFieldProvenance.DEVICE },
             )
         }
+        return written.keys
     }
 
     override fun onContinue() {

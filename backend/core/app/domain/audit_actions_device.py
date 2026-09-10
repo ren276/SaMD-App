@@ -72,6 +72,11 @@ DEVICE_AUDIT_ACTIONS: frozenset[str] = frozenset(
         "report_exported",
         "social_history_saved",
         "transcription_completed",
+        # Pi gateway acquisition seam (PR4a/PR4b): received on an accepted instrument reading,
+        # failed on a refused one. Payload is provenance and control evidence only, never a
+        # measured value. Added with the Kotlin AuditAction values in the same commit.
+        "vitals_device_reading_failed",
+        "vitals_device_reading_received",
         "vitals_recorded",
         # ASR track (asr-field-audit-memo.md B.4), one per confirmation-gate state. Not emitted
         # by the device yet; PR 3 wires the confirmation gate. Added with the Kotlin enum values
