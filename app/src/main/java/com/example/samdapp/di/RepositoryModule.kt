@@ -6,10 +6,12 @@ import com.example.samdapp.data.local.audit.RoomAuditLogger
 import com.example.samdapp.data.local.auth.AuthTokenStore
 import com.example.samdapp.data.local.auth.BackendAuthSession
 import com.example.samdapp.data.local.auth.DataStoreAuthTokenStore
+import com.example.samdapp.data.local.dao.CaseRecordDao
 import com.example.samdapp.data.sync.DataStoreInFlightBatchStore
 import com.example.samdapp.data.sync.InFlightBatchStore
 import com.example.samdapp.data.sync.RoomSyncOutboxRepository
 import com.example.samdapp.data.sync.SyncOutboxRepository
+import com.example.samdapp.data.sync.SyncOutboxDrainer
 import com.example.samdapp.data.sync.SyncOutboxScheduler
 import com.example.samdapp.data.sync.SyncStatusImpl
 import com.example.samdapp.data.sync.WorkManagerSyncOutboxScheduler
@@ -33,6 +35,8 @@ import com.example.samdapp.data.repository.VitalsRepositoryImpl
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.repository.AuditLogRepository
 import com.example.samdapp.domain.auth.AuthSession
+import com.example.samdapp.domain.usecase.GetCaseRecordSyncState
+import com.example.samdapp.domain.sync.OutboxDrainer
 import com.example.samdapp.domain.sync.SyncStatus
 import com.example.samdapp.domain.repository.AbhaProfileRepository
 import com.example.samdapp.domain.repository.AilmentRepository
@@ -52,6 +56,7 @@ import com.example.samdapp.domain.repository.PatientRepository
 import com.example.samdapp.domain.repository.VitalsRepository
 import dagger.Binds
 import dagger.Module
+import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
@@ -94,6 +99,9 @@ abstract class RepositoryModule {
     abstract fun bindSyncOutboxScheduler(impl: WorkManagerSyncOutboxScheduler): SyncOutboxScheduler
 
     @Binds @Singleton
+    abstract fun bindOutboxDrainer(impl: SyncOutboxDrainer): OutboxDrainer
+
+    @Binds @Singleton
     abstract fun bindAssessmentQueueScheduler(impl: WorkManagerAssessmentScheduler): AssessmentQueueScheduler
 
     @Binds @Singleton
@@ -134,4 +142,19 @@ abstract class RepositoryModule {
 
     @Binds @Singleton
     abstract fun bindDocumentCaptureStore(impl: AndroidDocumentCaptureStore): DocumentCaptureStore
+
+    companion object {
+        /** Bridges [CaseRecordDao.getSyncState] to the domain-layer
+         *  [com.example.samdapp.domain.usecase.GetCaseRecordSyncState] SAM
+         *  interface. The DAO is a data-layer type Hilt already provides; this @Provides is the
+         *  thinnest possible adapter so AssessmentRunner stays in domain/ without importing any
+         *  Room type. */
+        @Provides
+        fun provideGetCaseRecordSyncState(
+            caseRecordDao: CaseRecordDao,
+        ): GetCaseRecordSyncState =
+            GetCaseRecordSyncState { caseRecordId ->
+                caseRecordDao.getSyncState(caseRecordId)
+            }
+    }
 }

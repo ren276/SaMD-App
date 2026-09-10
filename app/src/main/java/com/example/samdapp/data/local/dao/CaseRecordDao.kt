@@ -33,6 +33,12 @@ interface CaseRecordDao {
     @Query("SELECT COUNT(*) FROM case_records WHERE syncState = 'FAILED'")
     fun observeFailedSyncCount(): Flow<Int>
 
+    /** One-shot read: the transport [SyncState] of a single case record, for the
+     *  sync-before-assess gate in [com.example.samdapp.domain.usecase.AssessmentRunner].
+     *  Returns null when the row itself does not exist. */
+    @Query("SELECT syncState FROM case_records WHERE id = :caseRecordId")
+    suspend fun getSyncState(caseRecordId: String): SyncState?
+
     /** Also stamps `localModifiedAt` from the same [updatedAt] value, see MIGRATION_12_13's
      *  KDoc for why the two columns are deliberately redundant on entities that have both, and
      *  resets the transport `syncState` to `PENDING` in the same statement (syncstate-reset

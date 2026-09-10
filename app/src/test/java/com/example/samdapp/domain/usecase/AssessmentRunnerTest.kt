@@ -15,6 +15,8 @@ import com.example.samdapp.domain.model.EvaluateSafetyAndTriage
 import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.domain.model.KernelPayload
 import com.example.samdapp.domain.repository.CaseRecordRepository
+import com.example.samdapp.domain.model.SyncState
+import com.example.samdapp.domain.sync.OutboxDrainer
 import com.example.samdapp.testutil.FakeAuditLogger
 import com.example.samdapp.testutil.FakeCaseRecordRepository
 import com.example.samdapp.testutil.FakeConsultationRepository
@@ -30,6 +32,7 @@ import com.example.samdapp.testutil.testPatient
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -126,6 +129,8 @@ class AssessmentRunnerTest {
         patientRepository: FakePatientRepository = FakePatientRepository().apply { registered = testPatient("p1") },
         kernelSource: RemoteKernelSource = AlwaysSucceedsKernelSource,
         evaluateSource: EvaluateKernelSource = AlwaysSucceedsEvaluateSource,
+        outboxDrainer: OutboxDrainer = OutboxDrainer { Result.success(Unit) },
+        getCaseRecordSyncState: GetCaseRecordSyncState = GetCaseRecordSyncState { SyncState.SYNCED },
     ) {
         val runner = AssessmentRunner(
             caseRecordRepository = caseRecordRepository,
@@ -139,6 +144,8 @@ class AssessmentRunnerTest {
             ),
             generateEvaluateReportUseCase = GenerateEvaluateReportUseCase(evaluateReportRepository, evaluateSource, com.example.samdapp.testutil.FakeBrandLookupSource()),
             auditLogger = auditLogger,
+            outboxDrainer = outboxDrainer,
+            getCaseRecordSyncState = getCaseRecordSyncState,
         )
     }
 
@@ -222,5 +229,127 @@ class AssessmentRunnerTest {
 
         val saved = fixture.kernelReportRepository.saved["no-such-case"]
         assertEquals(InferenceSource.UNAVAILABLE, saved?.inferenceSource)
+    }
+
+    @Test
+    fun `pre-assess outbox drain is executed before kernel assess`() = runTest {
+        var drainCalled = false
+        val fixture = Fixture(
+            outboxDrainer = OutboxDrainer {
+                drainCalled = true
+                Result.success(Unit)
+            },
+        )
+
+        fixture.runner.run("case-1")
+
+        assertTrue("Expected outbox drain to be called before assess", drainCalled)
+        assertEquals(InferenceSource.REAL_INFERENCE, fixture.kernelReportRepository.saved["case-1"]?.inferenceSource)
+    }
+
+    @Test
+    fun `outbox drain failure is best-effort and proceeds when case record is SYNCED`() = runTest {
+        val fixture = Fixture(
+            outboxDrainer = OutboxDrainer { Result.failure(IllegalStateException("Network offline")) },
+            getCaseRecordSyncState = { SyncState.SYNCED },
+        )
+
+        fixture.runner.run("case-1")
+
+        assertEquals(InferenceSource.REAL_INFERENCE, fixture.kernelReportRepository.saved["case-1"]?.inferenceSource)
+    }
+
+    @Test
+    fun `case record still PENDING after drain records UNAVAILABLE and skips kernel`() = runTest {
+        var kernelCalled = false
+        val kernelSource = object : RemoteKernelSource {
+            override suspend fun assess(payload: KernelPayload, patientAge: Int, patientSex: String): KernelAssessmentResult {
+                kernelCalled = true
+                return AlwaysSucceedsKernelSource.assess(payload, patientAge, patientSex)
+            }
+        }
+        val fixture = Fixture(
+            kernelSource = kernelSource,
+            getCaseRecordSyncState = { SyncState.PENDING },
+        )
+
+        fixture.runner.run("case-1")
+
+        assertEquals(InferenceSource.UNAVAILABLE, fixture.kernelReportRepository.saved["case-1"]?.inferenceSource)
+        assertTrue("Kernel must not be called when case_record is PENDING", !kernelCalled)
+    }
+
+    @Test
+    fun `case record FAILED after drain records UNAVAILABLE and skips kernel`() = runTest {
+        var kernelCalled = false
+        val kernelSource = object : RemoteKernelSource {
+            override suspend fun assess(payload: KernelPayload, patientAge: Int, patientSex: String): KernelAssessmentResult {
+                kernelCalled = true
+                return AlwaysSucceedsKernelSource.assess(payload, patientAge, patientSex)
+            }
+        }
+        val fixture = Fixture(
+            kernelSource = kernelSource,
+            getCaseRecordSyncState = { SyncState.FAILED },
+        )
+
+        fixture.runner.run("case-1")
+
+        assertEquals(InferenceSource.UNAVAILABLE, fixture.kernelReportRepository.saved["case-1"]?.inferenceSource)
+        assertTrue("Kernel must not be called when case_record is FAILED", !kernelCalled)
+    }
+
+    /**
+     * AUDIT5 section 2.5(a), the blocking defect: the Stage-0 gate persisted a clinical artifact
+     * (an UNAVAILABLE kernel report) and returned WITHOUT writing any audit entry, on what is the
+     * dominant UNAVAILABLE path in the field, because "not synced" and "offline" are the same
+     * condition. In a Class B/C SaMD with an append-only audit log, a persisted clinical artifact
+     * with no audit row is an audit-trail gap. This asserts the emitted audit entry and the
+     * persisted report row together, never `run`'s Unit return.
+     */
+    @Test
+    fun `stage 0 gate emits an audit entry alongside the UNAVAILABLE row it persists`() = runTest {
+        val fixture = Fixture(getCaseRecordSyncState = { SyncState.FAILED })
+
+        fixture.runner.run("case-1")
+
+        // The clinical artifact is persisted...
+        assertEquals(InferenceSource.UNAVAILABLE, fixture.kernelReportRepository.saved["case-1"]?.inferenceSource)
+
+        // ...and it does NOT exist without an audit row describing it.
+        val entry = fixture.auditLogger.logged.singleOrNull {
+            it.action == AuditAction.KERNEL_RESPONSE_RECEIVED.value
+        }
+        assertNotNull("Stage-0 gate persisted an UNAVAILABLE report with no audit entry", entry)
+        assertEquals("case-1", entry!!.caseRecordId)
+        assertTrue(
+            "Audit payload must record the UNAVAILABLE outcome, was: ${entry.payload}",
+            entry.payload.contains(InferenceSource.UNAVAILABLE.name),
+        )
+        assertTrue(
+            "Audit payload must record the sync state as the reason, was: ${entry.payload}",
+            entry.payload.contains(SyncState.FAILED.name),
+        )
+    }
+
+    /** Same gap at the pre-existing `resolved == null` early return (AUDIT5 section 2.5(a), last
+     *  paragraph): it wrote the row and returned silently too, so it is fixed in the same pass. */
+    @Test
+    fun `unresolvable local data emits an audit entry alongside the UNAVAILABLE row it persists`() = runTest {
+        val fixture = Fixture(vitalsRepository = FakeVitalsRepository())
+
+        fixture.runner.run("case-1")
+
+        assertEquals(InferenceSource.UNAVAILABLE, fixture.kernelReportRepository.saved["case-1"]?.inferenceSource)
+
+        val entry = fixture.auditLogger.logged.singleOrNull {
+            it.action == AuditAction.KERNEL_RESPONSE_RECEIVED.value
+        }
+        assertNotNull("resolve-failure early return persisted an UNAVAILABLE report with no audit entry", entry)
+        assertEquals("case-1", entry!!.caseRecordId)
+        assertTrue(
+            "Audit payload must record the UNAVAILABLE outcome, was: ${entry.payload}",
+            entry.payload.contains(InferenceSource.UNAVAILABLE.name),
+        )
     }
 }
