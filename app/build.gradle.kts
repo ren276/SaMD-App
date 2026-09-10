@@ -58,6 +58,11 @@ android {
             // api-contract.md §5.1); this is the one LAN address the device now needs.
             buildConfigField("String", "BACKEND_BASE_URL", "\"${localProperties.getProperty("BACKEND_BASE_URL", "http://10.16.4.182:8080/")}\"")
             buildConfigField("String", "ENVIRONMENT", "\"dev\"")
+            // Raspberry Pi instrument gateway on the LAN, dev flavour only. Overridable from
+            // local.properties the same way BACKEND_BASE_URL is, so moving the Pi to a new address
+            // is a property edit rather than a source edit. Staging and prod define no such field:
+            // the code that reads it lives in src/dev/ and does not exist in those builds.
+            buildConfigField("String", "PI_GATEWAY_BASE_URL", "\"${localProperties.getProperty("PI_GATEWAY_BASE_URL", "http://kernel-hub.local:8090/")}\"")
             // FLAG_SECURE off in dev so investor/demo screen recordings work; staging/prod enforce it.
             buildConfigField("boolean", "SCREEN_SECURITY_ENABLED", "false")
         }

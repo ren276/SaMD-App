@@ -6,6 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
+import com.example.samdapp.domain.connectivity.ACCESS_LOCAL_NETWORK_PERMISSION
 
 /** Dangerous permissions need a runtime prompt, not just the manifest entry — without this,
  *  [android.media.AudioRecord], [android.media.MediaRecorder], and camera capture all
@@ -34,3 +35,17 @@ fun rememberPermissionAction(
         }
     }
 }
+
+/** Entry point for PR4's Pi Start control: call this before the first LAN socket to the Pi
+ *  relay, so the runtime prompt (Android 17+ / API 37+) happens ahead of the connection attempt
+ *  rather than being discovered as a socket failure. TODO(PR4): call the returned action from
+ *  the Start button, with onDenied routing to a "grant local network access" message. */
+@Composable
+fun rememberLocalNetworkPermissionAction(
+    onGranted: () -> Unit,
+    onDenied: () -> Unit = {},
+): () -> Unit = rememberPermissionAction(
+    permission = ACCESS_LOCAL_NETWORK_PERMISSION,
+    onGranted = onGranted,
+    onDenied = onDenied,
+)
