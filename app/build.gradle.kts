@@ -58,6 +58,10 @@ android {
             // api-contract.md §5.1); this is the one LAN address the device now needs.
             buildConfigField("String", "BACKEND_BASE_URL", "\"${localProperties.getProperty("BACKEND_BASE_URL", "http://10.16.4.182:8080/")}\"")
             buildConfigField("String", "ENVIRONMENT", "\"dev\"")
+            // The Start/Stop/instrument/scenario block renders only when this is true. Second
+            // layer on top of PiGatewayVitalsSource living in src/dev/: the class does not exist
+            // outside dev, and the control that would call it does not render.
+            buildConfigField("boolean", "PI_GATEWAY_ENABLED", "true")
             // Raspberry Pi instrument gateway on the LAN, dev flavour only. Overridable from
             // local.properties the same way BACKEND_BASE_URL is, so moving the Pi to a new address
             // is a property edit rather than a source edit. Staging and prod define no such field:
@@ -71,12 +75,14 @@ android {
             applicationIdSuffix = ".staging"
             buildConfigField("String", "BACKEND_BASE_URL", "\"https://staging.samd.example.com/backend/\"")
             buildConfigField("String", "ENVIRONMENT", "\"staging\"")
+            buildConfigField("boolean", "PI_GATEWAY_ENABLED", "false")
             buildConfigField("boolean", "SCREEN_SECURITY_ENABLED", "true")
         }
         create("prod") {
             dimension = "environment"
             buildConfigField("String", "BACKEND_BASE_URL", "\"https://api.samd.example.com/backend/\"")
             buildConfigField("String", "ENVIRONMENT", "\"prod\"")
+            buildConfigField("boolean", "PI_GATEWAY_ENABLED", "false")
             buildConfigField("boolean", "SCREEN_SECURITY_ENABLED", "true")
         }
     }
