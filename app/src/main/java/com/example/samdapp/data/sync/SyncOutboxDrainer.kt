@@ -6,6 +6,7 @@ import com.example.samdapp.data.remote.SyncPushService
 import com.example.samdapp.data.remote.dto.SyncPushRequestDto
 import com.example.samdapp.data.remote.dto.SyncRecordDto
 import com.example.samdapp.data.remote.dto.SyncResultDto
+import com.example.samdapp.domain.sync.OutboxDrainer
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.time.Instant
@@ -37,7 +38,7 @@ class SyncOutboxDrainer @Inject constructor(
     private val pushService: SyncPushService,
     private val inFlightBatchStore: InFlightBatchStore,
     private val authTokenStore: AuthTokenStore,
-) {
+) : OutboxDrainer {
     // Process-wide: the periodic (sync_push_periodic) and one-time (sync_push_now) WorkManager
     // requests are different unique-work names, so their SyncPushWorker instances can run
     // concurrently. Without this, two overlapping drains could both pack the same PENDING rows
@@ -46,6 +47,8 @@ class SyncOutboxDrainer @Inject constructor(
     private val drainMutex = Mutex()
 
     suspend fun drain(): Result<Unit> = drainMutex.withLock { drainLocked() }
+
+    override suspend fun drainAll(): Result<Unit> = drain()
 
     private suspend fun drainLocked(): Result<Unit> {
         resumeInFlightBatch()?.let { resumed -> if (resumed.isFailure) return resumed }
