@@ -6,8 +6,12 @@ import kotlinx.coroutines.delay
 import javax.inject.Inject
 import kotlin.random.Random
 
-/** The seam a real BLE vitals-monitor integration plugs into later. Randomizes within
- * plausible ranges on every call so the investor demo doesn't look static. */
+/** Randomizes within plausible ranges on every call so the investor demo doesn't look static.
+ *
+ * UNBOUND as of the Pi gateway integration: [com.example.samdapp.di.DevClinicalMockModule] now
+ * binds `PiGatewayVitalsSource` instead. Kept rather than deleted because this is the hardware-free
+ * demo path, and restoring it is a one-line binding change in that module. Nothing references this
+ * class in the meantime, which is intended. */
 class MockVitalsSource @Inject constructor() : VitalsSource {
 
     override suspend fun readVitals(): VitalsReading {
