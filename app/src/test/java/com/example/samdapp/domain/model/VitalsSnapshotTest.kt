@@ -35,4 +35,44 @@ class VitalsSnapshotTest {
         // 70kg at 1.75m: 70 / (1.75*1.75) = 22.857...
         assertEquals(22.9, snapshot(weightKg = 70.0, heightCm = 175.0).bmi!!, 0.001)
     }
+
+    @Test
+    fun `all-null VitalsReading has no value`() {
+        assertEquals(false, VitalsReading().hasAnyValue())
+    }
+
+    @Test
+    fun `VitalsReading with one populated field has a value`() {
+        assertEquals(true, VitalsReading(pulseBpm = 72).hasAnyValue())
+    }
+
+    @Test
+    fun `all-null VitalsReading derives MANUAL source`() {
+        assertEquals(ObservationSource.MANUAL, VitalsReading().derivedSource())
+    }
+
+    @Test
+    fun `populated VitalsReading derives DEVICE source`() {
+        assertEquals(ObservationSource.DEVICE, VitalsReading(spo2Percent = 98).derivedSource())
+    }
+
+    @Test
+    fun `toSnapshot on all-null reading is MANUAL`() {
+        val result = VitalsReading().toSnapshot(
+            encounterId = "encounter-1",
+            patientId = "patient-1",
+            recordedAt = Instant.EPOCH,
+        )
+        assertEquals(ObservationSource.MANUAL, result.source)
+    }
+
+    @Test
+    fun `toSnapshot on reading with a value is DEVICE`() {
+        val result = VitalsReading(pulseBpm = 72).toSnapshot(
+            encounterId = "encounter-1",
+            patientId = "patient-1",
+            recordedAt = Instant.EPOCH,
+        )
+        assertEquals(ObservationSource.DEVICE, result.source)
+    }
 }

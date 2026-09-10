@@ -255,7 +255,7 @@ class CompounderViewModel @AssistedInject constructor(
                     weightKg = snapshot.weightKg?.toString().orEmpty(),
                     heightCm = snapshot.heightCm?.toString().orEmpty(),
                     bloodGlucoseMgDl = snapshot.bloodGlucoseMgDl?.toString().orEmpty(),
-                    source = ObservationSource.DEVICE,
+                    source = snapshot.source,
                 )
             }
         }
