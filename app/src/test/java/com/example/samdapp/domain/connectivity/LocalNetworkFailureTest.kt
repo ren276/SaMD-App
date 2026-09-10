@@ -27,11 +27,20 @@ class LocalNetworkFailureTest {
     }
 
     @Test
-    fun `pre-enforcement OS classifies as UNREACHABLE even if checkSelfPermission reads as not granted`() {
+    fun `pre-enforcement OS with permission granted classifies as UNREACHABLE_OR_BLOCKED`() {
+        val result = classifyLocalNetworkFailure(
+            permissionGranted = true,
+            sdkInt = ACCESS_LOCAL_NETWORK_ENFORCED_SDK - 1,
+        )
+        assertEquals(LocalNetworkFailure.UNREACHABLE_OR_BLOCKED, result)
+    }
+
+    @Test
+    fun `pre-enforcement OS with permission reading denied still classifies as UNREACHABLE_OR_BLOCKED, never PERMISSION_DENIED`() {
         val result = classifyLocalNetworkFailure(
             permissionGranted = false,
             sdkInt = ACCESS_LOCAL_NETWORK_ENFORCED_SDK - 1,
         )
-        assertEquals(LocalNetworkFailure.UNREACHABLE, result)
+        assertEquals(LocalNetworkFailure.UNREACHABLE_OR_BLOCKED, result)
     }
 }
