@@ -3,6 +3,7 @@ package com.example.samdapp.presentation.patientsummary
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
@@ -310,7 +311,10 @@ private fun DoctorReviewCard(uiState: PatientSummaryUiState, actions: PatientSum
             uiState.evaluateOutput?.diagnosticSummary?.primaryAilmentName?.let {
                 Text("AI diagnosis: $it", style = MaterialTheme.typography.bodyMedium)
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 PhysicianDecision.entries.forEach { decision ->
                     FilterChip(
                         selected = uiState.selectedDecision == decision,
