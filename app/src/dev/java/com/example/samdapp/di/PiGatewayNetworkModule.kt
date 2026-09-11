@@ -1,11 +1,15 @@
 package com.example.samdapp.di
 
+import android.content.Context
+import com.example.samdapp.data.vitalssource.NsdGatewayDns
 import com.example.samdapp.data.vitalssource.PiGatewayApi
 import com.google.gson.Gson
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import okhttp3.Dns
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -40,12 +44,27 @@ object PiGatewayNetworkModule {
      *  posture as the ABHA client's absent logging interceptor.
      *
      *  Timeouts are deliberately short. The worker is standing at the instrument waiting; a fast,
-     *  honest "not reachable" beats a 30s hang in front of a patient. */
+     *  honest "not reachable" beats a 30s hang in front of a patient.
+     *
+     *  [NsdGatewayDns] is installed here and nowhere else. Android's system resolver has no mDNS
+     *  path, so the `.local` host in `PI_GATEWAY_BASE_URL` cannot be resolved by `Dns.SYSTEM`;
+     *  every gateway call failed with `UnknownHostException` before this. It resolves names only
+     *  and never touches a request, so the no-replay rule still holds. */
     @Provides
     @Singleton
     @PiGatewayHttpStack
-    fun providePiGatewayOkHttpClient(): OkHttpClient =
+    fun providePiGatewayOkHttpClient(@ApplicationContext context: Context): OkHttpClient =
+        piGatewayOkHttpClient(NsdGatewayDns(discover = NsdGatewayDns.nsdDiscovery(context)))
+
+    /**
+     * The client itself, with the [Dns] left open. Split out so a host unit test can assert this
+     * exact configuration — the short timeouts and, more to the point, the interceptors that are
+     * absent — without an Android [Context] to hand. Production always gets [NsdGatewayDns]; the
+     * default is only ever taken by a test pointing at a MockWebServer on loopback.
+     */
+    fun piGatewayOkHttpClient(dns: Dns = Dns.SYSTEM): OkHttpClient =
         OkHttpClient.Builder()
+            .dns(dns)
             .connectTimeout(2, TimeUnit.SECONDS)
             .readTimeout(5, TimeUnit.SECONDS)
             .writeTimeout(5, TimeUnit.SECONDS)
