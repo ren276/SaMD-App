@@ -10,6 +10,7 @@ import com.example.samdapp.domain.repository.ConsultationRepository
 import com.example.samdapp.domain.repository.EncounterRepository
 import com.example.samdapp.domain.repository.PatientRepository
 import com.example.samdapp.domain.repository.VitalsRepository
+import com.example.samdapp.domain.sync.SyncStatus
 import com.google.gson.Gson
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
@@ -36,6 +37,7 @@ class AssessmentRunner @Inject constructor(
     private val sendToKernelUseCase: SendToKernelUseCase,
     private val generateKernelReportUseCase: GenerateKernelReportUseCase,
     private val generateEvaluateReportUseCase: GenerateEvaluateReportUseCase,
+    private val syncStatus: SyncStatus,
     private val auditLogger: AuditLogger,
 ) {
     private val gson = Gson()
@@ -66,6 +68,19 @@ class AssessmentRunner @Inject constructor(
         if (resolved == null) {
             generateKernelReportUseCase.recordUnavailable(caseRecordId)
             return
+        }
+
+        // Both kernel legs below are backend proxies that resolve the case record server-side
+        // (POST /api/v1/assess -> _resolve_case_record). A case created on device exists only
+        // locally until the outbox drains, so assessing before pushing gets SAMD-ENC-4002 "case
+        // record not found" and collapses to the fallback/unavailable path for a reason that has
+        // nothing to do with the kernel being unavailable. Push first, then assess.
+        //
+        // The result is deliberately not fatal. syncNow() refuses when offline, and a failed push
+        // means the kernel call below fails too and lands in the honest UNAVAILABLE state that
+        // already exists — which is the correct outcome, not something to special-case here.
+        syncStatus.syncNow().onFailure { e ->
+            logger.warning("Pre-assessment sync failed for case $caseRecordId: ${e.message}")
         }
 
         val kernelResult = generateKernelReportUseCase(

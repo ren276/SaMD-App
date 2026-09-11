@@ -126,6 +126,7 @@ class AssessmentRunnerTest {
         patientRepository: FakePatientRepository = FakePatientRepository().apply { registered = testPatient("p1") },
         kernelSource: RemoteKernelSource = AlwaysSucceedsKernelSource,
         evaluateSource: EvaluateKernelSource = AlwaysSucceedsEvaluateSource,
+        val syncStatus: com.example.samdapp.domain.sync.SyncStatus = com.example.samdapp.testutil.FakeSyncStatus(),
     ) {
         val runner = AssessmentRunner(
             caseRecordRepository = caseRecordRepository,
@@ -138,6 +139,7 @@ class AssessmentRunnerTest {
                 kernelReportRepository, FakeDeviceInfoProvider(), kernelSource, FakeKernelFallbackSource(result = null), auditLogger,
             ),
             generateEvaluateReportUseCase = GenerateEvaluateReportUseCase(evaluateReportRepository, evaluateSource, com.example.samdapp.testutil.FakeBrandLookupSource()),
+            syncStatus = syncStatus,
             auditLogger = auditLogger,
         )
     }
@@ -222,5 +224,55 @@ class AssessmentRunnerTest {
 
         val saved = fixture.kernelReportRepository.saved["no-such-case"]
         assertEquals(InferenceSource.UNAVAILABLE, saved?.inferenceSource)
+    }
+
+    /** The regression guard for SAMD-ENC-4002. Both kernel legs are backend proxies that resolve
+     *  the case record server-side, and a device-created case exists only locally until the
+     *  outbox drains — so the push has to have happened by the time the kernel call goes out. */
+    @Test
+    fun `the case is pushed before the kernel call runs`() = runTest {
+        val syncStatus = com.example.samdapp.testutil.FakeSyncStatus()
+        var syncCallsSeenByKernel = -1
+        val recordingKernel = object : RemoteKernelSource {
+            override suspend fun assess(payload: KernelPayload, patientAge: Int, patientSex: String): KernelAssessmentResult {
+                syncCallsSeenByKernel = syncStatus.syncCalls
+                return AlwaysSucceedsKernelSource.assess(payload, patientAge, patientSex)
+            }
+        }
+        val fixture = Fixture(kernelSource = recordingKernel, syncStatus = syncStatus)
+
+        fixture.runner.run("case-1")
+
+        assertEquals(1, syncCallsSeenByKernel)
+    }
+
+    /** A push that fails (offline, backend down) must not abort the assessment. The kernel call
+     *  then fails on its own and lands in the UNAVAILABLE state that already exists; swallowing
+     *  the assessment here would lose that honest outcome. */
+    @Test
+    fun `a failed pre-assessment sync still lets the assessment run`() = runTest {
+        val fixture = Fixture(syncStatus = FailingSyncStatus)
+
+        fixture.runner.run("case-1")
+
+        assertEquals(InferenceSource.REAL_INFERENCE, fixture.kernelReportRepository.saved["case-1"]?.inferenceSource)
+    }
+
+    /** Nothing to assess means nothing worth pushing for: the unavailable row is written without
+     *  a network round trip. */
+    @Test
+    fun `a case that cannot be resolved is never pushed`() = runTest {
+        val syncStatus = com.example.samdapp.testutil.FakeSyncStatus()
+        val fixture = Fixture(vitalsRepository = FakeVitalsRepository(), syncStatus = syncStatus)
+
+        fixture.runner.run("case-1")
+
+        assertEquals(InferenceSource.UNAVAILABLE, fixture.kernelReportRepository.saved["case-1"]?.inferenceSource)
+        assertEquals(0, syncStatus.syncCalls)
+    }
+
+    private object FailingSyncStatus : com.example.samdapp.domain.sync.SyncStatus {
+        override val state = kotlinx.coroutines.flow.flowOf(com.example.samdapp.domain.sync.SyncState())
+        override suspend fun syncNow(): Result<Unit> = Result.failure(IllegalStateException("offline"))
     }
 }
