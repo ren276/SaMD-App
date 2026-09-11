@@ -22,6 +22,7 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
@@ -36,6 +37,14 @@ import javax.inject.Singleton
 @Qualifier
 @Retention(AnnotationRetention.BINARY)
 annotation class AbhaHttpStack
+
+/** Interceptors that exist only in the dev flavor. `src/dev/` provides the dynamic-host
+ *  interceptor; `src/staging/` and `src/prod/` provide an empty list, so no dev-only class is
+ *  named, constructed, or even present in those builds — the same containment
+ *  `MockBoundaryModule` documents for the clinical mock seams. */
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class DevHostInterceptors
 
 /**
  * Provides the Retrofit + OkHttp stack for `backend/core`. One `OkHttpClient`/`Retrofit` pair
@@ -82,11 +91,13 @@ object NetworkModule {
         loggingInterceptor: HttpLoggingInterceptor,
         bearerInterceptor: BearerInterceptor,
         tokenAuthenticator: TokenAuthenticator,
+        @DevHostInterceptors devInterceptors: List<@JvmSuppressWildcards Interceptor>,
     ): OkHttpClient =
         OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
+            .apply { devInterceptors.forEach(::addInterceptor) }
             .addInterceptor(bearerInterceptor)
             .authenticator(tokenAuthenticator)
             .addInterceptor(loggingInterceptor)
@@ -108,11 +119,13 @@ object NetworkModule {
     fun provideAbhaOkHttpClient(
         bearerInterceptor: BearerInterceptor,
         tokenAuthenticator: TokenAuthenticator,
+        @DevHostInterceptors devInterceptors: List<@JvmSuppressWildcards Interceptor>,
     ): OkHttpClient =
         OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
+            .apply { devInterceptors.forEach(::addInterceptor) }
             .addInterceptor(bearerInterceptor)
             .authenticator(tokenAuthenticator)
             .build()
