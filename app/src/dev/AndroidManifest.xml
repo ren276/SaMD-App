@@ -1,6 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <application android:usesCleartextTraffic="true" />
+    <!-- Signature-level: only a package signed with this app's key may repoint the backend.
+         The receiver is exported because adb has to reach it, and an exported receiver that
+         accepts a backend URL from anyone is a redirect of Aadhaar identity submission and OTP
+         verification to a host of the sender's choosing (AUDIT5 section 3.5).
+         Note the cost: `adb shell am broadcast` runs as the shell uid, which does not hold this
+         permission, so tools/dev-connect.sh's hot-update broadcast now only lands on a rooted or
+         userdebug device. The build-time BACKEND_BASE_URL path is unaffected. Relax to
+         "signature|development" and `pm grant com.android.shell` if the broadcast is needed on a
+         locked device. -->
+    <permission
+        android:name="com.example.samdapp.dev.permission.SET_BACKEND_URL"
+        android:protectionLevel="signature" />
+
+    <application android:usesCleartextTraffic="true">
+        <receiver
+            android:name=".receiver.DevServerReceiver"
+            android:exported="true"
+            android:permission="com.example.samdapp.dev.permission.SET_BACKEND_URL">
+            <intent-filter>
+                <action android:name="com.example.samdapp.dev.SET_BACKEND_URL" />
+            </intent-filter>
+        </receiver>
+    </application>
 
 </manifest>

@@ -4,6 +4,7 @@ package com.example.samdapp.presentation.medicalbackground
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -195,7 +196,10 @@ private fun MedicalHistorySection(
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         SectionHeader("Medical & surgical history")
         ExistingItemsList(items)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             MedicalHistoryCategory.entries.forEach { option ->
                 FilterChip(selected = category == option, onClick = { category = option }, label = { Text(option.label()) })
             }
@@ -235,7 +239,10 @@ private fun MedicationSection(items: List<String>, onAdd: (MedicationKind, Strin
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         SectionHeader("Current medications & supplements")
         ExistingItemsList(items)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             MedicationKind.entries.forEach { option ->
                 FilterChip(selected = kind == option, onClick = { kind = option }, label = { Text(option.label()) })
             }
@@ -264,7 +271,10 @@ private fun AllergySection(items: List<String>, onAdd: (AllergyCategory, String,
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         SectionHeader("Allergies")
         ExistingItemsList(items)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             AllergyCategory.entries.forEach { option ->
                 FilterChip(selected = category == option, onClick = { category = option }, label = { Text(option.label()) })
             }

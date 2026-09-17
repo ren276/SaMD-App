@@ -37,7 +37,7 @@ class PiGatewayVitalsSourceTest {
         server.start()
         val api = Retrofit.Builder()
             .baseUrl(server.url("/"))
-            .client(PiGatewayNetworkModule.providePiGatewayOkHttpClient())
+            .client(PiGatewayNetworkModule.piGatewayOkHttpClient())
             .addConverterFactory(GsonConverterFactory.create(SyncGson.create()))
             .build()
             .create(PiGatewayApi::class.java)

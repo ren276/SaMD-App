@@ -1,3 +1,6 @@
+import java.net.Inet4Address
+import java.net.NetworkInterface
+import java.util.Collections
 import java.util.Properties
 
 plugins {
@@ -19,6 +22,30 @@ val localProperties = Properties().apply {
     providers.fileContents(rootProject.layout.projectDirectory.file("local.properties"))
         .asText.orNull
         ?.let { load(it.reader()) }
+}
+
+fun resolveDevHostIp(): String {
+    try {
+        val interfaces = NetworkInterface.getNetworkInterfaces() ?: return "127.0.0.1"
+        for (iface in Collections.list(interfaces)) {
+            if (!iface.isUp || iface.isLoopback || iface.isPointToPoint) continue
+            val name = iface.name
+            if (name.startsWith("docker") || name.startsWith("br-") || name.startsWith("virbr") || name.startsWith("tailscale") || name.startsWith("vboxnet") || name.startsWith("zeth")) {
+                continue
+            }
+            for (addr in Collections.list(iface.inetAddresses)) {
+                if (addr is Inet4Address && !addr.isLoopbackAddress) {
+                    val ip = addr.hostAddress
+                    if (!ip.startsWith("127.") && !ip.startsWith("169.254.")) {
+                        return ip
+                    }
+                }
+            }
+        }
+    } catch (_: Exception) {
+        // Fallback if network interface query fails
+    }
+    return "127.0.0.1"
 }
 
 android {
@@ -56,7 +83,24 @@ android {
             // Overridable via local.properties for physical-device testing over Wi-Fi: the
             // kernel is no longer reachable directly (KERNEL_BASE_URL deleted, Phase 6a,
             // api-contract.md §5.1); this is the one LAN address the device now needs.
-            buildConfigField("String", "BACKEND_BASE_URL", "\"${localProperties.getProperty("BACKEND_BASE_URL", "http://10.16.4.182:8080/")}\"")
+            // If missing or set to 'auto', resolveDevHostIp() dynamically inspects the host's
+            // active physical network interface (Ethernet/Wi-Fi) at build time.
+            val configuredBackend = localProperties.getProperty("BACKEND_BASE_URL", "").trim()
+            val backendIsAuto = configuredBackend.isEmpty() || configuredBackend.equals("auto", ignoreCase = true)
+            val resolvedDevBackend = if (backendIsAuto) "http://${resolveDevHostIp()}:8080/" else configuredBackend
+            // Unconditional, not just on failure: resolveDevHostIp()'s failure paths all converge
+            // on the same well-formed "127.0.0.1" (never null, never an exception the developer
+            // would see), and a multi-homed host (VPN up alongside the real LAN adapter) can pick
+            // a real-looking but wrong address without throwing at all. A log only in a catch
+            // block would stay silent on exactly those two cases; logging the resolved host here,
+            // every time, is what actually surfaces a wrong address instead of it looking like an
+            // unrelated "backend unavailable" on the phone. See
+            // scratchpad/resolve-dev-host-ip-review.md Q4/Q5.
+            logger.lifecycle(
+                "dev backend resolved to $resolvedDevBackend" +
+                    if (backendIsAuto) " via auto" else " (from local.properties)",
+            )
+            buildConfigField("String", "BACKEND_BASE_URL", "\"$resolvedDevBackend\"")
             buildConfigField("String", "ENVIRONMENT", "\"dev\"")
             // The Start/Stop/instrument/scenario block renders only when this is true. Second
             // layer on top of PiGatewayVitalsSource living in src/dev/: the class does not exist
@@ -66,6 +110,11 @@ android {
             // local.properties the same way BACKEND_BASE_URL is, so moving the Pi to a new address
             // is a property edit rather than a source edit. Staging and prod define no such field:
             // the code that reads it lives in src/dev/ and does not exist in those builds.
+            // The `.local` default is resolved by NsdGatewayDns, installed on the gateway's own
+            // OkHttpClient only; Android's system resolver has no mDNS path and would throw
+            // UnknownHostException here. It requires the Pi to advertise the DNS-SD service in
+            // tools/kernel-hub-avahi.service. Override with a literal IP in local.properties when
+            // the handset is off the gateway's LAN (adb reverse) or mDNS is blocked by the AP.
             buildConfigField("String", "PI_GATEWAY_BASE_URL", "\"${localProperties.getProperty("PI_GATEWAY_BASE_URL", "http://kernel-hub.local:8090/")}\"")
             // FLAG_SECURE off in dev so investor/demo screen recordings work; staging/prod enforce it.
             buildConfigField("boolean", "SCREEN_SECURITY_ENABLED", "false")

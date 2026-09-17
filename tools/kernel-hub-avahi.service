@@ -1,0 +1,36 @@
+<?xml version="1.0" standalone='no'?><!--*-nxml-*-->
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+
+<!--
+  Install on the Raspberry Pi gateway as /etc/avahi/services/kernel-hub.service, then:
+
+      sudo install -m 0644 kernel-hub-avahi.service /etc/avahi/services/kernel-hub.service
+      sudo systemctl reload avahi-daemon
+
+  Verify from a machine on the same LAN:
+
+      avahi-browse -rt _samd-gw._tcp        # must show kernel-hub, address, port 8090
+
+  Why this file is required. The app resolves PI_GATEWAY_BASE_URL's `.local` host through
+  NsdGatewayDns, because Android's system resolver has no mDNS path. NsdManager does DNS-SD
+  service discovery, not bare hostname lookup, so there must be a service record to find.
+  Avahi's automatic `_workstation._tcp` record is NOT a substitute: it advertises port 9
+  (discard), not the gateway, and it is disabled outright in many Avahi configurations.
+
+  The type is deliberately `_samd-gw._tcp` rather than `_http._tcp`. On a campus LAN there are
+  many HTTP advertisers, and discovery must match this gateway and nothing else. The type string
+  is duplicated in NsdGatewayDns.SERVICE_TYPE; a unit test pins that constant, so if you change
+  it here, change it there and that test will tell you if you missed one.
+
+  `%h` publishes the instance name as the Pi's hostname (kernel-hub), which is the same token the
+  app derives from the URL host. Renaming the Pi means renaming it in PI_GATEWAY_BASE_URL too.
+-->
+
+<service-group>
+  <name replace-wildcards="yes">%h</name>
+
+  <service>
+    <type>_samd-gw._tcp</type>
+    <port>8090</port>
+  </service>
+</service-group>

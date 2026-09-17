@@ -10,6 +10,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -293,7 +294,10 @@ internal fun ConsultationContent(uiState: ConsultationUiState, actions: Consulta
                 )
             }
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     DURATION_BUCKETS.forEach { bucket ->
                         FilterChip(
                             selected = uiState.durationBucket == bucket,
@@ -412,7 +416,10 @@ internal fun ConsultationContent(uiState: ConsultationUiState, actions: Consulta
                             }
                         }
                     } else null
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     IMPACT_CHIPS.forEach { chip ->
                         FilterChip(
                             selected = false,
@@ -440,7 +447,10 @@ internal fun ConsultationContent(uiState: ConsultationUiState, actions: Consulta
             // state field) must be visible without scrolling past the rest of the form.
             uiState.errorMessage?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     HISTORY_CHIPS.forEach { chip ->
                         FilterChip(
                             selected = false,

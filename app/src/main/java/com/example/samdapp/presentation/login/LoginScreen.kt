@@ -4,6 +4,7 @@ package com.example.samdapp.presentation.login
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -113,8 +114,9 @@ internal fun LoginContent(uiState: LoginUiState, actions: LoginActions) {
 private fun RoleRow(selected: UserRole?, onSelect: (UserRole) -> Unit) {
     Column {
         Text(text = "Role *", style = MaterialTheme.typography.labelLarge)
-        Row(
+        FlowRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.padding(top = 4.dp),
         ) {
             UserRole.entries.forEach { role ->

@@ -5,6 +5,13 @@ initial PIN to the worker in person. must_change_pin is true on every account cr
 the administrator-issued PIN is a one-time credential and cannot become a long-lived one. There
 is no self-service registration endpoint and no self-service reset in v1.
 
+D-3 has exactly one exception, and it is dev-only: --no-must-change-pin creates an account whose
+issued PIN is immediately a long-lived credential, for seeding test accounts that would otherwise
+have to walk the first-login PIN change on every reset. It is refused outright unless
+ENVIRONMENT=dev, so the guarantee above holds unconditionally in staging and prod. This script is
+the production provisioning path (see backend/README.md), so the guard lives here rather than in
+the caller's discipline.
+
 worker_id is not invented here. It is derived exactly as MockAuthSession.stableUserId does on
 the device:
 
@@ -32,6 +39,7 @@ import sys
 
 from sqlalchemy import select
 
+from app.config import get_settings
 from app.db.session import dispose_engine, get_sessionmaker
 from app.models.enums import UserRole
 from app.models.facility import Facility
@@ -64,7 +72,13 @@ async def _create_facility(
     print(f"Created facility {facility_id} ({name}).")
 
 
-async def _create_worker(name: str, role_value: str, facility_id: str, pin: str | None) -> None:
+async def _create_worker(
+    name: str,
+    role_value: str,
+    facility_id: str,
+    pin: str | None,
+    must_change_pin: bool = True,
+) -> None:
     role = UserRole(role_value)
     worker_id = derive_worker_id(name, role)
     issued_pin = pin or "".join(secrets.choice("0123456789") for _ in range(GENERATED_PIN_DIGITS))
@@ -82,7 +96,7 @@ async def _create_worker(name: str, role_value: str, facility_id: str, pin: str 
         if existing is not None:
             # Re-issuing a PIN is a deliberate, separate act from creating an account.
             existing.pin_hash = hash_pin(issued_pin)
-            existing.must_change_pin = True
+            existing.must_change_pin = must_change_pin
             existing.failed_attempts = 0
             existing.locked_until = None
             await session.commit()
@@ -95,7 +109,7 @@ async def _create_worker(name: str, role_value: str, facility_id: str, pin: str 
                     role=role.value,
                     facility_id=facility_id,
                     pin_hash=hash_pin(issued_pin),
-                    must_change_pin=True,
+                    must_change_pin=must_change_pin,
                     is_active=True,
                 )
             )
@@ -103,7 +117,10 @@ async def _create_worker(name: str, role_value: str, facility_id: str, pin: str 
             print(f"Created worker {worker_id} ({name}, {role.value}) at {facility_id}.")
 
     print(f"Initial PIN: {issued_pin}")
-    print("Hand this to the worker in person. They must change it at first login.")
+    if must_change_pin:
+        print("Hand this to the worker in person. They must change it at first login.")
+    else:
+        print("must_change_pin is False (PIN is active directly).")
 
 
 def main() -> None:
@@ -122,8 +139,26 @@ def main() -> None:
     worker.add_argument("role", choices=[role.value for role in UserRole])
     worker.add_argument("facility_id")
     worker.add_argument("--pin", default=None, help="Omit to generate one")
+    worker.add_argument(
+        "--no-must-change-pin",
+        action="store_true",
+        help=(
+            "Dev only. Do not require changing PIN on first login. Refused unless ENVIRONMENT=dev."
+        ),
+    )
 
     args = parser.parse_args()
+
+    if getattr(args, "no_must_change_pin", False):
+        settings = get_settings()
+        if not settings.is_dev:
+            print(
+                f"Refusing --no-must-change-pin in ENVIRONMENT={settings.environment}. "
+                "It creates an account whose administrator-issued PIN is a long-lived "
+                "credential, which breaks Decision D-3. Dev only.",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
 
     async def run() -> None:
         try:
@@ -132,7 +167,13 @@ def main() -> None:
                     args.facility_id, args.name, args.district, args.state, args.hfr_id
                 )
             else:
-                await _create_worker(args.name, args.role, args.facility_id, args.pin)
+                await _create_worker(
+                    args.name,
+                    args.role,
+                    args.facility_id,
+                    args.pin,
+                    must_change_pin=not args.no_must_change_pin,
+                )
         finally:
             await dispose_engine()
 
