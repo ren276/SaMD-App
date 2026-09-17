@@ -172,23 +172,12 @@ internal fun ConsultationContent(uiState: ConsultationUiState, actions: Consulta
         }
     }
 
-    // H-18, Build 3b. Same platform `TakePicture` primitive as the affected-area photo above, but
-    // deliberately NOT its storage posture: that path hands the camera a `cacheDir/attachments`
-    // JPEG and leaves it there in plaintext (the H-19 gap). Here the frame lands in its own
-    // staging directory and `onDocumentPageCaptured` encrypts it into the capture session and
-    // deletes the plaintext before the next page can be taken.
-    val takeDocumentPageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { saved ->
-        actions.onDocumentPageCaptured(saved)
-    }
+    // H-18, Build 3b, Option A: document capture is in-process CameraX (DocumentCaptureSurface
+    // embeds the viewfinder directly), not the external `TakePicture` hand-off the affected-area
+    // photo above still uses. No launcher and no FileProvider grant needed here - see
+    // scratchpad/capture-process-death-memo.md for why this replaced the old staging-file path.
     val capture = uiState.documentCapture
-    LaunchedEffect(capture?.pendingPageId) {
-        val stagingPath = capture?.pendingStagingPath ?: return@LaunchedEffect
-        takeDocumentPageLauncher.launch(
-            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", File(stagingPath)),
-        )
-    }
     if (capture != null) {
-        LaunchFirstCapturePage(capture = capture, actions = actions)
         DocumentCaptureSurface(capture = capture, actions = actions)
     }
     val requestCameraForDocumentScan = rememberPermissionAction(

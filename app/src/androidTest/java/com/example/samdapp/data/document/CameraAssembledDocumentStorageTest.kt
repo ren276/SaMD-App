@@ -14,6 +14,7 @@ import com.example.samdapp.data.repository.ConsultationDocumentRepositoryImpl
 import com.example.samdapp.data.repository.ConsultationRepositoryImpl
 import com.example.samdapp.data.repository.PatientRepositoryImpl
 import com.example.samdapp.domain.document.DocumentBytes
+import com.example.samdapp.domain.document.OrderedPage
 import com.example.samdapp.domain.model.Consultation
 import com.example.samdapp.domain.model.DepartmentCode
 import com.example.samdapp.domain.model.DocumentSource
@@ -92,16 +93,17 @@ class CameraAssembledDocumentStorageTest {
         createdAt = Instant.EPOCH, updatedAt = Instant.EPOCH,
     )
 
-    private fun captureThreePages(): Pair<String, List<String>> = runBlocking {
+    /** Option A: the frame is built as JPEG bytes directly and handed straight to `ingestPage` -
+     *  no staging file round trip, matching how `ConsultationViewModel` calls the real store. */
+    private fun captureThreePages(): Pair<String, List<OrderedPage>> = runBlocking {
         val sessionId = store.newSession().also { sessions += it }
         val pages = listOf(Color.RED, Color.GREEN, Color.BLUE).map { color ->
             val pageId = UUID.randomUUID().toString()
             val bitmap = Bitmap.createBitmap(900, 1200, Bitmap.Config.RGB_565).apply { eraseColor(color) }
-            File(store.stagingPathFor(sessionId, pageId)).outputStream()
-                .use { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+            val jpeg = ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }.toByteArray()
             bitmap.recycle()
-            store.ingestPage(sessionId, pageId).getOrThrow()
-            pageId
+            store.ingestPage(sessionId, pageId, jpeg, rotationDegrees = 0).getOrThrow()
+            OrderedPage(pageId, rotationDegrees = 0)
         }
         sessionId to pages
     }
@@ -185,7 +187,7 @@ class CameraAssembledDocumentStorageTest {
         val (sessionId, pages) = captureThreePages()
         val victim = File(
             File(File(File(context.filesDir, "documents"), ".capture"), sessionId),
-            "${pages[1]}.enc",
+            "${pages[1].pageId}.enc",
         )
         val corrupted = victim.readBytes().also { it[it.size / 2] = (it[it.size / 2] + 1).toByte() }
         victim.writeBytes(corrupted)
