@@ -63,7 +63,7 @@ fun CompounderScreen(
     resumeEncounterId: String? = null,
     resumeCaseRecordId: String? = null,
     onContinue: (patientId: String, encounterId: String, caseRecordId: String, chiefComplaint: String) -> Unit,
-    onEmergencyOverride: (reasons: List<String>) -> Unit,
+    onEmergencyOverride: (encounterId: String) -> Unit,
     viewModel: CompounderViewModel = hiltViewModel<CompounderViewModel, CompounderViewModel.Factory>(
         creationCallback = { factory -> factory.create(patientId, followUpOfEncounterId, resumeEncounterId, resumeCaseRecordId) },
     ),
@@ -76,7 +76,7 @@ fun CompounderScreen(
                 when (effect) {
                     is CompounderEffect.Continue ->
                         onContinue(effect.patientId, effect.encounterId, effect.caseRecordId, effect.chiefComplaint)
-                    is CompounderEffect.EmergencyOverride -> onEmergencyOverride(effect.reasons)
+                    is CompounderEffect.EmergencyOverride -> onEmergencyOverride(effect.encounterId)
                 }
             }
         }

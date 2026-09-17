@@ -144,6 +144,18 @@ enum class AuditAction(val value: String) {
      *  whom, and why, alongside the still-standing [DOCUMENT_UPLOADED] row. Payload: `documentId`,
      *  `reason`, `actorRole`, `bytesDeleted`. */
     DOCUMENT_RETRACTED("document_retracted"),
+
+    /** Navigation back-stack restore (process-death fix, phase 1): a persisted back stack was
+     *  thrown away instead of being restored, and the worker was put back on Home. Payload is the
+     *  [com.example.samdapp.presentation.navigation.NavStackDiscardReason] value alone
+     *  (`corrupt`, `too_large`, `session_changed`) and NEVER any route contents: a discard reason
+     *  is diagnostic, the stack it discarded may carry patient ids.
+     *
+     *  Emitted rather than logged so a discard is investigable from the field. A saved stack that
+     *  vanishes silently is indistinguishable from a worker who navigated Home themselves, and
+     *  the corrupt case specifically means an app update invalidated every stack on every device,
+     *  which nobody would otherwise find out about. */
+    NAV_STACK_RESTORE_DISCARDED("nav_stack_restore_discarded"),
 }
 
 /** Builds the JSON blob stored in AuditLogEntity.payload from a flat set of fields. */

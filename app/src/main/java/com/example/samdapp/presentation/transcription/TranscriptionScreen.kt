@@ -24,10 +24,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 @Composable
 fun TranscriptionScreen(
     consultationId: String,
-    audioUri: String,
     onContinue: () -> Unit,
     viewModel: TranscriptionViewModel = hiltViewModel<TranscriptionViewModel, TranscriptionViewModel.Factory>(
-        creationCallback = { factory -> factory.create(consultationId, audioUri) },
+        creationCallback = { factory -> factory.create(consultationId) },
     ),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()

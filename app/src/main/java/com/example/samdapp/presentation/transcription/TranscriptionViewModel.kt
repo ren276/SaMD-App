@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.example.samdapp.domain.audit.AuditAction
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
+import com.example.samdapp.domain.model.AttachmentType
+import com.example.samdapp.domain.repository.ConsultationRepository
 import com.example.samdapp.domain.usecase.TranscribeAudioUseCase
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
@@ -24,18 +26,15 @@ data class TranscriptionUiState(
 
 @HiltViewModel(assistedFactory = TranscriptionViewModel.Factory::class)
 class TranscriptionViewModel @AssistedInject constructor(
-    @Assisted("consultationId") private val consultationId: String,
-    @Assisted("audioUri") private val audioUri: String,
+    @Assisted private val consultationId: String,
+    private val consultationRepository: ConsultationRepository,
     private val transcribeAudioUseCase: TranscribeAudioUseCase,
     private val auditLogger: AuditLogger,
 ) : ViewModel() {
 
     @AssistedFactory
     interface Factory {
-        fun create(
-            @Assisted("consultationId") consultationId: String,
-            @Assisted("audioUri") audioUri: String,
-        ): TranscriptionViewModel
+        fun create(consultationId: String): TranscriptionViewModel
     }
 
     private val _uiState = MutableStateFlow(TranscriptionUiState())
@@ -43,6 +42,20 @@ class TranscriptionViewModel @AssistedInject constructor(
 
     init {
         viewModelScope.launch {
+            // The uri is read from this consultation's AUDIO attachment row rather than carried
+            // through three routes. No row means nothing was persisted to transcribe, which is an
+            // error state on this screen, never a crash: this block runs on construction, so
+            // throwing here would take down a screen the worker cannot back out of.
+            val audioUri = consultationRepository.getById(consultationId)
+                ?.attachments
+                ?.firstOrNull { it.type == AttachmentType.AUDIO }
+                ?.uri
+            if (audioUri == null) {
+                _uiState.update {
+                    it.copy(isLoading = false, errorMessage = "No recording was saved for this consultation.")
+                }
+                return@launch
+            }
             transcribeAudioUseCase(consultationId, audioUri).fold(
                 onSuccess = { text ->
                     _uiState.update { it.copy(isLoading = false, transcription = text) }

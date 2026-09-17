@@ -134,18 +134,20 @@ internal fun ConsultationContent(uiState: ConsultationUiState, actions: Consulta
 
     // H-18, Build 3a: a document upload failure holds the Sent navigation back
     // (ConsultationViewModel.onSend) until this is explicitly dismissed, so the worker actually
-    // sees it rather than it being raced off-screen by an immediate navigation.
-    if (uiState.documentUploadFailures.isNotEmpty()) {
+    // sees it rather than it being raced off-screen by an immediate navigation. A failed
+    // attachment row now holds it the same way, so the wording covers both: a worker whose voice
+    // recording failed must not be told a document failed.
+    if (uiState.sendFailures.isNotEmpty()) {
         AlertDialog(
-            onDismissRequest = actions::onDismissDocumentUploadFailures,
-            title = { Text("Some documents could not be uploaded") },
+            onDismissRequest = actions::onDismissSendFailures,
+            title = { Text("Some attachments could not be saved") },
             text = {
                 Column {
-                    uiState.documentUploadFailures.forEach { failure -> Text("• $failure") }
+                    uiState.sendFailures.forEach { failure -> Text("• $failure") }
                 }
             },
             confirmButton = {
-                TextButton(onClick = actions::onDismissDocumentUploadFailures) { Text("Continue") }
+                TextButton(onClick = actions::onDismissSendFailures) { Text("Continue") }
             },
         )
     }

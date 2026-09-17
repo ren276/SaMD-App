@@ -1063,3 +1063,57 @@ async def test_document_retracted_audit_row_is_accepted_and_persisted(
     ).scalar_one()
     assert row.origin == "DEVICE"
     assert "wrong patient" not in row.payload.lower()
+
+
+# ---------------------------------------------------------------------------
+# Navigation back-stack restore (process-death fix, phase 1):
+# nav_stack_restore_discarded audit action
+# ---------------------------------------------------------------------------
+
+
+def test_nav_stack_restore_discarded_is_in_the_accepted_device_action_set() -> None:
+    """Sourced from the checked-in mirror, not retyped, same as every other assertion against
+    DEVICE_AUDIT_ACTIONS in this module. A device action the backend does not accept is not a
+    dropped row: the device keeps the row PENDING and keeps re-sending it, forever.
+    """
+    assert "nav_stack_restore_discarded" in DEVICE_AUDIT_ACTIONS
+
+
+async def test_nav_stack_restore_discarded_audit_row_is_accepted_and_persisted(
+    client: AsyncClient, auth_headers: dict[str, str], session: AsyncSession
+) -> None:
+    """A device-origin audit_log row carrying action=nav_stack_restore_discarded must sync-push
+    successfully and land in audit_events with that action verbatim -- proves the accepted-set
+    widening takes effect end to end, not just that the Python set contains the string. Asserts
+    the persisted row via a fresh query, not the HTTP response, per this repo's rule that a
+    write-survived-a-failure-path test must check the DB, not the return value.
+
+    patient_id is None on purpose: the discarded back stack is exactly the thing that may have
+    carried a patient id, so the row recording its loss carries the reason and nothing else.
+    """
+    response = await push(
+        client,
+        auth_headers,
+        [
+            audit_record(
+                "al-nav-stack-discarded",
+                action="nav_stack_restore_discarded",
+                patient_id=None,
+                case_record_id=None,
+                payload='{"reason":"corrupt"}',
+            )
+        ],
+    )
+    assert response.status_code == 200
+
+    row = (
+        await session.execute(
+            select(AuditEvent).where(AuditEvent.action == "nav_stack_restore_discarded")
+        )
+    ).scalar_one()
+    assert row.origin == "DEVICE"
+    assert row.patient_id is None
+    # The reason is the whole row; no route name, no id, nothing from the stack that was thrown
+    # away. The device-side half of this assertion lives in NavRestoreViewModelTest.
+    assert "corrupt" in row.payload
+    assert "Route" not in row.payload

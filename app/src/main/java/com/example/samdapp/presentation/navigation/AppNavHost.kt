@@ -8,8 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -21,6 +20,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.navigation3.runtime.NavBackStack
+import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
@@ -87,7 +88,25 @@ fun AppNavHost() {
 
 @Composable
 private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
-    val backStack = remember { mutableStateListOf<Any>(Home) }
+    // Saveable, so the worker comes back to the screen they were on after process death instead
+    // of losing the whole stack (the old `remember { mutableStateListOf<Any>(Home) }`).
+    //
+    // NOT `rememberNavBackStack`: verified against navigation3-runtime 1.1.4's sources, that
+    // helper takes no `inputs` and has no failure path, and this call site needs both. The
+    // `session.userId` key is what preserves the guarantee this composable's KDoc above relies on
+    // (every new sign-in starts at Home), which a saveable stack would otherwise break, and the
+    // saver's own null-on-failure contract is what stops a route class that can no longer be
+    // deserialized from crashing the app on every launch. See NavBackStackSaver.kt.
+    val backStack = rememberSaveable(
+        session.userId,
+        saver = rememberNavBackStackSaver(session.userId),
+    ) { NavBackStack<NavKey>(Home) }
+
+    // A discarded stack must leave a trace: a stack that vanishes silently looks exactly like a
+    // worker who walked back to Home themselves. Drained once per composition; the reporter
+    // clears itself, so one discard writes one row.
+    val navRestoreViewModel: NavRestoreViewModel = hiltViewModel()
+    LaunchedEffect(Unit) { navRestoreViewModel.logPendingDiscard() }
 
     // Obtained here, outside any NavEntry — one shared instance for the whole app lifetime,
     // so online/offline status is consistent and persistent across every screen.
@@ -284,12 +303,14 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
                     onContinue = { patientId, encounterId, caseRecordId, chiefComplaint ->
                         backStack.add(ConsultationRoute(patientId, encounterId, caseRecordId, chiefComplaint))
                     },
-                    onEmergencyOverride = { reasons -> backStack.add(EmergencyOverrideRoute(reasons)) },
+                    onEmergencyOverride = { encounterId ->
+                        backStack.add(EmergencyOverrideRoute(key.patientId, encounterId))
+                    },
                 )
             }
             entry<EmergencyOverrideRoute> { key ->
                 EmergencyOverrideScreen(
-                    reasons = key.reasons,
+                    encounterId = key.encounterId,
                     onAcknowledged = { backStack.clear(); backStack.add(Home) },
                 )
             }
@@ -299,8 +320,8 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
                     encounterId = key.encounterId,
                     caseRecordId = key.caseRecordId,
                     initialChiefComplaint = key.chiefComplaint,
-                    onSent = { _, encounterId, caseRecordId, consultationId, audioUri ->
-                        backStack.add(SendingRoute(caseRecordId, consultationId, audioUri, encounterId))
+                    onSent = { _, encounterId, caseRecordId, consultationId, _ ->
+                        backStack.add(SendingRoute(caseRecordId, consultationId, encounterId))
                     },
                 )
             }
@@ -308,24 +329,27 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
                 SendingScreen(
                     caseRecordId = key.caseRecordId,
                     consultationId = key.consultationId,
-                    audioUri = key.audioUri,
                     encounterId = key.encounterId,
-                    onDone = { caseRecordId, consultationId, audioUri ->
-                        backStack.add(KernelAssessmentRoute(caseRecordId, consultationId, audioUri))
+                    onDone = { caseRecordId, consultationId ->
+                        backStack.add(KernelAssessmentRoute(caseRecordId, consultationId))
                     },
                 )
             }
             entry<KernelAssessmentRoute> { key ->
                 KernelAssessmentScreen(
                     caseRecordId = key.caseRecordId,
-                    onContinue = {
+                    consultationId = key.consultationId,
+                    // audioUri now arrives from the ViewModel, which read the consultation's own
+                    // AUDIO attachment row, rather than from the route. The branch below is
+                    // otherwise unchanged.
+                    onContinue = { audioUri ->
                         // The transcription screen auto-transcribes and PERSISTS the result with no
                         // confirmation gate and no provenance (H-15.C2), so it is gated by the same
                         // flag as the attachment that produces audioUri. Belt and braces: with the
                         // flag off nothing can create an AUDIO attachment in the first place, and
                         // TranscribeAudioUseCase refuses independently of this branch.
-                        if (key.audioUri != null && FeatureFlags.VOICE_AUDIO_ATTACHMENT_ENABLED) {
-                            backStack.add(TranscriptionRoute(key.consultationId, key.audioUri, key.caseRecordId))
+                        if (audioUri != null && FeatureFlags.VOICE_AUDIO_ATTACHMENT_ENABLED) {
+                            backStack.add(TranscriptionRoute(key.consultationId, key.caseRecordId))
                         } else {
                             backStack.add(AcknowledgementRoute(key.caseRecordId))
                         }
@@ -335,7 +359,6 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
             entry<TranscriptionRoute> { key ->
                 TranscriptionScreen(
                     consultationId = key.consultationId,
-                    audioUri = key.audioUri,
                     onContinue = { backStack.add(AcknowledgementRoute(key.caseRecordId)) },
                 )
             }

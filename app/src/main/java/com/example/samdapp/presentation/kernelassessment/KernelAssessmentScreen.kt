@@ -37,9 +37,12 @@ import androidx.lifecycle.repeatOnLifecycle
 @Composable
 fun KernelAssessmentScreen(
     caseRecordId: String,
-    onContinue: () -> Unit,
+    consultationId: String,
+    /** [audioUri] is resolved by the ViewModel from this consultation's attachment row and handed
+     *  up here, because the navigation decision it feeds cannot suspend. */
+    onContinue: (audioUri: String?) -> Unit,
     viewModel: KernelAssessmentViewModel = hiltViewModel<KernelAssessmentViewModel, KernelAssessmentViewModel.Factory>(
-        creationCallback = { factory -> factory.create(caseRecordId) },
+        creationCallback = { factory -> factory.create(caseRecordId, consultationId) },
     ),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -48,7 +51,7 @@ fun KernelAssessmentScreen(
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             viewModel.effects.collect { effect ->
                 when (effect) {
-                    is KernelAssessmentEffect.Continue -> onContinue()
+                    is KernelAssessmentEffect.Continue -> onContinue(effect.audioUri)
                 }
             }
         }

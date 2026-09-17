@@ -25,11 +25,10 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 fun SendingScreen(
     caseRecordId: String,
     consultationId: String,
-    audioUri: String?,
     encounterId: String,
-    onDone: (caseRecordId: String, consultationId: String, audioUri: String?) -> Unit,
+    onDone: (caseRecordId: String, consultationId: String) -> Unit,
     viewModel: SendingViewModel = hiltViewModel<SendingViewModel, SendingViewModel.Factory>(
-        creationCallback = { factory -> factory.create(caseRecordId, consultationId, audioUri, encounterId) },
+        creationCallback = { factory -> factory.create(caseRecordId, consultationId, encounterId) },
     ),
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -37,7 +36,7 @@ fun SendingScreen(
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             viewModel.effects.collect { effect ->
                 when (effect) {
-                    is SendingEffect.Done -> onDone(effect.caseRecordId, effect.consultationId, effect.audioUri)
+                    is SendingEffect.Done -> onDone(effect.caseRecordId, effect.consultationId)
                 }
             }
         }

@@ -8,9 +8,11 @@ import com.example.samdapp.data.assessment.AssessmentWorkState
 import com.example.samdapp.domain.audit.AuditAction
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
+import com.example.samdapp.domain.model.AttachmentType
 import com.example.samdapp.domain.model.EvaluateReportOutput
 import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.domain.model.KernelReportOutput
+import com.example.samdapp.domain.repository.ConsultationRepository
 import com.example.samdapp.domain.repository.EvaluateReportRepository
 import com.example.samdapp.domain.repository.KernelReportRepository
 import com.example.samdapp.domain.usecase.GenerateKernelReportUseCase
@@ -126,12 +128,18 @@ data class KernelAssessmentUiState(
     val display: AssessmentDisplay? = null,
     val liabilityAcknowledged: Boolean = false,
     val isRetrying: Boolean = false,
+    /** Resolved once from this consultation's AUDIO attachment row, not carried in the route.
+     *  A uri that survived three screens is not evidence the attachment was persisted; the row
+     *  is. Null means no audio leg, which sends the case straight to Acknowledgement. */
+    val audioUri: String? = null,
 ) {
     val canContinue: Boolean get() = !isLoading && liabilityAcknowledged
 }
 
 sealed interface KernelAssessmentEffect {
-    data object Continue : KernelAssessmentEffect
+    /** [audioUri] is resolved here rather than in the navigation lambda, because the answer now
+     *  comes from a database read and a nav lambda cannot suspend. */
+    data class Continue(val audioUri: String?) : KernelAssessmentEffect
 }
 
 @Stable
@@ -150,16 +158,21 @@ interface KernelAssessmentActions {
  */
 @HiltViewModel(assistedFactory = KernelAssessmentViewModel.Factory::class)
 class KernelAssessmentViewModel @AssistedInject constructor(
-    @Assisted private val caseRecordId: String,
+    @Assisted("caseRecordId") private val caseRecordId: String,
+    @Assisted("consultationId") private val consultationId: String,
     private val evaluateReportRepository: EvaluateReportRepository,
     private val kernelReportRepository: KernelReportRepository,
+    private val consultationRepository: ConsultationRepository,
     private val assessmentQueueScheduler: AssessmentQueueScheduler,
     private val auditLogger: AuditLogger,
 ) : ViewModel(), KernelAssessmentActions {
 
     @AssistedFactory
     interface Factory {
-        fun create(caseRecordId: String): KernelAssessmentViewModel
+        fun create(
+            @Assisted("caseRecordId") caseRecordId: String,
+            @Assisted("consultationId") consultationId: String,
+        ): KernelAssessmentViewModel
     }
 
     private val _uiState = MutableStateFlow(KernelAssessmentUiState())
@@ -169,6 +182,20 @@ class KernelAssessmentViewModel @AssistedInject constructor(
     val effects = _effects.receiveAsFlow()
 
     init {
+        // Resolved once, not collected: the AUDIO attachment row for this consultation is written
+        // by ConsultationViewModel.onSend before it emits the effect that navigates here, so it
+        // either exists by now or the worker recorded nothing. Reuses ConsultationRepository.getById
+        // (which already resolves attachments) rather than adding a narrow DAO query: firstOrNull
+        // over that ASC-ordered list is exactly the semantics the route argument used to carry,
+        // and a hand-written ORDER BY would reintroduce the chance of picking the wrong take from
+        // a worker who recorded twice.
+        viewModelScope.launch {
+            val audioUri = consultationRepository.getById(consultationId)
+                ?.attachments
+                ?.firstOrNull { it.type == AttachmentType.AUDIO }
+                ?.uri
+            _uiState.update { it.copy(audioUri = audioUri) }
+        }
         // Collected, not one-shot: the async submission queue means no report row is guaranteed
         // to exist yet when this screen opens. workState tells apart "still processing" (show a
         // wait state) from "stalled" (no row, nothing running - offer the same retry affordance
@@ -224,7 +251,7 @@ class KernelAssessmentViewModel @AssistedInject constructor(
                     "sourceLabel" to display?.sourceLabel,
                 ),
             )
-            _effects.send(KernelAssessmentEffect.Continue)
+            _effects.send(KernelAssessmentEffect.Continue(_uiState.value.audioUri))
         }
     }
 }
