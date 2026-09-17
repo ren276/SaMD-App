@@ -152,6 +152,29 @@ class NavBackStackSaverTest {
         assertFalse(saved!!.flattenToString().contains(complaint))
     }
 
+    /**
+     * The OTHER budget. Until this test existed the byte check had never executed: the only
+     * over-budget case drove 60 entries, which trips the 50-entry cap first and returns before
+     * anything is encoded. So the branch guarding the Binder transaction was dead code as far as
+     * the suite was concerned.
+     *
+     * Ten entries is well inside the entry cap, and each carries a 10 KB argument, so the encoded
+     * payload passes 64 KB and the byte check is the thing that rejects it. A stack this shape is
+     * not something the app produces; the point is to execute the guard, not to model a real
+     * stack.
+     */
+    @Test
+    fun aStackOverTheByteBudgetIsNotPersisted() {
+        val saver = navBackStackSaver(ownerUserId = "worker-a")
+        val bloated = NavBackStack<NavKey>(Home).apply {
+            repeat(10) { add(PatientSummary("x".repeat(10_000))) }
+        }
+        assertTrue("The fixture must stay under the entry cap, or it tests the wrong guard", bloated.size < 50)
+
+        assertNull(saver.saveStack(bloated))
+        assertEquals(NavStackDiscardReason.TOO_LARGE, NavStackRestoreReporter.consume())
+    }
+
     /** The entry cap: a runaway stack persists nothing at all rather than risking the Binder
      *  transaction the whole Activity's saved state shares. */
     @Test
