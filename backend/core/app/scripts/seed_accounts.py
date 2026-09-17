@@ -143,8 +143,7 @@ def main() -> None:
         "--no-must-change-pin",
         action="store_true",
         help=(
-            "Dev only. Do not require changing PIN on first login. "
-            "Refused unless ENVIRONMENT=dev."
+            "Dev only. Do not require changing PIN on first login. Refused unless ENVIRONMENT=dev."
         ),
     )
 
