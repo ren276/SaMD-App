@@ -3,6 +3,7 @@ package com.example.samdapp.data.vitalssource
 import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
+import android.os.SystemClock
 import okhttp3.Dns
 import java.net.InetAddress
 import java.net.UnknownHostException
@@ -35,7 +36,10 @@ import java.util.logging.Logger
  */
 class NsdGatewayDns(
     private val systemDns: Dns = Dns.SYSTEM,
-    private val nowMillis: () -> Long = System::currentTimeMillis,
+    // Monotonic, not wall-clock: System.currentTimeMillis can move backward on clock sync or a
+    // manual time change, which would leave a negative cache age permanently below
+    // CACHE_TTL_MILLIS and cache a stale gateway address indefinitely.
+    private val nowMillis: () -> Long = { SystemClock.elapsedRealtime() },
     /** Resolves an mDNS instance name (`kernel-hub`) to an address, or null if it is not found in
      *  time. Seam so the cache and delegation logic are testable without a device or a LAN. */
     private val discover: (String) -> InetAddress?,

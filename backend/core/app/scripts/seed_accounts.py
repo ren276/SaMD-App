@@ -142,7 +142,10 @@ def main() -> None:
     worker.add_argument(
         "--no-must-change-pin",
         action="store_true",
-        help="Dev only. Do not require changing PIN on first login. Refused unless ENVIRONMENT=dev.",
+        help=(
+            "Dev only. Do not require changing PIN on first login. "
+            "Refused unless ENVIRONMENT=dev."
+        ),
     )
 
     args = parser.parse_args()
@@ -151,9 +154,9 @@ def main() -> None:
         settings = get_settings()
         if not settings.is_dev:
             print(
-                f"Refusing --no-must-change-pin in ENVIRONMENT={settings.environment}. It creates an "
-                "account whose administrator-issued PIN is a long-lived credential, which "
-                "breaks Decision D-3. Dev only.",
+                f"Refusing --no-must-change-pin in ENVIRONMENT={settings.environment}. "
+                "It creates an account whose administrator-issued PIN is a long-lived "
+                "credential, which breaks Decision D-3. Dev only.",
                 file=sys.stderr,
             )
             raise SystemExit(2)
