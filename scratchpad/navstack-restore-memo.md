@@ -656,10 +656,13 @@ itself is deliberately untouched until then; this is the staging area.
 >
 > So the thing not to weaken in isolation is the single-`Compounder` structure: do not add a
 > `Compounder` push site, and do not introduce a scene that composes `Home` with a non-empty tail,
-> without revisiting both the content key and the ancestor search. One caveat recorded honestly:
-> "popping back removes the entry" is standard `NavDisplay` behaviour that has been reasoned about
-> rather than read out of the library, and phase 4 settles it while reading the back handler for
-> `process_death_check.sh`.
+> without revisiting both the content key and the ancestor search.
+>
+> The last leg is now read rather than reasoned (2026-09-18, phase 4 scoping). "Popping back removes
+> the entry" is VERIFIED: navigation3-ui 1.1.4's `NavDisplay` defaults `onBack` to
+> `if (backStack is MutableList<T>) backStack.removeLastOrNull()` (`NavDisplay.kt:255-259` in the
+> sources jar), and this app passes its own equivalent explicitly at `AppNavHost.kt:166`. The
+> earlier note recording this as unverified is struck.
 
 ### 8.3 Cross-links to H-18
 
