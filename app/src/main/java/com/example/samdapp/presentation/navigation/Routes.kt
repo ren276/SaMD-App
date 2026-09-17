@@ -13,10 +13,13 @@ import kotlinx.serialization.Serializable
  *     writes `value::class.java.name` and reads it back with `Class.forName(...)`, so renaming
  *     or moving a route class silently invalidates every stack saved by an older build. That is
  *     why `app/proguard-rules.pro` keeps this package.
- *  2. Every argument declared here is written into the Activity's saved-state Bundle, which is
- *     NOT covered by SQLCipher or the document key. Arguments are opaque local ids by default.
- *     The three exceptions still carrying human-readable values are marked below and are removed
- *     from saved state by phase 2's restore-time pop policies, not by carrying less here.
+ *  2. Every argument declared here would be written into the Activity's saved-state Bundle, which
+ *     is NOT covered by SQLCipher or the document key. Arguments are opaque local ids by default.
+ *     The three exceptions still carrying human-readable values are marked below. They are kept
+ *     out of the Bundle by the SAVE-TIME transform in `NavBackStackSaver.transformForSave`, not
+ *     by carrying less here and not by anything that happens at restore: `onSaveInstanceState`
+ *     writes the Bundle before the process dies, so a policy applied on the way back in decides
+ *     only what the worker returns to and removes nothing that was written.
  */
 
 @Serializable
@@ -63,13 +66,14 @@ data object AbhaAadhaarEntry : NavKey
  * [maskedMobile] is ABDM's already-masked rendering of the Aadhaar-linked number (`XXXXXX3210`),
  * carried because no endpoint returns it a second time and it is display-only.
  *
- * SAVED-STATE NOTE (nav restore, phase 1): [maskedMobile] is deliberately RETAINED as a route
- * argument even though it is a contact quasi-identifier in the saved-state Bundle. It originates
- * in [AbhaAadhaarEntryViewModel]'s effect, which lives in a different NavEntry's ViewModelStore,
- * so dropping the argument would delete the "code sent to the mobile ending XXXX" line on the
- * FORWARD path, not just after a restore. The saved-state exposure is closed instead by phase 2's
- * restore-time pop of this route to [AbhaAadhaarEntry]. `NavBackStackPhiFreeTest` asserts this
- * value is still present on purpose; do not "fix" that assertion by dropping it here.
+ * SAVED-STATE NOTE: [maskedMobile] is deliberately RETAINED as a route argument even though it is
+ * a contact quasi-identifier. It originates in [AbhaAadhaarEntryViewModel]'s effect, which lives
+ * in a different NavEntry's ViewModelStore, so dropping the argument would delete the "code sent
+ * to the mobile ending XXXX" line on the FORWARD path, not just after a restore. It never reaches
+ * the Bundle because the save-time transform drops this whole entry to [AbhaAadhaarEntry], which
+ * also discards a [sessionId] whose backend registration transaction is time-bounded.
+ * `NavBackStackPhiFreeTest` asserts the value is absent from the serialized stack while this route
+ * is still in its fixture; do not "fix" that by dropping the argument here.
  */
 @Serializable
 data class AbhaCreateOtpRoute(val sessionId: String, val maskedMobile: String?) : NavKey
@@ -77,8 +81,10 @@ data class AbhaCreateOtpRoute(val sessionId: String, val maskedMobile: String?) 
 /** [abhaId] is null for a manual/no-ABHA registration ("Skip" on [AbhaEntry]); non-null when
  *  reached via the mock ABHA sign-up/login flow, so [RegisterViewModel] autofills from it.
  *
- *  SAVED-STATE NOTE: [abhaId] is a national health identifier. Retained this phase; removed from
- *  saved state by phase 2's pop policy (memo decision D2), not by reshaping this route. */
+ *  SAVED-STATE NOTE: [abhaId] is a national health identifier. Retained as an argument, because
+ *  the forward path needs it to autofill; kept out of the Bundle by the save-time transform, which
+ *  replaces `Register(abhaId != null)` with [AbhaEntry]. `Register(null)` carries no identifier and
+ *  is left alone. */
 @Serializable
 data class Register(val abhaId: String? = null) : NavKey
 
@@ -140,11 +146,12 @@ data class EmergencyOverrideRoute(val patientId: String, val encounterId: String
 
 /**
  * SAVED-STATE NOTE: [chiefComplaint] is clinical free text and is deliberately RETAINED as a
- * route argument this phase. It exists nowhere in the database between Compounder and the
- * consultation save (a draft `consultations` row was considered and rejected: it needed a
- * one-row-per-encounter migration on a clinical table), so it cannot be re-read. The saved-state
- * exposure is closed by phase 2's restore-time pop of this route to [Compounder].
- * `NavBackStackPhiFreeTest` asserts this value is still present on purpose.
+ * route argument. It exists nowhere in the database between Compounder and the consultation save
+ * (a draft `consultations` row was considered and rejected: it needed a one-row-per-encounter
+ * migration on a clinical table), so it cannot be re-read and the forward hop has to carry it.
+ * It never reaches the Bundle because the save-time transform replaces this entry with
+ * [Compounder] in resume shape, built from this route's own [patientId]/[encounterId]/
+ * [caseRecordId] rather than from whatever happens to sit beneath it.
  */
 @Serializable
 data class ConsultationRoute(
@@ -264,6 +271,36 @@ fun requiresScreenSecurity(route: Any?): Boolean =
  * Acknowledgement, DoctorList) inherit it from the encounter route beneath them — keeping
  * the patient identity banner visible for the whole encounter.
  */
+/**
+ * True when some entry in [backStack] is already about [caseRecordId].
+ *
+ * Home's crash-recovery prompt is gated on this. A restored deep stack has `Home` at index 0 and
+ * an encounter screen above it, so the moment the worker backs out to Home mid-encounter the
+ * prompt would otherwise offer to resume the exact case they are already inside, and accepting
+ * pushes a SECOND [Compounder] entry for it. That is the consult-sent-to-two-doctors defect class
+ * reached from a new direction.
+ *
+ * The invariant this enforces, together with `dismissedResumeId` being saveable: at most one live
+ * path to a given case exists at any time, whether it arrived by restore or by the resume prompt.
+ * That invariant is also what keeps the `Compounder` entry's pinned content key unique in
+ * `AppNavHost`; weakening this gate is not a tidiness regression there, it is a wrong-encounter
+ * binding. Read that comment before touching this.
+ */
+fun backStackContainsCase(backStack: List<Any>, caseRecordId: String): Boolean =
+    backStack.any { route ->
+        when (route) {
+            is Compounder -> route.resumeCaseRecordId == caseRecordId
+            is ConsultationRoute -> route.caseRecordId == caseRecordId
+            is SendingRoute -> route.caseRecordId == caseRecordId
+            is KernelAssessmentRoute -> route.caseRecordId == caseRecordId
+            is TranscriptionRoute -> route.caseRecordId == caseRecordId
+            is AcknowledgementRoute -> route.caseRecordId == caseRecordId
+            is ReportRoute -> route.caseRecordId == caseRecordId
+            is DoctorAssignmentConfirmRoute -> route.caseRecordId == caseRecordId
+            else -> false
+        }
+    }
+
 fun currentPatientId(backStack: List<Any>): String? {
     for (route in backStack.asReversed()) {
         when (route) {

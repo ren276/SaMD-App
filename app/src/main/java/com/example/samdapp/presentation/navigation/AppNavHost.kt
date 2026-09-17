@@ -183,6 +183,11 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
                     onResumeEncounter = { patientId, encounterId, caseRecordId ->
                         backStack.add(Compounder(patientId, resumeEncounterId = encounterId, resumeCaseRecordId = caseRecordId))
                     },
+                    // A restored stack can already be inside the very case this prompt offers to
+                    // resume. Accepting it then would push a second path to one case, which is the
+                    // consult-sent-to-two-doctors class from a new direction. This also keeps the
+                    // pinned Compounder content key unique; see the entry<Compounder> comment.
+                    resumeSuppressedFor = { caseRecordId -> backStackContainsCase(backStack, caseRecordId) },
                     isOnline = isOnline,
                     session = session,
                     onSignOut = onSignOut,
@@ -294,7 +299,28 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
                     onContinue = { backStack.add(Compounder(key.patientId, key.followUpOfEncounterId)) },
                 )
             }
-            entry<Compounder> { key ->
+            // The content key is pinned rather than left to default, and that is load-bearing.
+            //
+            // `NavEntry.contentKey` defaults to `key.toString()`, and `Compounder` is a data class
+            // whose toString() includes the resume ids. The in-place rewrite below changes those
+            // ids, so with the default key the entry would look like a different entry: the
+            // ViewModelStore decorator would clear the store, a fresh CompounderViewModel would be
+            // built with the resume ids, and it would log ENCOUNTER_RESUMED for a visit that was
+            // started seconds earlier and never left. A fabricated audit row on a clinical trail
+            // is worse than the thing the rewrite is fixing. Pinning the key keeps the entry, its
+            // ViewModel and its saved state identical across the rewrite.
+            //
+            // UNIQUENESS DEPENDS ON THE RESUME GATING. Two entries sharing this key would share one
+            // ViewModelStore, and the second would be handed the first's ViewModel with the wrong
+            // encounter. This key collides only for two Compounder entries with the same patient
+            // AND the same follow-up parent, which is exactly the duplicate live path that Home's
+            // resume gating (`resumeSuppressedFor`/`backStackContainsCase`) exists to prevent.
+            // Do NOT widen this key to patientId alone, and do not weaken that gate in isolation:
+            // either one on its own turns a tidiness regression into a wrong-encounter binding.
+            // NavBackStackPolicyTest pins the collision precondition.
+            entry<Compounder>(
+                clazzContentKey = { key -> "Compounder:${key.patientId}:${key.followUpOfEncounterId}" },
+            ) { key ->
                 CompounderScreen(
                     patientId = key.patientId,
                     followUpOfEncounterId = key.followUpOfEncounterId,
@@ -305,6 +331,26 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
                     },
                     onEmergencyOverride = { encounterId ->
                         backStack.add(EmergencyOverrideRoute(key.patientId, encounterId))
+                    },
+                    onCaseReady = { encounterId, caseRecordId ->
+                        // Rewrite this entry into its resume shape, so every save from here on
+                        // carries "resume that case" instead of "start a case". Guarded on the top
+                        // entry still being this Compounder: the ids can arrive after the worker
+                        // has already navigated onward, and rewriting a stale index would corrupt
+                        // someone else's entry.
+                        val top = backStack.lastOrNull()
+                        if (top is Compounder &&
+                            top.patientId == key.patientId &&
+                            top.followUpOfEncounterId == key.followUpOfEncounterId &&
+                            (top.resumeEncounterId != encounterId || top.resumeCaseRecordId != caseRecordId)
+                        ) {
+                            backStack[backStack.lastIndex] = Compounder(
+                                patientId = key.patientId,
+                                followUpOfEncounterId = key.followUpOfEncounterId,
+                                resumeEncounterId = encounterId,
+                                resumeCaseRecordId = caseRecordId,
+                            )
+                        }
                     },
                 )
             }

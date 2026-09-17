@@ -7,6 +7,7 @@ import androidx.navigation3.runtime.NavKey
 import androidx.savedstate.SavedState
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -30,12 +31,18 @@ class NavBackStackSaverTest {
         stack: NavBackStack<NavKey>,
     ): SavedState? = with(saverScope) { save(stack) }
 
+    /**
+     * Every entry here is one the save-time transform leaves alone, so this stack round trips
+     * byte for byte. Stacks that DO get transformed are covered in `NavBackStackPhiFreeTest`;
+     * mixing them in here would make a round-trip assertion test two things at once and fail for
+     * the wrong reason.
+     */
     private fun deepStack() = NavBackStack<NavKey>(
         Home,
         PatientSummary("pat-1"),
         ConsentRoute("pat-1", followUpOfEncounterId = "enc-0"),
         Compounder("pat-1", resumeEncounterId = "enc-1", resumeCaseRecordId = "case-1"),
-        ConsultationRoute("pat-1", "enc-1", "case-1", "ZZPROBE cough three days"),
+        KernelAssessmentRoute("case-1", "consult-1"),
     )
 
     @Before
@@ -111,6 +118,38 @@ class NavBackStackSaverTest {
 
         assertNotNull(restored)
         assertEquals(deepStack().toList(), restored!!.toList())
+    }
+
+    /**
+     * V8. The save-time transform must never touch the LIVE stack.
+     *
+     * `onSaveInstanceState` fires whenever the app is backgrounded, not only before process death.
+     * If the transform mutated the live list, a worker who took a phone call mid-consultation
+     * would come back to find their `ConsultationRoute` had become a `Compounder`, their chief
+     * complaint gone, and no crash anywhere to explain it. That is a worse defect than the one
+     * this whole phase fixes, and it would be invisible in every other test here, all of which
+     * only look at what was serialized.
+     */
+    @Test
+    fun savingDoesNotMutateTheLiveStack() {
+        val complaint = "ZZPROBE cough three days"
+        val live = NavBackStack<NavKey>(
+            Home,
+            Compounder("pat-1", resumeEncounterId = "enc-1", resumeCaseRecordId = "case-1"),
+            ConsultationRoute("pat-1", "enc-1", "case-1", complaint),
+            AbhaCreateOtpRoute("session-1", "XXXXXX9999"),
+        )
+        val before = live.toList()
+
+        val saved = navBackStackSaver(ownerUserId = "worker-a").saveStack(live)
+
+        assertNotNull("The fixture must persist, or this proves nothing", saved)
+        assertEquals("The live stack must be identical after a save", before, live.toList())
+        val top = live[2] as ConsultationRoute
+        assertEquals("The worker's chief complaint must still be on the live entry", complaint, top.chiefComplaint)
+        // And the serialized copy genuinely did diverge, so the assertion above is not passing
+        // because the transform quietly did nothing.
+        assertFalse(saved!!.flattenToString().contains(complaint))
     }
 
     /** The entry cap: a runaway stack persists nothing at all rather than risking the Binder

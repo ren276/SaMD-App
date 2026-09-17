@@ -25,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -63,6 +64,10 @@ fun HomeScreen(
     isOnline: Boolean,
     session: UserSession,
     onSignOut: () -> Unit,
+    /** True when the back stack already holds an entry for this case, in which case the resume
+     *  prompt must not be offered: accepting it would push a second path to a case the worker is
+     *  already inside. Defaults to "never suppressed" so previews and tests keep working. */
+    resumeSuppressedFor: (caseRecordId: String) -> Boolean = { false },
     bottomBar: @Composable () -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
@@ -76,6 +81,7 @@ fun HomeScreen(
         onOpenPatient = onOpenPatient,
         onOpenDoctorList = onOpenDoctorList,
         onResumeEncounter = onResumeEncounter,
+        resumeSuppressedFor = resumeSuppressedFor,
         onSyncNow = viewModel::onSyncNow,
         bottomBar = bottomBar,
     )
@@ -91,16 +97,23 @@ private fun HomeContent(
     onOpenPatient: (String) -> Unit,
     onOpenDoctorList: () -> Unit,
     onResumeEncounter: (patientId: String, encounterId: String, caseRecordId: String) -> Unit,
+    resumeSuppressedFor: (caseRecordId: String) -> Boolean,
     onSyncNow: () -> Unit,
     bottomBar: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
     var resourceWarnings by remember { mutableStateOf<List<String>>(emptyList()) }
-    var dismissedResumeId by remember { mutableStateOf<String?>(null) }
+    // Saveable, not `remember`: a dismissal that dies with the process means a worker who said
+    // "no" gets asked again on relaunch, now that the restored stack has already put them where
+    // they wanted to be.
+    var dismissedResumeId by rememberSaveable { mutableStateOf<String?>(null) }
 
     if (FeatureFlags.RESUME_DRAFT_ENABLED) {
         uiState.resumableEncounter?.let { resumable ->
-            if (resumable.caseRecordId != dismissedResumeId) {
+            // Two gates, not one. The dismissal is the worker's own "no". The suppression is
+            // structural: if any entry in the stack is already about this case, offering to resume
+            // it would create a second live path to one case.
+            if (resumable.caseRecordId != dismissedResumeId && !resumeSuppressedFor(resumable.caseRecordId)) {
                 ResumeEncounterDialog(
                     resumable = resumable,
                     onDismiss = { dismissedResumeId = resumable.caseRecordId },

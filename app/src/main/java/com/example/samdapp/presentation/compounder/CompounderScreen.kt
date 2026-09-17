@@ -64,12 +64,27 @@ fun CompounderScreen(
     resumeCaseRecordId: String? = null,
     onContinue: (patientId: String, encounterId: String, caseRecordId: String, chiefComplaint: String) -> Unit,
     onEmergencyOverride: (encounterId: String) -> Unit,
+    /** Fires once the encounter and case record for this visit exist, whether this screen started
+     *  them or resumed them. The nav layer uses it to rewrite this entry into its resume shape, so
+     *  a stack saved from here restores as "resume that case" rather than "start a case". Without
+     *  it, restoring re-runs `StartCaseUseCase` and mints a second encounter and case record for
+     *  one visit. Only the nav layer can do this: the ids exist here, but the route does not. */
+    onCaseReady: (encounterId: String, caseRecordId: String) -> Unit = { _, _ -> },
     viewModel: CompounderViewModel = hiltViewModel<CompounderViewModel, CompounderViewModel.Factory>(
         creationCallback = { factory -> factory.create(patientId, followUpOfEncounterId, resumeEncounterId, resumeCaseRecordId) },
     ),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
+    // Keyed on the ids, so this fires once when they first appear and again only if they somehow
+    // change. `CompounderViewModel` publishes both together right after the start-or-resume branch.
+    val readyEncounterId = uiState.encounterId
+    val readyCaseRecordId = uiState.caseRecordId
+    LaunchedEffect(readyEncounterId, readyCaseRecordId) {
+        if (readyEncounterId != null && readyCaseRecordId != null) {
+            onCaseReady(readyEncounterId, readyCaseRecordId)
+        }
+    }
     LaunchedEffect(Unit) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             viewModel.effects.collect { effect ->
