@@ -50,7 +50,7 @@ restore memo's section 8.2.1 is struck in the same commit that carries this docu
 | 3 | `process_death_check.sh` deep-stack mode | none, script only | medium | Sonnet |
 | 4 | Emergency-reason re-derivation test | none, test only | small | Sonnet |
 | 5 | `SendingRoute` idempotency pin + byte-budget test | none, tests only | small | Sonnet |
-| 6 | `AsrEgressTest` `GrantPermissionRule` | none, test setup only | 2 lines | Sonnet, **separate commit** |
+| 6 | `AsrEgressTest` full-suite-only failure | none, test only | **OWED**, cause corrected | own task |
 
 ---
 
@@ -204,16 +204,49 @@ emergency screen, which is the behaviour the ViewModel's KDoc already claims.
 - `MAX_SAVED_STACK_BYTES`: the branch has never executed, because the only over-budget test trips
   the 50-entry cap first (VERIFIED `NavBackStackSaverTest.anOverlongStackIsNotPersisted`).
 
-## 6. AsrEgressTest RECORD_AUDIO. Sonnet, separate commit
+## 6. AsrEgressTest full-suite-only failure. OWED, cause corrected, NOT a permission fix
 
-`AsrEgressTest` has no `GrantPermissionRule` (VERIFIED), while its own KDoc assumes the emulator mic
-yields silence and asserts capture returns success-carrying-nothing. Without the grant it gets
-`Microphone unavailable`, which is the failure seen in the full instrumented run. The fix is the
-rule. **Not** a relaxed assertion: relaxing it would blind the test to a real egress regression,
-which is the one thing it exists to catch.
+> **CORRECTED 2026-09-18, before anything was written.** This section originally said the test has
+> no `GrantPermissionRule` and "the fix is the rule". That is WRONG and the rule would have changed
+> nothing. It is recorded here in its corrected form so nobody inherits the wrong fix.
 
-Unrelated to navigation. It should ship as its own commit so it can be reviewed, reverted or
-cherry-picked without touching the nav track.
+`AsrEgressTest.aCaptureAndDecodeWritesNoFileToAppStorage` fails in a full instrumented run with
+`Microphone unavailable, RECORD_AUDIO may not be granted, or the mic is in use`. The first clause of
+that message is what misled the original scoping. Four experiments (VERIFIED, all run 2026-09-18):
+
+1. `adb install -r -g` both APKs, then `dumpsys package com.example.samdapp.dev`:
+   `android.permission.RECORD_AUDIO: granted=true`.
+2. `adb shell am instrument` for that single test: `OK (1 test)`, 8.9s.
+3. Gradle, single class (`-Pandroid.testInstrumentationRunnerArguments.class=...AsrEgressTest`):
+   `BUILD SUCCESSFUL`, 3 tests.
+4. Gradle, full suite: that one test FAILS, same message.
+
+So the permission is granted and the test passes in isolation through both paths. The failure is
+**full-suite-only**, and no `GrantPermissionRule` can affect it. The repo already said as much and
+was not read closely enough the first time: `SherpaOnnxTranscriptionServiceTest.kt:22-24` states
+that AGP installs the test APK with runtime permissions pre-granted, which is why no rule is
+declared in either class.
+
+**Leading hypothesis, explicitly NOT a diagnosis.** `AsrEgressTest` and
+`SherpaOnnxTranscriptionServiceTest` share one process-wide recognizer
+(`AsrTestSupport.kt:15`, `sharedAsrService`) and both drive the real microphone:
+`AsrEgressTest.kt:202` captures, and `SherpaOnnxTranscriptionServiceTest.kt:99` launches a capture
+and cancels it mid-`AudioRecord.read` on purpose, to assert cancellation lands within 2s. An
+`AudioRecord` not fully released by the time the next class runs would present as "the mic is in
+use" in whichever class ran second, and never in isolation. That fits every observation above. It
+has NOT been confirmed: the release path was not instrumented and no ordering was forced.
+
+**Likely real fix:** test isolation, or an explicit release-and-await in `AsrTestSupport` teardown
+between the two classes. Not a permission, and not two lines.
+
+**THE FIX MUST NEVER BE A RELAXED ASSERTION.** This test witnesses a zero-egress property of
+vendored ASR native code and is a pre-distribution gate. Relaxing the assertion to make a flake
+green trades the flake for undetected egress in code nobody here wrote. The assertion's diagnostic
+MESSAGE has been corrected (the condition is untouched) so the next person is not sent down the
+permission path again.
+
+Unrelated to navigation, and now unrelated in size too: it is an ASR concurrency investigation that
+wants its own task and its own STOP. It was deliberately not chased at the end of phase 4.
 
 ---
 
