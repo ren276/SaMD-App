@@ -7,6 +7,7 @@ import com.example.samdapp.domain.audit.AuditAction
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.connectivity.ConnectivityController
+import com.example.samdapp.domain.model.CaseStatus
 import com.example.samdapp.domain.model.Doctor
 import com.example.samdapp.domain.repository.CaseRecordRepository
 import com.example.samdapp.domain.usecase.AssignDoctorUseCase
@@ -43,6 +44,22 @@ data class DoctorAssignmentConfirmUiState(
 
 sealed interface DoctorAssignmentConfirmEffect {
     data object Done : DoctorAssignmentConfirmEffect
+
+    /**
+     * This case already has a doctor, so there is nothing to confirm. Emitted instead of populating
+     * the screen, which means the confirm UI is never drawn for a case past assignment.
+     *
+     * Reachable only by restore. The forward path never routes here for an assigned case: the
+     * screen is shown once, before assignment, and its [Done] clears the stack to Home. A saved
+     * back stack, though, can be restored after the case moved on, and offering to assign a doctor
+     * to a case that has one invites a second assignment for a single case.
+     *
+     * A distinct effect rather than reusing [Done]: both navigate to the same place, but "the
+     * worker confirmed an assignment" and "a restored screen was dismissed because the case had
+     * moved on" are different events, and collapsing them here would make them indistinguishable
+     * to anything that later wants to tell them apart.
+     */
+    data object AlreadyAssigned : DoctorAssignmentConfirmEffect
 }
 
 @Stable
@@ -73,9 +90,32 @@ class DoctorAssignmentConfirmViewModel @AssistedInject constructor(
     private val _effects = Channel<DoctorAssignmentConfirmEffect>(Channel.BUFFERED)
     val effects = _effects.receiveAsFlow()
 
+    private companion object {
+        /**
+         * Statuses meaning this case already has a doctor, so the confirm screen must not be shown.
+         *
+         * DELIBERATELY A SET, NOT AN ORDINAL COMPARISON. `CaseStatus` is declared
+         * `DRAFT, SAVED_LOCALLY, PENDING_SYNC, SENT_TO_DOCTOR, PRESCRIPTION_RECEIVED, ABANDONED`,
+         * so `status.ordinal >= SENT_TO_DOCTOR.ordinal` would sweep in `ABANDONED`, which is not an
+         * assigned case and should restore to its confirm screen like any other unassigned one.
+         * An ordinal threshold also silently acquires every new enum value declared after it, which
+         * is a defect that arrives without anyone editing this file. List the statuses that mean
+         * what this check means, and nothing else.
+         */
+        val ALREADY_ASSIGNED_STATUSES = setOf(CaseStatus.SENT_TO_DOCTOR, CaseStatus.PRESCRIPTION_RECEIVED)
+    }
+
     init {
         viewModelScope.launch {
-            val encounterId = caseRecordRepository.observeCaseRecord(caseRecordId).first()?.encounterId
+            val caseRecord = caseRecordRepository.observeCaseRecord(caseRecordId).first()
+            // Checked before anything is resolved or drawn, so a restored screen for a case that
+            // has moved on never flashes a doctor proposal on its way out. isLoading stays true
+            // until the navigation lands.
+            if (caseRecord != null && caseRecord.status in ALREADY_ASSIGNED_STATUSES) {
+                _effects.send(DoctorAssignmentConfirmEffect.AlreadyAssigned)
+                return@launch
+            }
+            val encounterId = caseRecord?.encounterId
             val proposal = encounterId?.let { resolveDoctorAssignmentUseCase(caseRecordId, it).getOrNull() }
             if (proposal == null) {
                 _uiState.update { it.copy(isLoading = false, errorMessage = "Could not resolve a doctor for this case") }
