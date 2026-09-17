@@ -809,12 +809,23 @@ class FakeDocumentCaptureStore : com.example.samdapp.domain.document.DocumentCap
 
     var sessions = mutableMapOf<String, MutableList<String>>()
     val discardedSessions = mutableListOf<String>()
-    val discardedStaging = mutableListOf<String>()
     /** The page order `assemble` was actually handed, per call. */
     val assembledOrders = mutableListOf<List<String>>()
-    var ingestResult: (String) -> Result<com.example.samdapp.domain.document.CapturedPage> = { pageId ->
-        Result.success(com.example.samdapp.domain.document.CapturedPage(pageId, ByteArray(4)))
-    }
+    /** The rotationDegrees `assemble` was actually handed for each page, per call, in the same
+     *  order as the matching entry in [assembledOrders]. */
+    val assembledRotations = mutableListOf<List<Int>>()
+    /** Every `ingestPage` call's rotationDegrees, keyed by pageId - lets a test assert rotation
+     *  reached the store without depending on assembly ever running. */
+    val ingestedRotations = mutableMapOf<String, Int>()
+    /** Every `ingestPage` call's byte count, keyed by pageId. The fake never retains the array
+     *  itself (mirroring the real store, whose KDoc says the caller owns it after the call), so a
+     *  test that wants to assert the caller zeroed its own copy reads the array it still holds,
+     *  not anything here. */
+    val ingestedByteSizes = mutableMapOf<String, Int>()
+    var ingestResult: (pageId: String, rotationDegrees: Int) -> Result<com.example.samdapp.domain.document.CapturedPage> =
+        { pageId, rotationDegrees ->
+            Result.success(com.example.samdapp.domain.document.CapturedPage(pageId, ByteArray(4), rotationDegrees))
+        }
     /** Takes the session id as well as the page order so the DEFAULT result carries the session
      *  that was actually assembled - a hardcoded one would queue the second capture of a test
      *  under the first capture's id. A custom result is returned untouched. */
@@ -835,8 +846,6 @@ class FakeDocumentCaptureStore : com.example.samdapp.domain.document.DocumentCap
 
     override fun newSession(): String = "session-${++nextSession}".also { sessions[it] = mutableListOf() }
 
-    override suspend fun stagingPathFor(sessionId: String, pageId: String): String = "/tmp/$sessionId/$pageId.jpg"
-
     /** Held open by a test that needs an ingestion to still be in flight when something else -
      *  a discard - happens. Null means ingestion completes immediately, as it does everywhere else. */
     var ingestGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
@@ -844,13 +853,14 @@ class FakeDocumentCaptureStore : com.example.samdapp.domain.document.DocumentCap
     override suspend fun ingestPage(
         sessionId: String,
         pageId: String,
+        jpegBytes: ByteArray,
+        rotationDegrees: Int,
     ): Result<com.example.samdapp.domain.document.CapturedPage> {
+        ingestedByteSizes[pageId] = jpegBytes.size
+        ingestedRotations[pageId] = rotationDegrees
         ingestGate?.await()
-        return ingestResult(pageId).onSuccess { sessions.getOrPut(sessionId) { mutableListOf() } += pageId }
-    }
-
-    override suspend fun discardStaging(sessionId: String, pageId: String) {
-        discardedStaging += pageId
+        return ingestResult(pageId, rotationDegrees)
+            .onSuccess { sessions.getOrPut(sessionId) { mutableListOf() } += pageId }
     }
 
     override suspend fun deletePage(sessionId: String, pageId: String) {
@@ -864,11 +874,13 @@ class FakeDocumentCaptureStore : com.example.samdapp.domain.document.DocumentCap
 
     override suspend fun assemble(
         sessionId: String,
-        orderedPageIds: List<String>,
+        orderedPages: List<com.example.samdapp.domain.document.OrderedPage>,
         onProgress: (Int, Int) -> Unit,
     ): Result<com.example.samdapp.domain.document.DocumentBytes.AssembledCapture> {
-        assembledOrders += orderedPageIds
-        orderedPageIds.forEachIndexed { index, _ -> onProgress(index + 1, orderedPageIds.size) }
-        return assembleResult(sessionId, orderedPageIds)
+        val pageIds = orderedPages.map { it.pageId }
+        assembledOrders += pageIds
+        assembledRotations += orderedPages.map { it.rotationDegrees }
+        pageIds.forEachIndexed { index, _ -> onProgress(index + 1, pageIds.size) }
+        return assembleResult(sessionId, pageIds)
     }
 }

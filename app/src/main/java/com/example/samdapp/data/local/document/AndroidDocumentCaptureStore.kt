@@ -6,14 +6,15 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
+import android.graphics.Matrix
 import android.graphics.pdf.PdfDocument
-import android.media.ExifInterface
 import com.example.samdapp.data.local.security.DocumentEncryptionProvider
 import com.example.samdapp.data.repository.ConsultationDocumentRepositoryImpl.Companion.MAX_DOCUMENT_SIZE_BYTES
 import com.example.samdapp.domain.document.CapturedPage
 import com.example.samdapp.domain.document.DocumentBytes
 import com.example.samdapp.domain.document.DocumentCaptureStore
 import com.example.samdapp.domain.document.DocumentPageUnreadableException
+import com.example.samdapp.domain.document.OrderedPage
 import com.example.samdapp.domain.document.computeInSampleSize
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
@@ -34,11 +35,6 @@ import kotlin.coroutines.coroutineContext
  *  root. A `consultationId` is a UUID and can never be the literal `.capture`, so the two never
  *  collide and the sweep below can never reach a stored document. */
 private const val CAPTURE_DIR = ".capture"
-
-/** The plaintext staging directory. In `cacheDir`, not `filesDir`, and its own subdirectory so
- *  the sweep and the `FileProvider` grant are both scoped to exactly it - the camera app is
- *  granted this path and nothing else. */
-private const val STAGING_DIR = "document_capture_staging"
 
 private const val ASSEMBLED_FILE = "assembled.enc"
 
@@ -62,23 +58,27 @@ private const val THUMBNAIL_MAX_DIMENSION = 256
 private const val THUMBNAIL_JPEG_QUALITY = 70
 
 /**
- * H-18, Build 3b. Deletes every capture-session directory and every plaintext staging file.
+ * H-18, Build 3b. Deletes every capture-session directory.
  *
  * **Policy: sweep everything, unconditionally, at app start.** A capture session's page list
  * lives only in `ConsultationViewModel` state, so it cannot survive process death; any session
  * directory that exists when the process starts is by definition orphaned, and there is no live
  * session for the sweep to damage. That makes an age heuristic or a liveness registry pointless
- * complexity here.
+ * complexity here. Re-verified unchanged under Option A (in-process CameraX capture,
+ * `scratchpad/capture-process-death-memo.md` section 1): Option A persists nothing new, so this
+ * premise still holds exactly as before.
  *
  * Deliberately a SECOND, separate sweep rather than an extension of Build 3a's
  * [com.example.samdapp.presentation.documents.sweepOrphanedViewerTempFiles]. They cover disjoint
- * directories (`cacheDir/document_viewer_temp` there, `filesDir/documents/.capture` plus
- * `cacheDir/document_capture_staging` here) and answer different questions, so merging them would
- * only hide which one failed. Both are called from `SaMDApplication.onCreate`.
+ * directories (`cacheDir/document_viewer_temp` there, `filesDir/documents/.capture` here) and
+ * answer different questions, so merging them would only hide which one failed. Both are called
+ * from `SaMDApplication.onCreate`.
+ *
+ * Only one directory as of Option A: capture no longer hands a plaintext staging file to an
+ * external camera process, so there is no `cacheDir/document_capture_staging` for this to sweep.
  */
 fun sweepOrphanedCaptureSessions(context: Context) {
     File(File(context.filesDir, "documents"), CAPTURE_DIR).deleteRecursively()
-    File(context.cacheDir, STAGING_DIR).deleteRecursively()
 }
 
 @Singleton
@@ -92,11 +92,6 @@ class AndroidDocumentCaptureStore @Inject constructor(
     private fun sessionDir(sessionId: String): File =
         File(File(File(context.filesDir, "documents"), CAPTURE_DIR), sanitizeId(sessionId)).apply { mkdirs() }
 
-    private fun stagingDir(): File = File(context.cacheDir, STAGING_DIR).apply { mkdirs() }
-
-    private fun stagingFile(sessionId: String, pageId: String): File =
-        File(stagingDir(), "${sanitizeId(sessionId)}__${sanitizeId(pageId)}.jpg")
-
     private fun pageFile(sessionId: String, pageId: String): File =
         File(sessionDir(sessionId), "${sanitizeId(pageId)}.enc")
 
@@ -104,62 +99,49 @@ class AndroidDocumentCaptureStore @Inject constructor(
 
     override fun newSession(): String = UUID.randomUUID().toString()
 
-    override suspend fun stagingPathFor(sessionId: String, pageId: String): String =
-        withContext(Dispatchers.IO) { stagingFile(sessionId, pageId).absolutePath }
-
     /**
-     * R2, the encrypt-when rule. The plaintext staging file is deleted in a `finally`, so it is
-     * gone before this function returns on EVERY path - success, encryption failure, decode
-     * failure, or a thrown cancellation. The next page cannot be captured until the ViewModel
-     * observes this result, so at most one page of plaintext exists on disk at any instant, and
-     * only for the duration of this call.
+     * R2, the encrypt-when rule, Option A shape. [jpegBytes] is the frame CameraX's
+     * `OnImageCapturedCallback` delivered, already copied out of its `ImageProxy` by the caller
+     * (which owns closing that proxy); nothing here retains a reference to [jpegBytes] past this
+     * call; encryption happens through the same [ByteArrayInputStream]-into-`encryptToFile` path
+     * the old staging-file overload used, so the bytes never touch disk unencrypted. The caller
+     * zeroes [jpegBytes] once this returns - the residual plaintext window is now bounded to one
+     * heap array for the duration of one encrypt call, never a file.
      */
-    override suspend fun ingestPage(sessionId: String, pageId: String): Result<CapturedPage> =
+    override suspend fun ingestPage(
+        sessionId: String,
+        pageId: String,
+        jpegBytes: ByteArray,
+        rotationDegrees: Int,
+    ): Result<CapturedPage> =
         withContext(Dispatchers.IO) {
-            val staging = stagingFile(sessionId, pageId)
             try {
-                if (!staging.exists() || staging.length() == 0L) {
+                if (jpegBytes.isEmpty()) {
                     return@withContext Result.failure(IllegalStateException("The camera returned no image"))
                 }
                 // DocumentPageUnreadableException is deliberately NOT used here: it is the
                 // assembly-abort signal (R4), and a page that fails at capture time simply never
                 // enters the page list, so there is nothing to abort.
-                val thumbnail = renderThumbnail(staging)
+                val thumbnail = renderThumbnail(jpegBytes, rotationDegrees)
                     ?: return@withContext Result.failure(IllegalStateException("The captured image could not be read"))
-                staging.inputStream().use { plaintext ->
+                ByteArrayInputStream(jpegBytes).use { plaintext ->
                     encryptionProvider.encryptToFile(plaintext, pageFile(sessionId, pageId), MAX_DOCUMENT_SIZE_BYTES)
                 }
-                Result.success(CapturedPage(pageId, thumbnail))
+                Result.success(CapturedPage(pageId, thumbnail, rotationDegrees))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 pageFile(sessionId, pageId).delete()
                 Result.failure(e)
-            } finally {
-                staging.delete()
             }
         }
 
-    override suspend fun discardStaging(sessionId: String, pageId: String) {
-        withContext(Dispatchers.IO) { stagingFile(sessionId, pageId).delete() }
-    }
-
     override suspend fun deletePage(sessionId: String, pageId: String) {
-        withContext(Dispatchers.IO) {
-            pageFile(sessionId, pageId).delete()
-            stagingFile(sessionId, pageId).delete()
-        }
+        withContext(Dispatchers.IO) { pageFile(sessionId, pageId).delete() }
     }
 
     override suspend fun discardSession(sessionId: String) {
-        withContext(Dispatchers.IO) {
-            sessionDir(sessionId).deleteRecursively()
-            // Staging files are named with the session prefix, so a capture the camera abandoned
-            // mid-flight (no ingest, therefore no `finally` ran) is caught here too.
-            stagingDir().listFiles()?.forEach { file ->
-                if (file.name.startsWith("${sanitizeId(sessionId)}__")) file.delete()
-            }
-        }
+        withContext(Dispatchers.IO) { sessionDir(sessionId).deleteRecursively() }
     }
 
     /**
@@ -177,13 +159,13 @@ class AndroidDocumentCaptureStore @Inject constructor(
      */
     override suspend fun assemble(
         sessionId: String,
-        orderedPageIds: List<String>,
+        orderedPages: List<OrderedPage>,
         onProgress: (Int, Int) -> Unit,
     ): Result<DocumentBytes.AssembledCapture> = withContext(Dispatchers.Default) {
-        if (orderedPageIds.isEmpty()) {
+        if (orderedPages.isEmpty()) {
             return@withContext Result.failure(IllegalArgumentException("No pages to assemble"))
         }
-        if (orderedPageIds.size > MAX_PAGES) {
+        if (orderedPages.size > MAX_PAGES) {
             return@withContext Result.failure(IllegalArgumentException("At most $MAX_PAGES pages per document"))
         }
         val dest = assembledFile(sessionId)
@@ -193,12 +175,12 @@ class AndroidDocumentCaptureStore @Inject constructor(
         val callerContext = coroutineContext
         try {
             val encrypted = encryptionProvider.encryptToFile(dest, MAX_DOCUMENT_SIZE_BYTES) { sink ->
-                writePdf(sessionId, orderedPageIds, sink, callerContext, onProgress)
+                writePdf(sessionId, orderedPages, sink, callerContext, onProgress)
             }
             Result.success(
                 DocumentBytes.AssembledCapture(
                     captureSessionId = sessionId,
-                    pageCount = orderedPageIds.size,
+                    pageCount = orderedPages.size,
                     sizeBytes = encrypted.sizeBytes,
                     sha256 = encrypted.sha256,
                 ),
@@ -219,7 +201,7 @@ class AndroidDocumentCaptureStore @Inject constructor(
 
     private fun writePdf(
         sessionId: String,
-        orderedPageIds: List<String>,
+        orderedPages: List<OrderedPage>,
         sink: OutputStream,
         callerContext: CoroutineContext,
         onProgress: (Int, Int) -> Unit,
@@ -228,10 +210,10 @@ class AndroidDocumentCaptureStore @Inject constructor(
         try {
             // Index order IS the worker's final reordered order: this list is the ViewModel's
             // ordered page list, read once, after every move and delete has been applied.
-            orderedPageIds.forEachIndexed { index, pageId ->
+            orderedPages.forEachIndexed { index, page ->
                 callerContext.ensureActive()
-                drawPage(document, sessionId, pageId, index)
-                onProgress(index + 1, orderedPageIds.size)
+                drawPage(document, sessionId, page.pageId, page.rotationDegrees, index)
+                onProgress(index + 1, orderedPages.size)
             }
             document.writeTo(sink)
         } finally {
@@ -250,7 +232,7 @@ class AndroidDocumentCaptureStore @Inject constructor(
      * `writeTo`; that is inherent to the platform API, which has no incremental write, and is
      * what the page cap bounds.)
      */
-    private fun drawPage(document: PdfDocument, sessionId: String, pageId: String, index: Int) {
+    private fun drawPage(document: PdfDocument, sessionId: String, pageId: String, rotationDegrees: Int, index: Int) {
         val encrypted = pageFile(sessionId, pageId)
         val plaintext = try {
             ByteArrayOutputStream().also { encryptionProvider.decryptToStream(encrypted, it) }.toByteArray()
@@ -275,7 +257,11 @@ class AndroidDocumentCaptureStore @Inject constructor(
                 PdfDocument.PageInfo.Builder(PAGE_WIDTH_PT, PAGE_HEIGHT_PT, index + 1).create(),
             )
             try {
-                drawFitted(page.canvas, bitmap, exifRotationDegrees { ExifInterface(ByteArrayInputStream(plaintext)) })
+                // A1: rotation is CameraX's own ImageInfo.rotationDegrees, carried by the caller
+                // from capture through to here (OrderedPage.rotationDegrees) - not re-derived from
+                // EXIF. See the isolated diff in the Phase B1 report for why this replaced the old
+                // ExifInterface(ByteArrayInputStream(plaintext)) read.
+                drawFitted(page.canvas, bitmap, rotationDegrees)
             } finally {
                 document.finishPage(page)
             }
@@ -314,40 +300,23 @@ class AndroidDocumentCaptureStore @Inject constructor(
         canvas.restore()
     }
 
-    /**
-     * The reader is constructed INSIDE the `try`, not passed in: every `ExifInterface` constructor
-     * declares `IOException`, so building one at the call site would put the failure outside this
-     * fallback and let unreadable EXIF fail a page whose pixels decoded fine.
-     */
-    private fun exifRotationDegrees(openExif: () -> ExifInterface): Int = try {
-        when (openExif().getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
-            ExifInterface.ORIENTATION_ROTATE_90 -> 90
-            ExifInterface.ORIENTATION_ROTATE_180 -> 180
-            ExifInterface.ORIENTATION_ROTATE_270 -> 270
-            else -> 0
-        }
-    } catch (e: Exception) {
-        // Missing or malformed EXIF is not a reason to fail a readable page - only an undecodable
-        // image is (R4). Unrotated is the honest fallback.
-        0
-    }
-
-    /** Small in-memory JPEG for the thumbnail strip, decoded from the staging file before it is
-     *  deleted so a thumbnail never costs a second decrypt. Rotated by `Matrix` here rather than
-     *  on a canvas because the result has to survive as bytes. */
-    private fun renderThumbnail(staging: File): ByteArray? {
+    /** Small in-memory JPEG for the thumbnail strip, decoded from the just-captured frame before
+     *  it is encrypted, so a thumbnail never costs a second decrypt. [rotationDegrees] is CameraX's
+     *  own `ImageInfo.rotationDegrees` (A1) - not read from EXIF, since a raw `ImageProxy` capture
+     *  is not guaranteed to carry it the way a saved-to-disk JPEG would. Rotated by `Matrix` here
+     *  rather than on a canvas because the result has to survive as bytes. */
+    private fun renderThumbnail(jpegBytes: ByteArray, rotationDegrees: Int): ByteArray? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(staging.absolutePath, bounds)
+        BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.size, bounds)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
         val options = BitmapFactory.Options().apply {
             inSampleSize = computeInSampleSize(bounds.outWidth, bounds.outHeight, THUMBNAIL_MAX_DIMENSION)
         }
-        val decoded = BitmapFactory.decodeFile(staging.absolutePath, options) ?: return null
-        val rotation = exifRotationDegrees { ExifInterface(staging.absolutePath) }
-        val upright = if (rotation == 0) {
+        val decoded = BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.size, options) ?: return null
+        val upright = if (rotationDegrees == 0) {
             decoded
         } else {
-            val matrix = android.graphics.Matrix().apply { postRotate(rotation.toFloat()) }
+            val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
             Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
                 .also { if (it !== decoded) decoded.recycle() }
         }

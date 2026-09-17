@@ -68,8 +68,9 @@ private class FakeConsultationActions : ConsultationActions {
     override fun onDocumentLabelChange(text: String) = Unit
     override fun onDocumentPicked(uri: String, claimedMimeType: String?) = Unit
     override fun onStartDocumentCapture() = Unit
-    override fun onAddDocumentPage() = Unit
-    override fun onDocumentPageCaptured(saved: Boolean) = Unit
+    override fun onDocumentPageCaptured(jpegBytes: ByteArray, rotationDegrees: Int) = Unit
+    override fun onDocumentPageCaptureFailed(message: String?) = Unit
+    override fun onCameraUnavailable(message: String) = Unit
     override fun onDeleteDocumentPage(pageId: String) = Unit
     override fun onMoveDocumentPage(from: Int, to: Int) = Unit
     override fun onFinishDocumentCapture() = Unit

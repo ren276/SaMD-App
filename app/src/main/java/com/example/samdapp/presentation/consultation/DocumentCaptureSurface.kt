@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -25,7 +26,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -50,10 +50,11 @@ private val THUMB_WIDTH = 96.dp
 private val THUMB_SPACING = 8.dp
 
 /**
- * H-18, Build 3b. The capture loop: photograph a page, be asked for another, reorder, delete,
- * finish. A full-screen dialog rather than a nav route so the capture cannot outlive the
- * consultation whose department/record-type selections it belongs to, and so backing out lands on
- * the discard confirmation ([R5]) instead of on a different screen.
+ * H-18, Build 3b, Option A. The capture loop: an in-process viewfinder ([DocumentCameraCapture])
+ * always live while the shutter is enabled, reorder, delete, finish. A full-screen dialog rather
+ * than a nav route so the capture cannot outlive the consultation whose department/record-type
+ * selections it belongs to, and so backing out lands on the discard confirmation ([R5]) instead
+ * of on a different screen.
  */
 @Composable
 internal fun DocumentCaptureSurface(capture: DocumentCaptureUiState, actions: ConsultationActions) {
@@ -102,14 +103,27 @@ internal fun DocumentCaptureSurface(capture: DocumentCaptureUiState, actions: Co
                         modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
                     ) { Text("Cancel") }
                 } else {
-                    OutlinedButton(
-                        onClick = actions::onAddDocumentPage,
-                        enabled = capture.canAddPage,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("captureAddPage"),
-                    ) {
-                        Text(
-                            if (capture.pages.isEmpty()) "Take photo of page 1" else "Add another page",
-                            style = MaterialTheme.typography.titleMedium,
+                    // H-18, Build 3b, Option A: the viewfinder is live inline for the whole
+                    // capture surface rather than an external hand-off per page - see
+                    // DocumentCameraCapture. A5: if it could not start, show the explicit error
+                    // instead of the viewfinder, with no fallback capture path.
+                    if (capture.cameraUnavailable) {
+                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                            Text(
+                                "Camera capture is not available on this device. Close this and use " +
+                                    "\"Upload existing file\" instead.",
+                                modifier = Modifier.padding(12.dp),
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                            )
+                        }
+                    } else {
+                        DocumentCameraCapture(
+                            shutterEnabled = capture.canAddPage,
+                            onCaptured = actions::onDocumentPageCaptured,
+                            onCaptureFailed = actions::onDocumentPageCaptureFailed,
+                            onUnavailable = actions::onCameraUnavailable,
+                            modifier = Modifier.fillMaxWidth().weight(1f, fill = false).height(280.dp)
+                                .testTag("documentCameraViewfinder"),
                         )
                     }
                     Button(
@@ -247,15 +261,5 @@ private fun CapturedPageThumbnail(
             }
             TextButton(onClick = onDelete, enabled = enabled) { Text("Delete") }
         }
-    }
-}
-
-/** Fires once per capture session so the worker lands straight in the camera instead of on an
- *  empty strip. Keyed on the session id, never on the (unchanging) empty page list, so cancelling
- *  the first shot returns to the strip rather than relaunching the camera in a loop. */
-@Composable
-internal fun LaunchFirstCapturePage(capture: DocumentCaptureUiState, actions: ConsultationActions) {
-    LaunchedEffect(capture.sessionId) {
-        if (capture.pages.isEmpty() && capture.pendingPageId == null) actions.onAddDocumentPage()
     }
 }

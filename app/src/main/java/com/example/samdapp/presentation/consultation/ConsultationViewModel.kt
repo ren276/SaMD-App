@@ -20,6 +20,7 @@ import com.example.samdapp.domain.usecase.SaveConsultationUseCase
 import com.example.samdapp.domain.document.CapturedPage
 import com.example.samdapp.domain.document.DocumentBytes
 import com.example.samdapp.domain.document.DocumentCaptureStore
+import com.example.samdapp.domain.document.OrderedPage
 import com.example.samdapp.domain.usecase.UploadConsultationDocumentUseCase
 import kotlinx.coroutines.flow.first
 import dagger.assisted.Assisted
@@ -51,31 +52,38 @@ data class PendingDocument(
 )
 
 /**
- * H-18, Build 3b: an in-progress camera capture. Lives here rather than in a screen of its own
- * because the department/record-type/label the document needs are already this screen's state,
- * and because a capture must not outlive the consultation it belongs to.
+ * H-18, Build 3b (Option A, in-process CameraX capture): an in-progress camera capture. Lives
+ * here rather than in a screen of its own because the department/record-type/label the document
+ * needs are already this screen's state, and because a capture must not outlive the consultation
+ * it belongs to.
  *
- * Holds only page IDS and small in-memory thumbnails: every captured page's real bytes are
- * encrypted on disk under [sessionId] the moment the camera returns them, and nothing here is
- * persisted. A process death therefore loses the capture, which is the intended posture - the
- * startup sweep deletes the orphaned session directory rather than resurrecting a half-captured
- * clinical document with no owner.
+ * Holds only page IDs, small in-memory thumbnails and each page's capture rotation: every
+ * captured page's real bytes are encrypted on disk under [sessionId] the moment the CameraX
+ * callback delivers them, and nothing here is persisted. A process death therefore loses the
+ * capture, which is the intended posture - the startup sweep deletes the orphaned session
+ * directory rather than resurrecting a half-captured clinical document with no owner. Re-verified
+ * unchanged under Option A: `scratchpad/capture-process-death-memo.md` section 1.
  */
 data class DocumentCaptureUiState(
     val sessionId: String,
     val maxPages: Int,
     val pages: List<CapturedPage> = emptyList(),
-    /** Non-null while the camera activity is capturing this page. */
-    val pendingPageId: String? = null,
-    val pendingStagingPath: String? = null,
+    /** True while a captured frame is being encrypted into the session (A4's backpressure): the
+     *  shutter stays disabled until this clears, so page N+1 can never be captured while page N's
+     *  plaintext bytes are still alive on the heap. */
+    val isIngestingPage: Boolean = false,
     val isAssembling: Boolean = false,
     val pagesAssembled: Int = 0,
     val errorMessage: String? = null,
     /** R5: back or cancel with pages captured asks before throwing them away. */
     val confirmDiscard: Boolean = false,
+    /** A5: the viewfinder could not start (provider init failure, no back camera, or the camera
+     *  is in use elsewhere). No fallback to the old external camera hand-off - the surface shows
+     *  an explicit error and points the worker at the existing file-upload path instead. */
+    val cameraUnavailable: Boolean = false,
 ) {
-    val canAddPage: Boolean get() = !isAssembling && pendingPageId == null && pages.size < maxPages
-    val canFinish: Boolean get() = !isAssembling && pendingPageId == null && pages.isNotEmpty()
+    val canAddPage: Boolean get() = !isAssembling && !isIngestingPage && !cameraUnavailable && pages.size < maxPages
+    val canFinish: Boolean get() = !isAssembling && !isIngestingPage && pages.isNotEmpty()
 }
 
 /** The two facts `onSend` needs to emit `VOICE_FIELD_EDITED` honestly, captured at the Edit tap
@@ -313,14 +321,21 @@ interface ConsultationActions {
      *  path's magic-byte cross-check. */
     fun onDocumentPicked(uri: String, claimedMimeType: String?)
 
-    // ── Multi-page camera capture (H-18, Build 3b, PATH B) ────────────────────────────────────
+    // ── Multi-page camera capture (H-18, Build 3b, PATH B, Option A in-process CameraX) ────────
     /** Opens the capture surface. Gated on the same controlled-vocabulary selections the file
      *  picker is: a scanned document is never queued with a guessed department or record type. */
     fun onStartDocumentCapture()
-    /** Allocates the next page and its staging path; the Screen launches the camera onto it. */
-    fun onAddDocumentPage()
-    /** [saved] is the camera contract's own result - false means the worker backed out. */
-    fun onDocumentPageCaptured(saved: Boolean)
+    /** A frame the CameraX shutter callback delivered: [jpegBytes] copied out of its `ImageProxy`
+     *  by the caller (which owns closing that proxy), [rotationDegrees] its `ImageInfo`. This
+     *  call owns encrypting [jpegBytes] and zeroing it once done - the caller must not reuse or
+     *  zero it itself. */
+    fun onDocumentPageCaptured(jpegBytes: ByteArray, rotationDegrees: Int)
+    /** The CameraX capture callback's own failure (`OnImageCapturedCallback.onError`) - no bytes
+     *  were produced, so there is nothing to discard, only an error to surface. */
+    fun onDocumentPageCaptureFailed(message: String?)
+    /** A5: the viewfinder could not start at all - provider init failure, no back camera, or the
+     *  camera is in use elsewhere. Never followed by a fallback capture path. */
+    fun onCameraUnavailable(message: String)
     fun onDeleteDocumentPage(pageId: String)
     /** R7: page order is clinical meaning in a multi-page report, so it is worker-controlled. */
     fun onMoveDocumentPage(from: Int, to: Int)
@@ -1135,48 +1150,54 @@ class ConsultationViewModel @AssistedInject constructor(
         }
     }
 
-    override fun onAddDocumentPage() {
+    /**
+     * R2's timing guarantee, Option A shape: [jpegBytes] is a JPEG the CameraX shutter callback
+     * copied out of its `ImageProxy` (that proxy is already closed by the time this is called -
+     * the caller's responsibility, not this function's). This call owns the whole plaintext
+     * window: it stays on the heap only for the duration of `ingestPage`'s encrypt call, zeroed in
+     * the `finally` below regardless of outcome. The UI does not offer "add another page" again
+     * until this resolves ([DocumentCaptureUiState.canAddPage] is false while [isIngestingPage]
+     * is set), so page N+1 can never be captured while page N's plaintext is still alive.
+     */
+    override fun onDocumentPageCaptured(jpegBytes: ByteArray, rotationDegrees: Int) {
         val capture = _uiState.value.documentCapture ?: return
         if (!capture.canAddPage) return
         val pageId = UUID.randomUUID().toString()
-        viewModelScope.launch {
-            val path = documentCaptureStore.stagingPathFor(capture.sessionId, pageId)
-            updateCapture { it.copy(pendingPageId = pageId, pendingStagingPath = path, errorMessage = null) }
+        updateCapture { it.copy(isIngestingPage = true, errorMessage = null) }
+        ingestJob = viewModelScope.launch {
+            try {
+                documentCaptureStore.ingestPage(capture.sessionId, pageId, jpegBytes, rotationDegrees).fold(
+                    onSuccess = { page ->
+                        updateCapture { it.copy(pages = it.pages + page, isIngestingPage = false) }
+                    },
+                    onFailure = { error ->
+                        updateCapture {
+                            it.copy(
+                                isIngestingPage = false,
+                                errorMessage = error.message ?: "That page could not be saved. Take it again.",
+                            )
+                        }
+                    },
+                )
+            } finally {
+                jpegBytes.fill(0)
+            }
         }
     }
 
-    /**
-     * R2's timing guarantee, at the one point in the app where a document page exists as
-     * plaintext. `ingestPage` encrypts the staging file into the capture session and deletes it
-     * in a `finally`, so the plaintext is gone before this coroutine resumes - and the UI does
-     * not offer "add another page" again until it has ([DocumentCaptureUiState.canAddPage] is
-     * false while `pendingPageId` is set), so page N+1 can never be captured while page N's
-     * plaintext is still on disk.
-     */
-    override fun onDocumentPageCaptured(saved: Boolean) {
-        val capture = _uiState.value.documentCapture ?: return
-        val pageId = capture.pendingPageId ?: return
-        ingestJob = viewModelScope.launch {
-            if (!saved) {
-                documentCaptureStore.discardStaging(capture.sessionId, pageId)
-                updateCapture { it.copy(pendingPageId = null, pendingStagingPath = null) }
-                return@launch
-            }
-            documentCaptureStore.ingestPage(capture.sessionId, pageId).fold(
-                onSuccess = { page ->
-                    updateCapture { it.copy(pages = it.pages + page, pendingPageId = null, pendingStagingPath = null) }
-                },
-                onFailure = { error ->
-                    updateCapture {
-                        it.copy(
-                            pendingPageId = null,
-                            pendingStagingPath = null,
-                            errorMessage = error.message ?: "That page could not be saved. Take it again.",
-                        )
-                    }
-                },
-            )
+    /** The CameraX capture callback's own failure - no frame was produced, so there is nothing to
+     *  discard, unlike the old external-camera "saved = false" path which had a staging file to
+     *  clean up. */
+    override fun onDocumentPageCaptureFailed(message: String?) {
+        updateCapture {
+            it.copy(isIngestingPage = false, errorMessage = message ?: "That page could not be captured. Try again.")
         }
+    }
+
+    /** A5: no fallback capture path is offered. The error copy points the worker at the existing
+     *  "Upload existing file" affordance elsewhere on this screen. */
+    override fun onCameraUnavailable(message: String) {
+        updateCapture { it.copy(cameraUnavailable = true, errorMessage = message) }
     }
 
     override fun onDeleteDocumentPage(pageId: String) {
@@ -1210,10 +1231,10 @@ class ConsultationViewModel @AssistedInject constructor(
         val department = state.documentDraftDepartment ?: return
         val recordType = state.documentDraftRecordType ?: return
         val label = state.documentDraftLabel
-        val orderedPageIds = capture.pages.map { it.pageId }
+        val orderedPages = capture.pages.map { OrderedPage(it.pageId, it.rotationDegrees) }
         assemblyJob = viewModelScope.launch {
             updateCapture { it.copy(isAssembling = true, pagesAssembled = 0, errorMessage = null) }
-            val result = documentCaptureStore.assemble(capture.sessionId, orderedPageIds) { done, _ ->
+            val result = documentCaptureStore.assemble(capture.sessionId, orderedPages) { done, _ ->
                 updateCapture { it.copy(pagesAssembled = done) }
             }
             result.fold(
