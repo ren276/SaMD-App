@@ -623,24 +623,43 @@ itself is deliberately untouched until then; this is the staging area.
 > `ViewModelStoreNavEntryDecorator` clears the store, and the rebuilt `CompounderViewModel` takes
 > the resume branch and logs `ENCOUNTER_RESUMED` for a visit that was started seconds earlier and
 > never left: a fabricated row on a clinical audit trail. The pinned key is unique only while no
-> two `Compounder` entries share a patient AND a follow-up parent, which is exactly what Home's
-> resume gating (`resumeSuppressedFor` / `backStackContainsCase`, plus a saveable
-> `dismissedResumeId`) prevents. These two must not be reasoned about separately: weakening the
-> gate stops being a duplicate-prompt regression and becomes a wrong-encounter ViewModel binding on
-> a clinical screen. `NavBackStackPolicyTest` pins the collision precondition, and
-> `CompounderContentKeyTest` proves the pin's effect directly: with it, no `ENCOUNTER_RESUMED` and
-> one ViewModel construction; with the default key, one fabricated row and two constructions.
+> two `Compounder` entries share a patient AND a follow-up parent.
+> `NavBackStackPolicyTest` pins the collision precondition, and `CompounderContentKeyTest` proves
+> the pin's effect directly: with it, no `ENCOUNTER_RESUMED` and one ViewModel construction; with
+> the default key, one fabricated row and two constructions.
 >
-> THREE mechanisms now depend on "no two `Compounder` entries for one patient and follow-up
-> parent", which is why that invariant is held as firmly as it is:
-> 1. the pinned content key is unique only under it;
-> 2. Home's resume prompt must not create a second live path to one case;
-> 3. `transformForSave`'s whole-stack ancestor search for `ConsultationRoute` matches on
->    `patientId` alone and takes the nearest match, which is the OWNING `Compounder` only because a
->    second same-patient one cannot be live. (Nearest and owning otherwise coincide anyway:
+> **CORRECTED 2026-09-18.** As first written, this note said the uniqueness was held by Home's
+> resume gating (`resumeSuppressedFor` / `backStackContainsCase`). That is wrong, and it named a
+> mechanism that cannot fire. `Home` exists only at index 0: the stack is seeded with it
+> (`AppNavHost.kt:103`), `switchTab` clears before adding a tab root (`:126-136`), and both other
+> insertions are `backStack.clear(); backStack.add(Home)` on one line (`:360`, `:421`). `NavDisplay`
+> draws the last entry, so `HomeScreen` composes only when the stack is exactly `[Home]`, and
+> `backStackContainsCase` is therefore always false at the moment it is consulted.
+>
+> WHAT ACTUALLY ENFORCES IT is a structural property of `AppNavHost`: only one `Compounder` can be
+> in the stack at all. There are two push sites, Home's resume prompt (reachable only at `[Home]`)
+> and `ConsentRoute` (`:184`, `:299`). Reaching either again while a `Compounder` is live requires a
+> tab switch, which clears, or popping back past that entry. A second one cannot be pushed on top of
+> the first.
+>
+> The three-way coupling still stands, with the middle leg restated:
+> 1. the pinned content key is unique only under "at most one live `Compounder` per patient and
+>    follow-up parent";
+> 2. that property is held by the single-`Compounder` structure above, NOT by the resume gate. The
+>    gate is retained as defence in depth against a future multi-pane or list-detail scene that
+>    could compose `Home` with a non-empty tail, at which point it becomes the live guard. See the
+>    comment at its call site;
+> 3. `transformForSave`'s whole-stack ancestor search for `ConsultationRoute` matches on `patientId`
+>    alone and takes the nearest match, which is the OWNING `Compounder` only because a second
+>    same-patient one cannot be live. (Nearest and owning otherwise coincide anyway:
 >    `ConsultationRoute` is pushed only from the adjacent `Compounder`, `AppNavHost.kt:304`.)
 >
-> Do not weaken any one of these in isolation.
+> So the thing not to weaken in isolation is the single-`Compounder` structure: do not add a
+> `Compounder` push site, and do not introduce a scene that composes `Home` with a non-empty tail,
+> without revisiting both the content key and the ancestor search. One caveat recorded honestly:
+> "popping back removes the entry" is standard `NavDisplay` behaviour that has been reasoned about
+> rather than read out of the library, and phase 4 settles it while reading the back handler for
+> `process_death_check.sh`.
 
 ### 8.3 Cross-links to H-18
 

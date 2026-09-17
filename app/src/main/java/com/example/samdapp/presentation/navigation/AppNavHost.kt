@@ -183,10 +183,21 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
                     onResumeEncounter = { patientId, encounterId, caseRecordId ->
                         backStack.add(Compounder(patientId, resumeEncounterId = encounterId, resumeCaseRecordId = caseRecordId))
                     },
-                    // A restored stack can already be inside the very case this prompt offers to
-                    // resume. Accepting it then would push a second path to one case, which is the
-                    // consult-sent-to-two-doctors class from a new direction. This also keeps the
-                    // pinned Compounder content key unique; see the entry<Compounder> comment.
+                    // CURRENTLY UNREACHABLE, AND KEPT ON PURPOSE. This would suppress the resume
+                    // prompt for a case the stack is already inside, so accepting it could not push
+                    // a second path to one case. It cannot fire today: `Home` only ever exists at
+                    // index 0 (the stack is seeded with it above, `switchTab` clears before adding
+                    // a tab root, and both other insertions are `clear(); add(Home)`), and
+                    // `NavDisplay` draws the last entry, so this composable runs only when the
+                    // stack is exactly [Home]. `backStackContainsCase` is therefore always false
+                    // here.
+                    //
+                    // Retained as defence in depth: a future multi-pane or list-detail scene could
+                    // compose `Home` alongside a non-empty tail, at which point this becomes live
+                    // and is the only thing standing between a restored deep stack and a second
+                    // live path into the case it is already showing. Removing it would be silent
+                    // until that day. Note that it is NOT what keeps the pinned Compounder content
+                    // key unique; see the entry<Compounder> comment for what actually does.
                     resumeSuppressedFor = { caseRecordId -> backStackContainsCase(backStack, caseRecordId) },
                     isOnline = isOnline,
                     session = session,
@@ -310,14 +321,29 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
             // is worse than the thing the rewrite is fixing. Pinning the key keeps the entry, its
             // ViewModel and its saved state identical across the rewrite.
             //
-            // UNIQUENESS DEPENDS ON THE RESUME GATING. Two entries sharing this key would share one
-            // ViewModelStore, and the second would be handed the first's ViewModel with the wrong
-            // encounter. This key collides only for two Compounder entries with the same patient
-            // AND the same follow-up parent, which is exactly the duplicate live path that Home's
-            // resume gating (`resumeSuppressedFor`/`backStackContainsCase`) exists to prevent.
-            // Do NOT widen this key to patientId alone, and do not weaken that gate in isolation:
-            // either one on its own turns a tidiness regression into a wrong-encounter binding.
-            // NavBackStackPolicyTest pins the collision precondition.
+            // WHAT KEEPS THIS KEY UNIQUE (corrected 2026-09-18). Two entries sharing it would share
+            // one ViewModelStore, and the second would be handed the first's ViewModel with the
+            // wrong encounter. The key collides only for two Compounder entries with the same
+            // patient AND the same follow-up parent.
+            //
+            // That cannot happen because only ONE Compounder can be in the stack at all, which is a
+            // structural property of this file rather than a policy anywhere else. There are two
+            // push sites: Home's resume prompt, which composes only when the stack is exactly
+            // [Home] (Home is seeded at index 0 and every other insertion clears first), and
+            // ConsentRoute. Reaching either again while a Compounder is live requires a tab switch,
+            // which clears the stack, or popping back past that entry. So a second one cannot be
+            // pushed on top of the first.
+            //
+            // An earlier version of this comment credited Home's resume gating
+            // (`resumeSuppressedFor`/`backStackContainsCase`) with the guarantee. That was wrong:
+            // that guard is structurally unreachable today and contributes nothing here. It is
+            // retained for a different reason, documented at its call site above.
+            //
+            // Do NOT widen this key to patientId alone, and do not add a Compounder push site or a
+            // scene that composes Home with a non-empty tail without revisiting this: either turns
+            // a tidiness regression into a wrong-encounter binding.
+            // NavBackStackPolicyTest pins the collision precondition; CompounderContentKeyTest
+            // proves the pin's effect, with a control arm on the default key.
             entry<Compounder>(
                 clazzContentKey = { key -> "Compounder:${key.patientId}:${key.followUpOfEncounterId}" },
             ) { key ->
