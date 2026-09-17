@@ -11,6 +11,12 @@ Central under `com.k2fsa.sherpa.onnx`), and ONNX Runtime ships as native librari
 Identity, versions, SHA-256 hashes and licences live in the companion; this record is what was
 validated, how, and what is still open.
 
+**Note (2026-09-17).** Section 5 covers a second, unrelated SOUP inventory (CameraX, H-18 Build 3b
+Option A), added to this file for convenience rather than as a new file. Everything above this
+note, and the framing that follows it, is ASR-specific: CameraX is Maven-published and DOES appear
+in the generated CycloneDX SBOM, the opposite of what the Scope paragraph above says about the ASR
+components, so section 5 does not reuse this paragraph's "why this record exists" reasoning.
+
 **Why this record exists now.** Until PR 4b these components were compiled into the APK but
 unreachable: both voice flags were `false`. `VOICE_FIELD_IMPACT_ENABLED` is now `true`, so the ASR
 SOUP is live on one field and its validation state stops being hypothetical.
@@ -86,3 +92,94 @@ row renders). The attribution obligation is discharged.
    sherpa-onnx and ONNX Runtime need a periodic advisory check tied to release, and none exists.
 3. **No performance requirement.** First-capture latency was measured (2612 ms cold, 613 ms warm,
    x86_64 emulator) and is reported, not asserted: there is no agreed threshold to assert against.
+
+## 5. CameraX (H-18 Build 3b Option A, in-process document capture)
+
+> **PROPOSED, AWAITING OPERATOR SIGN-OFF.** Not an approved controlled document. This section was
+> added 2026-09-17, independently of sections 1 to 4 above, which it does not touch.
+
+**Scope.** Four components: `androidx.camera:camera-core`, `camera-camera2`, `camera-lifecycle`
+and `camera-compose`, all version 1.6.2, all Apache-2.0, all Maven-published. Unlike the ASR
+components above, these ARE Maven coordinates and DO appear in the generated CycloneDX SBOM, so
+identity, exact version and hash are already covered by that automated pipeline rather than needing
+a hand-maintained companion file. This section is the validation record IEC 62304 also requires:
+what these components are used for, what was checked, and what is still open.
+
+**Why this record exists now.** `scratchpad/capture-process-death-memo.md` traces a field-reported
+lost captured page to the previous camera-capture mechanism (`ActivityResultContracts.TakePicture`,
+an external camera app) backgrounding this process and making it a low-memory-killer target. CameraX
+replaces that external hand-off with an in-process viewfinder (`DocumentCameraCapture`), and its
+validation state stops being hypothetical the moment that code ships.
+
+### 5.1 Requirements placed on this SOUP
+
+| # | Requirement | Why it is a requirement and not a preference |
+|---|---|---|
+| C-1 | The capture path performs no off-device transmission | CameraX is a local camera-hardware abstraction with no network dependency of its own; a document-capture pipeline processing PHI-adjacent clinical imagery must not silently acquire one through a library upgrade |
+| C-2 | A captured page's bytes never reach disk as plaintext | H-18's core PHI-at-rest guarantee (control (xi)); CameraX is the layer that produces the bytes this guarantee is built on top of, so its own API must not write a file this app never asked for |
+| C-3 | The component set changes only by shipping a new app release | Same reasoning as the ASR record's S-3: a silent version change is a design change nobody reviewed |
+| C-4 | Camera failure is honest: an unavailable camera fails visibly, never silently | A silently-failed capture that produces no error and no page is indistinguishable from "the worker forgot to take the photo" - a clinical document could be missing with nothing to say why |
+| C-5 | Licence obligations of the four components are discharged | Apache-2.0 attribution is owed at distribution, the same posture as every other Apache-2.0 component already listed on the Open Source Licences screen |
+
+### 5.2 Validation evidence, per requirement
+
+**C-1, no off-device transmission.** Not independently instrumented the way the ASR record's L3.2
+byte-level egress measurement was (this SOUP has no `StrictMode`/traffic-delta test of its own).
+Argued instead from what CameraX's public API surface is: `Preview`, `ImageCapture`,
+`ProcessCameraProvider` and `CameraXViewfinder` are a hardware-abstraction and rendering layer with
+no networking classes anywhere in this app's use of them, and no permission beyond `CAMERA` is
+requested for this path. **Open**: no automated test asserts this the way the ASR SOUP's egress
+tests do; recorded as an open item in 5.4 rather than a pass.
+
+**C-2, no plaintext on disk.** `ingestPageWritesNothingUnderCacheDir` (`DocumentCaptureAssemblyTest`,
+instrumented) snapshots `cacheDir` before and after a real `ingestPage` call and asserts no file was
+created anywhere in it - the direct replacement for the old staging-file-specific check, and a
+stronger claim (no file anywhere, not just the one staging file gone). `DocumentCameraCaptureTest`
+(unit) asserts the `ImageProxy` the frame arrives in is closed on both the success and the failure
+path, so the platform-owned buffer behind the capture is released promptly either way.
+
+**C-3, change control.** The version is pinned once, in `gradle/libs.versions.toml`
+(`camerax = "1.6.2"`), read by all four component declarations; a version bump is an ordinary
+reviewed dependency-catalog change, not a silent transitive upgrade of any one of the four.
+
+**C-4, honest failure.** A5 (`scratchpad/capture-process-death-memo.md` amendment A5): provider
+init failure, no back camera, or the camera already in use elsewhere all route to
+`onCameraUnavailable`, which sets an explicit error state the capture surface renders instead of
+the viewfinder - never a silent fallback and never a shutter that does nothing. Covered by
+`camera unavailable is recorded and blocks further pages` (`ConsultationDocumentCaptureTest`, unit,
+the ViewModel-state half of this contract).
+
+**C-5, licences.** Apache-2.0 for all four components, recorded on the Open Source Licences screen
+(`OpenSourceLicensesScreen.kt`, a single "CameraX" entry covering all four - they share one licence
+and one release cadence, so one row is the accurate representation, not four identical ones).
+
+### 5.3 Per-component notes
+
+| Component | Role in the device | Validation state |
+|---|---|---|
+| `camera-core` 1.6.2 (Apache-2.0) | `ImageCapture`, `Preview`, `ImageProxy` - the capture and frame-delivery API this app calls directly | C-2 and C-4 evidenced above |
+| `camera-camera2` 1.6.2 (Apache-2.0) | Camera2-backed implementation CameraX binds to at runtime; this app never calls it directly | Exercised transitively by every test above; no test targets it independently |
+| `camera-lifecycle` 1.6.2 (Apache-2.0) | `ProcessCameraProvider`, lifecycle-bound bind/unbind | Unbind-on-dispose is exercised manually (`DocumentCameraCapture`'s `DisposableEffect`), not covered by an automated test - see 5.4 |
+| `camera-compose` 1.6.2 (Apache-2.0) | `CameraXViewfinder`, the Compose interop surface for the live preview | Rendered in `DocumentCameraCapture`; no dedicated Compose UI test exists for it - see 5.4 |
+
+### 5.4 Open items, carried not closed
+
+1. **Transitive AndroidX dependencies below these four are not independently validated or
+   registered as their own SOUP components.** They are captured by the generated CycloneDX SBOM,
+   which is necessary but not sufficient for a IEC 62304 SOUP determination on any one of them.
+   **Marked pending QA countersign**: whether each transitive dependency needs its own SOUP entry,
+   or whether the SBOM plus this section's coverage of the four direct dependencies is sufficient,
+   is a QA/regulatory-process call this section does not make.
+2. **No automated egress test for C-1.** Argued from API surface, not measured, unlike the ASR
+   record's L3.2. If the operator wants this to the same evidentiary standard as the ASR SOUP, a
+   `StrictMode`/traffic-delta test analogous to `AsrEgressTest` would need writing.
+3. **No live process-death run through the real capture screen.** The claim in H-18 control (xxiii)
+   is narrower than it may read: **the process stays foreground during capture by construction, and
+   the automated `oom_score_adj` check asserts this; a live deep-stack process-death run is still
+   owed** - the automated check (`scripts/process_death_check.sh`) exercises a standalone capture
+   window, not the full sign-in-and-navigate-to-capture path, because the backend that path needs
+   was not available when this section was written.
+4. **No Compose UI test exercises `DocumentCameraCapture` directly.** Its CameraX plumbing is
+   verified structurally (compiles against the real 1.6.2 API, binds/unbinds without a crash in
+   manual runs); the byte-extraction half is unit-tested (`DocumentCameraCaptureTest`); the
+   viewfinder rendering and shutter-disabled-while-ingesting behaviour have no automated UI test.
