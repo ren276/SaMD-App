@@ -86,11 +86,20 @@ android {
             // If missing or set to 'auto', resolveDevHostIp() dynamically inspects the host's
             // active physical network interface (Ethernet/Wi-Fi) at build time.
             val configuredBackend = localProperties.getProperty("BACKEND_BASE_URL", "").trim()
-            val resolvedDevBackend = if (configuredBackend.isEmpty() || configuredBackend.equals("auto", ignoreCase = true)) {
-                "http://${resolveDevHostIp()}:8080/"
-            } else {
-                configuredBackend
-            }
+            val backendIsAuto = configuredBackend.isEmpty() || configuredBackend.equals("auto", ignoreCase = true)
+            val resolvedDevBackend = if (backendIsAuto) "http://${resolveDevHostIp()}:8080/" else configuredBackend
+            // Unconditional, not just on failure: resolveDevHostIp()'s failure paths all converge
+            // on the same well-formed "127.0.0.1" (never null, never an exception the developer
+            // would see), and a multi-homed host (VPN up alongside the real LAN adapter) can pick
+            // a real-looking but wrong address without throwing at all. A log only in a catch
+            // block would stay silent on exactly those two cases; logging the resolved host here,
+            // every time, is what actually surfaces a wrong address instead of it looking like an
+            // unrelated "backend unavailable" on the phone. See
+            // scratchpad/resolve-dev-host-ip-review.md Q4/Q5.
+            logger.lifecycle(
+                "dev backend resolved to $resolvedDevBackend" +
+                    if (backendIsAuto) " via auto" else " (from local.properties)",
+            )
             buildConfigField("String", "BACKEND_BASE_URL", "\"$resolvedDevBackend\"")
             buildConfigField("String", "ENVIRONMENT", "\"dev\"")
             // The Start/Stop/instrument/scenario block renders only when this is true. Second

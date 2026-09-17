@@ -226,7 +226,7 @@ adb reverse tcp:8080 tcp:8080 && adb reverse tcp:8090 tcp:8090
 ## Uncommitted changes
 
 ```
- M app/build.gradle.kts                                                  # PI_GATEWAY_BASE_URL comment
+ M app/build.gradle.kts                                                  # PI_GATEWAY_BASE_URL comment, plus resolveDevHostIp() - see correction below
  M app/src/dev/java/com/example/samdapp/di/PiGatewayNetworkModule.kt     # NsdGatewayDns wiring + client split
  M app/src/main/java/com/example/samdapp/domain/usecase/AssessmentRunner.kt      # pre-assessment sync
  M app/src/test/java/com/example/samdapp/domain/usecase/AssessmentRunnerTest.kt  # 3 tests
@@ -235,6 +235,24 @@ adb reverse tcp:8080 tcp:8080 && adb reverse tcp:8090 tcp:8090
 ?? app/src/testDev/java/com/example/samdapp/data/vitalssource/NsdGatewayDnsTest.kt
 ?? tools/                        # dev-connect.sh (pre-existing), kernel-hub-avahi.service (new)
 ```
+
+**Correction (post-review, `scratchpad/resolve-dev-host-ip-review.md`).** The
+`app/build.gradle.kts` line above understated this file's change: it also added
+`resolveDevHostIp()`, a build-time function that scans host network interfaces to compute
+`BACKEND_BASE_URL` when `local.properties` leaves it blank or sets it to `auto`. That mechanism
+is unrelated to the PI_GATEWAY_BASE_URL/.local problem this handoff describes and was not
+recorded here at the time. **It is dev-flavor-gated, not release-build-type-gated**: `staging`
+and `prod` are separate `productFlavors` blocks that never reference it, so a `stagingRelease`
+or `prodRelease` build - the artifact actually distributed - cannot reach it. A `devRelease`
+variant (dev flavor, release build type) is still buildable and still reaches it; the gate is
+the flavor, not the build type, and the record should not say otherwise. Full review, including
+the two residuals it did not close: `scratchpad/resolve-dev-host-ip-review.md`. **Residual not
+closed by this fix, recorded here because a scratchpad file does not itself travel through PR
+review**: a build-time log line (added in a follow-up commit) reports whatever host was resolved,
+but does not stop a multi-homed host (a VPN interface up alongside the real LAN adapter) from
+having its address picked instead of the developer's actual LAN IP - the deny-list in
+`resolveDevHostIp()` names six specific virtual-adapter prefixes and no VPN-client prefixes.
+Closing that needs a wider deny-list or an allow-list, out of scope for the log-only fix.
 
 Pre-existing, not mine, **decide before committing**:
 ```
