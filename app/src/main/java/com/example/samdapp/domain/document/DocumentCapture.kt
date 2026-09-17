@@ -34,8 +34,22 @@ sealed interface DocumentBytes {
 /** One captured page, as the capture UI knows it. [thumbnailJpeg] is a small re-encoded JPEG held
  *  in memory only for the thumbnail strip - never written to disk, so the only on-disk copy of a
  *  captured page is the encrypted one. A `ByteArray` rather than a `Bitmap` so this type stays in
- *  the domain layer and the ViewModel never handles an Android graphics object. */
-class CapturedPage(val pageId: String, val thumbnailJpeg: ByteArray)
+ *  the domain layer and the ViewModel never handles an Android graphics object.
+ *
+ *  [rotationDegrees] is CameraX's `ImageInfo.rotationDegrees` for this frame (Option A, in-process
+ *  capture), carried alongside the page rather than baked into the stored bytes: the encrypted
+ *  page on disk is exactly what the sensor produced, and rotation is applied at read time - once
+ *  for the thumbnail here, again in [DocumentCaptureStore.assemble] when the page is drawn into
+ *  the PDF - the same one-value-two-consumers shape [DocumentCaptureStore.assemble]'s KDoc
+ *  describes. Not persisted: this whole type lives only in ViewModel memory (H-18 Build 3b's
+ *  accepted no-`SavedStateHandle` posture), so it needs no on-disk representation. */
+class CapturedPage(val pageId: String, val thumbnailJpeg: ByteArray, val rotationDegrees: Int)
+
+/** One page in its assembly-time position, as [DocumentCaptureStore.assemble] needs it: the
+ *  worker's final reordered id, paired with the rotation [CapturedPage] carried for it since
+ *  capture. A named pair rather than `Pair<String, Int>` so a call site reads as page data, not
+ *  two coincidental strings-and-ints. */
+data class OrderedPage(val pageId: String, val rotationDegrees: Int)
 
 /**
  * Thrown when a captured page cannot be turned into a drawable image - the ciphertext fails GCM
@@ -54,19 +68,26 @@ class DocumentPageUnreadableException(
 ) : Exception("Captured page ${pageIndex + 1} could not be read", cause)
 
 /**
- * H-18, Build 3b. Owns the on-disk life of an in-progress camera capture: the per-session
- * directory of individually-encrypted pages, the short-lived plaintext staging file each camera
- * hand-off needs, and the assembly of the final PDF.
+ * H-18, Build 3b (Option A, in-process capture). Owns the on-disk life of an in-progress camera
+ * capture: the per-session directory of individually-encrypted pages, and the assembly of the
+ * final PDF.
  *
  * An interface in the domain layer for the same reason every repository here is: the ViewModel
  * that drives the capture loop is plain-JVM unit tested, and the real implementation needs the
  * Android Keystore, `BitmapFactory` and `PdfDocument`.
  *
  * **Encrypt-as-captured, not assemble-then-encrypt.** Each page is encrypted the moment the
- * camera returns it and decrypted one at a time during assembly. The alternative - keep N
- * plaintext JPEGs until the worker taps done, then assemble and encrypt - would leave every page
+ * camera callback delivers it and decrypted one at a time during assembly. The alternative - keep
+ * N plaintext JPEGs until the worker taps done, then assemble and encrypt - would leave every page
  * of a clinical document readable on disk for the whole capture loop and across any process death
  * in it, which is the exact posture this feature exists to avoid.
+ *
+ * **No plaintext on disk, never "no plaintext".** [ingestPage] takes the captured frame as an
+ * in-memory `ByteArray` (CameraX's `ImageCapture.OnImageCapturedCallback`, not the old external
+ * `ActivityResultContracts.TakePicture` hand-off), so there is no staging file for any other
+ * process to write into and no window in which a plaintext page sits on disk. The bytes still
+ * pass through the JVM heap for the duration of one encrypt call; that residual is named, not
+ * claimed away, in the H-18 risk file.
  */
 interface DocumentCaptureStore {
 
@@ -79,42 +100,37 @@ interface DocumentCaptureStore {
      *  Touches no disk - directories are created by the suspending calls that need them. */
     fun newSession(): String
 
-    /** Absolute path of the plaintext staging file the camera app writes page [pageId] into,
-     *  its directory created. A path, not a `Uri`: the Screen owns the `FileProvider` grant and
-     *  the ViewModel never sees an Android `Uri` (the layering the direct-file path follows). */
-    suspend fun stagingPathFor(sessionId: String, pageId: String): String
-
     /**
-     * Encrypts the staging file for [pageId] into the session directory and deletes the plaintext
-     * staging file before returning, on every path including failure. After this returns there is
-     * no plaintext copy of the page anywhere on disk.
+     * Encrypts [jpegBytes] for [pageId] into the session directory. [rotationDegrees] is CameraX's
+     * `ImageInfo.rotationDegrees` for this frame, applied to the returned [CapturedPage.thumbnailJpeg]
+     * so the thumbnail strip is upright; the same value must be threaded back through
+     * [OrderedPage] into [assemble] so the assembled PDF page is upright too - this call does not
+     * persist it. The caller owns [jpegBytes] after this returns and is responsible for zeroing
+     * it; nothing here retains a reference to it.
      */
-    suspend fun ingestPage(sessionId: String, pageId: String): Result<CapturedPage>
-
-    /** Deletes the plaintext staging file for a capture the camera never completed (cancelled,
-     *  or returned `saved = false`). */
-    suspend fun discardStaging(sessionId: String, pageId: String)
+    suspend fun ingestPage(sessionId: String, pageId: String, jpegBytes: ByteArray, rotationDegrees: Int): Result<CapturedPage>
 
     /** Per-page delete before finalising (page order and page membership are clinical meaning). */
     suspend fun deletePage(sessionId: String, pageId: String)
 
-    /** Deletes the whole session directory, every encrypted page in it, any assembled output and
-     *  any staging leftovers. Abandoning a capture keeps nothing: encrypted PHI on disk with no
+    /** Deletes the whole session directory and every encrypted page in it, including any
+     *  assembled output. Abandoning a capture keeps nothing: encrypted PHI on disk with no
      *  metadata row, no audit and no owner is a worse posture than losing the photos. */
     suspend fun discardSession(sessionId: String)
 
     /**
-     * Consolidates [orderedPageIds] into ONE PDF, in exactly that order, encrypts it inside the
-     * session directory and returns its measurements. [onProgress] is called with
-     * `(pagesDone, pageCount)` as each page is finished.
+     * Consolidates [orderedPages] into ONE PDF, in exactly that order and with each page rotated
+     * upright per its own [OrderedPage.rotationDegrees], encrypts it inside the session directory
+     * and returns its measurements. [onProgress] is called with `(pagesDone, pageCount)` as each
+     * page is finished.
      *
      * Fails, writing nothing, if any page is unreadable ([DocumentPageUnreadableException]) or if
-     * [orderedPageIds] is empty or longer than [maxPages]. Cancellation of the calling coroutine
+     * [orderedPages] is empty or longer than [maxPages]. Cancellation of the calling coroutine
      * deletes the partial output the same way a failure does.
      */
     suspend fun assemble(
         sessionId: String,
-        orderedPageIds: List<String>,
+        orderedPages: List<OrderedPage>,
         onProgress: (Int, Int) -> Unit,
     ): Result<DocumentBytes.AssembledCapture>
 }

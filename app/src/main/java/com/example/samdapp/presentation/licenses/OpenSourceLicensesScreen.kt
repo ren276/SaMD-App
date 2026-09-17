@@ -64,6 +64,12 @@ private val LICENSED_COMPONENTS = listOf(
         role = "UI toolkit.",
     ),
     LicensedComponent(
+        name = "CameraX",
+        version = "1.6.2",
+        licence = "Apache-2.0",
+        role = "In-process document capture (H-18 Build 3b).",
+    ),
+    LicensedComponent(
         name = "Room",
         version = "2.8.4",
         licence = "Apache-2.0",

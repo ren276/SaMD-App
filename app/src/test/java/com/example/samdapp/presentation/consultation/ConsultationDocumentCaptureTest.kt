@@ -55,18 +55,23 @@ class ConsultationDocumentCaptureTest {
     )
 
     /** The capture surface is gated on the same controlled-vocabulary selections the file picker
-     *  is, so every test has to make them first - which is itself the point of this helper. */
-    private fun TestScope.startCaptureWith(viewModel: ConsultationViewModel, pages: Int) {
+     *  is, so every test has to make them first - which is itself the point of this helper.
+     *  [rotationDegrees] is fixed per call (a real capture session can vary it per page; no test
+     *  here needs that, so a single shared value keeps call sites short). */
+    private fun TestScope.startCaptureWith(viewModel: ConsultationViewModel, pages: Int, rotationDegrees: Int = 0) {
         viewModel.onDocumentDepartmentSelected(DepartmentCode.CARDIO)
         viewModel.onDocumentRecordTypeSelected(RecordTypeCode.LAB_REPORT)
         viewModel.onStartDocumentCapture()
         repeat(pages) {
-            viewModel.onAddDocumentPage()
-            advanceUntilIdle()
-            viewModel.onDocumentPageCaptured(saved = true)
+            viewModel.onDocumentPageCaptured(fakeJpegBytes(), rotationDegrees)
             advanceUntilIdle()
         }
     }
+
+    /** A fresh, non-empty, non-shared array each call - the ViewModel zeroes its own copy after
+     *  ingest (A3), so a test that needs to assert on the bytes after the fact must keep its own
+     *  reference rather than reuse one already handed to the ViewModel. */
+    private fun fakeJpegBytes(): ByteArray = ByteArray(8) { (it + 1).toByte() }
 
     @Test
     fun `capture cannot start without a selected department and record type`() =
@@ -203,22 +208,101 @@ class ConsultationDocumentCaptureTest {
             assertEquals(1, captureStore.discardedSessions.size)
         }
 
+    /** Option A replacement for the old "camera backed out, discard the staging file" case: there
+     *  is no staging file to strand any more (H-18, Build 3b, Option A) - a CameraX capture
+     *  failure never produces bytes in the first place, so the only things left to assert are
+     *  that no page was added and the surface stays usable with an explicit error. */
     @Test
-    fun `a camera the worker backed out of adds no page and strands no staging file`() =
+    fun `a failed camera capture adds no page and surfaces an error`() =
         runTest(mainDispatcherRule.dispatcher) {
             val viewModel = newViewModel()
             startCaptureWith(viewModel, pages = 1)
 
-            viewModel.onAddDocumentPage()
-            advanceUntilIdle()
-            val abandoned = viewModel.uiState.value.documentCapture!!.pendingPageId!!
-            viewModel.onDocumentPageCaptured(saved = false)
+            viewModel.onDocumentPageCaptureFailed("Capture failed")
             advanceUntilIdle()
 
             val capture = viewModel.uiState.value.documentCapture!!
             assertEquals(1, capture.pages.size)
-            assertNull(capture.pendingPageId)
-            assertEquals(listOf(abandoned), captureStore.discardedStaging)
+            assertFalse(capture.isIngestingPage)
+            assertEquals("Capture failed", capture.errorMessage)
+        }
+
+    /** A5: the viewfinder itself could not start. No fallback capture path exists - the surface
+     *  is expected to show an explicit error instead (asserted at the Compose layer in
+     *  DocumentCaptureSurface; this is the ViewModel-state half of that contract). */
+    @Test
+    fun `camera unavailable is recorded and blocks further pages`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val viewModel = newViewModel()
+            viewModel.onDocumentDepartmentSelected(DepartmentCode.CARDIO)
+            viewModel.onDocumentRecordTypeSelected(RecordTypeCode.LAB_REPORT)
+            viewModel.onStartDocumentCapture()
+
+            viewModel.onCameraUnavailable("No back camera is available on this device.")
+            advanceUntilIdle()
+
+            val capture = viewModel.uiState.value.documentCapture!!
+            assertTrue(capture.cameraUnavailable)
+            assertFalse(capture.canAddPage)
+            assertEquals("No back camera is available on this device.", capture.errorMessage)
+        }
+
+    /** A3: the ViewModel owns zeroing the byte array once ingest resolves, regardless of
+     *  success or failure - the caller's copy must not remain live plaintext on the heap after
+     *  its one use. */
+    @Test
+    fun `the captured byte array is zeroed after a successful ingest`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val viewModel = newViewModel()
+            viewModel.onDocumentDepartmentSelected(DepartmentCode.CARDIO)
+            viewModel.onDocumentRecordTypeSelected(RecordTypeCode.LAB_REPORT)
+            viewModel.onStartDocumentCapture()
+            val bytes = fakeJpegBytes()
+
+            viewModel.onDocumentPageCaptured(bytes, rotationDegrees = 0)
+            advanceUntilIdle()
+
+            assertTrue(bytes.all { it == 0.toByte() })
+        }
+
+    @Test
+    fun `the captured byte array is zeroed even when ingest fails`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val viewModel = newViewModel()
+            captureStore.ingestResult = { _, _ -> Result.failure(IllegalStateException("The captured image could not be read")) }
+            viewModel.onDocumentDepartmentSelected(DepartmentCode.CARDIO)
+            viewModel.onDocumentRecordTypeSelected(RecordTypeCode.LAB_REPORT)
+            viewModel.onStartDocumentCapture()
+            val bytes = fakeJpegBytes()
+
+            viewModel.onDocumentPageCaptured(bytes, rotationDegrees = 0)
+            advanceUntilIdle()
+
+            assertTrue(bytes.all { it == 0.toByte() })
+        }
+
+    /** A1's plumbing half: each page's CameraX rotation reaches `ingestPage`, and the SAME value
+     *  (read back from the final page list, per page) reaches `assemble` via `OrderedPage` - the
+     *  pixel-level rotation math itself is real-`Matrix`/`Canvas` work covered in
+     *  `DocumentCaptureAssemblyTest` (androidTest), not here. */
+    @Test
+    fun `each page's capture rotation is threaded through to assembly`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val viewModel = newViewModel()
+            viewModel.onDocumentDepartmentSelected(DepartmentCode.CARDIO)
+            viewModel.onDocumentRecordTypeSelected(RecordTypeCode.LAB_REPORT)
+            viewModel.onStartDocumentCapture()
+            listOf(0, 90, 180, 270).forEach { rotation ->
+                viewModel.onDocumentPageCaptured(fakeJpegBytes(), rotation)
+                advanceUntilIdle()
+            }
+            val pageIds = viewModel.uiState.value.documentCapture!!.pages.map { it.pageId }
+
+            viewModel.onFinishDocumentCapture()
+            advanceUntilIdle()
+
+            assertEquals(listOf(0, 90, 180, 270), pageIds.map { captureStore.ingestedRotations.getValue(it) })
+            assertEquals(listOf(0, 90, 180, 270), captureStore.assembledRotations.single())
         }
 
     /** A finished capture queues exactly one document, on the same pending-document list the
@@ -288,9 +372,7 @@ class ConsultationDocumentCaptureTest {
 
             val stillEncrypting = CompletableDeferred<Unit>()
             captureStore.ingestGate = stillEncrypting
-            viewModel.onAddDocumentPage()
-            advanceUntilIdle()
-            viewModel.onDocumentPageCaptured(saved = true)
+            viewModel.onDocumentPageCaptured(fakeJpegBytes(), rotationDegrees = 0)
             advanceUntilIdle()
 
             viewModel.onConfirmDiscardDocumentCapture()
