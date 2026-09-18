@@ -134,6 +134,23 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
             },
         )
     }
+    // Both Compounder insertion sites go through this. A double tap on Consent's Continue, or on
+    // Home's Resume, can fire two navigation callbacks before the source entry leaves composition,
+    // and two Compounder entries for one patient and follow-up parent would share a content key,
+    // a ViewModelStore and therefore a CompounderViewModel. The single-live-Compounder property
+    // that the pinned content key depends on is asserted in this file, so it is enforced here too
+    // rather than left to each caller to remember.
+    fun pushCompounder(key: Compounder) {
+        val top = backStack.lastOrNull()
+        if (top is Compounder &&
+            top.patientId == key.patientId &&
+            top.followUpOfEncounterId == key.followUpOfEncounterId
+        ) {
+            return
+        }
+        backStack.add(key)
+    }
+
     fun bottomNavBar(current: BottomNavTab?): @Composable () -> Unit =
         { BottomNavBar(current = current, onSelect = ::switchTab) }
 
@@ -181,7 +198,7 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
                     onOpenPatient = { patientId -> backStack.add(PatientSummary(patientId)) },
                     onOpenDoctorList = { backStack.add(DoctorListRoute) },
                     onResumeEncounter = { patientId, encounterId, caseRecordId ->
-                        backStack.add(Compounder(patientId, resumeEncounterId = encounterId, resumeCaseRecordId = caseRecordId))
+                        pushCompounder(Compounder(patientId, resumeEncounterId = encounterId, resumeCaseRecordId = caseRecordId))
                     },
                     // CURRENTLY UNREACHABLE, AND KEPT ON PURPOSE. This would suppress the resume
                     // prompt for a case the stack is already inside, so accepting it could not push
@@ -307,7 +324,7 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
             entry<ConsentRoute> { key ->
                 ConsentScreen(
                     patientId = key.patientId,
-                    onContinue = { backStack.add(Compounder(key.patientId, key.followUpOfEncounterId)) },
+                    onContinue = { pushCompounder(Compounder(key.patientId, key.followUpOfEncounterId)) },
                 )
             }
             // The content key is pinned rather than left to default, and that is load-bearing.

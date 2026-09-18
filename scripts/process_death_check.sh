@@ -224,9 +224,15 @@ run_navstack_mode() {
 
     OVERLAP=$(comm -12 <(echo "$BEFORE") <(echo "$AFTER") | wc -l | tr -d ' ')
     echo "  $OVERLAP of $BEFORE_COUNT pre-kill text values are still on screen."
-    if [ "$OVERLAP" -eq 0 ]; then
-        echo "FAIL: nothing from the pre-kill screen survived. The worker did not land back where" >&2
-        echo "they were." >&2
+    # A single surviving string is not evidence. Patient banners, bottom-nav labels and app chrome
+    # are shared across most screens, so "at least one value matches" can be satisfied by restoring
+    # to a DIFFERENT non-Home destination. Require a majority of the pre-kill screen to come back.
+    # This is still a text comparison and cannot name the route; see the limitation note below.
+    REQUIRED=$(( (BEFORE_COUNT + 1) / 2 ))
+    if [ "$OVERLAP" -lt "$REQUIRED" ]; then
+        echo "FAIL: only $OVERLAP of $BEFORE_COUNT pre-kill text values came back (needed at least" >&2
+        echo "$REQUIRED). The app relaunched to a screen that is not the one it died on, or the" >&2
+        echo "screen came back substantially empty." >&2
         return 1
     fi
 
@@ -235,9 +241,14 @@ run_navstack_mode() {
     echo "came back to a screen sharing $OVERLAP text values with the one it died on rather than to"
     echo "Home. onSaveInstanceState routed through the back-stack saver."
     echo
-    echo "NOTE: this compares what is on screen, not the stack itself. Fields held only in ViewModel"
-    echo "memory (a typed form, an in-flight acquisition) are expected to come back empty; that is"
-    echo "RR-03, not a restore failure. What is being asserted here is the ROUTE, not its contents."
+    echo "NOTE: this compares what is on screen, not the stack itself, and it cannot name the route."
+    echo "A majority-overlap match plus the Home rejection is strong evidence the worker came back"
+    echo "to the same destination, but two screens sharing most of their text would satisfy it. The"
+    echo "precise check would compare a route-specific marker, which needs the app to emit one (for"
+    echo "example the restored stack depth and top route class name to logcat); that does not exist"
+    echo "and is recorded as owed in scratchpad/navstack-phase4-scope.md."
+    echo "Fields held only in ViewModel memory (a typed form, an in-flight acquisition) are expected"
+    echo "to come back empty; that is RR-03, not a restore failure."
     return 0
 }
 

@@ -54,18 +54,21 @@ class DoctorAssignmentConfirmViewModelTest {
         registrationNumber = "REG-1",
     )
 
-    private fun caseRecord(status: CaseStatus) = CaseRecord(
+    private fun caseRecord(status: CaseStatus, assignedDoctorId: String? = null) = CaseRecord(
         id = CASE,
         patientId = "pat-1",
         encounterId = ENCOUNTER,
         status = status,
-        assignedDoctorId = null,
+        assignedDoctorId = assignedDoctorId,
         createdAt = Instant.EPOCH,
         updatedAt = Instant.EPOCH,
     )
 
-    private fun viewModel(status: CaseStatus): DoctorAssignmentConfirmViewModel {
-        val cases = FakeCaseRecordRepository(initial = listOf(caseRecord(status)))
+    private fun viewModel(
+        status: CaseStatus,
+        assignedDoctorId: String? = null,
+    ): DoctorAssignmentConfirmViewModel {
+        val cases = FakeCaseRecordRepository(initial = listOf(caseRecord(status, assignedDoctorId)))
         // The resolver bails out if the encounter row is missing, so the control cases below would
         // fail for that reason rather than for the status check they exist to exercise.
         val encounters = FakeEncounterRepository(
@@ -154,5 +157,44 @@ class DoctorAssignmentConfirmViewModelTest {
         advanceUntilIdle()
 
         assertEquals(doctor, viewModel.uiState.value.selectedDoctor)
+    }
+
+    /**
+     * PR 57 review finding, confirmed against `CaseRecordRepositoryImpl.assignDoctor`: an OFFLINE
+     * confirmation writes `PENDING_SYNC` together with `assignedDoctorId`, so such a case already
+     * has a doctor and is merely waiting to be pushed. The first version of this guard omitted
+     * `PENDING_SYNC`, so a restored screen proposed a doctor again and confirming would have
+     * overwritten the persisted one before it ever synced.
+     *
+     * Note this is also why the guard cannot be an ordinal threshold in the other direction:
+     * `PENDING_SYNC` sorts BEFORE `SENT_TO_DOCTOR`, so `>=` would have missed it too.
+     */
+    @Test
+    fun `an offline-assigned case pending sync navigates away instead of re-proposing`() = runTest(mainDispatcherRule.dispatcher) {
+        val viewModel = viewModel(CaseStatus.PENDING_SYNC, assignedDoctorId = "doc-9")
+
+        assertEquals(DoctorAssignmentConfirmEffect.AlreadyAssigned, viewModel.effects.first())
+        assertNull("An offline-assigned case must not be offered a new doctor", viewModel.uiState.value.selectedDoctor)
+    }
+
+    /** The doctor id is checked directly as well as the status, because `markPrescriptionReceived`
+     *  updates status alone: a case assigned on another device and arrived by sync can carry a
+     *  doctor without this device having seen the status transition that set it. */
+    @Test
+    fun `a case carrying a doctor id navigates away whatever its status says`() = runTest(mainDispatcherRule.dispatcher) {
+        val viewModel = viewModel(CaseStatus.SAVED_LOCALLY, assignedDoctorId = "doc-9")
+
+        assertEquals(DoctorAssignmentConfirmEffect.AlreadyAssigned, viewModel.effects.first())
+        assertNull(viewModel.uiState.value.selectedDoctor)
+    }
+
+    /** Pins the status SET specifically. The two assertions above would also pass on the
+     *  `assignedDoctorId` half of the check alone, so without this nothing would fail if
+     *  `PENDING_SYNC` were dropped from `ALREADY_ASSIGNED_STATUSES` again. */
+    @Test
+    fun `PENDING_SYNC alone is enough to navigate away, without a local doctor id`() = runTest(mainDispatcherRule.dispatcher) {
+        val viewModel = viewModel(CaseStatus.PENDING_SYNC, assignedDoctorId = null)
+
+        assertEquals(DoctorAssignmentConfirmEffect.AlreadyAssigned, viewModel.effects.first())
     }
 }

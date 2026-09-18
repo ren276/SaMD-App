@@ -27,6 +27,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 
 /**
@@ -175,6 +177,9 @@ class KernelAssessmentViewModel @AssistedInject constructor(
         ): KernelAssessmentViewModel
     }
 
+    /** Resolved once in `init` and awaited by [onContinue]. See the comment at its assignment. */
+    private lateinit var audioUriLookup: Deferred<String?>
+
     private val _uiState = MutableStateFlow(KernelAssessmentUiState())
     val uiState: StateFlow<KernelAssessmentUiState> = _uiState.asStateFlow()
 
@@ -189,12 +194,19 @@ class KernelAssessmentViewModel @AssistedInject constructor(
         // over that ASC-ordered list is exactly the semantics the route argument used to carry,
         // and a hand-written ORDER BY would reintroduce the chance of picking the wrong take from
         // a worker who recorded twice.
-        viewModelScope.launch {
+        // Held as a Deferred, not merely written into uiState when it happens to finish. The
+        // Continue button is enabled by `canContinue`, which tracks the REPORT load and knows
+        // nothing about this lookup, so a worker who acknowledges quickly could previously press
+        // Continue while `audioUri` was still its initial null. That is indistinguishable from
+        // "there is no recording", and the nav branch would skip transcription for a case that
+        // does have audio: a silently dropped clinical leg. onContinue now awaits this.
+        audioUriLookup = viewModelScope.async {
             val audioUri = consultationRepository.getById(consultationId)
                 ?.attachments
                 ?.firstOrNull { it.type == AttachmentType.AUDIO }
                 ?.uri
             _uiState.update { it.copy(audioUri = audioUri) }
+            audioUri
         }
         // Collected, not one-shot: the async submission queue means no report row is guaranteed
         // to exist yet when this screen opens. workState tells apart "still processing" (show a
@@ -251,7 +263,9 @@ class KernelAssessmentViewModel @AssistedInject constructor(
                     "sourceLabel" to display?.sourceLabel,
                 ),
             )
-            _effects.send(KernelAssessmentEffect.Continue(_uiState.value.audioUri))
+            // Awaited, not read from uiState: the lookup may still be in flight, and a null read
+            // here would drop the transcription leg for a case that has audio.
+            _effects.send(KernelAssessmentEffect.Continue(audioUriLookup.await()))
         }
     }
 }

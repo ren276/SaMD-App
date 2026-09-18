@@ -61,9 +61,12 @@ Evidence is marked **VERIFIED** (read the file or ran the command in this pass) 
 
 The four phase-4 deferrals were each checked and are **still only owed, not half-built**:
 no `CaseRecord.status` read exists at the `DoctorAssignmentConfirmRoute` entry (VERIFIED), there is
-no Robolectric emergency test (VERIFIED, `app/src/test/.../emergency/` does not exist), there is no
-`process_death_check.sh` (VERIFIED, absent from the tree), and `AsrEgressTest` still has no
-`GrantPermissionRule` (VERIFIED).
+no emergency-reason test (VERIFIED, `app/src/test/.../emergency/` does not exist), the
+`process_death_check.sh` that exists has no navigation mode (CORRECTED 2026-09-18: this pass
+originally recorded the script as absent from the tree, which was wrong; it has existed since
+`b88bd88`, and what was outstanding was its deep-stack mode, not the script), and `AsrEgressTest`
+has no `GrantPermissionRule` (VERIFIED as a fact, though the box above records that the rule was
+never the fix).
 
 **Phase 3 is not empty, but it is small**, and nothing in it is a route policy. Every remaining
 route-level item is done or belongs to phase 4/5. What is left is one inert seam, one unbuilt

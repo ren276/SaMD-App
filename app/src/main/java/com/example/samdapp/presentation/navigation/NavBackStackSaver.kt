@@ -182,8 +182,14 @@ internal fun transformForSave(stack: List<NavKey>): List<NavKey> {
                 // one) made the check miss and emit a SECOND Compounder for the same case, which
                 // is precisely the duplicate this transform exists to avoid. The nearest one wins,
                 // so the answer is deterministic.
-                val ancestor = stack.take(index).filterIsInstance<Compounder>()
-                    .lastOrNull { it.patientId == entry.patientId }
+                // The INDEX is tracked, not just the value. `indexOf` would resolve the entry by
+                // data-class equality and return the FIRST equal one, so a stack holding two equal
+                // start-shape Compounder entries would have the repair applied to the lower one
+                // while the nearest stayed armed below the restored screen: exactly the state this
+                // branch exists to prevent.
+                val ancestorIndex = stack.take(index)
+                    .indexOfLast { it is Compounder && it.patientId == entry.patientId }
+                val ancestor = if (ancestorIndex >= 0) stack[ancestorIndex] as Compounder else null
                 when {
                     ancestor == null -> decisions[index] = EntryDecision.Replace(target)
                     resumesSameCase(ancestor, target) -> decisions[index] = EntryDecision.Drop
@@ -194,7 +200,7 @@ internal fun transformForSave(stack: List<NavKey>): List<NavKey> {
                     // would re-run StartCaseUseCase.
                     else -> {
                         decisions[index] = EntryDecision.Drop
-                        decisions[stack.indexOf(ancestor)] = EntryDecision.Replace(
+                        decisions[ancestorIndex] = EntryDecision.Replace(
                             Compounder(
                                 patientId = entry.patientId,
                                 followUpOfEncounterId = ancestor.followUpOfEncounterId,

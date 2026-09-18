@@ -94,15 +94,32 @@ class DoctorAssignmentConfirmViewModel @AssistedInject constructor(
         /**
          * Statuses meaning this case already has a doctor, so the confirm screen must not be shown.
          *
-         * DELIBERATELY A SET, NOT AN ORDINAL COMPARISON. `CaseStatus` is declared
-         * `DRAFT, SAVED_LOCALLY, PENDING_SYNC, SENT_TO_DOCTOR, PRESCRIPTION_RECEIVED, ABANDONED`,
-         * so `status.ordinal >= SENT_TO_DOCTOR.ordinal` would sweep in `ABANDONED`, which is not an
-         * assigned case and should restore to its confirm screen like any other unassigned one.
-         * An ordinal threshold also silently acquires every new enum value declared after it, which
-         * is a defect that arrives without anyone editing this file. List the statuses that mean
-         * what this check means, and nothing else.
+         * DELIBERATELY A SET, NOT AN ORDINAL COMPARISON, and the reason is sharper than it
+         * first looks. `CaseStatus` is declared
+         * `DRAFT, SAVED_LOCALLY, PENDING_SYNC, SENT_TO_DOCTOR, PRESCRIPTION_RECEIVED, ABANDONED`.
+         * An ordinal threshold at `SENT_TO_DOCTOR` is wrong in BOTH directions: it sweeps in
+         * `ABANDONED`, which has no doctor and should restore normally, and it misses
+         * `PENDING_SYNC`, which does have one. Declaration order is not assignment order, and any
+         * threshold over this enum encodes the wrong thing. It would also silently acquire every
+         * new value declared after it. List the statuses that mean what this check means.
+         *
+         * The statuses are the documented gate, but they are not the whole truth, which is why the
+         * check below also tests `assignedDoctorId` directly: `markPrescriptionReceived` updates
+         * status alone, so a case whose assignment happened elsewhere and arrived by sync could
+         * carry a later status without a local doctor id, and conversely the id is the thing this
+         * screen must not let a worker overwrite.
          */
-        val ALREADY_ASSIGNED_STATUSES = setOf(CaseStatus.SENT_TO_DOCTOR, CaseStatus.PRESCRIPTION_RECEIVED)
+        val ALREADY_ASSIGNED_STATUSES = setOf(
+            // Offline assignment. CaseRecordRepositoryImpl.assignDoctor writes PENDING_SYNC
+            // together with assignedDoctorId when isOnline is false, so this case HAS a doctor and
+            // is merely waiting to be pushed. Missing it was a real defect: a restored confirm
+            // screen proposed a second doctor, and confirming would overwrite the persisted one
+            // before it ever synced. Note that an ordinal threshold would have missed it too, and
+            // in the other direction: PENDING_SYNC sorts BEFORE SENT_TO_DOCTOR.
+            CaseStatus.PENDING_SYNC,
+            CaseStatus.SENT_TO_DOCTOR,
+            CaseStatus.PRESCRIPTION_RECEIVED,
+        )
     }
 
     init {
@@ -111,7 +128,9 @@ class DoctorAssignmentConfirmViewModel @AssistedInject constructor(
             // Checked before anything is resolved or drawn, so a restored screen for a case that
             // has moved on never flashes a doctor proposal on its way out. isLoading stays true
             // until the navigation lands.
-            if (caseRecord != null && caseRecord.status in ALREADY_ASSIGNED_STATUSES) {
+            if (caseRecord != null &&
+                (caseRecord.assignedDoctorId != null || caseRecord.status in ALREADY_ASSIGNED_STATUSES)
+            ) {
                 _effects.send(DoctorAssignmentConfirmEffect.AlreadyAssigned)
                 return@launch
             }

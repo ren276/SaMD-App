@@ -183,6 +183,33 @@ class NavBackStackPolicyTest {
         assertEquals(1, cases.records.size)
     }
 
+    /**
+     * PR 57 review finding. The repair branch picks the NEAREST same-patient `Compounder` below the
+     * `ConsultationRoute`, but the first version then located it with `stack.indexOf(ancestor)`,
+     * which resolves by data-class equality and returns the FIRST equal entry. With two equal
+     * start-shape entries the repair landed on the lower one and the nearest stayed armed, which is
+     * precisely the state the branch exists to prevent: backing out once would re-run
+     * StartCaseUseCase. The fix tracks the index during the search.
+     */
+    @Test
+    fun `the repair targets the nearest same-patient Compounder, not the first equal one`() {
+        val stack = listOf(
+            Home,
+            Compounder(PATIENT),
+            Compounder(PATIENT),
+            ConsultationRoute(PATIENT, "enc-1", "case-1", "ZZPROBE cough three days"),
+        )
+
+        val transformed = transformForSave(stack)
+
+        // The lower duplicate is untouched; the NEAREST one carries the repair.
+        assertEquals(3, transformed.size)
+        assertEquals(Compounder(PATIENT), transformed[1])
+        val repaired = transformed[2] as Compounder
+        assertEquals("enc-1", repaired.resumeEncounterId)
+        assertEquals("case-1", repaired.resumeCaseRecordId)
+    }
+
     // ---------------------------------------------------------------------------------------
     // V9: the resume gate, and the collision precondition it doubles as.
     // ---------------------------------------------------------------------------------------
