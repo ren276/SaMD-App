@@ -12,11 +12,14 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 /**
  * Full-screen, high-contrast, terminal state (REQ-TRS-02) — reached only from
@@ -27,7 +30,21 @@ import androidx.compose.ui.unit.dp
  * the actual next step is a real-world physical referral, which this app does not mediate.
  */
 @Composable
-fun EmergencyOverrideScreen(reasons: List<String>, onAcknowledged: () -> Unit) {
+fun EmergencyOverrideScreen(
+    encounterId: String,
+    onAcknowledged: () -> Unit,
+    viewModel: EmergencyOverrideViewModel = hiltViewModel<EmergencyOverrideViewModel, EmergencyOverrideViewModel.Factory>(
+        creationCallback = { factory -> factory.create(encounterId) },
+    ),
+) {
+    val reasons by viewModel.reasons.collectAsStateWithLifecycle()
+    EmergencyOverrideContent(reasons = reasons, onAcknowledged = onAcknowledged)
+}
+
+/** Split out from [EmergencyOverrideScreen] so the rendering stays a pure function of its inputs:
+ *  the reasons are now re-derived asynchronously, and this half must not depend on how. */
+@Composable
+internal fun EmergencyOverrideContent(reasons: List<String>, onAcknowledged: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()

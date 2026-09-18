@@ -8,8 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -21,6 +20,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.navigation3.runtime.NavBackStack
+import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
@@ -87,7 +88,25 @@ fun AppNavHost() {
 
 @Composable
 private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
-    val backStack = remember { mutableStateListOf<Any>(Home) }
+    // Saveable, so the worker comes back to the screen they were on after process death instead
+    // of losing the whole stack (the old `remember { mutableStateListOf<Any>(Home) }`).
+    //
+    // NOT `rememberNavBackStack`: verified against navigation3-runtime 1.1.4's sources, that
+    // helper takes no `inputs` and has no failure path, and this call site needs both. The
+    // `session.userId` key is what preserves the guarantee this composable's KDoc above relies on
+    // (every new sign-in starts at Home), which a saveable stack would otherwise break, and the
+    // saver's own null-on-failure contract is what stops a route class that can no longer be
+    // deserialized from crashing the app on every launch. See NavBackStackSaver.kt.
+    val backStack = rememberSaveable(
+        session.userId,
+        saver = rememberNavBackStackSaver(session.userId),
+    ) { NavBackStack<NavKey>(Home) }
+
+    // A discarded stack must leave a trace: a stack that vanishes silently looks exactly like a
+    // worker who walked back to Home themselves. Drained once per composition; the reporter
+    // clears itself, so one discard writes one row.
+    val navRestoreViewModel: NavRestoreViewModel = hiltViewModel()
+    LaunchedEffect(Unit) { navRestoreViewModel.logPendingDiscard() }
 
     // Obtained here, outside any NavEntry — one shared instance for the whole app lifetime,
     // so online/offline status is consistent and persistent across every screen.
@@ -115,6 +134,23 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
             },
         )
     }
+    // Both Compounder insertion sites go through this. A double tap on Consent's Continue, or on
+    // Home's Resume, can fire two navigation callbacks before the source entry leaves composition,
+    // and two Compounder entries for one patient and follow-up parent would share a content key,
+    // a ViewModelStore and therefore a CompounderViewModel. The single-live-Compounder property
+    // that the pinned content key depends on is asserted in this file, so it is enforced here too
+    // rather than left to each caller to remember.
+    fun pushCompounder(key: Compounder) {
+        val top = backStack.lastOrNull()
+        if (top is Compounder &&
+            top.patientId == key.patientId &&
+            top.followUpOfEncounterId == key.followUpOfEncounterId
+        ) {
+            return
+        }
+        backStack.add(key)
+    }
+
     fun bottomNavBar(current: BottomNavTab?): @Composable () -> Unit =
         { BottomNavBar(current = current, onSelect = ::switchTab) }
 
@@ -162,8 +198,24 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
                     onOpenPatient = { patientId -> backStack.add(PatientSummary(patientId)) },
                     onOpenDoctorList = { backStack.add(DoctorListRoute) },
                     onResumeEncounter = { patientId, encounterId, caseRecordId ->
-                        backStack.add(Compounder(patientId, resumeEncounterId = encounterId, resumeCaseRecordId = caseRecordId))
+                        pushCompounder(Compounder(patientId, resumeEncounterId = encounterId, resumeCaseRecordId = caseRecordId))
                     },
+                    // CURRENTLY UNREACHABLE, AND KEPT ON PURPOSE. This would suppress the resume
+                    // prompt for a case the stack is already inside, so accepting it could not push
+                    // a second path to one case. It cannot fire today: `Home` only ever exists at
+                    // index 0 (the stack is seeded with it above, `switchTab` clears before adding
+                    // a tab root, and both other insertions are `clear(); add(Home)`), and
+                    // `NavDisplay` draws the last entry, so this composable runs only when the
+                    // stack is exactly [Home]. `backStackContainsCase` is therefore always false
+                    // here.
+                    //
+                    // Retained as defence in depth: a future multi-pane or list-detail scene could
+                    // compose `Home` alongside a non-empty tail, at which point this becomes live
+                    // and is the only thing standing between a restored deep stack and a second
+                    // live path into the case it is already showing. Removing it would be silent
+                    // until that day. Note that it is NOT what keeps the pinned Compounder content
+                    // key unique; see the entry<Compounder> comment for what actually does.
+                    resumeSuppressedFor = { caseRecordId -> backStackContainsCase(backStack, caseRecordId) },
                     isOnline = isOnline,
                     session = session,
                     onSignOut = onSignOut,
@@ -272,10 +324,46 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
             entry<ConsentRoute> { key ->
                 ConsentScreen(
                     patientId = key.patientId,
-                    onContinue = { backStack.add(Compounder(key.patientId, key.followUpOfEncounterId)) },
+                    onContinue = { pushCompounder(Compounder(key.patientId, key.followUpOfEncounterId)) },
                 )
             }
-            entry<Compounder> { key ->
+            // The content key is pinned rather than left to default, and that is load-bearing.
+            //
+            // `NavEntry.contentKey` defaults to `key.toString()`, and `Compounder` is a data class
+            // whose toString() includes the resume ids. The in-place rewrite below changes those
+            // ids, so with the default key the entry would look like a different entry: the
+            // ViewModelStore decorator would clear the store, a fresh CompounderViewModel would be
+            // built with the resume ids, and it would log ENCOUNTER_RESUMED for a visit that was
+            // started seconds earlier and never left. A fabricated audit row on a clinical trail
+            // is worse than the thing the rewrite is fixing. Pinning the key keeps the entry, its
+            // ViewModel and its saved state identical across the rewrite.
+            //
+            // WHAT KEEPS THIS KEY UNIQUE (corrected 2026-09-18). Two entries sharing it would share
+            // one ViewModelStore, and the second would be handed the first's ViewModel with the
+            // wrong encounter. The key collides only for two Compounder entries with the same
+            // patient AND the same follow-up parent.
+            //
+            // That cannot happen because only ONE Compounder can be in the stack at all, which is a
+            // structural property of this file rather than a policy anywhere else. There are two
+            // push sites: Home's resume prompt, which composes only when the stack is exactly
+            // [Home] (Home is seeded at index 0 and every other insertion clears first), and
+            // ConsentRoute. Reaching either again while a Compounder is live requires a tab switch,
+            // which clears the stack, or popping back past that entry. So a second one cannot be
+            // pushed on top of the first.
+            //
+            // An earlier version of this comment credited Home's resume gating
+            // (`resumeSuppressedFor`/`backStackContainsCase`) with the guarantee. That was wrong:
+            // that guard is structurally unreachable today and contributes nothing here. It is
+            // retained for a different reason, documented at its call site above.
+            //
+            // Do NOT widen this key to patientId alone, and do not add a Compounder push site or a
+            // scene that composes Home with a non-empty tail without revisiting this: either turns
+            // a tidiness regression into a wrong-encounter binding.
+            // NavBackStackPolicyTest pins the collision precondition; CompounderContentKeyTest
+            // proves the pin's effect, with a control arm on the default key.
+            entry<Compounder>(
+                clazzContentKey = { key -> "Compounder:${key.patientId}:${key.followUpOfEncounterId}" },
+            ) { key ->
                 CompounderScreen(
                     patientId = key.patientId,
                     followUpOfEncounterId = key.followUpOfEncounterId,
@@ -284,12 +372,34 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
                     onContinue = { patientId, encounterId, caseRecordId, chiefComplaint ->
                         backStack.add(ConsultationRoute(patientId, encounterId, caseRecordId, chiefComplaint))
                     },
-                    onEmergencyOverride = { reasons -> backStack.add(EmergencyOverrideRoute(reasons)) },
+                    onEmergencyOverride = { encounterId ->
+                        backStack.add(EmergencyOverrideRoute(key.patientId, encounterId))
+                    },
+                    onCaseReady = { encounterId, caseRecordId ->
+                        // Rewrite this entry into its resume shape, so every save from here on
+                        // carries "resume that case" instead of "start a case". Guarded on the top
+                        // entry still being this Compounder: the ids can arrive after the worker
+                        // has already navigated onward, and rewriting a stale index would corrupt
+                        // someone else's entry.
+                        val top = backStack.lastOrNull()
+                        if (top is Compounder &&
+                            top.patientId == key.patientId &&
+                            top.followUpOfEncounterId == key.followUpOfEncounterId &&
+                            (top.resumeEncounterId != encounterId || top.resumeCaseRecordId != caseRecordId)
+                        ) {
+                            backStack[backStack.lastIndex] = Compounder(
+                                patientId = key.patientId,
+                                followUpOfEncounterId = key.followUpOfEncounterId,
+                                resumeEncounterId = encounterId,
+                                resumeCaseRecordId = caseRecordId,
+                            )
+                        }
+                    },
                 )
             }
             entry<EmergencyOverrideRoute> { key ->
                 EmergencyOverrideScreen(
-                    reasons = key.reasons,
+                    encounterId = key.encounterId,
                     onAcknowledged = { backStack.clear(); backStack.add(Home) },
                 )
             }
@@ -299,8 +409,8 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
                     encounterId = key.encounterId,
                     caseRecordId = key.caseRecordId,
                     initialChiefComplaint = key.chiefComplaint,
-                    onSent = { _, encounterId, caseRecordId, consultationId, audioUri ->
-                        backStack.add(SendingRoute(caseRecordId, consultationId, audioUri, encounterId))
+                    onSent = { _, encounterId, caseRecordId, consultationId, _ ->
+                        backStack.add(SendingRoute(caseRecordId, consultationId, encounterId))
                     },
                 )
             }
@@ -308,24 +418,27 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
                 SendingScreen(
                     caseRecordId = key.caseRecordId,
                     consultationId = key.consultationId,
-                    audioUri = key.audioUri,
                     encounterId = key.encounterId,
-                    onDone = { caseRecordId, consultationId, audioUri ->
-                        backStack.add(KernelAssessmentRoute(caseRecordId, consultationId, audioUri))
+                    onDone = { caseRecordId, consultationId ->
+                        backStack.add(KernelAssessmentRoute(caseRecordId, consultationId))
                     },
                 )
             }
             entry<KernelAssessmentRoute> { key ->
                 KernelAssessmentScreen(
                     caseRecordId = key.caseRecordId,
-                    onContinue = {
+                    consultationId = key.consultationId,
+                    // audioUri now arrives from the ViewModel, which read the consultation's own
+                    // AUDIO attachment row, rather than from the route. The branch below is
+                    // otherwise unchanged.
+                    onContinue = { audioUri ->
                         // The transcription screen auto-transcribes and PERSISTS the result with no
                         // confirmation gate and no provenance (H-15.C2), so it is gated by the same
                         // flag as the attachment that produces audioUri. Belt and braces: with the
                         // flag off nothing can create an AUDIO attachment in the first place, and
                         // TranscribeAudioUseCase refuses independently of this branch.
-                        if (key.audioUri != null && FeatureFlags.VOICE_AUDIO_ATTACHMENT_ENABLED) {
-                            backStack.add(TranscriptionRoute(key.consultationId, key.audioUri, key.caseRecordId))
+                        if (audioUri != null && FeatureFlags.VOICE_AUDIO_ATTACHMENT_ENABLED) {
+                            backStack.add(TranscriptionRoute(key.consultationId, key.caseRecordId))
                         } else {
                             backStack.add(AcknowledgementRoute(key.caseRecordId))
                         }
@@ -335,7 +448,6 @@ private fun MainNavHost(session: UserSession, onSignOut: () -> Unit) {
             entry<TranscriptionRoute> { key ->
                 TranscriptionScreen(
                     consultationId = key.consultationId,
-                    audioUri = key.audioUri,
                     onContinue = { backStack.add(AcknowledgementRoute(key.caseRecordId)) },
                 )
             }

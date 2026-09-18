@@ -199,13 +199,20 @@ data class ConsultationUiState(
     val documentDraftLabel: String = "",
     val isSaving: Boolean = false,
     val errorMessage: String? = null,
-    /** H-18, Build 3a: non-empty means one or more documents failed to upload during send. The
-     *  consultation itself already saved successfully — this only holds the screen open (see
-     *  [pendingSentEffect]) until the worker acknowledges, so the failure is seen rather than
-     *  raced off-screen by an immediate navigation. */
-    val documentUploadFailures: List<String> = emptyList(),
-    /** The [ConsultationEffect.Sent] navigation held back while [documentUploadFailures] is
-     *  non-empty, dispatched by [ConsultationActions.onDismissDocumentUploadFailures]. */
+    /** Non-empty means part of the send did not persist, while the consultation row itself did.
+     *  This only holds the screen open (see [pendingSentEffect]) until the worker acknowledges,
+     *  so the failure is seen rather than raced off-screen by an immediate navigation.
+     *
+     *  Covers two sources: a document that failed to upload (H-18, Build 3a) and an attachment
+     *  row that failed to insert. The attachment case was previously swallowed entirely. It now
+     *  matters more than it did: the audio leg is decided by whether that row exists, so an
+     *  attachment insert that fails without telling anyone means the worker's recording is
+     *  dropped AND the case skips transcription, with nothing on screen to say so. Named for
+     *  what it holds rather than for documents alone, because a dialog that says "documents"
+     *  over an audio failure tells the worker something untrue. */
+    val sendFailures: List<String> = emptyList(),
+    /** The [ConsultationEffect.Sent] navigation held back while [sendFailures] is
+     *  non-empty, dispatched by [ConsultationActions.onDismissSendFailures]. */
     val pendingSentEffect: ConsultationEffect.Sent? = null,
 ) {
     /** The file-pick affordance is enabled only once both controlled-vocabulary dropdowns are
@@ -345,9 +352,10 @@ interface ConsultationActions {
     fun onDismissDiscardDocumentCapture()
     fun onConfirmDiscardDocumentCapture()
     fun onDismissDocumentCaptureError()
-    /** Dismisses the "some documents failed to upload" notice and lets the already-completed
-     *  send proceed to navigate away. */
-    fun onDismissDocumentUploadFailures()
+    /** Dismisses the "some attachments could not be saved" notice and lets the already-completed
+     *  send proceed to navigate away. Covers failed document uploads and failed attachment rows
+     *  alike, which is why it is not named for documents. */
+    fun onDismissSendFailures()
 
     fun onSend()
     /** Pre-fills the main concern + history-of-present-illness from [DemoPatientProfile] — demo only. */
@@ -1468,15 +1476,29 @@ class ConsultationViewModel @AssistedInject constructor(
                     ),
                 )
             }
+            // Collected, not swallowed. This insert used to have only an onSuccess branch, so a
+            // failed attachment row disappeared without a trace. That is no longer survivable:
+            // the attachment row is now what decides whether the case takes the transcription leg
+            // at all (KernelAssessmentViewModel reads it), so a silent failure loses the worker's
+            // recording AND silently reroutes the case, with nothing on screen either way.
+            val sendFailures = mutableListOf<String>()
             current.pendingAttachments.forEach { pending ->
-                addAttachmentUseCase(consultation.id, pending.type, pending.uri).onSuccess {
-                    auditLogger.log(
-                        action = AuditAction.ATTACHMENT_ADDED,
-                        patientId = patientId,
-                        caseRecordId = caseRecordId,
-                        payload = auditPayload("type" to pending.type.name, "uri" to pending.uri),
-                    )
-                }
+                addAttachmentUseCase(consultation.id, pending.type, pending.uri).fold(
+                    onSuccess = {
+                        auditLogger.log(
+                            action = AuditAction.ATTACHMENT_ADDED,
+                            patientId = patientId,
+                            caseRecordId = caseRecordId,
+                            payload = auditPayload("type" to pending.type.name, "uri" to pending.uri),
+                        )
+                    },
+                    onFailure = { error ->
+                        // The type, never the uri: this string is shown to the worker and the uri
+                        // is a path to patient audio.
+                        sendFailures += attachmentFailureLabel(pending.type) + ": " +
+                            (error.message ?: "could not be saved")
+                    },
+                )
             }
             // H-18, Build 3a: documents are encrypted and inserted here, once `consultation.id`
             // exists as their foreign key — same deferred-commit shape as pendingAttachments
@@ -1488,8 +1510,8 @@ class ConsultationViewModel @AssistedInject constructor(
             // same coroutine and PatientSummaryScreen navigates away as soon as it's received —
             // an errorMessage set right before that would be raced off-screen before the worker
             // could ever read it, which is worse than not tracking it at all (it looks handled
-            // and isn't). See onDismissDocumentUploadFailures.
-            val documentFailures = mutableListOf<String>()
+            // and isn't). See onDismissSendFailures. Appended to the same list the attachment
+            // failures above collect into: one hold, one dialog, one acknowledgement.
             if (current.pendingDocuments.isNotEmpty()) {
                 val session = authSession.currentUser().first()
                 current.pendingDocuments.forEach { pending ->
@@ -1502,7 +1524,7 @@ class ConsultationViewModel @AssistedInject constructor(
                         uploaderUserId = session?.userId ?: "phc_field_worker",
                         uploaderRole = session?.role?.name ?: "ASHA_WORKER",
                     ).onFailure { error ->
-                        documentFailures += pending.label.ifBlank { pending.recordTypeCode.name } +
+                        sendFailures += pending.label.ifBlank { pending.recordTypeCode.name } +
                             ": " + (error.message ?: "upload failed")
                     }
                 }
@@ -1514,22 +1536,30 @@ class ConsultationViewModel @AssistedInject constructor(
                 payload = auditPayload("consultationId" to consultation.id, "chiefComplaint" to current.chiefComplaint),
             )
             val sentEffect = ConsultationEffect.Sent(patientId, encounterId, caseRecordId, consultation.id, current.hasAudioAttachment)
-            if (documentFailures.isEmpty()) {
+            if (sendFailures.isEmpty()) {
                 _uiState.update { it.copy(isSaving = false) }
                 _effects.send(sentEffect)
             } else {
-                // Held until the worker explicitly acknowledges (see onDismissDocumentUploadFailures)
+                // Held until the worker explicitly acknowledges (see onDismissSendFailures)
                 // instead of sent now — the consultation is already saved either way, this only
                 // delays the navigation away from this screen until the failure has actually
                 // been seen.
-                _uiState.update { it.copy(isSaving = false, documentUploadFailures = documentFailures, pendingSentEffect = sentEffect) }
+                _uiState.update { it.copy(isSaving = false, sendFailures = sendFailures, pendingSentEffect = sentEffect) }
             }
         }
     }
 
-    override fun onDismissDocumentUploadFailures() {
+    override fun onDismissSendFailures() {
         val pending = _uiState.value.pendingSentEffect ?: return
-        _uiState.update { it.copy(documentUploadFailures = emptyList(), pendingSentEffect = null) }
+        _uiState.update { it.copy(sendFailures = emptyList(), pendingSentEffect = null) }
         viewModelScope.launch { _effects.send(pending) }
     }
+}
+
+/** Worker-facing name for an attachment kind, for the send-failure dialog. Never the uri. */
+private fun attachmentFailureLabel(type: AttachmentType): String = when (type) {
+    AttachmentType.AUDIO -> "Voice recording"
+    AttachmentType.IMAGE -> "Photo"
+    AttachmentType.VIDEO -> "Video"
+    AttachmentType.AFFECTED_AREA_PHOTO -> "Affected-area photo"
 }

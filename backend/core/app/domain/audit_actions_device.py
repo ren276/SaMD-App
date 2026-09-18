@@ -61,6 +61,11 @@ DEVICE_AUDIT_ACTIONS: frozenset[str] = frozenset(
         "kernel_response_received",
         "medical_history_item_added",
         "medication_added",
+        # Navigation back-stack restore (process-death fix, phase 1): a persisted back stack was
+        # discarded instead of restored and the worker was put back on Home. Payload is the
+        # discard reason alone (corrupt, too_large, session_changed), never route contents, which
+        # can carry patient ids. Added with the Kotlin AuditAction value in the same commit.
+        "nav_stack_restore_discarded",
         "patient_registered",
         # Prescription visibility gate (H-17, Build 1): the physician's AGREE/MODIFY/REJECT
         # decision commit, and a gated-open worker report load, respectively. Added with the

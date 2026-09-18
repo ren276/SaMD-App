@@ -157,6 +157,14 @@ android {
             optimization {
                 enable = false
             }
+            // Wired now, applied only if the optimizer above is ever turned on. The rules keep
+            // the navigation route classes and their generated serializers, because those class
+            // NAMES are the persisted wire format of a saved back stack: renaming one silently
+            // breaks restore on every device with no crash to report it. See proguard-rules.pro.
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
     compileOptions {

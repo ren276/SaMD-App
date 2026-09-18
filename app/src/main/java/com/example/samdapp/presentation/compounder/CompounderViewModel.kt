@@ -217,8 +217,13 @@ sealed interface CompounderEffect {
         val chiefComplaint: String,
     ) : CompounderEffect
 
-    /** Short-circuits past Consultation/Sending entirely (REQ-TRS-02) — see EmergencyOverrideScreen. */
-    data class EmergencyOverride(val reasons: List<String>) : CompounderEffect
+    /** Short-circuits past Consultation/Sending entirely (REQ-TRS-02) — see EmergencyOverrideScreen.
+     *
+     *  Carries [encounterId] rather than the reason strings: the emergency screen re-derives them
+     *  from the vitals row this encounter just persisted, so clinical text never has to travel
+     *  through a navigation route and into the saved-state Bundle. The vitals are written before
+     *  the threshold check runs, so the re-derivation reads exactly the values that tripped it. */
+    data class EmergencyOverride(val encounterId: String) : CompounderEffect
 }
 
 @Stable
@@ -712,7 +717,7 @@ class CompounderViewModel @AssistedInject constructor(
                             caseRecordId = caseRecordId,
                             payload = auditPayload("reasons" to emergency.reasons.joinToString("; ")),
                         )
-                        _effects.send(CompounderEffect.EmergencyOverride(emergency.reasons))
+                        _effects.send(CompounderEffect.EmergencyOverride(encounterId))
                     } else {
                         _effects.send(CompounderEffect.Continue(patientId, encounterId, caseRecordId, current.chiefComplaint))
                     }

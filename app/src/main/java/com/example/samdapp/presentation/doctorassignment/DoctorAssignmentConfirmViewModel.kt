@@ -7,6 +7,7 @@ import com.example.samdapp.domain.audit.AuditAction
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.connectivity.ConnectivityController
+import com.example.samdapp.domain.model.CaseStatus
 import com.example.samdapp.domain.model.Doctor
 import com.example.samdapp.domain.repository.CaseRecordRepository
 import com.example.samdapp.domain.usecase.AssignDoctorUseCase
@@ -43,6 +44,22 @@ data class DoctorAssignmentConfirmUiState(
 
 sealed interface DoctorAssignmentConfirmEffect {
     data object Done : DoctorAssignmentConfirmEffect
+
+    /**
+     * This case already has a doctor, so there is nothing to confirm. Emitted instead of populating
+     * the screen, which means the confirm UI is never drawn for a case past assignment.
+     *
+     * Reachable only by restore. The forward path never routes here for an assigned case: the
+     * screen is shown once, before assignment, and its [Done] clears the stack to Home. A saved
+     * back stack, though, can be restored after the case moved on, and offering to assign a doctor
+     * to a case that has one invites a second assignment for a single case.
+     *
+     * A distinct effect rather than reusing [Done]: both navigate to the same place, but "the
+     * worker confirmed an assignment" and "a restored screen was dismissed because the case had
+     * moved on" are different events, and collapsing them here would make them indistinguishable
+     * to anything that later wants to tell them apart.
+     */
+    data object AlreadyAssigned : DoctorAssignmentConfirmEffect
 }
 
 @Stable
@@ -73,9 +90,51 @@ class DoctorAssignmentConfirmViewModel @AssistedInject constructor(
     private val _effects = Channel<DoctorAssignmentConfirmEffect>(Channel.BUFFERED)
     val effects = _effects.receiveAsFlow()
 
+    private companion object {
+        /**
+         * Statuses meaning this case already has a doctor, so the confirm screen must not be shown.
+         *
+         * DELIBERATELY A SET, NOT AN ORDINAL COMPARISON, and the reason is sharper than it
+         * first looks. `CaseStatus` is declared
+         * `DRAFT, SAVED_LOCALLY, PENDING_SYNC, SENT_TO_DOCTOR, PRESCRIPTION_RECEIVED, ABANDONED`.
+         * An ordinal threshold at `SENT_TO_DOCTOR` is wrong in BOTH directions: it sweeps in
+         * `ABANDONED`, which has no doctor and should restore normally, and it misses
+         * `PENDING_SYNC`, which does have one. Declaration order is not assignment order, and any
+         * threshold over this enum encodes the wrong thing. It would also silently acquire every
+         * new value declared after it. List the statuses that mean what this check means.
+         *
+         * The statuses are the documented gate, but they are not the whole truth, which is why the
+         * check below also tests `assignedDoctorId` directly: `markPrescriptionReceived` updates
+         * status alone, so a case whose assignment happened elsewhere and arrived by sync could
+         * carry a later status without a local doctor id, and conversely the id is the thing this
+         * screen must not let a worker overwrite.
+         */
+        val ALREADY_ASSIGNED_STATUSES = setOf(
+            // Offline assignment. CaseRecordRepositoryImpl.assignDoctor writes PENDING_SYNC
+            // together with assignedDoctorId when isOnline is false, so this case HAS a doctor and
+            // is merely waiting to be pushed. Missing it was a real defect: a restored confirm
+            // screen proposed a second doctor, and confirming would overwrite the persisted one
+            // before it ever synced. Note that an ordinal threshold would have missed it too, and
+            // in the other direction: PENDING_SYNC sorts BEFORE SENT_TO_DOCTOR.
+            CaseStatus.PENDING_SYNC,
+            CaseStatus.SENT_TO_DOCTOR,
+            CaseStatus.PRESCRIPTION_RECEIVED,
+        )
+    }
+
     init {
         viewModelScope.launch {
-            val encounterId = caseRecordRepository.observeCaseRecord(caseRecordId).first()?.encounterId
+            val caseRecord = caseRecordRepository.observeCaseRecord(caseRecordId).first()
+            // Checked before anything is resolved or drawn, so a restored screen for a case that
+            // has moved on never flashes a doctor proposal on its way out. isLoading stays true
+            // until the navigation lands.
+            if (caseRecord != null &&
+                (caseRecord.assignedDoctorId != null || caseRecord.status in ALREADY_ASSIGNED_STATUSES)
+            ) {
+                _effects.send(DoctorAssignmentConfirmEffect.AlreadyAssigned)
+                return@launch
+            }
+            val encounterId = caseRecord?.encounterId
             val proposal = encounterId?.let { resolveDoctorAssignmentUseCase(caseRecordId, it).getOrNull() }
             if (proposal == null) {
                 _uiState.update { it.copy(isLoading = false, errorMessage = "Could not resolve a doctor for this case") }

@@ -57,8 +57,15 @@ class ConsentViewModel @AssistedInject constructor(
 
     override fun onAgreedChange(agreed: Boolean) = _uiState.update { it.copy(agreed = agreed) }
 
+    private val continueConsumed = java.util.concurrent.atomic.AtomicBoolean(false)
+
     override fun onContinue() {
         if (!_uiState.value.canContinue) return
+        // Consumed on the first invocation. Without this a double tap logs CONSENT_RECORDED twice
+        // for one consent, which is a fabricated second consent event on a clinical audit trail,
+        // and sends two Continue effects. The navigation layer refuses the duplicate entry, but
+        // the audit row is written here and has to be prevented here.
+        if (!continueConsumed.compareAndSet(false, true)) return
         viewModelScope.launch {
             auditLogger.log(
                 action = AuditAction.CONSENT_RECORDED,

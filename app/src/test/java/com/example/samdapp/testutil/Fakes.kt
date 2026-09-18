@@ -567,10 +567,13 @@ fun testConsultation(
     encounterId: String,
     patientId: String = "p1",
     chiefComplaint: String = "fever",
+    /** Additive: the audio leg is now decided by whether an AUDIO attachment row exists, so tests
+     *  covering that branch need to be able to put one here. */
+    attachments: List<com.example.samdapp.domain.model.Attachment> = emptyList(),
 ): com.example.samdapp.domain.model.Consultation = com.example.samdapp.domain.model.Consultation(
     id = "consult-$encounterId", patientId = patientId, encounterId = encounterId, chiefComplaint = chiefComplaint,
     onset = null, durationBucket = null, severityScore = null, aggravatingFactors = null, relievingFactors = null,
-    impactOnDailyActivities = null, impactOnDailyActivitiesProvenance = null, relevantHistory = null, transcription = null, attachments = emptyList(),
+    impactOnDailyActivities = null, impactOnDailyActivitiesProvenance = null, relevantHistory = null, transcription = null, attachments = attachments,
     createdAt = Instant.EPOCH, updatedAt = Instant.EPOCH,
 )
 

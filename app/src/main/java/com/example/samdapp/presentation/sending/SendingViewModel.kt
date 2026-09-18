@@ -18,7 +18,9 @@ import kotlinx.coroutines.launch
 import java.util.logging.Logger
 
 sealed interface SendingEffect {
-    data class Done(val caseRecordId: String, val consultationId: String, val audioUri: String?) : SendingEffect
+    /** No `audioUri`: this screen never read it, it only carried it. The next screen resolves it
+     *  from the consultation's own attachment row instead. */
+    data class Done(val caseRecordId: String, val consultationId: String) : SendingEffect
 }
 
 data class SendingUiState(val enqueueFailed: Boolean = false)
@@ -42,7 +44,6 @@ data class SendingUiState(val enqueueFailed: Boolean = false)
 class SendingViewModel @AssistedInject constructor(
     @Assisted("caseRecordId") private val caseRecordId: String,
     @Assisted("consultationId") private val consultationId: String,
-    @Assisted("audioUri") private val audioUri: String?,
     // Kept only for Factory/route-shape compatibility — the assessment itself now re-derives
     // encounterId from caseRecordId (AssessmentRunner), same as the old retry use case did.
     @Assisted("encounterId") encounterId: String,
@@ -54,7 +55,6 @@ class SendingViewModel @AssistedInject constructor(
         fun create(
             @Assisted("caseRecordId") caseRecordId: String,
             @Assisted("consultationId") consultationId: String,
-            @Assisted("audioUri") audioUri: String?,
             @Assisted("encounterId") encounterId: String,
         ): SendingViewModel
     }
@@ -85,7 +85,7 @@ class SendingViewModel @AssistedInject constructor(
                 _uiState.update { it.copy(enqueueFailed = true) }
                 return@launch
             }
-            _effects.send(SendingEffect.Done(caseRecordId, consultationId, audioUri))
+            _effects.send(SendingEffect.Done(caseRecordId, consultationId))
         }
     }
 

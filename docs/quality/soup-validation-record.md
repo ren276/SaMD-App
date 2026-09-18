@@ -92,6 +92,23 @@ row renders). The attribution obligation is discharged.
    sherpa-onnx and ONNX Runtime need a periodic advisory check tied to release, and none exists.
 3. **No performance requirement.** First-capture latency was measured (2612 ms cold, 613 ms warm,
    x86_64 emulator) and is reported, not asserted: there is no agreed threshold to assert against.
+4. **The egress test is not reliable in a full-suite run.** The capture-and-decode test in
+   `AsrEgressTest`, which carries the L3.2 byte-level egress evidence above, fails when the
+   whole instrumented suite runs and passes when it runs alone. A gate that flakes is a gate people
+   learn to ignore, which is why this is recorded here rather than left as folklore. **The cause is
+   not the microphone permission**, and the failure message's first clause misleads on that point:
+   `RECORD_AUDIO` is granted (`dumpsys` reports `granted=true`, and the test passes alone under both
+   `am instrument` and a single-class Gradle run), so no permission rule affects it. The leading
+   explanation is cross-test microphone contention through the process-wide recognizer this class
+   shares with `SherpaOnnxTranscriptionServiceTest`, which cancels a capture mid-read on purpose; an
+   `AudioRecord` not fully released before the next class runs would present exactly as observed and
+   never in isolation. That is a hypothesis, not a diagnosis: the release path has not been
+   instrumented and no ordering has been forced. The likely fix is test isolation or an explicit
+   release-and-await in the shared test fixture's teardown. **The fix must never be a relaxed
+   assertion.** This test witnesses a zero-egress property of vendored native code as a
+   pre-distribution gate, and relaxing it to silence a flake trades the flake for undetected egress
+   in code nobody here wrote. The assertion's diagnostic message has been corrected to say all of
+   this; the assertion condition is untouched.
 
 ## 5. CameraX (H-18 Build 3b Option A, in-process document capture)
 

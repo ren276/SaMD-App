@@ -204,7 +204,18 @@ class AsrEgressTest {
         Log.i(TAG, "capture+decode=${(System.nanoTime() - startedAt) / 1_000_000}ms")
 
         assertTrue(
-            "capture must not surface as an engine error: ${captured.exceptionOrNull()?.message}",
+            "capture must not surface as an engine error: ${captured.exceptionOrNull()?.message}" +
+                "\nIF THIS FAILED ONLY IN A FULL-SUITE RUN, IT IS NOT THE PERMISSION. RECORD_AUDIO " +
+                "is granted (confirmed: dumpsys reports granted=true, and this test passes alone " +
+                "under both `am instrument` and a single-class Gradle run). A full-suite-only " +
+                "failure points at cross-test microphone contention: this class and " +
+                "SherpaOnnxTranscriptionServiceTest share one process-wide recognizer " +
+                "(AsrTestSupport.sharedAsrService) and both drive the real mic, and that class " +
+                "cancels a capture mid-AudioRecord.read on purpose. The leading hypothesis is that " +
+                "AudioRecord is not fully released before the next class runs. Unproven. See the " +
+                "owed item in scratchpad/navstack-phase4-scope.md. Do NOT relax this assertion to " +
+                "make it green: it guards a pre-distribution zero-egress property of vendored " +
+                "native code, and a relaxed assertion trades a flake for undetected egress.",
             captured.isSuccess,
         )
         assertEquals(

@@ -3,7 +3,11 @@ package com.example.samdapp.presentation.kernelassessment
 import com.example.samdapp.data.assessment.AssessmentWorkState
 import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.testutil.FakeAssessmentQueueScheduler
+import com.example.samdapp.domain.model.Attachment
+import com.example.samdapp.domain.model.AttachmentType
 import com.example.samdapp.testutil.FakeAuditLogger
+import com.example.samdapp.testutil.FakeConsultationRepository
+import com.example.samdapp.testutil.testConsultation
 import com.example.samdapp.testutil.FakeEvaluateReportRepository
 import com.example.samdapp.testutil.FakeKernelReportRepository
 import com.example.samdapp.testutil.MainDispatcherRule
@@ -16,6 +20,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import java.time.Instant
 
 /**
  * Async submission queue: this screen's report reads are a collected Flow, not a one-shot read
@@ -37,10 +42,13 @@ class KernelAssessmentViewModelTest {
         kernelReportRepository: FakeKernelReportRepository = FakeKernelReportRepository(),
         evaluateReportRepository: FakeEvaluateReportRepository = FakeEvaluateReportRepository(),
         scheduler: FakeAssessmentQueueScheduler = FakeAssessmentQueueScheduler(),
+        consultationRepository: FakeConsultationRepository = FakeConsultationRepository(),
     ): KernelAssessmentViewModel = KernelAssessmentViewModel(
         caseRecordId = caseRecordId,
+        consultationId = "consult-$caseRecordId",
         evaluateReportRepository = evaluateReportRepository,
         kernelReportRepository = kernelReportRepository,
+        consultationRepository = consultationRepository,
         assessmentQueueScheduler = scheduler,
         auditLogger = FakeAuditLogger(),
     )
@@ -200,5 +208,46 @@ class KernelAssessmentViewModelTest {
         assertTrue(vm.uiState.value.display!!.isUnavailable)
         assertTrue(vm.uiState.value.display!!.predictedCondition != "STALE - should not survive retry")
         assertFalse(vm.uiState.value.isRetrying)
+    }
+
+    /**
+     * The audio leg is now decided by the consultation's own AUDIO attachment row rather than by
+     * a uri carried through three routes. `firstOrNull` matches the semantics the route argument
+     * had (`pendingAttachments.firstOrNull { it.type == AUDIO }`), so a worker who recorded twice
+     * still gets their FIRST take, not their last.
+     */
+    @Test
+    fun `audioUri resolves from the consultation's first AUDIO attachment row`() = runTest(mainDispatcherRule.dispatcher) {
+        val consultation = testConsultation(
+            encounterId = "case-1",
+            attachments = listOf(
+                Attachment("att-1", "consult-case-1", AttachmentType.IMAGE, "file:///photo.jpg", Instant.EPOCH),
+                Attachment("att-2", "consult-case-1", AttachmentType.AUDIO, "file:///first-take.m4a", Instant.EPOCH),
+                Attachment("att-3", "consult-case-1", AttachmentType.AUDIO, "file:///second-take.m4a", Instant.EPOCH),
+            ),
+        )
+        val vm = viewModel(
+            "case-1",
+            consultationRepository = FakeConsultationRepository(byEncounter = mapOf("case-1" to consultation)),
+        )
+
+        advanceUntilIdle()
+
+        assertEquals("file:///first-take.m4a", vm.uiState.value.audioUri)
+    }
+
+    /** No attachment row means no audio leg: the case goes straight to Acknowledgement. A uri that
+     *  survived three screens was never evidence the attachment was persisted; the row is. */
+    @Test
+    fun `audioUri is null when the consultation has no audio attachment`() = runTest(mainDispatcherRule.dispatcher) {
+        val consultation = testConsultation(encounterId = "case-1")
+        val vm = viewModel(
+            "case-1",
+            consultationRepository = FakeConsultationRepository(byEncounter = mapOf("case-1" to consultation)),
+        )
+
+        advanceUntilIdle()
+
+        assertEquals(null, vm.uiState.value.audioUri)
     }
 }

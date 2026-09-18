@@ -79,7 +79,7 @@ private class FakeConsultationActions : ConsultationActions {
     override fun onDismissDiscardDocumentCapture() = Unit
     override fun onConfirmDiscardDocumentCapture() = Unit
     override fun onDismissDocumentCaptureError() = Unit
-    override fun onDismissDocumentUploadFailures() = Unit
+    override fun onDismissSendFailures() = Unit
     override fun onSend() = Unit
     override fun fillDemoData() = Unit
 }

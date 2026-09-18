@@ -53,6 +53,11 @@ fun DoctorAssignmentConfirmScreen(
             viewModel.effects.collect { effect ->
                 when (effect) {
                     is DoctorAssignmentConfirmEffect.Done -> onDone()
+                    // Same destination as Done: the nav layer's onDone already clears the stack to
+                    // Home, which is the right landing for a case whose encounter is finished and
+                    // which has no in-task ancestor worth returning to. The effects stay distinct
+                    // at the type level because the two events are not the same thing.
+                    is DoctorAssignmentConfirmEffect.AlreadyAssigned -> onDone()
                 }
             }
         }
