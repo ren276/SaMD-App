@@ -822,7 +822,7 @@ only an `ApiEnvelope<T>` wrapper class is added. REQ-HAN-01, REQ-HAN-07.
       }
     ],
     "recommended_investigations": ["CBC"],
-    "model_metadata": { "model_version": "xgb-2026-06-11", "inference_time_ms": 143 }
+    "model_metadata": { "model_version": "toy-v0.6-observed-glucose-4tier", "inference_time_ms": 143 }
   },
   "meta": { "request_id": "...", "timestamp": "2026-08-16T10:00:00.000Z", "api_version": "v1" }
 }
@@ -1128,7 +1128,8 @@ held hostage by a single malformed row.
       { "table": "patients", "id": "K7m2Qx9pR4tZ", "status": "applied", "server_version": 1 },
       { "table": "encounters", "id": "8c1d4e6f-a2b3-4c5d-9e0f-112233445566", "status": "applied", "server_version": 1 },
       { "table": "audit_log", "id": "al-5521", "status": "rejected",
-        "code": "SAMD-SYNC-6003", "message": "action: unknown audit action." }
+        "code": "SAMD-SYNC-6003", "message": "action: unknown audit action.",
+        "retry_class": "RETRYABLE" }
     ]
   },
   "meta": { "request_id": "...", "timestamp": "2026-08-16T10:05:01.220Z", "api_version": "v1" }
@@ -1137,11 +1138,42 @@ held hostage by a single malformed row.
 
 `status` is one of `applied`, `stale`, `conflict`, `duplicate`, `rejected`. A `conflict` result
 additionally carries `server_state` with the server's current values for the conflicting fields.
+A `rejected` result additionally carries `retry_class`, below.
+
+**`retry_class`, on every `rejected` result.** One of three values. The server classifies, because
+only the server knows the reason; a client MUST read this field and MUST NOT infer it from `code`,
+which identifies the failure and not what to do about it.
+
+| Value | Meaning | Client |
+|---|---|---|
+| `RETRYABLE` | Resending the identical bytes later can succeed. The cause is outside this record and can change. | Keep the record. Resend it on a later drain, under a retry policy of the client's choosing. |
+| `TERMINAL` | Resending the identical bytes fails identically, forever. The record itself is wrong. | Stop resending. Only a client-side change can fix it. |
+| `CONFLICT` | A different, already-present record claims something this one also claims. | Stop resending and surface it: a person must decide which record is right. |
+
+A client that does not recognise a `retry_class`, or receives a `rejected` result without one
+(a server predating this field), MUST treat it as `TERMINAL`. That is the conservative reading and
+it is the behaviour every client had before the field existed.
+
+Current server classification, by rejection cause:
+
+- `RETRYABLE`: a foreign key whose parent row has not been applied yet (sqlstate `23503`); an
+  `audit_log` record whose `action` this server build does not yet know (see section 8's device
+  audit-action vocabulary, which the device owns and which is expected to grow ahead of a given
+  server build, so the same bytes apply once the server is upgraded).
+- `CONFLICT`: a unique-constraint violation (sqlstate `23505`). Two causes are reachable:
+  another patient already holds this `abha_number`, or two medication lines claim the same
+  position in one prescription.
+- `TERMINAL`: everything else. Malformed or missing fields, forbidden fields, unknown fields, an
+  unsupported `op`, an unparseable timestamp, a `sending_phc_id` that is not the caller's
+  facility, an id already held by another facility, a not-null or check-constraint violation
+  (sqlstates `23502`, `23514`), and any constraint violation whose sqlstate this server does not
+  classify.
 
 **Android handling rule:** mark a record synced on `applied`, `stale`, or `duplicate`. Keep it
-pending and surface it for review on `conflict`. Mark it as permanently failed and stop retrying on
-`rejected`, since a malformed row will stay malformed forever and an infinite retry loop drains a
-field device's battery.
+pending and surface it for review on `conflict`. On `rejected`, branch on `retry_class` per the
+table above: `TERMINAL` and `CONFLICT` stop the retry loop, which is what protects a field
+device's battery; `RETRYABLE` does not, because the row is not malformed and abandoning it loses
+a record that would have synced once its parent landed.
 
 **Idempotency:** replaying a `batch_id` within 24 hours returns the original stored response
 verbatim without re-applying anything.

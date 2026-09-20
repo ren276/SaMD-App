@@ -3,6 +3,7 @@ package com.example.samdapp.domain.usecase
 import com.example.samdapp.domain.audit.AuditAction
 import com.example.samdapp.domain.kernel.EvaluateKernelSource
 import com.example.samdapp.domain.kernel.EvaluateResult
+import com.example.samdapp.domain.kernel.KernelApiResult
 import com.example.samdapp.domain.kernel.KernelAssessmentResult
 import com.example.samdapp.domain.kernel.RemoteKernelSource
 import com.example.samdapp.domain.model.CaseRecord
@@ -45,17 +46,26 @@ import java.time.Instant
 class AssessmentRunnerTest {
 
     private object AlwaysFailsKernelSource : RemoteKernelSource {
-        override suspend fun assess(payload: KernelPayload, patientAge: Int, patientSex: String): KernelAssessmentResult =
-            throw java.io.IOException("unreachable")
+        override suspend fun assess(
+            payload: KernelPayload,
+            patientAge: Int,
+            patientSex: String,
+        ): KernelApiResult<KernelAssessmentResult> =
+            KernelApiResult.Unreachable(java.io.IOException("unreachable"))
     }
 
     private object AlwaysSucceedsKernelSource : RemoteKernelSource {
-        override suspend fun assess(payload: KernelPayload, patientAge: Int, patientSex: String): KernelAssessmentResult =
+        override suspend fun assess(
+            payload: KernelPayload,
+            patientAge: Int,
+            patientSex: String,
+        ): KernelApiResult<KernelAssessmentResult> = KernelApiResult.Success(
             KernelAssessmentResult(
                 predictedCondition = "Viral fever", confidenceScore = 0.9, triageUrgency = "ROUTINE",
                 safetyScreenPassed = true, evidenceFor = emptyList(), evidenceAgainst = emptyList(),
                 differentials = emptyList(), recommendedInvestigations = emptyList(), modelVersion = "v1",
-            )
+            ),
+        )
     }
 
     private object AlwaysSucceedsEvaluateSource : EvaluateKernelSource {
@@ -234,7 +244,11 @@ class AssessmentRunnerTest {
         val syncStatus = com.example.samdapp.testutil.FakeSyncStatus()
         var syncCallsSeenByKernel = -1
         val recordingKernel = object : RemoteKernelSource {
-            override suspend fun assess(payload: KernelPayload, patientAge: Int, patientSex: String): KernelAssessmentResult {
+            override suspend fun assess(
+                payload: KernelPayload,
+                patientAge: Int,
+                patientSex: String,
+            ): KernelApiResult<KernelAssessmentResult> {
                 syncCallsSeenByKernel = syncStatus.syncCalls
                 return AlwaysSucceedsKernelSource.assess(payload, patientAge, patientSex)
             }
@@ -274,5 +288,7 @@ class AssessmentRunnerTest {
     private object FailingSyncStatus : com.example.samdapp.domain.sync.SyncStatus {
         override val state = kotlinx.coroutines.flow.flowOf(com.example.samdapp.domain.sync.SyncState())
         override suspend fun syncNow(): Result<Unit> = Result.failure(IllegalStateException("offline"))
+        override suspend fun failedRecords(): List<com.example.samdapp.domain.sync.FailedSyncRecord> = emptyList()
+        override suspend fun sendFailedRecordAgain(record: com.example.samdapp.domain.sync.FailedSyncRecord) = Unit
     }
 }

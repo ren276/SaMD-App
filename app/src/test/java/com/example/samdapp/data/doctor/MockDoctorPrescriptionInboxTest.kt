@@ -31,7 +31,7 @@ class MockDoctorPrescriptionInboxTest {
         softwareVersion = "test-version", dataQualityScore = 0.8, uncertaintyScore = 0.15,
         riskCategory = RiskCategory.MODERATE, urgencyLevel = UrgencyLevel.ROUTINE,
         inferenceStartedAt = Instant.EPOCH, inferenceEndedAt = Instant.EPOCH, requiredHumanVerification = true,
-        inferenceSource = InferenceSource.MOCK_FALLBACK,
+        inferenceSource = InferenceSource.MOCK_FALLBACK, failureCode = null,
     )
 
     @Test

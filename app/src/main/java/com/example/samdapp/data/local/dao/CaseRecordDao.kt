@@ -19,19 +19,53 @@ interface CaseRecordDao {
      *  above) this same table also carries. Draining a row here touches only `syncState`/
      *  `serverVersion`/`syncErrorCode`/`lastSyncAttemptAt` via [applySyncResult] below — never
      *  `status`. See PatientDao.getPendingForSync's KDoc for the general shape. */
-    @Query("SELECT * FROM case_records WHERE syncState = 'PENDING' ORDER BY localModifiedAt ASC")
-    suspend fun getPendingForSync(): List<CaseRecordEntity>
+    @Query("SELECT * FROM case_records WHERE syncState IN ('PENDING', 'RETRYABLE') "
+            + "AND (lastSyncAttemptAt IS NULL OR lastSyncAttemptAt <= :retryEligibleBefore) "
+            + "ORDER BY localModifiedAt ASC")
+    suspend fun getPendingForSync(retryEligibleBefore: Instant): List<CaseRecordEntity>
 
     @Query(
-        "UPDATE case_records SET syncState = :syncState, " +
-            "serverVersion = COALESCE(:serverVersion, serverVersion), " +
-            "syncErrorCode = :syncErrorCode, lastSyncAttemptAt = :attemptAt " +
-            "WHERE id = :id AND localModifiedAt = :sentLocalModifiedAt",
+        "UPDATE case_records SET " +
+        "syncState = CASE WHEN :syncState = 'RETRYABLE' AND syncAttemptCount + 1 >= :maxAttempts THEN 'FAILED' ELSE :syncState END, " +
+        "serverVersion = COALESCE(:serverVersion, serverVersion), " +
+        "syncErrorCode = CASE WHEN :syncState = 'RETRYABLE' AND syncAttemptCount + 1 >= :maxAttempts THEN :retryExhaustedCode ELSE :syncErrorCode END, " +
+        "syncErrorMessage = :syncErrorMessage, " +
+        "syncAttemptCount = CASE WHEN :syncState = 'SYNCED' THEN 0 ELSE syncAttemptCount + 1 END, " +
+        "lastSyncAttemptAt = :attemptAt " +
+        "WHERE id = :id AND localModifiedAt = :sentLocalModifiedAt",
     )
-    suspend fun applySyncResult(id: String, syncState: SyncState, serverVersion: Int?, syncErrorCode: String?, attemptAt: Instant, sentLocalModifiedAt: Instant)
+    suspend fun applySyncResult(id: String, syncState: SyncState, serverVersion: Int?, syncErrorCode: String?, syncErrorMessage: String?, attemptAt: Instant, sentLocalModifiedAt: Instant, maxAttempts: Int, retryExhaustedCode: String)
+
+    /** The FAILED to PENDING transition, the only way out of a terminal state.
+     *  Driven by an explicit human action (S-3 owns its UI): a worker who has fixed
+     *  whatever the server objected to, or who knows the parent has since landed,
+     *  asks for this row to be tried again.
+     *
+     *  Resets the attempt budget and clears both the code and the message, so the
+     *  next failure is reported on its own terms rather than under the last one's.
+     *  Guarded on FAILED so it cannot disturb a row that is mid-flight, and
+     *  idempotent: pressing retry twice is one requeue. */
+    @Query(
+        "UPDATE case_records SET syncState = 'PENDING', syncAttemptCount = 0, " +
+        "syncErrorCode = NULL, syncErrorMessage = NULL " +
+        "WHERE id = :id AND syncState = 'FAILED'",
+    )
+    suspend fun requeueFailed(id: String)
 
     @Query("SELECT COUNT(*) FROM case_records WHERE syncState = 'FAILED'")
     fun observeFailedSyncCount(): Flow<Int>
+
+    /** The FAILED rows of this table, projected for the worker-facing review list (S-3).
+     *  Selects exactly the rows this table's FAILED counter counts, so the number on the Home
+     *  card and the length of the list can never disagree. Suspend rather than a Flow:
+     *  the list is fetched when a worker opens it, so it costs nothing at launch.
+     *  See [FailedSyncRow]. */
+    @Query(
+        "SELECT 'case_records' AS tableName, id AS recordId, patientId AS patientId, localModifiedAt AS " +
+        "recordedAt, syncErrorCode AS syncErrorCode, syncErrorMessage AS syncErrorMessage FROM " +
+        "case_records WHERE syncState = 'FAILED'",
+    )
+    suspend fun getFailedForReview(): List<FailedSyncRow>
 
     /** Also stamps `localModifiedAt` from the same [updatedAt] value, see MIGRATION_12_13's
      *  KDoc for why the two columns are deliberately redundant on entities that have both, and
@@ -43,7 +77,7 @@ interface CaseRecordDao {
 
     @Query(
         "UPDATE case_records SET status = :status, assignedDoctorId = :doctorId, updatedAt = :updatedAt, " +
-            "localModifiedAt = :updatedAt, syncState = 'PENDING' WHERE id = :caseRecordId",
+        "localModifiedAt = :updatedAt, syncState = 'PENDING' WHERE id = :caseRecordId",
     )
     suspend fun assignDoctor(caseRecordId: String, doctorId: String, status: CaseStatus, updatedAt: Instant)
 
@@ -60,9 +94,9 @@ interface CaseRecordDao {
      *  under the queue. Same signal, same shape, as [observeResumableDraftForUser]'s exclusion. */
     @Query(
         "UPDATE case_records SET status = 'ABANDONED', updatedAt = :updatedAt, localModifiedAt = :updatedAt, " +
-            "syncState = 'PENDING' WHERE patientId = :patientId AND status = 'DRAFT' " +
-            "AND NOT EXISTS (SELECT 1 FROM audit_log al WHERE al.caseRecordId = case_records.id " +
-            "AND al.action = 'consultation_saved')",
+        "syncState = 'PENDING' WHERE patientId = :patientId AND status = 'DRAFT' " +
+        "AND NOT EXISTS (SELECT 1 FROM audit_log al WHERE al.caseRecordId = case_records.id " +
+        "AND al.action = 'consultation_saved')",
     )
     suspend fun abandonDraftsForPatient(patientId: String, updatedAt: Instant)
 
@@ -71,7 +105,7 @@ interface CaseRecordDao {
      *  (syncstate-reset session), for the same reason as [updateStatus]. */
     @Query(
         "UPDATE case_records SET status = 'SENT_TO_DOCTOR', updatedAt = :updatedAt, localModifiedAt = :updatedAt, " +
-            "syncState = 'PENDING' WHERE status = 'PENDING_SYNC'",
+        "syncState = 'PENDING' WHERE status = 'PENDING_SYNC'",
     )
     suspend fun sendAllPendingSync(updatedAt: Instant)
 
@@ -91,8 +125,8 @@ interface CaseRecordDao {
      *  of cases at or before a given one inside its day can never change once that case exists. */
     @Query(
         "SELECT COUNT(*) FROM case_records " +
-            "WHERE createdAt >= :dayStartMillis AND createdAt < :dayEndMillis " +
-            "AND (createdAt < :caseCreatedAtMillis OR (createdAt = :caseCreatedAtMillis AND id <= :caseRecordId))",
+        "WHERE createdAt >= :dayStartMillis AND createdAt < :dayEndMillis " +
+        "AND (createdAt < :caseCreatedAtMillis OR (createdAt = :caseCreatedAtMillis AND id <= :caseRecordId))",
     )
     suspend fun getDayOrdinal(
         dayStartMillis: Long,
@@ -125,11 +159,11 @@ interface CaseRecordDao {
      *  `LIMIT 1`/most-recent semantics above. */
     @Query(
         "SELECT cr.* FROM case_records cr " +
-            "JOIN audit_log al ON al.caseRecordId = cr.id " +
-            "WHERE al.userId = :userId AND al.action = 'encounter_started' AND cr.status = 'DRAFT' " +
-            "AND NOT EXISTS (SELECT 1 FROM audit_log sent WHERE sent.caseRecordId = cr.id " +
-            "AND sent.action = 'consultation_saved') " +
-            "ORDER BY cr.updatedAt DESC LIMIT 1",
+        "JOIN audit_log al ON al.caseRecordId = cr.id " +
+        "WHERE al.userId = :userId AND al.action = 'encounter_started' AND cr.status = 'DRAFT' " +
+        "AND NOT EXISTS (SELECT 1 FROM audit_log sent WHERE sent.caseRecordId = cr.id " +
+        "AND sent.action = 'consultation_saved') " +
+        "ORDER BY cr.updatedAt DESC LIMIT 1",
     )
     fun observeResumableDraftForUser(userId: String): Flow<CaseRecordEntity?>
 
@@ -145,14 +179,14 @@ interface CaseRecordDao {
      *  deliberately day-scoped roster query. */
     @Query(
         "SELECT cr.id AS caseRecordId, cr.patientId AS patientId, cr.status AS status, " +
-            "cr.updatedAt AS updatedAt, p.fullName AS patientFullName, c.chiefComplaint AS chiefComplaint, " +
-            "d.name AS doctorName, d.specialty AS doctorSpecialty " +
-            "FROM case_records cr " +
-            "JOIN patients p ON p.id = cr.patientId " +
-            "LEFT JOIN consultations c ON c.encounterId = cr.encounterId " +
-            "LEFT JOIN doctors d ON d.id = cr.assignedDoctorId " +
-            "WHERE cr.status IN ('SENT_TO_DOCTOR', 'PRESCRIPTION_RECEIVED') " +
-            "ORDER BY cr.updatedAt DESC",
+        "cr.updatedAt AS updatedAt, p.fullName AS patientFullName, c.chiefComplaint AS chiefComplaint, " +
+        "d.name AS doctorName, d.specialty AS doctorSpecialty " +
+        "FROM case_records cr " +
+        "JOIN patients p ON p.id = cr.patientId " +
+        "LEFT JOIN consultations c ON c.encounterId = cr.encounterId " +
+        "LEFT JOIN doctors d ON d.id = cr.assignedDoctorId " +
+        "WHERE cr.status IN ('SENT_TO_DOCTOR', 'PRESCRIPTION_RECEIVED') " +
+        "ORDER BY cr.updatedAt DESC",
     )
     fun observeDoctorTrackerRows(): Flow<List<DoctorTrackerRow>>
 }

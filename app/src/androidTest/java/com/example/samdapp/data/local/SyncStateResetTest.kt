@@ -17,6 +17,8 @@ import com.example.samdapp.domain.model.MeasurementType
 import com.example.samdapp.domain.model.PhysicianDecision
 import com.example.samdapp.domain.model.ReferralStatus
 import com.example.samdapp.domain.model.RiskCategory
+import com.example.samdapp.domain.model.MAX_SYNC_ATTEMPTS
+import com.example.samdapp.domain.model.RETRY_EXHAUSTED_CODE
 import com.example.samdapp.domain.model.SyncState
 import com.example.samdapp.domain.model.UrgencyLevel
 import com.example.samdapp.domain.model.Visibility
@@ -134,7 +136,9 @@ class SyncStateResetTest {
 
         dao.applySyncResult(
             "case-1", SyncState.SYNCED, serverVersion = 1, syncErrorCode = null,
+            syncErrorMessage = null,
             attemptAt = Instant.now(), sentLocalModifiedAt = Instant.ofEpochMilli(1000),
+            maxAttempts = MAX_SYNC_ATTEMPTS, retryExhaustedCode = RETRY_EXHAUSTED_CODE,
         )
 
         val updated = requireNotNull(firstValue(dao::observeById, "case-1"))
@@ -170,7 +174,9 @@ class SyncStateResetTest {
         // The late ack for the pre-edit send arrives, guarded on the OLD sentLocalModifiedAt.
         dao.applySyncResult(
             "case-1", SyncState.SYNCED, serverVersion = 1, syncErrorCode = null,
+            syncErrorMessage = null,
             attemptAt = Instant.now(), sentLocalModifiedAt = sentAt,
+            maxAttempts = MAX_SYNC_ATTEMPTS, retryExhaustedCode = RETRY_EXHAUSTED_CODE,
         )
 
         val afterLateAck = requireNotNull(firstValue(dao::observeById, "case-1"))
@@ -228,7 +234,7 @@ class SyncStateResetTest {
 
         // observeForEncounter excludes soft-deleted rows by design (its own KDoc); read the row
         // back via getPendingForSync instead, which conveniently also proves the PENDING reset.
-        val updated = dao.getPendingForSync().single { it.id == "ail-1" }
+        val updated = dao.getPendingForSync(Instant.now()).single { it.id == "ail-1" }
         assertEquals(SyncState.PENDING, updated.syncState)
         assertEquals(Instant.ofEpochMilli(5000), updated.localModifiedAt)
         assertEquals(2, updated.serverVersion)

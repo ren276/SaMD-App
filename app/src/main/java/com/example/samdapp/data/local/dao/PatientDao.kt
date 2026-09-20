@@ -15,21 +15,62 @@ interface PatientDao {
 
     /** Phase 6b outbox: rows this device has never pushed, or has locally re-modified since its
      *  last push. Never `CONFLICT`/`FAILED`/`SYNCED` — see SyncOutboxRepository's KDoc. */
-    @Query("SELECT * FROM patients WHERE syncState = 'PENDING' ORDER BY localModifiedAt ASC")
-    suspend fun getPendingForSync(): List<PatientEntity>
+    @Query("SELECT * FROM patients WHERE syncState IN ('PENDING', 'RETRYABLE') "
+            + "AND (lastSyncAttemptAt IS NULL OR lastSyncAttemptAt <= :retryEligibleBefore) "
+            + "ORDER BY localModifiedAt ASC")
+    suspend fun getPendingForSync(retryEligibleBefore: Instant): List<PatientEntity>
 
     /** [serverVersion] is `COALESCE`d against the existing value so a `conflict`/`rejected` ack
      *  (which carries no fresh version) never wipes the version from a prior successful sync. */
     @Query(
-        "UPDATE patients SET syncState = :syncState, " +
-            "serverVersion = COALESCE(:serverVersion, serverVersion), " +
-            "syncErrorCode = :syncErrorCode, lastSyncAttemptAt = :attemptAt " +
-            "WHERE id = :id AND localModifiedAt = :sentLocalModifiedAt",
+        "UPDATE patients SET " +
+        "syncState = CASE WHEN :syncState = 'RETRYABLE' AND syncAttemptCount + 1 >= :maxAttempts THEN 'FAILED' ELSE :syncState END, " +
+        "serverVersion = COALESCE(:serverVersion, serverVersion), " +
+        "syncErrorCode = CASE WHEN :syncState = 'RETRYABLE' AND syncAttemptCount + 1 >= :maxAttempts THEN :retryExhaustedCode ELSE :syncErrorCode END, " +
+        "syncErrorMessage = :syncErrorMessage, " +
+        "syncAttemptCount = CASE WHEN :syncState = 'SYNCED' THEN 0 ELSE syncAttemptCount + 1 END, " +
+        "lastSyncAttemptAt = :attemptAt " +
+        "WHERE id = :id AND localModifiedAt = :sentLocalModifiedAt",
     )
-    suspend fun applySyncResult(id: String, syncState: SyncState, serverVersion: Int?, syncErrorCode: String?, attemptAt: Instant, sentLocalModifiedAt: Instant)
+    suspend fun applySyncResult(id: String, syncState: SyncState, serverVersion: Int?, syncErrorCode: String?, syncErrorMessage: String?, attemptAt: Instant, sentLocalModifiedAt: Instant, maxAttempts: Int, retryExhaustedCode: String)
+
+    /** The FAILED to PENDING transition, the only way out of a terminal state.
+     *  Driven by an explicit human action (S-3 owns its UI): a worker who has fixed
+     *  whatever the server objected to, or who knows the parent has since landed,
+     *  asks for this row to be tried again.
+     *
+     *  Resets the attempt budget and clears both the code and the message, so the
+     *  next failure is reported on its own terms rather than under the last one's.
+     *  Guarded on FAILED so it cannot disturb a row that is mid-flight, and
+     *  idempotent: pressing retry twice is one requeue. */
+    @Query(
+        "UPDATE patients SET syncState = 'PENDING', syncAttemptCount = 0, " +
+        "syncErrorCode = NULL, syncErrorMessage = NULL " +
+        "WHERE id = :id AND syncState = 'FAILED'",
+    )
+    suspend fun requeueFailed(id: String)
 
     @Query("SELECT COUNT(*) FROM patients WHERE syncState = 'FAILED'")
     fun observeFailedSyncCount(): Flow<Int>
+
+    /** The FAILED rows of this table, projected for the worker-facing review list (S-3).
+     *  Selects exactly the rows this table's FAILED counter counts, so the number on the Home
+     *  card and the length of the list can never disagree. Suspend rather than a Flow:
+     *  the list is fetched when a worker opens it, so it costs nothing at launch.
+     *  See [FailedSyncRow]. */
+    @Query(
+        "SELECT 'patients' AS tableName, id AS recordId, id AS patientId, localModifiedAt AS recordedAt, " +
+        "syncErrorCode AS syncErrorCode, syncErrorMessage AS syncErrorMessage FROM patients WHERE " +
+        "syncState = 'FAILED'",
+    )
+    suspend fun getFailedForReview(): List<FailedSyncRow>
+
+    /** Display names for a set of patient ids the caller already holds, in one round trip.
+     *  Backs the failed-sync review list's row labels (S-3). Not a directory query: it cannot
+     *  return a patient the caller did not already name, so it adds no new way to enumerate the
+     *  patient table (agent_docs/hardening.md's data-minimization constraint). */
+    @Query("SELECT id, fullName FROM patients WHERE id IN (:ids)")
+    suspend fun getNamesByIds(ids: List<String>): List<PatientNameRow>
 
     @Query("SELECT * FROM patients WHERE id = :patientId")
     fun observeById(patientId: String): Flow<PatientEntity?>
@@ -44,10 +85,10 @@ interface PatientDao {
      */
     @Query(
         "SELECT p.* FROM patients p " +
-            "INNER JOIN encounters e ON e.patientId = p.id " +
-            "WHERE e.startedAt >= :startMillis AND e.startedAt < :endMillis " +
-            "GROUP BY p.id " +
-            "ORDER BY MAX(e.startedAt) DESC",
+        "INNER JOIN encounters e ON e.patientId = p.id " +
+        "WHERE e.startedAt >= :startMillis AND e.startedAt < :endMillis " +
+        "GROUP BY p.id " +
+        "ORDER BY MAX(e.startedAt) DESC",
     )
     fun observePatientsWithEncounterBetween(startMillis: Long, endMillis: Long): Flow<List<PatientEntity>>
 
@@ -84,11 +125,11 @@ interface PatientDao {
      */
     @Query(
         "SELECT p.*, MAX(e.startedAt) AS lastSeenAt FROM patients p " +
-            "LEFT JOIN encounters e ON e.patientId = p.id " +
-            "GROUP BY p.id " +
-            "HAVING MAX(p.createdAt, COALESCE(MAX(e.startedAt), p.createdAt)) >= :startMillis " +
-            "AND MAX(p.createdAt, COALESCE(MAX(e.startedAt), p.createdAt)) < :endMillis " +
-            "ORDER BY MAX(p.createdAt, COALESCE(MAX(e.startedAt), p.createdAt)) DESC, p.id ASC",
+        "LEFT JOIN encounters e ON e.patientId = p.id " +
+        "GROUP BY p.id " +
+        "HAVING MAX(p.createdAt, COALESCE(MAX(e.startedAt), p.createdAt)) >= :startMillis " +
+        "AND MAX(p.createdAt, COALESCE(MAX(e.startedAt), p.createdAt)) < :endMillis " +
+        "ORDER BY MAX(p.createdAt, COALESCE(MAX(e.startedAt), p.createdAt)) DESC, p.id ASC",
     )
     fun observeRegisteredOrSeenBetween(startMillis: Long, endMillis: Long): Flow<List<PatientDirectoryRow>>
 }

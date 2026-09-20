@@ -296,4 +296,26 @@ tasks.withType<Test>().configureEach {
     inputs.dir(layout.projectDirectory.dir("src/main"))
         .withPropertyName("mainSourcesScannedByEgressProofTests")
         .withPathSensitivity(PathSensitivity.RELATIVE)
+
+    // Backend files that unit tests READ AS TEXT to check a device/backend mirror. Without these
+    // declared, Gradle does not know the tests depend on them, marks the test task UP-TO-DATE on
+    // a backend-only change, and the guard never runs. MEASURED during S-1: adding a value to
+    // app/models/enums.py's SyncRetryClass left `testDevDebugUnitTest UP-TO-DATE` and the stale
+    // green result on disk, so the drift the test exists to catch went unreported. The
+    // AuditActionBackendMirrorTest that predates it had the same hole for the same reason, which
+    // is why both files are listed rather than only the new one.
+    //
+    // Missing files are tolerated: a checkout without backend/ simply has no mirror to compare,
+    // which both tests already handle (pytest skips; the Kotlin side fails loudly on a missing
+    // repo root, which is the correct signal there).
+    inputs.files(
+        rootProject.layout.projectDirectory.file("backend/core/app/models/enums.py"),
+        rootProject.layout.projectDirectory.file("backend/core/app/domain/audit_actions_device.py"),
+        // S-3: SyncFailureMessageMirrorTest matches on the literal constraint messages this
+        // module writes, because a duplicate ABHA and a missing field share one error code.
+        rootProject.layout.projectDirectory.file("backend/core/app/services/sync.py"),
+    )
+        .withPropertyName("backendMirrorSourcesReadByMirrorTests")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+        .optional()
 }

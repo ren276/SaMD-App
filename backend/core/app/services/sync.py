@@ -40,7 +40,7 @@ from app.models.abha import AbhaProfile
 from app.models.attachment import Attachment
 from app.models.clinical import Ailment, CaseRecord, Observation
 from app.models.encounter import Consultation, Encounter
-from app.models.enums import AuditAction, AuditOrigin
+from app.models.enums import AuditAction, AuditOrigin, SyncRetryClass
 from app.models.history import (
     Allergy,
     FamilyHistoryEntry,
@@ -126,6 +126,35 @@ _SQLSTATE_MESSAGES = {
     "23514": "a field value is not valid.",
 }
 
+# sqlstate -> SyncRetryClass. The one reject site in this module that is not uniformly TERMINAL.
+#
+# 23503 (foreign key) is the row this whole change exists for. A child whose parent has not landed
+# yet is REJECTED TERMINALLY TODAY, which permanently destroys a row that would have synced on the
+# next drain once the parent arrived. push() sorts a batch by table rank, so a parent in the SAME
+# batch always applies first; a 23503 therefore means the parent genuinely is not on the server
+# yet, which is a fact about the world that changes, not a fact about this record.
+#
+# 23505 (unique) is CONFLICT, not "sometimes retryable". MEASURED: exactly two unique constraints
+# in the whole schema are reachable from a client-pushed row, `ix_patients_abha_number` and
+# `uq_medication_lines_position`; every other unique index is on a server-generated column
+# (audit_events.sequence) or is handled inside _apply_audit_log and never reaches this site. The
+# patients one is the duplicate-ABHA case and needs a person to decide which patient is right.
+# The medication-lines one is theoretically transient (two lines swapping positions inside one
+# prescription, in one batch, where within-table order is the array order the device sent), but
+# the device does not currently produce that shape, and a sqlstate cannot tell the two apart.
+# Classifying the whole sqlstate as CONFLICT is therefore no worse than today for the second case
+# and correct for the first. If the second ever matters, the upgrade is per-CONSTRAINT-NAME
+# classification here, not a fourth retry class.
+#
+# 23502 (not null) and 23514 (check) are TERMINAL: the row omits a required column or carries a
+# value the schema forbids, and neither changes by waiting.
+_SQLSTATE_RETRY_CLASSES = {
+    "23502": SyncRetryClass.TERMINAL,
+    "23503": SyncRetryClass.RETRYABLE,
+    "23505": SyncRetryClass.CONFLICT,
+    "23514": SyncRetryClass.TERMINAL,
+}
+
 
 @dataclass(frozen=True)
 class TableSpec:
@@ -203,11 +232,30 @@ def _timestamp_attr(spec: TableSpec) -> str:
     return "updated_at" if hasattr(spec.model, "updated_at") else "created_at"
 
 
-def _constraint_message(exc: IntegrityError | DataError) -> str:
+def _constraint_sqlstate(exc: IntegrityError | DataError) -> str | None:
     sqlstate = getattr(exc.orig, "sqlstate", None)
-    if not isinstance(sqlstate, str):
+    return sqlstate if isinstance(sqlstate, str) else None
+
+
+def _constraint_message(exc: IntegrityError | DataError) -> str:
+    sqlstate = _constraint_sqlstate(exc)
+    if sqlstate is None:
         return "the record could not be applied."
     return _SQLSTATE_MESSAGES.get(sqlstate, "the record could not be applied.")
+
+
+def _constraint_retry_class(exc: IntegrityError | DataError) -> SyncRetryClass:
+    """An sqlstate this module does not recognise, or a driver that supplied none, is TERMINAL.
+
+    TERMINAL is the conservative default here specifically because it is what this site did for
+    every sqlstate before this change: an unrecognised constraint failure keeps exactly today's
+    behaviour rather than silently gaining an unbounded retry for a class nobody has reasoned
+    about. Optimism belongs on the classes that were argued, not on the default.
+    """
+    sqlstate = _constraint_sqlstate(exc)
+    if sqlstate is None:
+        return SyncRetryClass.TERMINAL
+    return _SQLSTATE_RETRY_CLASSES.get(sqlstate, SyncRetryClass.TERMINAL)
 
 
 def _parse_datetime(value: Any) -> datetime:
@@ -235,13 +283,28 @@ def _coerce_value(column_type: Any, value: Any) -> Any:
     return value
 
 
-def _reject(table: str, record_id: str, code: ErrorCode, message: str) -> dict[str, Any]:
+def _reject(
+    table: str,
+    record_id: str,
+    code: ErrorCode,
+    message: str,
+    retry_class: SyncRetryClass,
+) -> dict[str, Any]:
+    """Build one `rejected` result.
+
+    `retry_class` is a REQUIRED positional parameter with no default, deliberately. A default
+    would let a new reject site omit it and silently inherit someone else's decision, and this
+    function is the only place a `rejected` result is constructed, so the signature itself is the
+    guarantee that no path can answer without classifying. `tests/test_sync_retry_class_mirror.py`
+    then checks the values; the compiler-equivalent check is here.
+    """
     return {
         "table": table,
         "id": record_id,
         "status": "rejected",
         "code": code.value,
         "message": message,
+        "retry_class": retry_class.value,
     }
 
 
@@ -262,7 +325,10 @@ async def _apply_generic(
 ) -> dict[str, Any]:
     for key, code in spec.forbidden.items():
         if key in data:
-            return _reject(table, record_id, code, f"{key}: forbidden field.")
+            # A field the device must never send. Same bytes, same answer, forever.
+            return _reject(
+                table, record_id, code, f"{key}: forbidden field.", SyncRetryClass.TERMINAL
+            )
 
     if table == "referrals":
         sending = data.get("sending_phc_id")
@@ -272,13 +338,27 @@ async def _apply_generic(
                 record_id,
                 ErrorCode.SYNC_RECORD_INVALID,
                 "sending_phc_id: does not match this facility.",
+                # A rule about this record against the authenticated session. Unchanged bytes
+                # from this device can never satisfy it.
+                SyncRetryClass.TERMINAL,
             )
 
     attr_map = _attr_map(spec)
     unknown = set(data) - set(attr_map)
     if unknown:
         bad = sorted(unknown)[0]
-        return _reject(table, record_id, ErrorCode.SYNC_RECORD_INVALID, f"{bad}: unexpected field.")
+        # TERMINAL, with a known limitation recorded in scratchpad/s1-ack-contract.md: a device
+        # shipped AHEAD of the backend, sending a column the backend's mapper does not have yet,
+        # would also land here and be destroyed rather than waiting for the backend migration.
+        # Judged far more likely to be a device defect than a rollout skew, unlike the audit
+        # action vocabulary below, where the device is expected to lead. Owner may overrule.
+        return _reject(
+            table,
+            record_id,
+            ErrorCode.SYNC_RECORD_INVALID,
+            f"{bad}: unexpected field.",
+            SyncRetryClass.TERMINAL,
+        )
 
     model = spec.model
     pk_column = getattr(model, spec.pk_attr)
@@ -288,7 +368,13 @@ async def _apply_generic(
 
     if existing is not None and existing.facility_id != worker.facility_id:
         return _reject(
-            table, record_id, ErrorCode.SYNC_RECORD_INVALID, "id: belongs to another facility."
+            table,
+            record_id,
+            ErrorCode.SYNC_RECORD_INVALID,
+            "id: belongs to another facility.",
+            # A primary key another facility already holds. Not CONFLICT: there is no resolution
+            # available to this worker, who cannot see or re-key the other facility's row.
+            SyncRetryClass.TERMINAL,
         )
 
     if existing is not None:
@@ -320,7 +406,11 @@ async def _apply_generic(
             attrs["payload_json"] = json.loads(attrs["payload_json"])
         except json.JSONDecodeError:
             return _reject(
-                table, record_id, ErrorCode.SYNC_RECORD_INVALID, "payload_json: invalid JSON."
+                table,
+                record_id,
+                ErrorCode.SYNC_RECORD_INVALID,
+                "payload_json: invalid JSON.",
+                SyncRetryClass.TERMINAL,
             )
 
     if existing is not None:
@@ -380,35 +470,70 @@ async def _apply_audit_log(
     unknown = set(data) - _AUDIT_LOG_ALLOWED_KEYS
     if unknown:
         bad = sorted(unknown)[0]
-        return _reject(table, record_id, ErrorCode.SYNC_RECORD_INVALID, f"{bad}: unexpected field.")
+        return _reject(
+            table,
+            record_id,
+            ErrorCode.SYNC_RECORD_INVALID,
+            f"{bad}: unexpected field.",
+            SyncRetryClass.TERMINAL,
+        )
 
     action = data.get("action")
     if action not in _DEVICE_AUDIT_ACTION_VALUES:
+        # RETRYABLE, and the one correction to the diagnosis's own sixteen. DEVICE_AUDIT_ACTIONS
+        # is this backend's copy of a vocabulary the DEVICE owns and is expected to grow; a device
+        # rolled out ahead of the backend sends an action this build has not learned yet. Terminal
+        # rejection there destroys an append-only audit row permanently and leaves a hole in the
+        # chain, and the remedy (upgrade the backend) needs nothing from the device: the identical
+        # bytes then apply. This is the same mirror the AuditActionBackendMirrorTest guards, and
+        # the same integrity class S-5 found in the ABDM adapter.
         return _reject(
-            table, record_id, ErrorCode.SYNC_RECORD_INVALID, "action: unknown audit action."
+            table,
+            record_id,
+            ErrorCode.SYNC_RECORD_INVALID,
+            "action: unknown audit action.",
+            SyncRetryClass.RETRYABLE,
         )
 
     try:
         occurred_at = _parse_datetime(data.get("timestamp"))
     except (TypeError, ValueError):
         return _reject(
-            table, record_id, ErrorCode.SYNC_RECORD_INVALID, "timestamp: invalid timestamp."
+            table,
+            record_id,
+            ErrorCode.SYNC_RECORD_INVALID,
+            "timestamp: invalid timestamp.",
+            SyncRetryClass.TERMINAL,
         )
 
     user_id = data.get("user_id")
     if not isinstance(user_id, str) or not user_id:
-        return _reject(table, record_id, ErrorCode.SYNC_RECORD_INVALID, "user_id: required.")
+        return _reject(
+            table,
+            record_id,
+            ErrorCode.SYNC_RECORD_INVALID,
+            "user_id: required.",
+            SyncRetryClass.TERMINAL,
+        )
 
     payload = data.get("payload", "{}")
     if not isinstance(payload, str):
         return _reject(
-            table, record_id, ErrorCode.SYNC_RECORD_INVALID, "payload: must be a string."
+            table,
+            record_id,
+            ErrorCode.SYNC_RECORD_INVALID,
+            "payload: must be a string.",
+            SyncRetryClass.TERMINAL,
         )
 
     for key in ("patient_id", "case_record_id"):
         if key in data and data[key] is not None and not isinstance(data[key], str):
             return _reject(
-                table, record_id, ErrorCode.SYNC_RECORD_INVALID, f"{key}: must be a string."
+                table,
+                record_id,
+                ErrorCode.SYNC_RECORD_INVALID,
+                f"{key}: must be a string.",
+                SyncRetryClass.TERMINAL,
             )
 
     # Reserve the dedup slot before appending to the chain, not after. If this INSERT loses the
@@ -465,14 +590,32 @@ async def _apply_one(
     safe_id = record_id if isinstance(record_id, str) and record_id else ""
 
     if not isinstance(record_id, str) or not record_id:
-        return _reject(table, safe_id, ErrorCode.SYNC_RECORD_INVALID, "id: required.")
+        return _reject(
+            table, safe_id, ErrorCode.SYNC_RECORD_INVALID, "id: required.", SyncRetryClass.TERMINAL
+        )
     if op not in ("upsert", "insert"):
-        return _reject(table, safe_id, ErrorCode.SYNC_RECORD_INVALID, "op: unsupported operation.")
+        return _reject(
+            table,
+            safe_id,
+            ErrorCode.SYNC_RECORD_INVALID,
+            "op: unsupported operation.",
+            SyncRetryClass.TERMINAL,
+        )
     if not isinstance(data, dict):
-        return _reject(table, safe_id, ErrorCode.SYNC_RECORD_INVALID, "data: required.")
+        return _reject(
+            table,
+            safe_id,
+            ErrorCode.SYNC_RECORD_INVALID,
+            "data: required.",
+            SyncRetryClass.TERMINAL,
+        )
     if base_version is not None and not isinstance(base_version, int):
         return _reject(
-            table, safe_id, ErrorCode.SYNC_RECORD_INVALID, "base_version: must be an integer."
+            table,
+            safe_id,
+            ErrorCode.SYNC_RECORD_INVALID,
+            "base_version: must be an integer.",
+            SyncRetryClass.TERMINAL,
         )
     try:
         client_updated_at = _parse_datetime(raw.get("client_updated_at"))
@@ -482,6 +625,7 @@ async def _apply_one(
             safe_id,
             ErrorCode.SYNC_RECORD_INVALID,
             "client_updated_at: invalid timestamp.",
+            SyncRetryClass.TERMINAL,
         )
 
     try:
@@ -508,7 +652,14 @@ async def _apply_one(
                     client_updated_at=client_updated_at,
                 )
     except (IntegrityError, DataError) as exc:
-        return _reject(table, safe_id, ErrorCode.SYNC_RECORD_INVALID, _constraint_message(exc))
+        # The only site that is not uniformly TERMINAL. See _SQLSTATE_RETRY_CLASSES.
+        return _reject(
+            table,
+            safe_id,
+            ErrorCode.SYNC_RECORD_INVALID,
+            _constraint_message(exc),
+            _constraint_retry_class(exc),
+        )
 
     return result
 

@@ -2,6 +2,7 @@ package com.example.samdapp.data.sync
 
 import com.example.samdapp.data.remote.dto.SyncRecordDto
 import com.example.samdapp.data.remote.dto.SyncResultDto
+import com.example.samdapp.domain.sync.FailedSyncRecord
 import kotlinx.coroutines.flow.Flow
 import java.time.Instant
 
@@ -12,10 +13,12 @@ import java.time.Instant
  * drainer needs to see it — [com.example.samdapp.data.sync.SyncStatusImpl] only reaches
  * [observeFailedCount] for the FAILED-count-observable requirement.
  *
- * [collectPendingRecords] selects only `syncState = PENDING` rows, per table, ordered by
- * `localModifiedAt` — never `CONFLICT` (surfaced for review, not retried blindly, per the ack
- * rule below) and never `FAILED`/`SYNCED` (terminal). [applyAck] is the single place that maps a
- * backend result's `status` to the local `syncState` transition, table-driven:
+ * [collectPendingRecords] selects `syncState = PENDING` or `RETRYABLE` rows, per table, ordered
+ * by `localModifiedAt`, and only those whose last attempt is older than
+ * [com.example.samdapp.domain.model.RETRY_MIN_INTERVAL]. Never `CONFLICT` (surfaced for review,
+ * not retried blindly, per the ack rule below) and never `FAILED`/`SYNCED` (terminal).
+ * [applyAck] is the single place that maps a backend result's `status` to the local `syncState`
+ * transition, table-driven:
  *
  * - `applied`/`stale`/`duplicate` -> `SYNCED`, `serverVersion` updated when the ack carries one
  *   (`stale`/`duplicate` may not; [SyncState] is left untouched via `COALESCE` in that case, see
@@ -24,9 +27,16 @@ import java.time.Instant
  *   conflicted row is never blindly resent with its stale `base_version` — it sits surfaced for
  *   review instead (api-contract.md §6.1: last-write-wins already ran server side, so a conflict
  *   here means a real `base_version` mismatch, not something worth silently retrying).
- * - `rejected` -> `FAILED`, `syncErrorCode` set to the returned SAMD-SYNC-6xxx code. Also excluded
- *   from the next [collectPendingRecords] call, which is what "stop retrying" means here: no
- *   separate retry-count column, the state transition itself is the guard.
+ * - `rejected` with `retry_class = TERMINAL` or `CONFLICT` -> `FAILED`, `syncErrorCode` and
+ *   `syncErrorMessage` set from the ack. Excluded from the next [collectPendingRecords] call,
+ *   which is what "stop retrying" means here.
+ * - `rejected` with `retry_class = RETRYABLE` -> `RETRYABLE`, which IS re-collected, after
+ *   [com.example.samdapp.domain.model.RETRY_MIN_INTERVAL] and at most
+ *   [com.example.samdapp.domain.model.MAX_SYNC_ATTEMPTS] times. On the attempt that exhausts the
+ *   budget the same DAO statement writes `FAILED` with
+ *   [com.example.samdapp.domain.model.RETRY_EXHAUSTED_CODE], so "we gave up" is separable from
+ *   "the server refused it". The state transition is still the guard; the count is what bounds
+ *   how long the guard takes to close.
  */
 interface SyncOutboxRepository {
     suspend fun collectPendingRecords(): List<SyncRecordDto>
@@ -39,5 +49,22 @@ interface SyncOutboxRepository {
      *  if it already was, so the newer content is picked up on the next drain) instead of being
      *  stamped `SYNCED` for content the server never saw. */
     suspend fun applyAck(result: SyncResultDto, sentLocalModifiedAt: Instant)
+
+    /** Moves one FAILED row back to PENDING and clears its attempt budget, code and message.
+     *  The only exit from a terminal state, and it exists only for an explicit human action:
+     *  a worker who has corrected whatever the server objected to, or who knows the parent row
+     *  has since landed. S-3 owns the screen that calls this; the transition lives here so the
+     *  state machine is complete in one place.
+     *
+     *  Guarded on FAILED per table, so calling it for a row in any other state is a no-op rather
+     *  than a way to yank a mid-flight record back into the queue. An unknown [table] is
+     *  recorded and skipped, exactly as [applyAck] does, and for the same reason. */
+    suspend fun requeueFailed(table: String, id: String)
+
     fun observeFailedCount(): Flow<Int>
+
+    /** The rows behind [observeFailedCount], newest first, classified for the worker-facing
+     *  review list (S-3). Suspend rather than a Flow: the count is already observed from app
+     *  start and the list is not, so this runs only when a worker opens it. */
+    suspend fun failedRecords(): List<FailedSyncRecord>
 }
