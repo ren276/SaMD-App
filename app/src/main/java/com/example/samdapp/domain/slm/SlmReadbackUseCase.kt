@@ -188,8 +188,17 @@ enum class SlmRefusal {
      * complete" and "the answer is not complete" are the same thing from the worker's side, and
      * fail-closed is the only reading worth having.
      *
-     * Retryable: a second generation may fit, and a persistent recurrence means the output ceiling
-     * is too low for the records being read back, which is a tuning signal rather than a fault.
+     * **Not retryable by re-running the same question, corrected in PR-7.** This KDoc said
+     * "Retryable: a second generation may fit", which was written in PR-2, before the decode
+     * parameters were settled and before any transport existed to send them. They are settled now:
+     * `slm-service-contract.md` §2.1 fixes `temperature` at 0 and `do_sample` at false, and the
+     * binding sends a constant seed, so the same question against the same record produces the same
+     * cut-off answer byte for byte. A second generation does not "may fit", it cannot fit. A
+     * shorter question is the only action that changes the outcome, which is why the worker-facing
+     * copy offers that and not a retry.
+     *
+     * A persistent recurrence still means the output ceiling is too low for the records being read
+     * back, which is a tuning signal rather than a fault.
      */
     OUTPUT_TRUNCATED,
 
