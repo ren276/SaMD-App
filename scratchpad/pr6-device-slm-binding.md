@@ -1,6 +1,8 @@
 # PR-6: the device-side SLM engine binding
 
-Branch `feat/slm-backend-proxy`, on top of PR-4 at `f43a3cf`. Two commits, neither pushed. The four
+Branch `feat/slm-backend-proxy`, on top of PR-4 at `f43a3cf`. Three commits, none pushed: the
+contract corrections, the binding, and a Gradle test-input fix the binding's own new guard turned
+out to need (§6 item 3). The four
 pre-existing local changes (`.idea/deploymentTargetSelector.xml`, `backend/README.md`,
 `backend/docker-compose.yml`, `tools/dev-connect.sh`) were left dirty and untouched throughout.
 
@@ -359,6 +361,13 @@ graph check. One caveat worth recording: running all three `assemble` tasks in a
 invocation produced a spurious `packageStagingDebug FAILED` that did not reproduce serially or on
 retry. INFERRED to be a parallel-output conflict between the three package tasks, not a defect.
 
+**One caveat on M16 that is itself a finding: the harness hid a real hole.** `mutate.py` deletes
+the JUnit results directory before every run, which makes the test task out of date and forces it to
+re-run. That is right for a mutation harness and it is also why M16 went red. Re-run WITHOUT deleting
+outputs, adding a stub engine to `src/staging/` left `:app:testDevDebugUnitTest UP-TO-DATE` and
+served the previous green result: the guard never ran. See §6 item 4; the build file is fixed and the
+same drift now goes red on a plain re-run.
+
 **Mutation checks: 18 applied, 18 RED, all restored byte-identical, suite green after.** Restore is
 by content snapshot with a SHA-256 comparison, never `git checkout`, which would restore the
 index's version and silently discard an uncommitted edit. A run producing no fresh JUnit XML is
@@ -395,17 +404,27 @@ defended against, and turns exactly one test red. The two original runs are not 
 
 ## 6. What a test caught that reasoning did not
 
-Three things, all found by running rather than by reading, and one of them is a real defect.
+Four things, all found by running rather than by reading, and two of them are real defects.
 
 1. **The `EOFException` classification.** A `200` with an empty body was classified `UNREACHABLE`,
    which would tell a connected worker they were offline about a request that reached the backend
-   and left a log row. Documented at §3.4. This is the finding; the other two are corrections to my
-   own assertions.
+   and left a log row. Documented at §3.4.
 2. **The timeout budget's nesting is not total.** `read + connect` is 65 s against a 60 s call bound,
    so an assertion I wrote expecting the three to nest failed. The numbers are the brief's and are
    right; my claim about them was wrong. The residual 5 s window is now pinned and documented rather
    than smoothed over. §2.2.
-3. **The seam's own taxonomy table caught the new enum value.** `SlmReadbackUseCaseTest` already
+3. **The flavor scan was UP-TO-DATE-able, which is the standing rule's eleventh instance.**
+   MEASURED: with only `src/main` declared as a test-task input, adding a stub `SlmEngine` to
+   `src/staging/` left `:app:testDevDebugUnitTest UP-TO-DATE` and served the previous green result.
+   The dev variant does not compile `src/staging`, so nothing made that file an input, and the test
+   written in this PR to prove that no shipped flavor can reach a fabricated clinical narrative
+   reported satisfied without running. It was invisible from the mutation results because the
+   harness deletes the output directory, which forces a re-run; only checking the trap explicitly
+   found it. `app/build.gradle.kts` now declares `src` rather than `src/main`, which closes the
+   class rather than this instance, and the same drift now turns the suite red on a plain re-run.
+   This is the exact defect `project-gradle-mirror-test-inputs` records from S-1, in a new place.
+
+4. **The seam's own taxonomy table caught the new enum value.** `SlmReadbackUseCaseTest` already
    asserts `SlmEngineError.entries.toSet() == cases.keys`, so adding `SECURE_CONNECTION_FAILED`
    turned it red until a row was added. That guard was written by PR-2 and worked exactly as
    intended on the first change that touched it, which is worth recording as a positive result: it
@@ -439,6 +458,9 @@ New from this PR:
 - **Contract §4.3's read bound does not fully achieve its own stated rationale.** 55 s is strictly
   inside 60 s, but connect plus read is 65 s, so more than 5 s spent connecting still lets the
   outermost layer classify the timeout. Pinned by a test; the numbers are settled and unchanged.
+- **Every other source-scanning test in this module should be re-checked the same way.** The
+  `src` input now covers them, but that is the fix, not the audit: nobody has confirmed which of
+  them were relying on `src/main` alone and were therefore skippable in the same way.
 - **Nothing can verify §2.7.** Control-token wrapping is invisible on the envelope, so the first
   integration test against a real service needs a record whose expected readback is known and a
   reviewer who reads the text.
