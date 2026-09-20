@@ -250,6 +250,9 @@ class MockKernelFallbackSource @Inject constructor(
             inferenceEndedAt = inferenceEndedAt,
             requiredHumanVerification = confidence < GenerateKernelReportUseCase.HUMAN_VERIFICATION_CONFIDENCE_THRESHOLD,
             inferenceSource = InferenceSource.MOCK_FALLBACK,
+            // A mock scenario is a produced result, not a failure. Null keeps MOCK_FALLBACK and
+            // a classified failure from ever being the same kind of thing on the screen.
+            failureCode = null,
         )
     }
 }

@@ -72,7 +72,7 @@ import com.example.samdapp.data.local.entity.SocialHistoryEntity
         DiagnosisFeedbackEntity::class,
         ConsultationDocumentEntity::class,
     ],
-    version = 19,
+    version = 21,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)

@@ -4,8 +4,11 @@ import com.example.samdapp.domain.audit.AuditAction
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.config.DeviceInfoProvider
+import com.example.samdapp.domain.kernel.KernelApiResult
+import com.example.samdapp.domain.kernel.KernelFailure
 import com.example.samdapp.domain.kernel.KernelFallbackSource
 import com.example.samdapp.domain.kernel.RemoteKernelSource
+import com.example.samdapp.domain.kernel.classifyKernelFailure
 import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.domain.model.KernelPayload
 import com.example.samdapp.domain.model.KernelReportOutput
@@ -106,9 +109,15 @@ class GenerateKernelReportUseCase @Inject constructor(
     ): Result<KernelReportOutput> {
         val inferenceStartedAt = Instant.now()
 
-        val output = tryRealApi(caseRecordId, payload, patientAge, patientSex, inferenceStartedAt)
+        val attempt = tryRealApi(caseRecordId, payload, patientAge, patientSex, inferenceStartedAt)
+        val output = attempt.output
             ?: kernelFallbackSource.fallback(caseRecordId, payload, inferenceStartedAt, dataQualityScore(payload))
-            ?: buildUnavailableOutput(caseRecordId, dataQualityScore(payload), inferenceStartedAt)
+            ?: buildUnavailableOutput(
+                caseRecordId,
+                dataQualityScore(payload),
+                inferenceStartedAt,
+                failure = attempt.failure,
+            )
 
         return kernelReportRepository.save(output).map { output }
     }
@@ -122,7 +131,15 @@ class GenerateKernelReportUseCase @Inject constructor(
      * no remedy. No payload exists here, so there is nothing to score for data quality.
      */
     suspend fun recordUnavailable(caseRecordId: String) {
-        val output = buildUnavailableOutput(caseRecordId, dataQualityScore = 0.0, inferenceStartedAt = Instant.now())
+        // failure = null deliberately: nothing was sent, so no KernelFailure describes this.
+        // The pre-flight "could not build a payload" case is its own class and is NOT one of the
+        // ten this enum covers; recorded as an open item rather than guessed at here.
+        val output = buildUnavailableOutput(
+            caseRecordId,
+            dataQualityScore = 0.0,
+            inferenceStartedAt = Instant.now(),
+            failure = null,
+        )
         kernelReportRepository.save(output)
     }
 
@@ -144,13 +161,38 @@ class GenerateKernelReportUseCase @Inject constructor(
         patientAge: Int?,
         patientSex: String?,
         inferenceStartedAt: Instant,
-    ): KernelReportOutput? {
-        return try {
-            val result = remoteKernelSource.assess(
+    ): RealApiAttempt {
+        val apiResult = try {
+            remoteKernelSource.assess(
                 payload = payload,
                 patientAge = patientAge ?: 30,
                 patientSex = patientSex ?: "U",
             )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // Narrowed, and deliberately so. Every transport and HTTP outcome now arrives as a
+            // KernelApiResult, so the only thing that can still be thrown out of assess() is a
+            // bug on this phone: an IllegalStateException or NullPointerException in the mapping
+            // code. Calling that DEVICE_ERROR rather than folding it in with "the network was
+            // down" is the difference between a bug report and a bug that survives.
+            logger.warning("Kernel call threw on this device, case $caseRecordId: ${e.message}")
+            return RealApiAttempt(output = null, failure = KernelFailure.DEVICE_ERROR)
+        }
+
+        if (apiResult !is KernelApiResult.Success) {
+            // The classification this PR exists for. Exhaustive over the sealed result, so a new
+            // KernelApiResult case cannot silently land back in one bucket: the build breaks in
+            // classifyKernelFailure until it is handled.
+            val failure = classifyKernelFailure(apiResult)
+            logger.warning(
+                "Kernel API failed, case $caseRecordId, failure=$failure, advice=${failure.advice}",
+            )
+            return RealApiAttempt(output = null, failure = failure)
+        }
+
+        return try {
+            val result = apiResult.data
             logger.info("Kernel API success — case $caseRecordId, triage=${result.triageUrgency}")
 
             if (result.predictedCondition == null) {
@@ -193,7 +235,19 @@ class GenerateKernelReportUseCase @Inject constructor(
                 } catch (e: Exception) {
                     logger.warning("Could not record kernel empty-differential audit event: ${e.message}")
                 }
-                return buildUnavailableOutput(caseRecordId, dataQualityScore(payload), inferenceStartedAt)
+                // failure = null: the kernel WAS reached and did answer. "No differential" is
+                // not a failure class, it is a real answer that happens to be empty, and giving
+                // it a KernelFailure would put a remedy on a screen where there is nothing to
+                // remedy. Reach-neutral copy is correct here and only here.
+                return RealApiAttempt(
+                    output = buildUnavailableOutput(
+                        caseRecordId,
+                        dataQualityScore(payload),
+                        inferenceStartedAt,
+                        failure = null,
+                    ),
+                    failure = null,
+                )
             }
 
             val inferenceEndedAt = Instant.now()
@@ -244,17 +298,31 @@ class GenerateKernelReportUseCase @Inject constructor(
                 inferenceEndedAt = inferenceEndedAt,
                 requiredHumanVerification = confidence < HUMAN_VERIFICATION_CONFIDENCE_THRESHOLD,
                 inferenceSource = InferenceSource.REAL_INFERENCE,
-            )
+                // A real assessment exists, so there is nothing to explain away.
+                failureCode = null,
+            ).let { RealApiAttempt(output = it, failure = null) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            // Any failure (network down, timeout, HTTP error, parse error, server offline) is
-            // logged here and returns null — the caller tries kernelFallbackSource next, then
-            // buildUnavailableOutput. The app never crashes when the ML server is unreachable.
-            logger.warning("Kernel API unavailable — trying fallback source. Reason: ${e.message}")
-            null
+            // Result handling on a body that arrived fine. Same DEVICE_ERROR reasoning as the
+            // catch around the call itself: this is an app bug, not an unreachable server, and
+            // it must not be reported to the worker as one.
+            logger.warning("Kernel result handling failed on this device, case $caseRecordId: ${e.message}")
+            RealApiAttempt(output = null, failure = KernelFailure.DEVICE_ERROR)
         }
     }
+
+    /**
+     * What one [tryRealApi] call produced. [output] is non-null only when a report was built,
+     * which is the 200-with-a-differential path and the reached-but-empty-differential path.
+     * [failure] is non-null only when the call did not produce one, and is what the screen turns
+     * into worker-facing copy.
+     *
+     * A pair rather than a sealed type on purpose: both fields are null on the empty-differential
+     * path, which produces an output AND no failure, and a sealed either-or would have to invent
+     * a third case for it.
+     */
+    private data class RealApiAttempt(val output: KernelReportOutput?, val failure: KernelFailure?)
 
     // ── Honest unavailable state ───────────────────────────────────────────────
 
@@ -270,6 +338,7 @@ class GenerateKernelReportUseCase @Inject constructor(
         caseRecordId: String,
         dataQualityScore: Double,
         inferenceStartedAt: Instant,
+        failure: KernelFailure?,
     ): KernelReportOutput = KernelReportOutput(
         id = UUID.randomUUID().toString(),
         caseRecordId = caseRecordId,
@@ -295,5 +364,12 @@ class GenerateKernelReportUseCase @Inject constructor(
         inferenceEndedAt = Instant.now(),
         requiredHumanVerification = true,
         inferenceSource = InferenceSource.UNAVAILABLE,
+        // The cause, kept OFF the clinical fields and next to them instead. reasoningSummary
+        // above stays reach-neutral, as its own comment requires: it is synced to the backend as
+        // clinical content and must not carry a remedy. This column is device-local (it is not
+        // in KernelReportSyncPayloadDto) and exists so the assessment screen can render the one
+        // thing the worker can act on. Same split the evaluate leg already makes with
+        // EvaluateReportEntity.failureCode.
+        failureCode = failure,
     )
 }

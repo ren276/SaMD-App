@@ -14,6 +14,7 @@ import com.example.samdapp.domain.model.ObservationSource
 import com.example.samdapp.domain.model.ObservationType
 import com.example.samdapp.domain.model.PhysicianDecision
 import com.example.samdapp.domain.model.RecordTypeCode
+import com.example.samdapp.domain.kernel.KernelFailure
 import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.domain.model.KernelDecision
 import com.example.samdapp.domain.model.ReferralStatus
@@ -86,6 +87,16 @@ class Converters {
 
     @TypeConverter fun inferenceSourceToString(value: InferenceSource): String = value.name
     @TypeConverter fun stringToInferenceSource(value: String): InferenceSource = InferenceSource.valueOf(value)
+
+    @TypeConverter fun kernelFailureToString(value: KernelFailure?): String? = value?.name
+    /** Tolerant on read, unlike [stringToInferenceSource] above, which is allowed to be strict
+     *  because its column is NOT NULL and every writer is this app. This column can hold a name
+     *  written by a NEWER build that a downgrade then reads back, and `valueOf` would throw
+     *  inside Room's cursor mapping and take the whole assessment screen's Flow with it. An
+     *  unrecognised name reads as [KernelFailure.UNKNOWN], which is exactly what that value is
+     *  for: general failure, escalate, never a crash and never silence. */
+    @TypeConverter fun stringToKernelFailure(value: String?): KernelFailure? =
+        value?.let { name -> KernelFailure.entries.firstOrNull { it.name == name } ?: KernelFailure.UNKNOWN }
 
     @TypeConverter fun physicianDecisionToString(value: PhysicianDecision): String = value.name
     @TypeConverter fun stringToPhysicianDecision(value: String): PhysicianDecision = PhysicianDecision.valueOf(value)

@@ -1,3 +1,150 @@
 <resources>
     <string name="app_name">SaMDApp</string>
+
+    <!--
+      Worker-facing copy for each com.example.samdapp.domain.kernel.KernelFailure.
+
+      Rules these were written against, and which a reviewer should hold new strings to:
+      - Name the RECORD that failed, not the feature that did not run. "This patient is not saved
+        on the server", never "Assessment unavailable", when the patient is what went wrong.
+      - Name the ACTION. "Retry" is only used where pressing again can actually work.
+      - No SAMD-* codes. A worker cannot act on one and it makes the screen look broken.
+      - Do not mention the AI when the AI is working correctly. kernel_failure_case_not_on_server
+        is the test of this: the assessment is fine, the patient was never saved.
+      - Short sentences, common words, a patient is waiting.
+    -->
+
+    <!-- OFFLINE. No press would help; the queued work runs itself. -->
+    <string name="kernel_failure_offline_title">This phone is not connected</string>
+    <string name="kernel_failure_offline_body">The assessment will run on its own once this phone is back on Wi-Fi or mobile data. You can carry on with the patient.</string>
+
+    <!-- TIMEOUT. The one class where pressing again now is genuinely reasonable. -->
+    <string name="kernel_failure_timeout_title">The server did not answer in time</string>
+    <string name="kernel_failure_timeout_body">The connection was made but no answer came back. Try again now.</string>
+
+    <!-- SECURE_CONNECTION_FAILED. Escalation, not retry: one cause is interception. -->
+    <string name="kernel_failure_secure_connection_failed_title">The connection is not secure</string>
+    <string name="kernel_failure_secure_connection_failed_body">This phone could not make a safe connection to the server. Do not send patient details until this is fixed. Tell your supervisor.</string>
+
+    <!-- NOT_AUTHORIZED. 401 or 403. -->
+    <string name="kernel_failure_not_authorized_title">Sign in again</string>
+    <string name="kernel_failure_not_authorized_body">Your sign-in has ended. Sign in again, then open this case.</string>
+
+    <!--
+      CASE_NOT_ON_SERVER. The reason this whole change exists.
+      Says nothing about the AI, because nothing is wrong with the AI. Names the patient record
+      and the action. Mentions the ABHA number as a thing to CHECK if sending keeps failing,
+      rather than asserting a duplicate: a 404 proves the case is not on the server, it does not
+      prove why, and telling a worker a cause we have not established is how they stop believing
+      the screen.
+    -->
+    <string name="kernel_failure_case_not_on_server_title">This patient is not saved on the server</string>
+    <string name="kernel_failure_case_not_on_server_body">This patient has not reached the server yet, so this visit could not be checked. Open the patient\'s record and send it again. If sending keeps failing, check that the ABHA number is not already used by another patient. This will finish on its own once the patient is saved.</string>
+
+    <!-- PAYLOAD_REJECTED. 5003, and 5005 which is the H-10 identity guard: a real defect signal. -->
+    <string name="kernel_failure_payload_rejected_title">The server would not accept this visit</string>
+    <string name="kernel_failure_payload_rejected_body">Something in this visit could not be sent. Sending it again unchanged will not work. Write down the patient\'s name and tell your supervisor today.</string>
+
+    <!-- KERNEL_UNAVAILABLE. 502/503/504 family. Nothing to press. -->
+    <string name="kernel_failure_kernel_unavailable_title">The assessment service is down</string>
+    <string name="kernel_failure_kernel_unavailable_body">The service that reads this visit is not working right now. It will run on its own when the service is back. You can carry on with the patient.</string>
+
+    <!-- MALFORMED_RESPONSE. Reached, unintelligible. Pressing again re-fetches the same bad body. -->
+    <string name="kernel_failure_malformed_response_title">The server sent something this app cannot read</string>
+    <string name="kernel_failure_malformed_response_body">Trying again will not help. Tell your supervisor.</string>
+
+    <!-- DEVICE_ERROR. An app bug. Never blamed on the network. -->
+    <string name="kernel_failure_device_error_title">Something went wrong in this app</string>
+    <string name="kernel_failure_device_error_body">This is a problem on this phone, not with the patient\'s record. Trying again will not help. Tell your supervisor.</string>
+
+    <!-- UNKNOWN. General failure. One press, then escalate. -->
+    <string name="kernel_failure_unknown_title">This visit could not be checked</string>
+    <string name="kernel_failure_unknown_body">Try once more. If it fails again, tell your supervisor.</string>
+
+    <!--
+      No KernelFailure: the kernel was reached and answered with nothing, or no payload could be
+      built at all. Reach-neutral on purpose, and the only place the old wording survives.
+    -->
+    <string name="kernel_failure_none_title">Assessment unavailable</string>
+    <string name="kernel_failure_none_body">The AI did not produce a result for this case. No diagnosis was generated.</string>
+
+    <string name="kernel_failure_retry">Try again</string>
+    <string name="kernel_failure_retrying">Trying…</string>
+
+    <!--
+      S-3: the failed-sync review surface. Same copy rules as the kernel_failure_* strings above,
+      plus two this feature adds:
+      - Never render syncErrorMessage. It is backend-authored and PHI-safe by contract, but it is
+        written for an operator reading a log ("a referenced record does not exist yet"). It is
+        used as a discriminator in SyncFailureReason and nowhere else.
+      - Do not offer an action a worker cannot take. Three of the five causes have no button at
+        all, because this app has no screen that edits a synced record, so "fix it" would be a
+        button with nowhere to go.
+    -->
+
+    <!-- The Home card. Count first, then what the count means. -->
+    <plurals name="failed_sync_card_title">
+        <item quantity="one">1 record did not reach the server</item>
+        <item quantity="other">%1$d records did not reach the server</item>
+    </plurals>
+    <string name="failed_sync_card_body">They are safe on this phone, but they are not on the server. Open this to see what each one needs.</string>
+    <string name="failed_sync_card_action">Review</string>
+
+    <!-- The list. -->
+    <string name="failed_sync_list_title">Records that did not reach the server</string>
+    <string name="failed_sync_list_close">Close</string>
+    <string name="failed_sync_list_empty">Nothing to review. Every record has reached the server.</string>
+    <!-- Patient name, then what kind of record it is. -->
+    <string name="failed_sync_row_header">%1$s — %2$s</string>
+    <string name="failed_sync_row_date">Saved %1$s</string>
+    <string name="failed_sync_action_send_again">Send again</string>
+
+    <!--
+      What kind of record failed, in words a worker uses. Twenty tables collapse to seven nouns:
+      a worker does not distinguish an allergy row from a family-history row, and giving each of
+      the twenty its own label would be twenty strings that all mean "part of this patient's
+      notes".
+    -->
+    <string name="sync_record_type_patient">Patient record</string>
+    <string name="sync_record_type_visit">Visit</string>
+    <string name="sync_record_type_history">Patient history</string>
+    <string name="sync_record_type_assessment">Assessment</string>
+    <string name="sync_record_type_prescription">Prescription</string>
+    <string name="sync_record_type_referral">Referral</string>
+    <string name="sync_record_type_activity">Activity record</string>
+    <!-- A table name this build does not know. Same fallback discipline as SyncFailureReason.UNRECOGNISED. -->
+    <string name="sync_record_type_other">Record</string>
+
+    <!--
+      DUPLICATE_RECORD. The duplicate-ABHA terminus, and the reason the sync track exists.
+      Says "such as", not "the ABHA number is duplicated": sqlstate 23505 proves a unique
+      constraint was hit, and on this schema that is almost always the ABHA number, but the ack
+      does not name the constraint. Telling a worker a cause we have not established is how they
+      stop believing the screen.
+    -->
+    <string name="failed_sync_duplicate_title">Another record already uses these details</string>
+    <string name="failed_sync_duplicate_body">The server already has a different record with the same details, such as the same ABHA number. This cannot be fixed on this phone. Write down the patient\'s name and tell your supervisor today.</string>
+
+    <!-- RECORD_REJECTED. A validation reject. On any table but patients this is an app defect. -->
+    <string name="failed_sync_rejected_title">The server would not accept this record</string>
+    <string name="failed_sync_rejected_body">Something in this record is missing or not allowed, so the server turned it down. Sending it again unchanged will not work. Write down the patient\'s name and tell your supervisor today.</string>
+
+    <!--
+      RETRIES_EXHAUSTED. The cap S-2 added ran out. The ONE cause with a button, because the
+      record is not the problem and the thing it was waiting for may have landed since.
+      Says "five times" because MAX_SYNC_ATTEMPTS is 5; if that constant moves, this moves.
+    -->
+    <string name="failed_sync_retries_exhausted_title">This record is waiting on another record</string>
+    <string name="failed_sync_retries_exhausted_body">This record was tried five times and something it needs was still not on the server. Nothing is wrong with this record. Send it again now. If it fails again, tell your supervisor.</string>
+
+    <!-- RECORD_TOO_LARGE. Stamped on this phone; the record never left it. -->
+    <string name="failed_sync_too_large_title">This record is too big to send</string>
+    <string name="failed_sync_too_large_body">This record is larger than the server accepts, so it stays on this phone. Sending it again will not help. Write down the patient\'s name and tell your supervisor today.</string>
+
+    <!--
+      UNRECOGNISED. An unknown code, or no code at all. Admits it does not know rather than
+      guessing, and still offers the one action that is safe to offer.
+    -->
+    <string name="failed_sync_unrecognised_title">This record did not reach the server</string>
+    <string name="failed_sync_unrecognised_body">The server turned it down and this app does not know why. Send it again once. If it fails again, write down the patient\'s name and tell your supervisor.</string>
 </resources>

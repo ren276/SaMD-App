@@ -63,6 +63,7 @@ private fun KernelReportOutput.toEntity(id: String, serverVersion: Int?) = Kerne
     inferenceEndedAt = inferenceEndedAt,
     requiredHumanVerification = requiredHumanVerification,
     inferenceSource = inferenceSource,
+    failureCode = failureCode,
     localModifiedAt = Instant.now(),
     serverVersion = serverVersion,
 )
@@ -88,4 +89,5 @@ private fun KernelReportEntity.toDomain() = KernelReportOutput(
     inferenceEndedAt = inferenceEndedAt,
     requiredHumanVerification = requiredHumanVerification,
     inferenceSource = inferenceSource,
+    failureCode = failureCode,
 )

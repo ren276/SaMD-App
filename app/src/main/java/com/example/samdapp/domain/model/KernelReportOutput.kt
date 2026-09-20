@@ -1,5 +1,6 @@
 package com.example.samdapp.domain.model
 
+import com.example.samdapp.domain.kernel.KernelFailure
 import java.time.Instant
 
 /**
@@ -43,4 +44,14 @@ data class KernelReportOutput(
      *  in [com.example.samdapp.domain.usecase.GenerateKernelReportUseCase] at the real-vs-mock
      *  branch point; never inferred after the fact. */
     val inferenceSource: InferenceSource,
+    /** Why no assessment exists, when [inferenceSource] is [InferenceSource.UNAVAILABLE] and a
+     *  cause is known. Null on every successful row, and also null on the two UNAVAILABLE rows
+     *  where no [KernelFailure] is true: a kernel that answered 200 with an empty differential
+     *  (reached, answered, nothing to say) and a case whose payload could not be built at all
+     *  (nothing was sent).
+     *
+     *  Device-local. Deliberately absent from `KernelReportSyncPayloadDto`, matching
+     *  `EvaluateReportEntity.failureCode`, which the backend also never receives: this is a
+     *  remedy for the worker holding the phone, not a clinical fact about the patient. */
+    val failureCode: KernelFailure?,
 )
