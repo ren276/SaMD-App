@@ -81,8 +81,18 @@ class SlmReadbackUseCaseTest {
             private set
         val prompts = mutableListOf<String>()
 
-        override fun generate(prompt: String, maxOutputTokens: Int): Flow<String> = flow {
+        /** Case ids the seam handed the engine. PR-6 added the parameter; the backend endpoint
+         *  resolves and facility-scopes the case, so a binding that dropped it would 422 on every
+         *  call and the seam is the only place the id exists. */
+        val caseRecordIds = mutableListOf<String>()
+
+        override fun generate(
+            caseRecordId: String,
+            prompt: String,
+            maxOutputTokens: Int,
+        ): Flow<String> = flow {
             callCount++
+            caseRecordIds += caseRecordId
             prompts += prompt
             failure?.let { throw it }
             chunks.forEach { emit(it) }
@@ -395,10 +405,35 @@ class SlmReadbackUseCaseTest {
      * The original assertion is preserved inside the table as the `ENGINE_ERROR` row, which is the
      * case it actually described.
      */
+    /**
+     * PR-6. The case id has to reach the engine, and nothing else in this file would notice if it
+     * stopped: the seam's own result is identical either way, and a binding that sent a blank one
+     * would fail with a `422` from `POST /api/v1/slm/readback`, which classifies as
+     * `ENGINE_REJECTED_INPUT` and reads to a worker as a misconfigured build. The endpoint uses the
+     * id to resolve the case, scope it to the caller's facility, and name it on the
+     * `slm_call_log` and audit rows; the seam is the only layer that has it.
+     */
+    @Test
+    fun `the case id reaches the engine, because the backend resolves and scopes on it`() = runTest {
+        val engine = RecordingSlmEngine(output = groundedOutput)
+
+        useCase(session(UserRole.ASHA_WORKER), engine)(
+            "case-1", "Explain the prescription in plain language",
+        )
+
+        assertEquals(listOf("case-1"), engine.caseRecordIds)
+    }
+
     @Test
     fun `each engine failure class refuses with its own reason, with no substitute output`() = runTest {
         val cases = mapOf(
             SlmEngineError.UNREACHABLE to SlmRefusal.ENGINE_UNREACHABLE,
+            // PR-6. Deliberately NOT folded into ENGINE_UNREACHABLE: SSLException extends
+            // IOException, so the offline bucket is where a TLS failure lands by default, and the
+            // advice that bucket carries is "keep tapping, it will go through when you have
+            // signal". Under an interception that means keep pushing the narrative at whoever is
+            // reading it. This row is what makes the collapse a failing test rather than a default.
+            SlmEngineError.SECURE_CONNECTION_FAILED to SlmRefusal.SECURE_CONNECTION_FAILED,
             SlmEngineError.TIMEOUT to SlmRefusal.ENGINE_TIMEOUT,
             SlmEngineError.UNAVAILABLE to SlmRefusal.ENGINE_UNAVAILABLE,
             SlmEngineError.PAYLOAD_REJECTED to SlmRefusal.ENGINE_REJECTED_INPUT,

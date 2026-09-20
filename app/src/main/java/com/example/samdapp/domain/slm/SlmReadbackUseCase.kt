@@ -81,6 +81,30 @@ enum class SlmRefusal {
     ENGINE_UNREACHABLE,
 
     /**
+     * The connection to the backend could not be secured: a TLS handshake that failed, a peer that
+     * could not be verified, any `SSLException`.
+     *
+     * **Separate from [ENGINE_UNREACHABLE] because the advice is opposite, and that is the only
+     * reason it is separate.** Every other distinction in this enum earns its place by naming a
+     * different worker action, and this one earns it by naming the case where the usual action is
+     * wrong. Unreachable means "you have no signal, it will go through later", so the worker taps
+     * again when the bars come back. A TLS failure can be a captive portal, a clock skew, or an
+     * interception, and under the last of those "keep tapping" means keep pushing a physician's
+     * free-text working diagnosis and a full prescription line set at a connection that may be
+     * reading them. Escalation, not retry.
+     *
+     * **This is a hole PR-2 left and PR-6 found, not a new idea.** `KernelFailure` has carried
+     * `SECURE_CONNECTION_FAILED` with `KernelRetryAdvice.NEEDS_ACTION` since the kernel taxonomy
+     * was written, for this argument, on a hop that carries eight numeric features under a
+     * pseudonym. This hop carries the narrative. The vocabulary was built before any transport
+     * existed to produce the failure, so nothing was there to notice the omission; `SSLException`
+     * extends `IOException`, so it would have landed in the offline bucket by default.
+     *
+     * Not retryable by tapping. A person has to look at what is between the phone and the backend.
+     */
+    SECURE_CONNECTION_FAILED,
+
+    /**
      * The service was reached and did not answer inside the budget.
      *
      * Distinct from [ENGINE_UNREACHABLE] because the remedies differ: unreachable is about the link,
@@ -92,11 +116,16 @@ enum class SlmRefusal {
     ENGINE_TIMEOUT,
 
     /**
-     * The service is up and is not serving. Three states, one worker-facing answer: the backend's
-     * circuit is open, the service reports its model is not loaded, or the service is loaded and
-     * healthy and **saturated**, with its bounded request queue full.
+     * Nothing is going to answer right now. Four states, one worker-facing answer: the backend's
+     * circuit is open, the backend has no readback configured, the service reports its model is not
+     * loaded or is loaded and healthy and **saturated** with its bounded request queue full, or a
+     * readback is already in flight **on this device** and the binding refused to start a second.
      *
-     * Widened in PR-4 to name saturation. The backend keeps the three apart in `slm_call_log`
+     * Widened in PR-4 to name saturation, and in PR-6 to name the device's own mutex. That last one
+     * is not a remote state at all, and it is here rather than in a value of its own for this
+     * enum's stated reason: the worker action is identical, wait a moment and try again. A refusal
+     * that reads differently would invite an instant retry, which is exactly what the mutex just
+     * declined to do. The backend keeps the three apart in `slm_call_log`
      * (`CIRCUIT_OPEN`, `NOT_LOADED`, `QUEUE_FULL`, the last of which PR-4 added to
      * `SlmCallOutcome` because a loaded, healthy, busy service is neither of the other two and an
      * operator responds to it differently). The device does not, deliberately: all three mean
@@ -299,7 +328,7 @@ class SlmReadbackUseCase @Inject constructor(
         val sanitizer = SlmStreamSanitizer()
         val visible = StringBuilder()
         try {
-            engine.generate(prompt, MAX_OUTPUT_TOKENS).collect { chunk ->
+            engine.generate(caseRecordId, prompt, MAX_OUTPUT_TOKENS).collect { chunk ->
                 visible.append(sanitizer.accept(chunk))
             }
             visible.append(sanitizer.finish())
@@ -440,6 +469,7 @@ internal val COMPLETE_FINISH_REASONS: Set<SlmFinishReason?> =
  */
 internal fun engineRefusalFor(t: Throwable): SlmRefusal = when ((t as? SlmEngineException)?.error) {
     SlmEngineError.UNREACHABLE -> SlmRefusal.ENGINE_UNREACHABLE
+    SlmEngineError.SECURE_CONNECTION_FAILED -> SlmRefusal.SECURE_CONNECTION_FAILED
     SlmEngineError.TIMEOUT -> SlmRefusal.ENGINE_TIMEOUT
     SlmEngineError.UNAVAILABLE -> SlmRefusal.ENGINE_UNAVAILABLE
     SlmEngineError.PAYLOAD_REJECTED -> SlmRefusal.ENGINE_REJECTED_INPUT
