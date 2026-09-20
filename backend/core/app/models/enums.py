@@ -80,6 +80,13 @@ class AuditAction(StrEnum):
     AUDIT_LOG_READ = "audit_log_read"
     KERNEL_CALL_FORWARDED = "kernel_call_forwarded"
     KERNEL_CALL_FAILED = "kernel_call_failed"
+    # SLM readback proxy (PR-4). Server-origin, like the kernel pair above and unlike the four
+    # slm_readback_* device actions in app/domain/audit_actions_device.py, which the DEVICE emits
+    # about its own seam and which arrive through sync push. These two are about the network hop
+    # this backend makes, and app/services/sync.py's import-time guard would reject them if the
+    # two vocabularies ever overlapped.
+    SLM_CALL_FORWARDED = "slm_call_forwarded"
+    SLM_CALL_FAILED = "slm_call_failed"
     SYNC_BATCH_RECEIVED = "sync_batch_received"
     SYNC_RECORD_REJECTED = "sync_record_rejected"
     ABHA_SESSION_STARTED = "abha_session_started"
@@ -358,3 +365,12 @@ class SlmCallOutcome(StrEnum):
     PHI_REJECTED = "PHI_REJECTED"
     NOT_LOADED = "NOT_LOADED"
     TRUNCATED = "TRUNCATED"
+    # Added in PR-4, found by PR-3 while writing the contract's section 4.2 mapping table: a
+    # service that is loaded, healthy and SATURATED is neither NOT_LOADED nor CIRCUIT_OPEN, and
+    # the three want different operator responses. NOT_LOADED is a deployment fault, CIRCUIT_OPEN
+    # is this proxy declining to call, and this is ordinary backpressure from the single worker's
+    # bounded queue (contract section 5.2), carrying a Retry-After that already tells the caller
+    # what to do. Mapping it onto either of the others would make the log state something untrue.
+    # It is also the one outcome here that does NOT count toward the circuit breaker; see
+    # app/services/slm.py, which argues that next to the code.
+    QUEUE_FULL = "QUEUE_FULL"

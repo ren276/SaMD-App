@@ -79,6 +79,25 @@ class Settings(BaseSettings):
     kernel_circuit_threshold: int = 3
     kernel_circuit_cooldown_seconds: float = 30.0
 
+    # SLM readback proxy (PR-4). Topology (A): device -> backend/core -> SLM service. The
+    # device never reaches the service. Timeouts are docs/backend/slm-service-contract.md
+    # section 4.3, each layer strictly inside the next so a timeout is classified at the
+    # innermost layer that can still see the cause: device 10/55/60, backend 5/50/50, service's
+    # own wall clock 40.
+    slm_base_url: str = "http://slm:8000"
+    slm_connect_timeout_seconds: float = 5.0
+    slm_read_timeout_seconds: float = 50.0
+    # Shared secret for the backend-to-service hop (contract section 4.4, memo R-2). The kernel
+    # hop has no auth at all; that is tolerable for eight numeric features under a pseudonym and
+    # is NOT tolerable for a hop carrying a physician's free-text diagnosis and a full
+    # prescription line set. Empty means the hop is not configured and the endpoint answers 503
+    # SAMD-SLM-8020 without making a call: fail closed, never call unauthenticated. The value is
+    # read from the environment here and sent as a header by app/adapters/slm/client.py; nothing
+    # logs it, and no audit payload or error detail carries it.
+    slm_service_token: str = ""
+    slm_circuit_threshold: int = 3
+    slm_circuit_cooldown_seconds: float = 30.0
+
     # ABDM / ABHA (Phase 5)
     abdm_mode: AbdmMode = "stub"
     abdm_base_url: str = "https://abhasbx.abdm.gov.in"
@@ -153,6 +172,12 @@ class Settings(BaseSettings):
 
         if self.abdm_mode == "live" and not (self.abdm_client_id and self.abdm_client_secret):
             problems.append("ABDM_MODE=live requires ABDM_CLIENT_ID and ABDM_CLIENT_SECRET")
+
+        # Not "must be set": a deployment without an SLM service leaves it empty and the endpoint
+        # answers 503. A placeholder is different from empty, and it is the shape that ships by
+        # accident.
+        if self.slm_service_token.startswith(PLACEHOLDER_PREFIX):
+            problems.append("SLM_SERVICE_TOKEN is still a .env.example placeholder")
 
         if problems:
             raise ValueError(

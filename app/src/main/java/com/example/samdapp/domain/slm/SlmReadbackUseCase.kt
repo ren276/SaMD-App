@@ -92,12 +92,21 @@ enum class SlmRefusal {
     ENGINE_TIMEOUT,
 
     /**
-     * The service is up and is not serving: the backend's circuit is open, or the service reports
-     * its model is not loaded.
+     * The service is up and is not serving. Three states, one worker-facing answer: the backend's
+     * circuit is open, the service reports its model is not loaded, or the service is loaded and
+     * healthy and **saturated**, with its bounded request queue full.
+     *
+     * Widened in PR-4 to name saturation. The backend keeps the three apart in `slm_call_log`
+     * (`CIRCUIT_OPEN`, `NOT_LOADED`, `QUEUE_FULL`, the last of which PR-4 added to
+     * `SlmCallOutcome` because a loaded, healthy, busy service is neither of the other two and an
+     * operator responds to it differently). The device does not, deliberately: all three mean
+     * "retryable, but not immediately", which is one worker action, and splitting one action
+     * across three refusals would be the mirror of the defect this taxonomy exists to fix.
      *
      * Retryable, but not immediately, and that is the whole reason it is separate from
      * [ENGINE_TIMEOUT]. An open circuit means the backend has already decided that hammering the
-     * service makes things worse, and a UI that invites an instant retry works against it.
+     * service makes things worse, a queue-full answer carries a `Retry-After` saying the same
+     * thing, and a UI that invites an instant retry works against both.
      */
     ENGINE_UNAVAILABLE,
 

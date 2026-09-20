@@ -1465,6 +1465,16 @@ autofill changes when the mock is replaced:
 | `SAMD-KERN-5005` | 422 | Identity field detected on the kernel boundary (H-10 guard) |
 | `SAMD-KERN-5006` | 503 | Kernel circuit breaker is open (added in Phase 3 implementation) |
 | `SAMD-KERN-5007` | 502 | Kernel returned an internal error, distinct from being unreachable (added in Phase 3 implementation) |
+| `SAMD-SLM-8004` | 503 | SLM service has no model loaded (relayed from the service, same meaning) |
+| `SAMD-SLM-8005` | 503 | SLM service queue is full; backpressure, not an outage (relayed) |
+| `SAMD-SLM-8006` | 502 | SLM service failed during generation, or answered 503 with no recognised code (relayed for 500/504) |
+| `SAMD-SLM-8010` | 502 | SLM service unreachable from the backend |
+| `SAMD-SLM-8011` | 504 | SLM service timed out against the backend's own budget |
+| `SAMD-SLM-8012` | 422 | SLM service rejected the request (its 422, 409 or 413) |
+| `SAMD-SLM-8013` | 502 | SLM service returned an unparseable response or an envelope missing required fields |
+| `SAMD-SLM-8014` | 422 | Identity content detected on the SLM boundary (§11.2) |
+| `SAMD-SLM-8015` | 503 | SLM circuit breaker is open |
+| `SAMD-SLM-8020` | 503 | SLM readback not configured for this deployment (no shared secret; fails closed) |
 | `SAMD-SYNC-6001` | 413 | Batch too large |
 | `SAMD-SYNC-6002` | 422 | Unknown table in batch |
 | `SAMD-SYNC-6003` | (per record) | Record validation failed; appears inside `results[]`, not as an HTTP status |
@@ -1504,6 +1514,7 @@ Android branches on the string and older app builds stay in the field for a long
 | `PATCH /api/v1/case-records/{id}/status` | `CaseRecordRepositoryImpl`, `DoctorAssignmentConfirmViewModel` | new |
 | `POST /api/v1/assess` | `RetrofitKernelSource` | **done, Phase 6a**, rebased to `BACKEND_BASE_URL` |
 | `POST /api/v1/evaluate` | `RetrofitEvaluateSource` | **done, Phase 6a**, rebased to `BACKEND_BASE_URL` |
+| `POST /api/v1/slm/readback` | none yet. `SlmEngine` has no implementation and no transport (PR-6), and the feature is unreachable (PR-7) | new, PR-4, backend side only |
 | `POST /api/v1/sync/push` | real `SyncStatus` implementation + `WorkManager` worker | new, replaces `MockSyncStatus` |
 | `GET /api/v1/sync/pull` | Room 3 `RemoteMediator` | new, Phase 3 |
 | `GET /api/v1/audit/events` | none | admin only |
@@ -1523,6 +1534,7 @@ Android branches on the string and older app builds stay in the field for a long
 | `POST /encounters`, `PATCH /case-records/{id}/status` | yes | yes | yes | yes |
 | `GET /encounters/{id}` | no | no | no | yes |
 | `POST /assess`, `POST /evaluate` | yes | yes | yes | yes |
+| `POST /slm/readback` | yes | yes | yes | yes |
 | `POST /sync/push` | yes | yes | yes | yes |
 | `GET /sync/pull` | yes | yes | yes | yes |
 | `GET /audit/events`, `GET /audit/verify` | no | no | no | yes |
@@ -1562,3 +1574,175 @@ Named explicitly so nobody builds them by accident:
 - Public or partner API access. This surface serves one Android client.
 - Model training, retraining, or a training-data reimport endpoint. `DiagnosisFeedback` rows sync
   and are stored; nothing consumes them yet (REQ-RFN-01).
+
+---
+
+## 11. SLM readback proxy (PR-4)
+
+Numbered 11 rather than inserted beside §5 because section numbers here are append-only, like the
+error codes: §5 is the kernel proxy and stays exactly what it is.
+
+### 11.1 Why this exists, and what it is not
+
+The SLM generation service is reached **only** from this backend. The device never calls it. That
+is topology (A) from `scratchpad/slm-remote-inference-memo.md` §1.4, and it is the shipping
+architecture, not a development arrangement: it gives clinical narrative one egress point, reuses
+the bearer credential the device already holds, puts the call inside the existing hash-chained
+audit log, and gives the hop a circuit breaker and a bounded timeout. The alternative, a device
+calling the service directly, needs a second credential on every device, a second reachability
+model on a rural link, and an audit trail built from nothing on the serving side.
+
+The hop from this backend to the service is specified separately, in
+`docs/backend/slm-service-contract.md`. That document owns the request and response envelopes,
+the error codes `SAMD-SLM-8001` to `SAMD-SLM-8007`, the timeout budget and the service's
+operational obligations. This section owns the **device to backend** half only.
+
+**Nothing downstream of this endpoint exists yet.** There is no `SlmEngine` implementation and no
+device-side transport (PR-6), no `SLM_READBACK_ENABLED` flag and no UI (PR-7), and no SLM service
+(PR-5). This endpoint is live and unreached.
+
+### 11.2 Structural PHI guarantee, and its honest limit
+
+Read this before assuming the guarantee is the kernel's. It is not the same, and the difference
+is the point.
+
+The kernel boundary carries eight numeric features and an opaque token, so a denylist of identity
+KEY NAMES plus `extra="forbid"` is a real structural guarantee there. **This boundary carries one
+free-text string.** The prompt is assembled on the device from the five whitelisted fields of
+`ApprovedRecordSnapshot` plus the worker's typed question: a physician's free-text working
+diagnosis, the prescription lines (generic, brand, strength, route, frequency, duration,
+quantity), a three-valued decision code, one referral bit, one question.
+
+What is enforced, structurally, server side:
+
+| Control | What it catches | What it cannot catch |
+|---|---|---|
+| `extra="forbid"` on the request model | any field this contract does not declare | nothing about the prompt's contents |
+| The kernel's 28-name denylist, applied to the inbound body | a future edit that declares a denied name **as a field** | nothing on today's payload: none of its keys is on the list, measured |
+| Case-identifier absence check on the prompt | the real `case_record_id` appearing in the prompt text | an identifier the device rewrote or split |
+| Identifier-shaped digit-run check on the prompt | Aadhaar, ABHA and mobile numbers, contiguous or in the groups they are usually written in | a name, a village, a relative, a landmark, a spelled-out number |
+
+**So, stated plainly: no server-side guard can keep a patient's name out of a physician's
+free-text diagnosis.** The residual is real, it is the subject of the drafted hazard H-28
+(`scratchpad/slm-remote-inference-memo.md` §1.6, not written to the risk file), and it is not
+closed by this endpoint. What this endpoint does provide is that the narrative crosses exactly one
+hop, that the hop is authenticated, and that every crossing leaves a row.
+
+**No pseudonym substitution on the outbound hop, deliberately.** The service's request schema has
+no identifier field at all and rejects unknown fields, so there is nothing to substitute into: the
+case id is absent from the wire rather than replaced on it, which is the stronger property, and
+the check in the table above is what enforces the absence. The HMAC `case_token` is still computed
+and stored on the log row so an SLM call and a kernel call for the same case correlate.
+
+### 11.3 POST /api/v1/slm/readback
+
+**Purpose:** Forward an assembled readback prompt to the SLM generation service and return its
+response envelope verbatim.
+**Auth:** Bearer, active worker. All four roles (§9.3), same posture as the kernel routes: the
+readback tier decision lives on the device in `SlmScopeGate` and the first build is WORKER tier
+only. Every row records the caller's role.
+**Android consumer:** none yet (PR-6).
+
+**Request**
+
+```json
+{
+  "case_token": "cr-88f1",
+  "prompt": "You are restating a record a doctor has already approved...",
+  "model_id": "google/gemma-4-E2B-it",
+  "prompt_template_version": "slm-readback-v1",
+  "max_tokens": 512,
+  "seed": 20260918
+}
+```
+
+| Field | Type | Rule |
+|---|---|---|
+| `case_token` | string | The real `case_record_id`, as on the kernel routes. Resolved and facility-scoped; never sent onward in any form |
+| `prompt` | string | 1 to 6000 characters, matching the device's own `MAX_PROMPT_CHARS`. Not a messages array: single turn is enforced by there being no field a transcript could arrive on |
+| `model_id` | string | The artifact the device's sanitizer and identity gate are pinned to. Forwarded verbatim; the service answers `409` on a mismatch |
+| `prompt_template_version` | string | Opaque here, echoed by the service, recorded on the row |
+| `max_tokens` | integer | 1 to 512. The service applies `min(requested, its own ceiling)` |
+| `seed` | integer | Echoed by the service. Required even under greedy decoding, as a claim the response is checked against |
+
+`temperature`, `do_sample` and `stop` are **not accepted**. The backend supplies `0`, `false` and
+`[]`. They are the determinism guarantee, and a guarantee the caller can vary is not one.
+
+**Response, 200:** the service's envelope verbatim inside the standard success envelope
+(`generation_id`, `text`, `model_id`, `model_sha256`, `prompt_template_version`, `finish_reason`,
+`decode`, `usage`; `slm-service-contract.md` §3).
+
+**A truncated generation is a `200`.** `finish_reason` of `length` or `error`, or an absent one,
+is relayed to the device with the envelope intact and logged as `TRUNCATED`. The device's seam is
+what refuses it, and converting it to a `5xx` here would take `finish_reason` away from the one
+layer built to act on it. A cut-off readback passes every other check in the system: it carries no
+control token for the sanitizer, and no drug name or numeral the record did not already contain,
+so the grounding gate returns true on it.
+
+**Failures**
+
+| Condition | Status | Code | `slm_call_log.outcome` |
+|---|---|---|---|
+| Readback not configured (no shared secret) | 503 | `SAMD-SLM-8020` | NULL, no call attempted |
+| Case not found, or in another facility | 404 | `SAMD-ENC-4002` | NULL, no call attempted |
+| Identity content on the boundary | 422 | `SAMD-SLM-8014` | `PHI_REJECTED` |
+| Circuit breaker open | 503 | `SAMD-SLM-8015` | `CIRCUIT_OPEN` |
+| Service unreachable | 502 | `SAMD-SLM-8010` | `UNREACHABLE` |
+| Backend's read budget expired | 504 | `SAMD-SLM-8011` | `TIMEOUT` |
+| Service `422`, `409` or `413` | 422 | `SAMD-SLM-8012` | `PAYLOAD_REJECTED` |
+| Service `503` `SAMD-SLM-8004` | 503 | `SAMD-SLM-8004` | `NOT_LOADED` |
+| Service `503` `SAMD-SLM-8005` | 503 | `SAMD-SLM-8005` | `QUEUE_FULL` |
+| Service `500` or `504`, or a `503` with no recognised code | 502 | `SAMD-SLM-8006` | `ENGINE_ERROR` |
+| Unparseable body, or an envelope missing a required field | 502 | `SAMD-SLM-8013` | `MALFORMED_RESPONSE` |
+| A defect in the proxy itself | 500 | `SAMD-SYS-9005` | NULL |
+
+`NULL` is not an absent outcome. `outcome` describes a CALL, and the rows above that carry NULL
+are requests this backend refused to send. `WHERE outcome IS NULL` is the operator's query for
+them, which is also the cross-facility probe query.
+
+**The circuit breaker counts a failure for every outcome above except two.** A `PAYLOAD_REJECTED`
+is the service answering correctly that one request is bad, and a `QUEUE_FULL` is a healthy
+service answering immediately that it is busy, with a `Retry-After`. Opening the circuit for
+either would punish every later caller in the PHC for something that is not an outage.
+
+### 11.4 Auditing, and the two gaps this endpoint does not inherit
+
+**Exactly one `slm_call_log` row and one `audit_events` row per request, on every path**, both
+written out of band in one transaction so a call that really happened is recorded whatever the
+request transaction does afterwards. `slm_call_forwarded` on a `200`, including a truncated one;
+`slm_call_failed` on everything else.
+
+Two things the kernel proxy does that this one does not:
+
+1. **The kernel's `404` writes no audit row.** `_resolve_case_record` raises before `_forward` is
+   entered, so a kernel call for a case the caller's facility does not have is the one kernel
+   failure with no row anywhere. That gap is real and is tracked standalone; this endpoint records
+   its own resolve failures, which is exactly the case a cross-facility probe would produce.
+2. **A defect in the proxy is recorded too.** An exception that is not a `SamdError` is a bug, and
+   measured: on that path the audit middleware's fallback row is never written, because Starlette's
+   `ServerErrorMiddleware` sits outside `AuditMiddleware`. The service writes the pair itself.
+
+**No row holds any text.** Not the prompt, not the question, not the diagnosis, not the generated
+readback. The row carries who called, which case, which template and model were asked for, how
+long the prompt was, hashes of the request and response, which model actually answered, how it
+finished and the token counts. There is no second table holding the response body, and the reason
+is not economy: a server-side copy of generated clinical prose is the thing H-28's controls
+exclude.
+
+### 11.5 The backend-to-service hop is authenticated
+
+`slm-service-contract.md` §4.4, memo R-2. A shared secret in the `X-SLM-Service-Token` header,
+read from the `SLM_SERVICE_TOKEN` setting and checked by the service (PR-5's obligation).
+
+**Fail closed.** With the setting empty the client is not built, `app.state.slm_client` stays
+`None`, and the endpoint answers `503` / `SAMD-SLM-8020` without a call. An unauthenticated call
+on this hop is not a degraded mode.
+
+The existing kernel hop has no authentication at all, which is tolerable for eight numeric
+features under a pseudonym and is not tolerable for a hop carrying a free-text diagnosis and a
+full prescription line set. Copying the kernel's shape is right for the topology and wrong for
+that one gap.
+
+**Timeouts, `slm-service-contract.md` §4.3.** Backend to service: connect 5 s, read 50 s. Strictly
+inside the device's 10 / 55 / 60, strictly outside the service's own 40 s wall clock, so a timeout
+is always classified at the innermost layer that can still see the cause.

@@ -74,6 +74,23 @@ class ErrorCode(StrEnum):
     KERN_INTERNAL_ERROR = "SAMD-KERN-5007"
     KERN_CIRCUIT_OPEN = "SAMD-KERN-5006"
 
+    # SLM-8xxx. The readback proxy (PR-4). 8001-8007 are the SLM SERVICE's own codes, fixed by
+    # docs/backend/slm-service-contract.md section 4.1; the proxy relays three of them unchanged
+    # because the meaning does not change by being relayed, and the rest of the block is the
+    # proxy's own call-site failures, which the service never sees and therefore cannot name.
+    # 8008 and 8009 are deliberately left free so the service can add two codes without
+    # colliding with this side.
+    SLM_NOT_LOADED = "SAMD-SLM-8004"
+    SLM_QUEUE_FULL = "SAMD-SLM-8005"
+    SLM_INTERNAL_ERROR = "SAMD-SLM-8006"
+    SLM_UNREACHABLE = "SAMD-SLM-8010"
+    SLM_TIMEOUT = "SAMD-SLM-8011"
+    SLM_PAYLOAD_REJECTED = "SAMD-SLM-8012"
+    SLM_MALFORMED_RESPONSE = "SAMD-SLM-8013"
+    SLM_IDENTITY_LEAK_BLOCKED = "SAMD-SLM-8014"
+    SLM_CIRCUIT_OPEN = "SAMD-SLM-8015"
+    SLM_NOT_CONFIGURED = "SAMD-SLM-8020"
+
     # SYNC-6xxx
     SYNC_BATCH_TOO_LARGE = "SAMD-SYNC-6001"
     SYNC_UNKNOWN_TABLE = "SAMD-SYNC-6002"
@@ -134,6 +151,16 @@ _REGISTRY: dict[ErrorCode, tuple[int, str]] = {
     ErrorCode.KERN_IDENTITY_LEAK_BLOCKED: (422, "Identity field detected on the kernel boundary"),
     ErrorCode.KERN_CIRCUIT_OPEN: (503, "Clinical kernel circuit breaker is open"),
     ErrorCode.KERN_INTERNAL_ERROR: (502, "Clinical kernel returned an internal error"),
+    ErrorCode.SLM_NOT_LOADED: (503, "SLM service has no model loaded"),
+    ErrorCode.SLM_QUEUE_FULL: (503, "SLM service queue is full"),
+    ErrorCode.SLM_INTERNAL_ERROR: (502, "SLM service failed during generation"),
+    ErrorCode.SLM_UNREACHABLE: (502, "SLM service unreachable"),
+    ErrorCode.SLM_TIMEOUT: (504, "SLM service timeout"),
+    ErrorCode.SLM_PAYLOAD_REJECTED: (422, "SLM service rejected the request"),
+    ErrorCode.SLM_MALFORMED_RESPONSE: (502, "SLM service returned an unparseable response"),
+    ErrorCode.SLM_IDENTITY_LEAK_BLOCKED: (422, "Identity content detected on the SLM boundary"),
+    ErrorCode.SLM_CIRCUIT_OPEN: (503, "SLM service circuit breaker is open"),
+    ErrorCode.SLM_NOT_CONFIGURED: (503, "SLM readback not configured for this deployment"),
     ErrorCode.SYNC_BATCH_TOO_LARGE: (413, "Sync batch too large"),
     ErrorCode.SYNC_UNKNOWN_TABLE: (422, "Unknown table in sync batch"),
     # 6003 is a per-record result inside results[], never an HTTP status. The 422 here is only
