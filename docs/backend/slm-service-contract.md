@@ -1,7 +1,13 @@
 # SLM Service Contract (v1)
 
-> **PROPOSED, AWAITING OPERATOR SIGN-OFF.** Not an approved controlled document. Specification
-> only: **no implementation exists**, on either side of this contract.
+> **PROPOSED, AWAITING OPERATOR SIGN-OFF.** Not an approved controlled document.
+>
+> **Implementation status, MEASURED.** The calling side exists: PR-4 built
+> `backend/core/app/adapters/slm/client.py` and `app/services/slm.py`, and PR-6 built the device
+> transport behind it. The **service side does not exist in this repository**. Every statement below
+> about what the service does is therefore a requirement on a component nobody here has written, and
+> the sections with a measurement attached (§2.7, §3.2) are measurements of a model or of a sample
+> application, never of a conforming service.
 
 **What this document is.** The wire contract of the SLM generation service: the request it accepts,
 the response envelope it returns, its error vocabulary, the timeout budget it sits inside, and the
@@ -42,6 +48,14 @@ one that fails, because a failure is visible and a wrong self-description is not
 ---
 
 ## 2. Request
+
+**Endpoint: `POST /v1/generate`, on the service's own base URL.** Written down here because until
+this revision nothing in this document named it, while the calling side had already been forced to
+choose one: `backend/core/app/adapters/slm/client.py` posts to `GENERATE_PATH = "/v1/generate"` and
+`backend/core/tests/test_slm.py` scripts that same path. Both MEASURED in this tree. The service
+serves that path or this contract changes. A path picked by one side and unwritten on the other is
+the same class of silent drift as a self-describing field nobody derives, and it is the kind that
+does not surface until integration day. `GET /health` (section 5.1) is the only other surface.
 
 ### 2.1 Shape
 
@@ -86,10 +100,16 @@ history buffer lets turn 1 establish context that turn 3's question leans on whi
 still looks tethered to the record, which is a bypass of the input scope gate rather than a
 violation of it. Removing the field removes that class rather than defending against it.
 
-This also settles a second question before it is asked. The service performs **no** chat-template
-application, no role wrapping, and no system-prompt injection. The prompt is assembled by the
+This also settles a second question before it is asked. The service injects **no clinical text**:
+no system prompt, no role preamble, no instruction lines of its own. The prompt is assembled by the
 device's seam from a versioned template and arrives complete. A service-side preamble would be
 clinical text that no template version accounts for and that no audit row could attribute.
+
+**One thing the service does add, and it is required: the served artifact's chat control tokens.**
+That is the turn grammar, not content, and section 2.7 states it as a safety property with the
+measurement behind it. This paragraph said "no chat-template application" before that measurement
+existed; the correction is deliberate and the two are not in tension, because wrapping a prompt in
+`<|turn>` / `<turn|>` adds no word a reader sees while omitting it changes what the model does.
 
 ### 2.3 Input length: rejected, never truncated
 
@@ -146,6 +166,46 @@ undeclared behaviour cannot be changed deliberately or reasoned about during an 
 
 An empty array means "terminate on model EOS only", stated rather than assumed.
 
+### 2.7 Control-token wrapping is a safety property, not a formatting detail
+
+**The service MUST wrap the prompt in the served artifact's chat control tokens before decoding.
+An unwrapped prompt produces degenerate output that every gate in this system passes.**
+
+This is stated as a safety property because it is measured, and because the failure is silent in a
+way the rest of this document's failure modes are not. PR-5 sent the same record's assembled prompt
+raw, without the turn grammar, to `google/gemma-4-E2B-it`. MEASURED result: the model generates the
+single word `Patient.` repeated to the token ceiling.
+
+Follow what that does to the controls downstream:
+
+- The loop ends at EOS, so `finish_reason` is honestly `stop`. Section 3.4's field is doing its job
+  and reporting the truth. **Truncation detection is not the control that catches this**, because
+  nothing was truncated.
+- It carries no control token, so the device's stream sanitizer passes it untouched and every one of
+  its suppression counters reads zero.
+- It carries no drug name and no dosing numeral the approved record did not already contain, because
+  it carries almost no tokens at all, so the output grounding gate returns true on it **by
+  construction**, exactly as it does for a truncated generation.
+- It arrives over a `200` with a well-formed envelope, a derived `model_id` and a matching
+  `model_sha256`, so the identity gate passes as well.
+
+**Every gate this system has is blind to it.** Four independent controls, calibrated against real
+failure modes, and a correct one-word answer repeated five hundred times walks through all four onto
+a health worker's screen. The only reason the readback would look wrong is that a person reads it.
+
+So the obligation is the service's and it is absolute: the prompt is wrapped in the artifact's own
+chat control tokens, derived from the loaded artifact's tokenizer rather than hardcoded, for the
+same reason section 3.2 requires the identity fields to be derived. A hardcoded turn grammar is a
+literal that survives an artifact change, which is the defect section 3.2 records three measured
+instances of.
+
+**What the caller can and cannot check.** Nothing on the response envelope distinguishes a wrapped
+generation from an unwrapped one, and no field proposed here would: a service that wraps incorrectly
+would report that it wrapped. This is therefore a property the service holds and the caller cannot
+verify, which is precisely why it is written here as a requirement with its measurement attached
+rather than left as an implementation note. The first integration test against a real service must
+include one record whose expected readback is known, and a reviewer must read the text.
+
 ---
 
 ## 3. Response envelope
@@ -157,7 +217,7 @@ An empty array means "terminate on model EOS only", stated rather than assumed.
   "generation_id": "gen-01J8Z2Q7K3",
   "text": "The doctor has approved amoxicillin...",
   "model_id": "google/gemma-4-E2B-it",
-  "model_sha256": "cc8d3a0ce36466ccc1278bf987df5f71db1719b9ca6b4118264f45cb627bfe0f",
+  "model_sha256": "9b1f0d4a7c2e58c3d06b41f8a5e97d2c3b8046fe1a7d5c92b0e34f681ca7d5b2",
   "prompt_template_version": "slm-readback-v1",
   "finish_reason": "stop",
   "decode": {
@@ -181,6 +241,17 @@ Every field is required on a `200`. None is nullable except the individual entri
 where `null` carries meaning: it states that the parameter was **not applied**, which is different
 from it being absent from the response.
 
+**The `model_sha256` above is illustrative and is not a measurement.** The value this example
+carried until this revision was
+`cc8d3a0ce36466ccc1278bf987df5f71db1719b9ca6b4118264f45cb627bfe0f`, which is MEASURED, but it is the
+SHA-256 of the artifact's `tokenizer.json` at revision
+`3e22461f65e89153144f8adb70e3b8c2cc9845a7`, not of its weights. It is the same constant the device
+carries as `SANITIZER_TOKENIZER_SHA256`, where it is correctly labelled. Leaving it here made the
+example assert that the field an operator uses to confirm which weights are resident is satisfied by
+a file that would be byte-identical across two different fine-tunes of the same base model. No
+digest of the weight set has been measured anywhere in this project, so the example above is a
+placeholder and is marked as one.
+
 ### 3.2 `model_id` and `model_sha256`: derive, never assert
 
 **Both are computed from the loaded artifact at load time. Neither may be a literal, a configuration
@@ -203,6 +274,13 @@ already measured in this system**:
 The common shape is a self-describing field written once at authoring time and then surviving every
 subsequent artifact change. The fix is structural and cheap: **every self-describing field on a model
 response is computed at load time from the artifact, or it is not on the response.**
+
+`model_sha256` is a digest **of the weight set actually resident**, not of the tokenizer, the config
+or the repository revision. Two fine-tunes of one base model share a tokenizer byte for byte, so a
+tokenizer digest answers "which vocabulary" when the question this field exists to answer is "which
+weights". How the service reduces a multi-file checkpoint to one digest is its own business and must
+be documented where it is implemented, but it must be over the weights and it must be computed at
+load time from what was loaded.
 
 `model_sha256` is the field the caller's identity gate compares against a pin it holds. Its absence
 or blankness is therefore **representable and meaningful**: a caller treats a missing or empty
@@ -278,16 +356,41 @@ Following `api-contract.md` §9.1's discipline. The `SAMD-SLM-8xxx` block is pre
 | `SAMD-SLM-8005` | 503 | Request queue full (carries `Retry-After`) |
 | `SAMD-SLM-8006` | 500 | Generation failed inside the service, including out of memory |
 | `SAMD-SLM-8007` | 504 | The service's own wall-clock cap expired and it abandoned the generation |
+| `SAMD-SLM-8008` | 401 | The caller's service credential was absent, malformed or rejected |
 
 `SAMD-SLM-8002` is deliberately `409` and not `422`. A conflict says the request was well formed and
 the **service** is not the one it was meant for, which is a different operational problem from a bad
 field and should page differently.
 
+**`SAMD-SLM-8008` is ratified as PR-5 allocated it.** The code block is this document's to assign,
+8008 was the next free number, and nothing in this tree uses it: the calling side's own codes start
+at `SAMD-SLM-8010` (`backend/core/app/errors.py`, MEASURED), so there is no collision to resolve and
+no reason to spend a second number. Section 4.4 has required this hop to be authenticated since the
+first revision and `backend/core/app/adapters/slm/client.py` sends
+`X-SLM-Service-Token` on every call, so a rejected credential was always a reachable response and
+this registry simply had no row for it. A service that enforces section 4.4 and answers `401` with
+no code at all is the state this closes.
+
+**`SAMD-SLM-8004` is reserved and unreachable, and stays in the registry.** Section 5.2 loads the
+model once in a lifespan hook, before the service accepts anything, so a load failure is a startup
+failure and there is no state in which the process is serving requests while its weights are not
+resident. Section 5.1's load state can therefore report `starting` or `serving` and can never report
+the third thing `SAMD-SLM-8004` describes. It is kept rather than deleted for two reasons. Section
+9.1's registry discipline is that a code is permanent and never reused for a different meaning, and
+deleting one is the first step toward reusing the number. And the calling side already branches on
+it: `backend/core/app/services/slm.py` maps this code to `SlmCallOutcome.NOT_LOADED`, which is a
+value in a shipped `CHECK` constraint. **No test may fake this code to reach that branch.** A test
+that scripts a `503` carrying `SAMD-SLM-8004` proves only that the mapping compiles, while reporting
+itself as coverage of a state the deployment model forbids, which is this project's characteristic
+bug wearing a green tick. If a future deployment loads lazily, that change makes the code reachable
+and owes it a real test; until then the branch is defensive code against a service that does not
+follow section 5.2.
+
 ### 4.2 Mapping to `SlmCallOutcome`, and its totality
 
-Every failure maps to exactly one outcome, and every outcome is reachable. Five are carried by a
-service response; five are observable only at the call site, because no response exists to carry
-them.
+Every failure maps to exactly one outcome, and every outcome is reachable. Seven are carried by a
+service response, one of which is a value §4.2.2 records as still missing; five are observable only
+at the call site, because no response exists to carry them.
 
 | Condition | Source | `SlmCallOutcome` |
 |---|---|---|
@@ -295,7 +398,8 @@ them.
 | `200`, `finish_reason` `length` or `error`, or absent | service | `TRUNCATED` |
 | `422` `SAMD-SLM-8001`, `409` `SAMD-SLM-8002`, `413` `SAMD-SLM-8003` | service | `PAYLOAD_REJECTED` |
 | `503` `SAMD-SLM-8004` | service | `NOT_LOADED` |
-| `503` `SAMD-SLM-8005` | service | **`QUEUE_FULL`, which does not yet exist. See §4.2.1** |
+| `503` `SAMD-SLM-8005` | service | `QUEUE_FULL` |
+| `401` `SAMD-SLM-8008` | service | **`SERVICE_UNAUTHENTICATED`, which does not yet exist. See §4.2.2** |
 | `500` `SAMD-SLM-8006`, `504` `SAMD-SLM-8007` | service | `ENGINE_ERROR` |
 | `200` whose body does not parse into §3.1 | call site | `MALFORMED_RESPONSE` |
 | read or total budget expired with no response | call site | `TIMEOUT` |
@@ -305,15 +409,18 @@ them.
 
 **Totality, asserted in prose because it is the property that matters.** The table is exhaustive in
 both directions. Every status this contract permits the service to return appears in a row, and
-every value of the outcome vocabulary appears as a target, with the one exception named below. There
-is no "other" row and there must never be one: an unmapped failure is exactly how a specific,
+every value of the outcome vocabulary appears as a target, with the two exceptions named below.
+There is no "other" row and there must never be one: an unmapped failure is exactly how a specific,
 recoverable, actionable error gets collapsed into a generic bucket, which is the defect the perf
 audit traced through six hops and named at a single `catch` block. If a future failure has no row,
 the correct response is to add a row, not to widen `ENGINE_ERROR`.
 
-#### 4.2.1 A gap this document found in the outcome vocabulary
+#### 4.2.1 A gap this document found in the outcome vocabulary, since closed
 
-**`QUEUE_FULL` does not exist and is required.** Writing the mapping surfaced it.
+**`QUEUE_FULL` did not exist and was required.** Writing the mapping surfaced it. **PR-4 added it**
+to `SlmCallOutcome` and to the calling side's `CHECK` constraint, so the row above no longer names a
+value that is missing. The rest of this subsection is kept as written, because §4.2.2 is the same
+finding happening a second time and the pattern is worth being able to read twice.
 
 `SlmCallOutcome` currently has `NOT_LOADED` for "up but not serving because the weights are not
 resident" and `CIRCUIT_OPEN` for "the caller declined to call". Neither describes a service that is
@@ -329,6 +436,41 @@ one is specification only.** On the device side no new refusal value is needed: 
 `ENGINE_UNAVAILABLE` already means. That value's own documentation currently says "circuit open, or
 the service reports its model is not loaded" and should be widened to name saturation when the
 calling side is built.
+
+#### 4.2.2 The same gap again, for the authenticated hop
+
+**`SERVICE_UNAUTHENTICATED` does not exist and is required.** Adding the `SAMD-SLM-8008` row
+surfaced it, exactly as §4.2.1's row surfaced `QUEUE_FULL`.
+
+The value is needed because of what happens without it, and this is MEASURED rather than predicted.
+`backend/core/app/services/slm.py` has one branch for every `4xx` the service returns: `422`, `409`
+and `413` all become `SlmCallOutcome.PAYLOAD_REJECTED` and `ErrorCode.SLM_PAYLOAD_REJECTED`. A `401`
+falls into that same branch today. So a deployment whose `SLM_SERVICE_TOKEN` does not match the
+service's writes a log row saying the **device's** request was bad, when the truth is that the
+**backend's** credential is wrong and no request from any device will ever succeed. The operator
+response to those two is not merely different, it is aimed at a different machine.
+
+That is precisely the collapse §4.2's own totality paragraph forbids: "an unmapped failure is exactly
+how a specific, recoverable, actionable error gets collapsed into a generic bucket". Adding the code
+without adding the outcome would leave the collapse in place while making the contract look complete.
+
+**Recorded here rather than added, for §4.2.1's reason and one more.** This revision is specification
+only, and the change that adds the value has real work attached that does not belong in it:
+`slm_call_log.outcome` is a `String(20)` under an `enum_check` `CHECK` constraint, so a new value is
+an Alembic migration; the calling side needs a device-facing error code for it, since `SAMD-SLM-8008`
+is a service-to-backend code and reusing it outward would make one number mean two things on two
+hops; and `services/slm.py` needs a `401` branch ahead of its generic `4xx` branch.
+
+**It must not count toward the circuit breaker, and it is worth saying why that is not obvious.** A
+`401` is permanent until a person changes a setting, so opening the circuit and failing fast looks
+right. It is not: an open circuit reports `CIRCUIT_OPEN`, which hides the `401` behind a second,
+vaguer outcome after the threshold is reached, and the first few rows that name the real cause scroll
+away. The failure is not transient and the breaker exists for transient failures.
+
+**Nothing changes on the device.** `SAMD-SLM-8008` never reaches it: the device's vocabulary
+describes the device-to-backend hop, and a misconfigured service credential is the backend's to
+report. Whatever device-facing code the calling side eventually picks, a build emitting it is
+misconfigured and unretryable, which is `SlmRefusal.ENGINE_REJECTED_INPUT`. No new refusal value.
 
 ### 4.3 Timeout budget
 
@@ -370,8 +512,16 @@ rule applies: reduce `max_tokens`, do not widen the cap.
 
 ### 4.4 Authentication
 
-**The backend-to-service hop MUST be authenticated. The mechanism is not chosen here**; it belongs
-with the service that has to enforce it.
+**The backend-to-service hop MUST be authenticated.** The mechanism is now chosen, because deferring
+it "to the service that has to enforce it" was the wrong side to defer to: the caller has to pick a
+header and a setting before the callee has anything to check. PR-4 picked them, MEASURED in
+`backend/core/app/adapters/slm/client.py`: a shared secret in the `X-SLM-Service-Token` header, read
+from the `SLM_SERVICE_TOKEN` setting. The builder raises on an empty token rather than constructing
+an unauthenticated client, so the route answers `503` / `SAMD-SLM-8020` with no outbound call.
+
+A credential the service rejects is `401` / `SAMD-SLM-8008` (§4.1), with the outcome gap §4.2.2
+records. The floor, not the ceiling: this authenticates the caller and nothing else. It is not a
+per-request signature and it does not bind the body.
 
 Stated as a requirement rather than left implicit because of a measured precedent that must not be
 inherited. The existing kernel hop has **no authentication at all**: its client is constructed with
