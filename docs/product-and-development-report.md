@@ -122,7 +122,7 @@ flowchart TD
   - Equipped with an on-device fallback to a curated clinical scenario matrix (respiratory, gastrointestinal, febrile, neurological) if the network drops.
   - Stamps every assessment with an immutable `InferenceSource` marker (`REAL_INFERENCE` vs. `MOCK_FALLBACK`), surfaced directly in the clinician UI.
 - **India Brand-Name Lookup Engine (`REQ-EVL-02`):** Integrates with Google Gemini API (`gemini-2.5-flash`, zero-latency thinking budget) to resolve the top-selling Indian pharmaceutical brand name and manufacturer for generic NLEM recommendations (e.g., Amoxicillin 500mg $\rightarrow$ *Novamox 500* by Cipla). Runs asynchronously and fails gracefully without blocking the clinical consultation.
-- **On-Device Small Language Model (SLM) Inference Feature:** Incorporates an on-device Google MedGemma 1.5-4B-IT model running via Google LiteRT. Features a custom C++/Kotlin Stream Sanitizer that strips internal reasoning tokens and control tokens (`<unused0>..<unused6241>`, `[multimodal]`), ensuring clean clinical consultation summaries and approved record readbacks.
+- **Small Language Model (SLM) Approved-Record Readback (designed and gated, not shipped):** Design-stage only, no inference engine exists. `SlmEngine` is a declared interface with no implementation in `app/src/main` and no Hilt binding; there is no LiteRT or MediaPipe dependency in the build; no feature flag and no readback surface are reachable. What is built is the guardrail seam that would sit around an engine: `SlmReadbackUseCase`, `ApprovedRecordReader`, the two-tier scope gate, and a Kotlin stream sanitizer that strips the model's reasoning-channel and control tokens before any text is displayed. Registered as hazard H-22.
 
 ### 3.5 Physician Review, Prescription & Continuous Learning
 - **Continuity-of-Care Doctor Assignment (`ResolveDoctorAssignmentUseCase`):**
@@ -300,7 +300,7 @@ Under the CDSCO Guidance Document on Medical Device Software (Doc No. `CDSCO/MD/
 
 ### 6.4 Advanced Capabilities & In-Flight Roadmap Features
 - [x] **Air-Gapped Speech Recognition (ASR):** On-device Sherpa-ONNX / Parakeet int8 transcription engine with clinician confirmation gating.
-- [x] **On-Device Small Language Model (SLM):** LiteRT MedGemma 1.5-4B-IT edge inference engine with C++ control-token stream sanitization.
+- [ ] **Small Language Model (SLM) Approved-Record Readback:** Design-stage only, no code exists for the engine. Guardrail seam and Kotlin stream sanitizer are built; the engine is unbound and the feature is not reachable in any build.
 - [x] **Point-of-Care IoT Gateway:** Local network discovery (`ACCESS_LOCAL_NETWORK`) and automated sensor acquisition via Raspberry Pi relay.
 - [ ] **Cloud Roster Synchronization (Phase 7):** `RemoteMediator` implementation for bi-directional patient record pull and historical lookup.
 - [ ] **ABDM M2/M3 Health Information Provider (HIP):** FHIR bundle generation and health record exchange across the national ABDM gateway.
