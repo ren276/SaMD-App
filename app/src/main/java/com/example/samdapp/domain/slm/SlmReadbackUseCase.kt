@@ -70,8 +70,106 @@ enum class SlmRefusal {
      *  entire output is suppressed and never edited into compliance (§5.4, §6.2). */
     OUTPUT_NOT_GROUNDED,
 
-    /** The engine failed. A failure is shown as a failure; there is no substitute output (§9.2). */
+    /**
+     * The service could not be reached: no route, DNS failure, connection refused.
+     *
+     * **This is the normal case, not an error case**, and the vocabulary exists to say so. The
+     * deployment target is an offline-first device in a rural PHC, so "no network right now" is the
+     * expected daily condition of the readback feature, and presenting it in the same words as a
+     * failed model is how a worker learns to distrust both. Retryable, and retryable soon.
+     */
+    ENGINE_UNREACHABLE,
+
+    /**
+     * The service was reached and did not answer inside the budget.
+     *
+     * Distinct from [ENGINE_UNREACHABLE] because the remedies differ: unreachable is about the link,
+     * a timeout is about load or a generation that ran long. Retryable, and worth telling the worker
+     * that the service is up, because "try again in a moment" is true here and not there.
+     *
+     * A cancelled readback is NOT this. Cancellation produces no result at all.
+     */
+    ENGINE_TIMEOUT,
+
+    /**
+     * The service is up and is not serving: the backend's circuit is open, or the service reports
+     * its model is not loaded.
+     *
+     * Retryable, but not immediately, and that is the whole reason it is separate from
+     * [ENGINE_TIMEOUT]. An open circuit means the backend has already decided that hammering the
+     * service makes things worse, and a UI that invites an instant retry works against it.
+     */
+    ENGINE_UNAVAILABLE,
+
+    /**
+     * The service refused the request itself: over the input token limit, an unknown prompt-template
+     * version, or a `model_id` it declines to serve. Any 4xx.
+     *
+     * **Not retryable unchanged, and that is the point of typing it.** This is the class that
+     * F6B-02 hop 7 showed being destroyed: a specific, actionable, recoverable defect signal
+     * collapsed into a generic outage by one blanket catch, so the worker was told the AI was
+     * unavailable when the truth was that something about the request was wrong and would stay
+     * wrong. A build emitting these is misconfigured, and somebody needs to see that.
+     *
+     * Distinct from [SERVED_MODEL_MISMATCH], and the two are easy to confuse. This one is the
+     * service **refusing to serve** what was asked for, before generating. That one is the service
+     * having **served something else** and said so in the response. Request side and response side.
+     */
+    ENGINE_REJECTED_INPUT,
+
+    /**
+     * The service failed inside itself: a 5xx, an out-of-memory during generation, or a response
+     * that could not be parsed into the §2.2 envelope.
+     *
+     * The catch-all, and deliberately last: anything the seam cannot classify lands here rather
+     * than being waved through, so an unrecognised failure is still a refusal. A failure is shown
+     * as a failure; there is no substitute output (§9.2). Retryable, cause unknown to the device.
+     */
     ENGINE_FAILED,
+
+    /**
+     * The generation was cut off: the envelope's `finish_reason` was `length`, or it carried no
+     * finish reason at all.
+     *
+     * **This is the most dangerous failure in the set and it is invisible to every other gate on
+     * this path.** A truncated readback passes [SlmStreamSanitizer] untouched, because truncation
+     * is not a control token. It passes the output grounding gate **by construction**, because a
+     * cut-off restatement of an approved record introduces no drug name and no numeral that was not
+     * already in the record, so [outputIsGrounded] returns true on it every time. It arrives over a
+     * 200. Nothing downstream of the response envelope can tell it from a complete answer.
+     *
+     * What reaches the worker if it is not caught is half a dosing instruction read as a whole one:
+     * "take one capsule three times a day for" with the duration missing, or a line that stops
+     * before the food relation. The `finish_reason` field of the §2.2 envelope is the only place in
+     * the entire system where this is detectable, which is why that contract requires the field to
+     * be **derived from the generation** rather than asserted, and why the sample serving app's
+     * unconditional literal `"stop"` is called out in the memo as a defect that must be impossible
+     * in the new contract.
+     *
+     * A missing finish reason is this refusal too. "The service did not say whether the answer is
+     * complete" and "the answer is not complete" are the same thing from the worker's side, and
+     * fail-closed is the only reading worth having.
+     *
+     * Retryable: a second generation may fit, and a persistent recurrence means the output ceiling
+     * is too low for the records being read back, which is a tuning signal rather than a fault.
+     */
+    OUTPUT_TRUNCATED,
+
+    /**
+     * The server served an artifact this build was not verified against, or did not say which
+     * artifact it served.
+     *
+     * **This is the durable control PR-1 exists for.** Every other gate on this path is calibrated
+     * to one model: [SlmStreamSanitizer]'s literal set is that artifact's tokenizer vocabulary, and
+     * its channel grammar is that artifact's channel grammar. Point the server at a different model
+     * and the sanitizer keeps returning clean-looking output while the new model's control
+     * constructs pass through to a clinician, with every suppression counter reading zero. That is
+     * not hypothetical: it is precisely what the previous MedGemma-pinned set would have done
+     * against `google/gemma-4-E2B-it`.
+     *
+     * A missing identity is this refusal too, deliberately. See [servedModelMatchesSanitizer].
+     */
+    SERVED_MODEL_MISMATCH,
 }
 
 /** Terminal result of [SlmReadbackUseCase]. */
@@ -120,6 +218,11 @@ sealed interface SlmReadbackResult {
  * 6. [SlmEngine.generate] - *unbound interface at this stage*; stage 3b binds it.
  * 7. [SlmStreamSanitizer] (§6.1) - control-token stripping on every chunk, before anything is
  *    displayed and before the output gate sees the text.
+ * 7b. Model identity (PR-1) - [servedModelMatchesSanitizer] against [SlmEngine.servedModelId].
+ *    Tier-blind, and before the grounding gate, because grounding cannot compensate for a gate
+ *    calibrated to the wrong artifact.
+ * 7c. Completeness (PR-2) - [SlmEngine.finishReason] against [COMPLETE_FINISH_REASONS]. Tier-blind.
+ *    The grounding gate cannot catch truncation, so the envelope is the only place it is visible.
  * 8. Output scope gate (§5.4), WORKER tier. Suppress whole or pass whole, never edit.
  * 9. Audit (§9.4) - *later stage*; needs new `AuditAction` values and the backend enum mirror in
  *    the same commit, so it is deliberately not started here.
@@ -194,9 +297,29 @@ class SlmReadbackUseCase @Inject constructor(
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            return SlmReadbackResult.Refused(SlmRefusal.ENGINE_FAILED)
+            return SlmReadbackResult.Refused(engineRefusalFor(t))
         }
         val generated = visible.toString()
+
+        // 7b. Model identity. The sanitizer's vocabulary and channel grammar belong to exactly one
+        //     artifact, so a generation from a different one has passed through a gate calibrated
+        //     for something else. Checked before the grounding gate because grounding cannot
+        //     compensate: an unrecognized control construct is not a drug name and not a numeral,
+        //     so it is "grounded" by construction and would be displayed. Tier-blind on purpose,
+        //     for the same reason the sanitizer is: a foreign control grammar is not an answer for
+        //     a physician either.
+        if (!servedModelMatchesSanitizer(engine.servedModelId())) {
+            return SlmReadbackResult.Refused(SlmRefusal.SERVED_MODEL_MISMATCH)
+        }
+
+        // 7c. Completeness. Checked here for the same reason as 7b and with more urgency: a
+        //     truncated readback passes the sanitizer and passes the grounding gate by
+        //     construction, because cutting a restatement short introduces no new drug and no new
+        //     numeral. The envelope is the only place it is visible. Tier-blind: half a dosing
+        //     instruction is not an answer for a physician either.
+        if (engine.finishReason() !in COMPLETE_FINISH_REASONS) {
+            return SlmReadbackResult.Refused(SlmRefusal.OUTPUT_TRUNCATED)
+        }
 
         // 8. Output scope gate, over the sanitized text: it must judge what will be displayed,
         //    not what the model emitted. Whole or nothing; the text below is never rewritten.
@@ -276,3 +399,42 @@ internal fun buildPrompt(invocation: SlmInvocation): String {
  * own operator decision naming the SLM tier explicitly.
  */
 internal fun UserSession?.isOpenSlmTier(): Boolean = this?.role?.toCadreTier() == CadreTier.PHYSICIAN
+
+/**
+ * Finish reasons that mean the generation actually finished.
+ *
+ * `STOP_SEQUENCE` counts as complete because a configured stop sequence ending the generation is
+ * the contract working as designed (§2.2 requires explicit stop sequences), not an interruption.
+ * Null is deliberately absent from this set, so an envelope carrying no finish reason refuses:
+ * see [SlmRefusal.OUTPUT_TRUNCATED].
+ */
+internal val COMPLETE_FINISH_REASONS: Set<SlmFinishReason?> =
+    setOf(SlmFinishReason.STOP, SlmFinishReason.STOP_SEQUENCE)
+
+/**
+ * Maps a thrown generation failure to its refusal (PR-2).
+ *
+ * **This function is what replaced a blanket catch, and the replacement is the point.** The perf
+ * audit's F6B-02 traced a duplicate-ABHA data-integrity error through six defensible hops into one
+ * `catch (e: Exception)` that turned it into "Assessment unavailable", and named that single catch
+ * block as the finding. The SLM path had the same shape from the day it was written, with one
+ * `ENGINE_FAILED` covering everything, and on a remote engine that would have merged the single
+ * most common condition in the field (no network) with the rarest and most serious (the service
+ * broke).
+ *
+ * **An unclassifiable throwable still refuses.** The `else` branch is [SlmRefusal.ENGINE_FAILED],
+ * never an answer, so a binding that throws something untyped degrades the quality of the refusal
+ * and never its existence. Fail-closed on the taxonomy, not just on the outcome.
+ *
+ * [CancellationException] never reaches here: the seam rethrows it before calling this, because a
+ * cancelled readback has no result at all, not a refusal.
+ */
+internal fun engineRefusalFor(t: Throwable): SlmRefusal = when ((t as? SlmEngineException)?.error) {
+    SlmEngineError.UNREACHABLE -> SlmRefusal.ENGINE_UNREACHABLE
+    SlmEngineError.TIMEOUT -> SlmRefusal.ENGINE_TIMEOUT
+    SlmEngineError.UNAVAILABLE -> SlmRefusal.ENGINE_UNAVAILABLE
+    SlmEngineError.PAYLOAD_REJECTED -> SlmRefusal.ENGINE_REJECTED_INPUT
+    SlmEngineError.ENGINE_ERROR -> SlmRefusal.ENGINE_FAILED
+    SlmEngineError.MALFORMED_RESPONSE -> SlmRefusal.ENGINE_FAILED
+    null -> SlmRefusal.ENGINE_FAILED
+}
