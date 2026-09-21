@@ -45,7 +45,7 @@ enum class SlmRetryOffer {
  * testable without one. Resource ids, not strings, so the copy is translatable and so a test can
  * assert WHICH message a refusal selects without asserting the English in it.
  *
- * **Eighteen refusals, eighteen states, and that is the requirement rather than thoroughness for
+ * **Nineteen refusals, nineteen states, and that is the requirement rather than thoroughness for
  * its own sake.** Guardrail memo §5.6 makes every refusal a first-class UI state, and H-14 is in
  * the hazard register because an absence that carries no signal is its own defect: a worker who
  * taps and gets a blank sheet, or a toast that has already gone, learns that the feature is
@@ -96,6 +96,23 @@ fun slmRefusalCopy(refusal: SlmRefusal): SlmRefusalCopy = when (refusal) {
         SlmRetryOffer.NONE,
     )
 
+    /*
+     * The injection guard, PR-8.
+     *
+     * NONE, not ASK_AGAIN, and the reason is that the device cannot tell the worker which half of
+     * the prompt carried the token. The question is theirs to change; the approved record is not,
+     * and if the diagnosis is what carries it then "ask something else" is advice that cannot
+     * work. A refusal that names both possibilities and offers no button is the honest shape.
+     *
+     * Never the code, per S-4. "SAMD-SLM-8009" tells a health worker nothing and reads as a fault
+     * in the app rather than as a control that fired.
+     */
+    SlmRefusal.PROMPT_CONTROL_TOKENS -> SlmRefusalCopy(
+        R.string.readback_refusal_prompt_control_tokens_title,
+        R.string.readback_refusal_prompt_control_tokens_body,
+        SlmRetryOffer.NONE,
+    )
+
     // The gate the entire feature rests on. Not an error, and must not read as one: a doctor has
     // simply not decided yet, which is the ordinary state of a case for most of its life.
     SlmRefusal.NOT_APPROVED -> SlmRefusalCopy(
@@ -140,7 +157,7 @@ fun slmRefusalCopy(refusal: SlmRefusal): SlmRefusalCopy = when (refusal) {
     // ---- the output grounding gate, WORKER tier -------------------------------------
 
     /*
-     * The gate working, not a fault, and the hardest of the eighteen to word. Three things it must
+     * The gate working, not a fault, and the hardest of the nineteen to word. Three things it must
      * not do: imply the patient's record is wrong (it is not, and it is the thing the worker is
      * being sent back to), imply the app broke (it did not, this is the control firing), or hint
      * that a real answer exists behind the refusal (the generation is suppressed whole, never

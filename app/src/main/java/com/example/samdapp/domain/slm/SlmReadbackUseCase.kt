@@ -47,6 +47,26 @@ enum class SlmRefusal {
      *  silently cut inside the prompt is one the model answers about incompletely with no signal. */
     RECORD_TOO_LARGE,
 
+    /**
+     * The assembled prompt carries one of the served artifact's control tokens as text.
+     *
+     * **Refused on the handset, before any network call (PR-8).** The service refuses the same
+     * text with `SAMD-SLM-8009` and does not strip it (`slm-service-contract.md` §2.8), so this
+     * value names one condition with two places it can be caught, and the local one is the one
+     * that matters: the prompt carries a physician's free-text working diagnosis and a health
+     * worker's free-text question, and refusing here means injection-shaped text never leaves the
+     * device. The remote half stays because a service that trusted its caller to have checked
+     * would be trusting a caller it cannot verify.
+     *
+     * **Once the two sets agree, a service-side `8009` means they have drifted**, which is a
+     * signal worth having and is the second reason to check locally. They do not agree yet: see
+     * [firstControlTokenIn] and the four spellings `SlmStreamSanitizer` refuses to guess.
+     *
+     * Not retryable, and not askable-again either, because the offending text may be in the
+     * record rather than in the question and the device cannot tell the worker which.
+     */
+    PROMPT_CONTROL_TOKENS,
+
     /** No committed `KernelDecision` for the case. Not physician-approved, so readback is not
      *  permitted at all (§4.1). Delegated to [ApprovedRecordReader]. */
     NOT_APPROVED,
@@ -259,6 +279,9 @@ sealed interface SlmReadbackResult {
  * 1. Input hard rejects (§4.4) - empty question, oversized question.
  * 2. Snapshot via [ApprovedRecordReader] (§4.2) - approval, resolvability and PHI exclusion are
  *    that reader's guarantees, restated here as typed refusals rather than re-implemented.
+ * 2b. Outbound control tokens (PR-8) - the assembled prompt against [firstControlTokenIn], before
+ *    the budget check and before any call. The service refuses the same text with
+ *    `SAMD-SLM-8009`; this refuses it without sending it.
  * 3. Prompt budget (§4.4).
  * 4. Tier resolution from the live `UserSession` (§5.1), fail-closed.
  * 5. Input scope gate (§5.4), WORKER tier only. **On a refusal the engine is never called.**
@@ -315,6 +338,18 @@ class SlmReadbackUseCase @Inject constructor(
 
         val invocation = SlmInvocation(snapshot = snapshot, question = question.trim())
         val prompt = buildPrompt(invocation)
+
+        // 2b. Injection-shaped text, refused here and never sent (PR-8). BEFORE the budget check,
+        //     which mirrors the service's own order: it runs its guard before its input bound, so
+        //     a prompt that is both over length and carrying control tokens is an injection on
+        //     both sides rather than a length violation on one and an injection on the other.
+        //     Refused, never stripped, for the service's reason: the two free-text fields in this
+        //     prompt are a physician's working diagnosis and a worker's question, and quietly
+        //     editing either on its way to a readback of an already-approved record is worse than
+        //     declining to produce one. The set is SlmStreamSanitizer's, not a second list.
+        if (firstControlTokenIn(prompt) != null) {
+            return SlmReadbackResult.Refused(SlmRefusal.PROMPT_CONTROL_TOKENS)
+        }
 
         // 3. Prompt budget: refuse rather than truncate.
         if (prompt.length > MAX_PROMPT_CHARS) {
@@ -482,6 +517,7 @@ internal fun engineRefusalFor(t: Throwable): SlmRefusal = when ((t as? SlmEngine
     SlmEngineError.TIMEOUT -> SlmRefusal.ENGINE_TIMEOUT
     SlmEngineError.UNAVAILABLE -> SlmRefusal.ENGINE_UNAVAILABLE
     SlmEngineError.PAYLOAD_REJECTED -> SlmRefusal.ENGINE_REJECTED_INPUT
+    SlmEngineError.CONTROL_TOKENS_REJECTED -> SlmRefusal.PROMPT_CONTROL_TOKENS
     SlmEngineError.ENGINE_ERROR -> SlmRefusal.ENGINE_FAILED
     SlmEngineError.MALFORMED_RESPONSE -> SlmRefusal.ENGINE_FAILED
     null -> SlmRefusal.ENGINE_FAILED

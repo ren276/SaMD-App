@@ -289,6 +289,12 @@
     <string name="readback_refusal_engine_rejected_input_title">The read-back could not be sent</string>
     <string name="readback_refusal_engine_rejected_input_body">This request was turned down and sending it again unchanged will not work. Read the report above with the patient, and tell your supervisor.</string>
 
+    <!-- PROMPT_CONTROL_TOKENS. The injection guard, on the phone or one hop in. Plain words, no
+         code, no button: the offending text may be in the approved record rather than in the
+         question, so "ask something else" is advice that may be impossible to follow. -->
+    <string name="readback_refusal_prompt_control_tokens_title">The read-back was not sent</string>
+    <string name="readback_refusal_prompt_control_tokens_body">Something written in this record or in your question uses symbols the AI would read as an instruction, so nothing was sent and nothing was changed. Read the report above with the patient, and tell your supervisor what was written.</string>
+
     <!-- ENGINE_FAILED. The catch-all. One press, then fall back to the report. -->
     <string name="readback_refusal_engine_failed_title">The read-back did not work</string>
     <string name="readback_refusal_engine_failed_body">Something went wrong while preparing it. Try once more. If it fails again, read the report above with the patient.</string>

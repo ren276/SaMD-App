@@ -588,6 +588,17 @@ FAILURE_TABLE: list[tuple[str, Any, SlmCallOutcome, int, str]] = [
         "SAMD-SLM-8012",
     ),
     (
+        # PR-8. The service's injection guard fired. PAYLOAD_REJECTED like its siblings, because
+        # the operational fact is the same, under a device-facing code of its own, because what a
+        # worker should be told is not: the TEXT of an approved record or of a question carries
+        # something the model would read as an instruction.
+        "control_tokens_in_prompt",
+        lambda s: s.push_response(422, _problem("SAMD-SLM-8009")),
+        SlmCallOutcome.PAYLOAD_REJECTED,
+        422,
+        "SAMD-SLM-8016",
+    ),
+    (
         "unparseable_body",
         lambda s: s.push_text(200, "<html>not json</html>"),
         SlmCallOutcome.MALFORMED_RESPONSE,
@@ -637,6 +648,45 @@ async def test_failure_paths_map_and_write_exactly_one_row_pair(
     audit = await _slm_audit_rows(session)
     assert len(audit) == 1
     assert audit[0].action == AuditAction.SLM_CALL_FAILED.value
+
+
+@pytest.mark.usefixtures("slm_overrides")
+async def test_the_injection_refusal_does_not_relay_the_services_detail(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    session: AsyncSession,
+    scripted_slm: ScriptedSlm,
+) -> None:
+    """The one 4xx whose upstream detail must not be passed through, and here is why.
+
+    Every other 4xx relays _safe_upstream_detail, which is a bounded read of a message-shaped
+    field. That is tolerable when the field describes a malformed request. It is not tolerable
+    here: the service refuses an injected prompt rather than sanitising it, and a verbose service
+    quoting the offending text back would be quoting a physician's free-text working diagnosis
+    into this backend's own error body, which the device then shows and the audit chain sees.
+    This branch therefore writes its own detail and reads nothing from the upstream body.
+    """
+    await _seed(client, auth_headers, session)
+    scripted_slm.push_response(
+        422,
+        {
+            **_problem("SAMD-SLM-8009"),
+            "detail": "rejected, not sanitised: <|turn> in 'Diagnosis: acute upper respiratory'",
+        },
+    )
+
+    response = await _post(client, auth_headers)
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "SAMD-SLM-8016"
+    detail = response.json()["detail"]
+    assert "acute upper respiratory" not in detail
+    assert "<|turn>" not in detail
+
+    rows = await _log_rows(session)
+    assert len(rows) == 1
+    assert rows[0].outcome == SlmCallOutcome.PAYLOAD_REJECTED.value
+    assert rows[0].error_code == "SAMD-SLM-8016"
 
 
 def test_every_outcome_in_the_vocabulary_is_exercised() -> None:
@@ -691,6 +741,10 @@ async def test_breaker_opens_on_engine_failures_and_then_refuses_without_calling
     ("label", "script"),
     [
         ("payload_rejected", lambda s: s.push_response(422, _problem("SAMD-SLM-8001"))),
+        # PR-8. Same rule, and worth its own row: 8009 takes a branch of its own inside the 4xx
+        # block, so "every 4xx is breaker-neutral" has to be re-proved for the branch that was
+        # added rather than assumed from the one that was already there.
+        ("control_tokens", lambda s: s.push_response(422, _problem("SAMD-SLM-8009"))),
         ("queue_full", lambda s: s.push_response(503, _problem("SAMD-SLM-8005"))),
     ],
 )

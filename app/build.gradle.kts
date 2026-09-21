@@ -329,6 +329,10 @@ tasks.withType<Test>().configureEach {
         // S-3: SyncFailureMessageMirrorTest matches on the literal constraint messages this
         // module writes, because a duplicate ABHA and a missing field share one error code.
         rootProject.layout.projectDirectory.file("backend/core/app/services/sync.py"),
+        // PR-8: SlmControlTokenMirrorTest reads the device-facing code the proxy relays for the
+        // service's SAMD-SLM-8009, and the 4xx branch that must not touch the circuit breaker.
+        rootProject.layout.projectDirectory.file("backend/core/app/errors.py"),
+        rootProject.layout.projectDirectory.file("backend/core/app/services/slm.py"),
     )
         .withPropertyName("backendMirrorSourcesReadByMirrorTests")
         .withPathSensitivity(PathSensitivity.RELATIVE)

@@ -1474,6 +1474,7 @@ autofill changes when the mock is replaced:
 | `SAMD-SLM-8013` | 502 | SLM service returned an unparseable response or an envelope missing required fields |
 | `SAMD-SLM-8014` | 422 | Identity content detected on the SLM boundary (§11.2) |
 | `SAMD-SLM-8015` | 503 | SLM circuit breaker is open |
+| `SAMD-SLM-8016` | 422 | SLM service refused control tokens in the prompt (its `SAMD-SLM-8009`, relayed under a code of this hop's own) |
 | `SAMD-SLM-8020` | 503 | SLM readback not configured for this deployment (no shared secret; fails closed) |
 | `SAMD-SYNC-6001` | 413 | Batch too large |
 | `SAMD-SYNC-6002` | 422 | Unknown table in batch |
@@ -1690,6 +1691,7 @@ so the grounding gate returns true on it.
 | Service unreachable | 502 | `SAMD-SLM-8010` | `UNREACHABLE` |
 | Backend's read budget expired | 504 | `SAMD-SLM-8011` | `TIMEOUT` |
 | Service `422`, `409` or `413` | 422 | `SAMD-SLM-8012` | `PAYLOAD_REJECTED` |
+| Service `422` `SAMD-SLM-8009`, the injection guard | 422 | `SAMD-SLM-8016` | `PAYLOAD_REJECTED` |
 | Service `503` `SAMD-SLM-8004` | 503 | `SAMD-SLM-8004` | `NOT_LOADED` |
 | Service `503` `SAMD-SLM-8005` | 503 | `SAMD-SLM-8005` | `QUEUE_FULL` |
 | Service `500` or `504`, or a `503` with no recognised code | 502 | `SAMD-SLM-8006` | `ENGINE_ERROR` |

@@ -107,6 +107,26 @@ enum class SlmEngineError {
      *  version, or a `model_id` the service declines to serve. Not retryable unchanged. */
     PAYLOAD_REJECTED,
 
+    /**
+     * The service's injection guard refused the prompt: it carried one of the loaded artifact's
+     * special or added tokens as text, and the service rejected it rather than stripping it
+     * (`slm-service-contract.md` §2.8, `SAMD-SLM-8009` one hop in, `SAMD-SLM-8016` on this one).
+     *
+     * **Separate from [PAYLOAD_REJECTED] for that value's own stated reason.** The request was
+     * shaped correctly; its TEXT is what was refused, and the text is a physician's free-text
+     * diagnosis and a worker's free-text question. "The request was turned down, tell your
+     * supervisor" and "something written in this record reads as an instruction to the model" are
+     * different things to say and different things to do about it. Not retryable unchanged
+     * either, and under a deterministic decode not retryable at all: the same bytes are refused
+     * the same way, forever.
+     *
+     * **A value the device should rarely see, and that is the point of having it.** The seam
+     * refuses this text locally before any call, so an arrival here means the service's derived
+     * set caught something the device's pinned set does not carry. See
+     * `SlmStreamSanitizer.firstControlTokenIn`.
+     */
+    CONTROL_TOKENS_REJECTED,
+
     /** A 5xx, an out-of-memory inside generation, or any failure the service attributes to itself. */
     ENGINE_ERROR,
 

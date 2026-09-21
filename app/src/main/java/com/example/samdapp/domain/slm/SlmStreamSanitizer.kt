@@ -205,6 +205,29 @@ internal val CONTROL_TOKENS: Set<String> = (RESERVED_UNUSED + NAMED_RESERVED).to
 /** Length of the hold-back window: no known control token is longer than this. */
 internal val MAX_CONTROL_TOKEN_LENGTH: Int = CONTROL_TOKENS.maxOf { it.length }
 
+/**
+ * The first control token from [CONTROL_TOKENS] that appears as text in [text], or null.
+ *
+ * **The outbound half of this file's set, added in PR-8, and it reuses the set rather than
+ * restating it.** The service refuses a prompt carrying any of the loaded artifact's special or
+ * added tokens with `SAMD-SLM-8009` and does not strip it (`slm-service-contract.md` §2.8). The
+ * seam asks this question first, so injection-shaped text never leaves the handset. A second list
+ * would be the defect [CONTROL_TOKENS] exists to prevent, one artifact repin away from two
+ * disagreeing answers about the same vocabulary.
+ *
+ * **Membership only, deliberately, and NOT [isControlTokenShaped].** The shape rule is fail-closed
+ * on the way in from the model, where an unrecognised bracketed construct is not an answer. On the
+ * way out it would refuse a physician's `<pending>` in a free-text diagnosis, which the service
+ * serves perfectly happily, so the handset would be blocking readbacks the service would answer.
+ * Substring membership is also exactly what the service matches on, which is what lets a service
+ * `8009` be read as a drift signal rather than as a second opinion.
+ *
+ * Cost is one pass of the set per readback, not per chunk, which is why this is written as the
+ * obvious loop while the streaming path needed [SlmStreamSanitizer.firstControlToken]'s inverted
+ * scan.
+ */
+internal fun firstControlTokenIn(text: String): String? = CONTROL_TOKENS.firstOrNull { it in text }
+
 /** Shortest known control token. Nothing below this length can be one, so matching starts here. */
 private val MIN_CONTROL_TOKEN_LENGTH: Int = CONTROL_TOKENS.minOf { it.length }
 

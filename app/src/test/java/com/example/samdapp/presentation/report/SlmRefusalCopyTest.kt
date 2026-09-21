@@ -16,7 +16,7 @@ import org.junit.Test
  * `kernel_failure_*` block, and it is why the copy lives in `strings.xml` at all.
  *
  * **This feature refuses more often than it answers by design**, so the copy table is not a
- * finishing touch on it, it is most of it. Eighteen refusals reach a health worker holding a phone
+ * finishing touch on it, it is most of it. Nineteen refusals reach a health worker holding a phone
  * with a patient in front of them, and the difference between "the gate did its job" and "the app
  * is broken" is carried entirely by these pairs.
  */

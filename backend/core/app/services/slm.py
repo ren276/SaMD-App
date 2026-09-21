@@ -102,6 +102,12 @@ COMPLETE_FINISH_REASONS = frozenset({"stop", "stop_sequence"})
 _UPSTREAM_NOT_LOADED = "SAMD-SLM-8004"
 _UPSTREAM_QUEUE_FULL = "SAMD-SLM-8005"
 
+# section 2.8 and section 4.1. The service's injection guard: the prompt carried one of the loaded
+# artifact's special or added tokens as text and was refused, never stripped. Named here rather
+# than matched inline for _UPSTREAM_NOT_LOADED's reason, and mirrored on the device by
+# SlmControlTokenMirrorTest, which reads this file as text.
+_UPSTREAM_CONTROL_TOKENS = "SAMD-SLM-8009"
+
 
 def sha256_hex(payload: dict[str, Any]) -> str:
     canonical = json.dumps(payload, separators=(",", ":"), sort_keys=True)
@@ -517,9 +523,26 @@ async def _readback(
         )
 
     if 400 <= status < 500:
-        # 422, 409 and 413 from section 4.1. Not a breaker failure: the service answered
-        # correctly that this one request is bad, and punishing every later caller for it is the
-        # defect the kernel proxy already names at its own 4xx branch.
+        # 422, 409, 413 and 8009's 422, all from section 4.1. NOT a breaker failure, any of them:
+        # the service answered correctly that this one request is bad, and punishing every later
+        # caller for it is the defect the kernel proxy already names at its own 4xx branch. The
+        # split below is a second DEVICE-FACING code for one outcome, not a second outcome.
+        if _upstream_code(response) == _UPSTREAM_CONTROL_TOKENS:
+            # section 4.2.3. The injection guard fired one hop in. Outcome PAYLOAD_REJECTED,
+            # because the operational fact is the same as the other three and a new outcome value
+            # would be an Alembic migration over slm_call_log.outcome's CHECK constraint to record
+            # what error_code already carries. The code differs because the worker-facing answer
+            # does: 8012 means the request was shaped wrong, this means the TEXT of an approved
+            # record or of a worker's question contains something the model reads as an
+            # instruction. The service REFUSES it rather than sanitising it, so this backend has
+            # nothing to clean up and must not invent a retry.
+            await _fail(
+                ctx,
+                code=ErrorCode.SLM_PROMPT_CONTROL_TOKENS,
+                detail="The readback text contains control tokens and was refused, not edited.",
+                outcome=SlmCallOutcome.PAYLOAD_REJECTED,
+                http_status=status,
+            )
         await _fail(
             ctx,
             code=ErrorCode.SLM_PAYLOAD_REJECTED,

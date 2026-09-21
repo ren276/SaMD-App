@@ -604,6 +604,9 @@ class RemoteSlmEngineTest {
             (502 to "SAMD-SLM-8010") to SlmEngineError.UNAVAILABLE,
             (504 to "SAMD-SLM-8011") to SlmEngineError.TIMEOUT,
             (422 to "SAMD-SLM-8012") to SlmEngineError.PAYLOAD_REJECTED,
+            // PR-8. The service's injection guard, relayed under this hop's own code. Its own row
+            // rather than a second PAYLOAD_REJECTED: the worker-facing answers differ.
+            (422 to "SAMD-SLM-8016") to SlmEngineError.CONTROL_TOKENS_REJECTED,
             (503 to "SAMD-SLM-8004") to SlmEngineError.UNAVAILABLE,
             (503 to "SAMD-SLM-8005") to SlmEngineError.UNAVAILABLE,
             (502 to "SAMD-SLM-8006") to SlmEngineError.ENGINE_ERROR,

@@ -363,6 +363,9 @@ internal fun httpErrorFor(code: String?, httpStatus: Int): SlmEngineError = when
     code == "SAMD-SLM-8012" -> SlmEngineError.PAYLOAD_REJECTED
     // The outbound PHI guard tripped. Refused before generation, and unretryable unchanged.
     code == "SAMD-SLM-8014" -> SlmEngineError.PAYLOAD_REJECTED
+    // The service's injection guard refused the prompt text (its own SAMD-SLM-8009, relayed under
+    // a code of this hop's own). Not folded into PAYLOAD_REJECTED: see that value's KDoc.
+    code == "SAMD-SLM-8016" -> SlmEngineError.CONTROL_TOKENS_REJECTED
     // The case does not resolve on this backend, or belongs to another facility. See the KDoc.
     code == "SAMD-ENC-4002" -> SlmEngineError.PAYLOAD_REJECTED
     // The service failed inside itself: a 500, or a 504 from its own 40 s wall clock.

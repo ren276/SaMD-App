@@ -4,10 +4,16 @@
 >
 > **Implementation status, MEASURED.** The calling side exists: PR-4 built
 > `backend/core/app/adapters/slm/client.py` and `app/services/slm.py`, and PR-6 built the device
-> transport behind it. The **service side does not exist in this repository**. Every statement below
-> about what the service does is therefore a requirement on a component nobody here has written, and
-> the sections with a measurement attached (§2.7, §3.2) are measurements of a model or of a sample
-> application, never of a conforming service.
+> transport behind it. The **service side still does not exist in this repository**, and every
+> statement below about what the service does is a requirement on a component nobody here has
+> written.
+>
+> **It does now exist on the GPU workstation**, built in PR-5 and PR-5b in the serving repository,
+> and three sections carry measurements taken against it rather than against a model or a sample
+> application: §2.2 (templating, and its 9-token cost), §2.8 (the injection guard and its 24
+> derived tokens) and §4.3 (the deadline armed at arrival). Their wording is copied verbatim from
+> that work's note and is marked where it starts. §2.7 and §3.2 are as they were: measurements of a
+> model and of a sample application.
 
 **What this document is.** The wire contract of the SLM generation service: the request it accepts,
 the response envelope it returns, its error vocabulary, the timeout budget it sits inside, and the
@@ -111,6 +117,25 @@ measurement behind it. This paragraph said "no chat-template application" before
 existed; the correction is deliberate and the two are not in tension, because wrapping a prompt in
 `<|turn>` / `<turn|>` adds no word a reader sees while omitting it changes what the model does.
 
+**The normative wording, carried verbatim from PR-5b's note (`15.7`) and measured against the
+service that now implements it.** PR-5b built the templating into the service and measured it; this
+paragraph is that change's wording and is not to be reconstructed:
+
+**2.2 Prompt assembly.** The caller sends `prompt` as plain text: the readback instruction,
+the approved record and the health worker's question, assembled by the device's seam from
+the template named in `prompt_template_version`. The caller does not apply the artifact's
+chat template and does not wrap the prompt in control tokens of any kind. **The service
+applies the loaded artifact's own chat template**, taking the caller's whole string as a
+single `user` turn with a generation prompt appended, using the template the artifact
+declares rather than any grammar written into the service. The string is not split into a
+system turn and a user turn; a system preamble, if one is ever required, belongs in the
+device's template and in a new `prompt_template_version`.
+
+MEASURED on the GPU box in PR-5b: the template adds a fixed 9 tokens (259 plain, 268 templated), so
+the input bound of section 2.4 measures the **templated** string, and a caller sitting exactly on
+the plain-text limit is refused a few tokens above it. That is the safe direction and the `413`
+detail says which number was measured.
+
 ### 2.3 Input length: rejected, never truncated
 
 **An over-length prompt is `413` / `SAMD-SLM-8003`. It is never truncated and then generated from.**
@@ -118,6 +143,9 @@ existed; the correction is deliberate and the two are not in tension, because wr
 This mirrors the device's own position, and the reasoning is the device's KDoc verbatim: a record
 silently cut inside the prompt is "one the model answers about incompletely with no signal that it
 did", which is why the device refuses at `MAX_PROMPT_CHARS` rather than trimming.
+
+**Section 2.8's injection guard runs before this bound**, so a prompt that is both over length and
+carrying control tokens is refused as an injection. The order is stated there and is contractual.
 
 The service is where the real tokenizer lives, so **the bound here is in tokens**, and it is the
 authoritative one. The device's 6000-character budget is documented in its own source as a
@@ -205,6 +233,42 @@ would report that it wrapped. This is therefore a property the service holds and
 verify, which is precisely why it is written here as a requirement with its measurement attached
 rather than left as an implementation note. The first integration test against a real service must
 include one record whose expected readback is known, and a reviewer must read the text.
+
+### 2.8 Control tokens in caller text
+
+The paragraph below is carried verbatim from PR-5b's note (`15.7`), where it is labelled **2.3**.
+It is numbered 2.8 here and nowhere else: sections 2.3 through 2.7 are cited by number in this
+file and in source comments, and renumbering them to make room would stale every one of those
+citations to save a digit. The label inside the quoted wording is PR-5b's and is left untouched.
+
+**2.3 Control tokens in caller text.** A `prompt` containing any of the loaded artifact's
+special or added tokens as text is rejected with `SAMD-SLM-8009` (HTTP 422). The rejected
+set is derived from the artifact's tokenizer, not enumerated in this contract, so it
+follows a change of artifact. The prompt is **rejected, never sanitised**: the service does
+not strip, escape or otherwise alter caller text, because that text carries a physician's
+free-text working diagnosis and a health worker's free-text question. This rule is a
+prompt-injection control and it is also what refuses a caller that has already applied the
+chat template itself, which would otherwise be templated twice and return a well-formed
+200 over a prompt nobody intended.
+
+**The guard runs before the input bound of section 2.3, and the order is contractual.** It
+inspects exactly what the caller sent, before the service has added anything to it. MEASURED in
+PR-5b: an over-length prompt that also carries control tokens is refused as an injection (`422`),
+not as a length violation (`413`). A caller that reads `413` may shorten and resend; a caller that
+reads `422` / `SAMD-SLM-8009` must change the text itself, and getting that order wrong would tell
+it the wrong one.
+
+**The device refuses the same text locally, before the call.** The assembled prompt is checked
+against the device's own pinned set of the artifact's control tokens and refused on the handset, so
+injection-shaped text never leaves it. That is the device's obligation, not this contract's, and it
+does not weaken this section: a service that trusted the device to have checked would be trusting a
+caller it cannot verify. What it buys is diagnostic, and it is written down here because it is a
+property an operator will reason with: **once both sets are the same, a `SAMD-SLM-8009` from the
+service means the two have drifted.** They are not the same yet. MEASURED, the device's named set
+carries 21 literals and the service derives 24, and the device's own source records which
+spellings it is missing (the image and audio boundary markers) and why it refuses to guess them.
+Until that gap is closed, an `8009` can also mean the service caught one of the four the device
+cannot name.
 
 ---
 
@@ -357,6 +421,18 @@ Following `api-contract.md` §9.1's discipline. The `SAMD-SLM-8xxx` block is pre
 | `SAMD-SLM-8006` | 500 | Generation failed inside the service, including out of memory |
 | `SAMD-SLM-8007` | 504 | The service's own wall-clock cap expired and it abandoned the generation |
 | `SAMD-SLM-8008` | 401 | The caller's service credential was absent, malformed or rejected |
+| `SAMD-SLM-8009` | 422 | Prompt contains artifact control tokens |
+
+**`SAMD-SLM-8009` is PR-5b's, and its row above is that note's wording.** It is the injection guard
+of section 2.8, and it is a `422` rather than a `413` even when the prompt is also over length,
+because the guard runs first.
+
+**The arrival-time refusal of section 4.3 reuses `SAMD-SLM-8005` rather than taking a tenth code,
+and that is deliberate.** A request refused because its expected queue wait alone would exceed its
+remaining budget and a request refused because the queue is full are the same instruction to the
+caller: honour `Retry-After` and come back. A second code would widen the contract surface for a
+distinction the caller cannot act on. The service's own log keeps the two apart
+(`queue_wait_exceeds_deadline` against `queue_full`) for whoever is tuning the queue.
 
 `SAMD-SLM-8002` is deliberately `409` and not `422`. A conflict says the request was well formed and
 the **service** is not the one it was meant for, which is a different operational problem from a bad
@@ -397,6 +473,7 @@ at the call site, because no response exists to carry them.
 | `200`, `finish_reason` `stop` or `stop_sequence` | service | `SUCCESS` |
 | `200`, `finish_reason` `length` or `error`, or absent | service | `TRUNCATED` |
 | `422` `SAMD-SLM-8001`, `409` `SAMD-SLM-8002`, `413` `SAMD-SLM-8003` | service | `PAYLOAD_REJECTED` |
+| `422` `SAMD-SLM-8009` | service | `PAYLOAD_REJECTED`, under a device-facing code of its own |
 | `503` `SAMD-SLM-8004` | service | `NOT_LOADED` |
 | `503` `SAMD-SLM-8005` | service | `QUEUE_FULL` |
 | `401` `SAMD-SLM-8008` | service | **`SERVICE_UNAUTHENTICATED`, which does not yet exist. See §4.2.2** |
@@ -472,6 +549,27 @@ describes the device-to-backend hop, and a misconfigured service credential is t
 report. Whatever device-facing code the calling side eventually picks, a build emitting it is
 misconfigured and unretryable, which is `SlmRefusal.ENGINE_REJECTED_INPUT`. No new refusal value.
 
+#### 4.2.3 `SAMD-SLM-8009`, and why it needs no new outcome but does need a new code
+
+**The outcome is `PAYLOAD_REJECTED`, and that is the right one rather than the convenient one.**
+The service answered correctly that this one request is bad and will stay bad; that is the same
+operational fact as its `422`, `409` and `413`, and it wants the same operator response. Adding an
+outcome value here would mean an Alembic migration over `slm_call_log.outcome`'s `CHECK`
+constraint to record a distinction the log already carries in `error_code`.
+
+**It does not count toward the circuit breaker**, under section 4.2's standing rule for every
+`4xx`: a healthy service refusing one malformed request is not an outage, and opening the circuit
+would punish every other worker in the PHC for one prompt. It still writes exactly one
+`slm_call_log` row and exactly one `audit_events` row, like every other path.
+
+**It does take a device-facing code of its own**, for §4.2.2's reason: `SAMD-SLM-8009` is a
+service-to-backend code, and relaying it outward would make one number mean two things on two
+hops. Folding it into the existing `SAMD-SLM-8012` would be the collapse §4.2 forbids in the one
+place it is most expensive, because the two have different worker-facing answers: `8012` means the
+request was shaped wrong, `8009` means the **text** of an approved record or of a worker's question
+contains something the model reads as an instruction, which is a thing to look at rather than a
+thing to resend.
+
 ### 4.3 Timeout budget
 
 Each layer strictly inside the next, so that a timeout is always classified at the innermost layer
@@ -483,6 +581,24 @@ outside and the §4.2 vocabulary stops earning its keep.
 | Device to backend, SLM endpoint | 10 s | **55 s** | 60 s |
 | Backend to SLM service | 5 s | 50 s | 50 s |
 | Service internal wall clock | n/a | n/a | **40 s hard cap** |
+
+**The deadline, carried verbatim from PR-5b's note (`15.7`).** PR-5b measured that the cap bounded
+decode only, because the clock was armed after the request left the queue, so a queued request was
+granted a fresh full budget when it reached the model. That is fixed and this is the wording:
+
+**4.3 Deadlines.** `generation_deadline_s` is measured **from request arrival**, not from
+the moment the request reaches the model. Time spent waiting in the service's queue is
+spent out of the same budget, so the caller's observed latency is bounded by the deadline
+regardless of queue depth. A request whose expected queue wait alone would exceed its
+remaining budget is refused at arrival with `SAMD-SLM-8005` (HTTP 503) and a `Retry-After`
+header, rather than admitted to expire in the queue. A request that exhausts its budget
+while waiting is abandoned with `SAMD-SLM-8007` (HTTP 504) before generation starts.
+
+MEASURED in PR-5b, at a 3 s deadline with two concurrent requests: before the fix the slower
+request answered `504` at 6.09 s against its own 3 s budget; after it, at 3.06 s. A stated gap
+travels with the arrival-time refusal: the estimate comes from completed generations, so before
+the first one finishes there is no sample and no arrival refusal can fire. On a freshly started
+service the deadline is the only protection until one generation has completed.
 
 At 40 s the service abandons its own generation and frees VRAM **deliberately**, returning `504` /
 `SAMD-SLM-8007`. That is the difference between a bounded failure and an abandoned generation that
