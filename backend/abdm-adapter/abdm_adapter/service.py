@@ -286,7 +286,16 @@ async def submit_identity(
     if not result.ok:
         await _fail(session, worker, txn, result)
 
-    txn.external_txn_id = str(result.body["txnId"])
+    # Same guard as verify_otp below, for the same reason. The ORDER here was already safe (the
+    # unpack precedes the state change, so no flushed write could claim an OTP had been
+    # requested), but an uncaught KeyError on a missing `txnId` still escaped `_fail` entirely:
+    # the row rolled back to STARTED, never FAILED, with nothing recording the attempt.
+    try:
+        external_txn_id = str(result.body["txnId"])
+    except (AttributeError, TypeError, KeyError) as exc:
+        await _fail(session, worker, txn, _result_from_transport_error(exc))
+
+    txn.external_txn_id = external_txn_id
     txn.state = State.OTP_REQUESTED.value
     await session.flush()
     await _audit(session, worker, txn, AuditAction.ABHA_IDENTITY_SUBMITTED)
@@ -352,25 +361,60 @@ async def verify_otp(
     if not result.ok:
         await _fail(session, worker, txn, result)
 
+    # Every read out of the gateway body happens HERE, before the first state change, flush or
+    # audit row, matching `submit_identity` above and `fetch_profile` below. A 200 body with no
+    # error shape classifies ok=True (errors.py: `classify_generic_enrollment_error`) and can
+    # still be missing `ABHAProfile`, `tokens`, `tokens.token` or `tokens.expiresIn`; indexing
+    # those raises KeyError, and a null `expiresIn` raises TypeError.
+    #
+    # Until 2026-09-19 this unpack ran AFTER `txn.state = OTP_VERIFIED`, after its flush and
+    # after the ABHA_OTP_VERIFIED audit row. MEASURED, not reasoned: the escaping KeyError took
+    # all three down with `session_scope`'s rollback, leaving the row at OTP_REQUESTED, never
+    # FAILED, with `last_error_code` null and no audit row anywhere recording that an enrolment
+    # attempt had reached the gateway and come back malformed. That is the same `_fail`-bypass
+    # trap this module's docstring names, in its audit-integrity form: not a lost log line, a
+    # transaction indistinguishable from one where the OTP step was never attempted.
+    #
+    # The ordering is load-bearing, not just tidier: MEASURED by moving this block back below
+    # the flush and running the same tests, the request DEADLOCKS rather than failing. `_audit`
+    # takes `pg_advisory_xact_lock(facility)` inside `audit.append`, transaction scoped, so the
+    # request session still holds it while awaiting `_fail`, whose out-of-band session blocks
+    # forever trying to take the same lock for its ABHA_SESSION_FAILED row. Note this is WIDER
+    # than the per-row deadlock rule `write_out_of_band`'s docstring states: any `_fail` reached
+    # after an `_audit` in the same request hangs, whether or not the same row is involved. So a
+    # guard added in place here could not have worked; the reads had to move above the audit.
+    #
+    # Per-key reads at the point of use, deliberately. Full envelope validation (a schema over
+    # every ABDM response site, not just this one) remains open.
+    try:
+        profile = result.body["ABHAProfile"]
+        tokens = result.body["tokens"]
+        external_token = str(tokens["token"])
+        token_expires_at = utcnow() + timedelta(seconds=int(tokens["expiresIn"]))
+        abha_number = mapping.strip_abha_number_dashes(str(profile["ABHANumber"]))
+        abha_address = (profile.get("phrAddress") or [None])[0]
+        abha_status = profile.get("abhaStatus")
+        abha_type = profile.get("abhaType")
+        enrolled_masked_mobile = str(profile.get("mobile", ""))
+    except (AttributeError, TypeError, ValueError, KeyError) as exc:
+        await _fail(session, worker, txn, _result_from_transport_error(exc))
+
     txn.state = State.OTP_VERIFIED.value
     await session.flush()
     await _audit(session, worker, txn, AuditAction.ABHA_OTP_VERIFIED)
 
-    profile = result.body["ABHAProfile"]
-    tokens = result.body["tokens"]
-    txn.external_token_encrypted = str(tokens["token"])
-    txn.external_token_expires_at = utcnow() + timedelta(seconds=int(tokens["expiresIn"]))
-    txn.abha_number = mapping.strip_abha_number_dashes(str(profile["ABHANumber"]))
-    txn.abha_address = (profile.get("phrAddress") or [None])[0]
-    txn.abha_status = profile.get("abhaStatus")
-    txn.abha_type = profile.get("abhaType")
+    txn.external_token_encrypted = external_token
+    txn.external_token_expires_at = token_expires_at
+    txn.abha_number = abha_number
+    txn.abha_address = abha_address
+    txn.abha_status = abha_status
+    txn.abha_type = abha_type
 
     validate_transition(current=State.OTP_VERIFIED, target=State.ENROLLED)
     txn.state = State.ENROLLED.value
     await session.flush()
     await _audit(session, worker, txn, AuditAction.ABHA_ENROLLED)
 
-    enrolled_masked_mobile = str(profile.get("mobile", ""))
     if mobile_verification_needed(
         submitted_mobile=mobile_number, enrolled_masked_mobile=enrolled_masked_mobile
     ):

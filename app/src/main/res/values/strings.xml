@@ -1,3 +1,322 @@
 <resources>
     <string name="app_name">SaMDApp</string>
+
+    <!--
+      Worker-facing copy for each com.example.samdapp.domain.kernel.KernelFailure.
+
+      Rules these were written against, and which a reviewer should hold new strings to:
+      - Name the RECORD that failed, not the feature that did not run. "This patient is not saved
+        on the server", never "Assessment unavailable", when the patient is what went wrong.
+      - Name the ACTION. "Retry" is only used where pressing again can actually work.
+      - No SAMD-* codes. A worker cannot act on one and it makes the screen look broken.
+      - Do not mention the AI when the AI is working correctly. kernel_failure_case_not_on_server
+        is the test of this: the assessment is fine, the patient was never saved.
+      - Short sentences, common words, a patient is waiting.
+    -->
+
+    <!-- OFFLINE. No press would help; the queued work runs itself. -->
+    <string name="kernel_failure_offline_title">This phone is not connected</string>
+    <string name="kernel_failure_offline_body">The assessment will run on its own once this phone is back on Wi-Fi or mobile data. You can carry on with the patient.</string>
+
+    <!-- TIMEOUT. The one class where pressing again now is genuinely reasonable. -->
+    <string name="kernel_failure_timeout_title">The server did not answer in time</string>
+    <string name="kernel_failure_timeout_body">The connection was made but no answer came back. Try again now.</string>
+
+    <!-- SECURE_CONNECTION_FAILED. Escalation, not retry: one cause is interception. -->
+    <string name="kernel_failure_secure_connection_failed_title">The connection is not secure</string>
+    <string name="kernel_failure_secure_connection_failed_body">This phone could not make a safe connection to the server. Do not send patient details until this is fixed. Tell your supervisor.</string>
+
+    <!-- NOT_AUTHORIZED. 401 or 403. -->
+    <string name="kernel_failure_not_authorized_title">Sign in again</string>
+    <string name="kernel_failure_not_authorized_body">Your sign-in has ended. Sign in again, then open this case.</string>
+
+    <!--
+      CASE_NOT_ON_SERVER. The reason this whole change exists.
+      Says nothing about the AI, because nothing is wrong with the AI. Names the patient record
+      and the action. Mentions the ABHA number as a thing to CHECK if sending keeps failing,
+      rather than asserting a duplicate: a 404 proves the case is not on the server, it does not
+      prove why, and telling a worker a cause we have not established is how they stop believing
+      the screen.
+    -->
+    <string name="kernel_failure_case_not_on_server_title">This patient is not saved on the server</string>
+    <string name="kernel_failure_case_not_on_server_body">This patient has not reached the server yet, so this visit could not be checked. Open the patient\'s record and send it again. If sending keeps failing, check that the ABHA number is not already used by another patient. This will finish on its own once the patient is saved.</string>
+
+    <!-- PAYLOAD_REJECTED. 5003, and 5005 which is the H-10 identity guard: a real defect signal. -->
+    <string name="kernel_failure_payload_rejected_title">The server would not accept this visit</string>
+    <string name="kernel_failure_payload_rejected_body">Something in this visit could not be sent. Sending it again unchanged will not work. Write down the patient\'s name and tell your supervisor today.</string>
+
+    <!-- KERNEL_UNAVAILABLE. 502/503/504 family. Nothing to press. -->
+    <string name="kernel_failure_kernel_unavailable_title">The assessment service is down</string>
+    <string name="kernel_failure_kernel_unavailable_body">The service that reads this visit is not working right now. It will run on its own when the service is back. You can carry on with the patient.</string>
+
+    <!-- MALFORMED_RESPONSE. Reached, unintelligible. Pressing again re-fetches the same bad body. -->
+    <string name="kernel_failure_malformed_response_title">The server sent something this app cannot read</string>
+    <string name="kernel_failure_malformed_response_body">Trying again will not help. Tell your supervisor.</string>
+
+    <!-- DEVICE_ERROR. An app bug. Never blamed on the network. -->
+    <string name="kernel_failure_device_error_title">Something went wrong in this app</string>
+    <string name="kernel_failure_device_error_body">This is a problem on this phone, not with the patient\'s record. Trying again will not help. Tell your supervisor.</string>
+
+    <!-- UNKNOWN. General failure. One press, then escalate. -->
+    <string name="kernel_failure_unknown_title">This visit could not be checked</string>
+    <string name="kernel_failure_unknown_body">Try once more. If it fails again, tell your supervisor.</string>
+
+    <!--
+      No KernelFailure: the kernel was reached and answered with nothing, or no payload could be
+      built at all. Reach-neutral on purpose, and the only place the old wording survives.
+    -->
+    <string name="kernel_failure_none_title">Assessment unavailable</string>
+    <string name="kernel_failure_none_body">The AI did not produce a result for this case. No diagnosis was generated.</string>
+
+    <string name="kernel_failure_retry">Try again</string>
+    <string name="kernel_failure_retrying">Trying…</string>
+
+    <!--
+      S-3: the failed-sync review surface. Same copy rules as the kernel_failure_* strings above,
+      plus two this feature adds:
+      - Never render syncErrorMessage. It is backend-authored and PHI-safe by contract, but it is
+        written for an operator reading a log ("a referenced record does not exist yet"). It is
+        used as a discriminator in SyncFailureReason and nowhere else.
+      - Do not offer an action a worker cannot take. Three of the five causes have no button at
+        all, because this app has no screen that edits a synced record, so "fix it" would be a
+        button with nowhere to go.
+    -->
+
+    <!-- The Home card. Count first, then what the count means. -->
+    <plurals name="failed_sync_card_title">
+        <item quantity="one">1 record did not reach the server</item>
+        <item quantity="other">%1$d records did not reach the server</item>
+    </plurals>
+    <string name="failed_sync_card_body">They are safe on this phone, but they are not on the server. Open this to see what each one needs.</string>
+    <string name="failed_sync_card_action">Review</string>
+
+    <!-- The list. -->
+    <string name="failed_sync_list_title">Records that did not reach the server</string>
+    <string name="failed_sync_list_close">Close</string>
+    <string name="failed_sync_list_empty">Nothing to review. Every record has reached the server.</string>
+    <!-- Patient name, then what kind of record it is. -->
+    <string name="failed_sync_row_header">%1$s — %2$s</string>
+    <string name="failed_sync_row_date">Saved %1$s</string>
+    <string name="failed_sync_action_send_again">Send again</string>
+
+    <!--
+      What kind of record failed, in words a worker uses. Twenty tables collapse to seven nouns:
+      a worker does not distinguish an allergy row from a family-history row, and giving each of
+      the twenty its own label would be twenty strings that all mean "part of this patient's
+      notes".
+    -->
+    <string name="sync_record_type_patient">Patient record</string>
+    <string name="sync_record_type_visit">Visit</string>
+    <string name="sync_record_type_history">Patient history</string>
+    <string name="sync_record_type_assessment">Assessment</string>
+    <string name="sync_record_type_prescription">Prescription</string>
+    <string name="sync_record_type_referral">Referral</string>
+    <string name="sync_record_type_activity">Activity record</string>
+    <!-- A table name this build does not know. Same fallback discipline as SyncFailureReason.UNRECOGNISED. -->
+    <string name="sync_record_type_other">Record</string>
+
+    <!--
+      DUPLICATE_RECORD. The duplicate-ABHA terminus, and the reason the sync track exists.
+      Says "such as", not "the ABHA number is duplicated": sqlstate 23505 proves a unique
+      constraint was hit, and on this schema that is almost always the ABHA number, but the ack
+      does not name the constraint. Telling a worker a cause we have not established is how they
+      stop believing the screen.
+    -->
+    <string name="failed_sync_duplicate_title">Another record already uses these details</string>
+    <string name="failed_sync_duplicate_body">The server already has a different record with the same details, such as the same ABHA number. This cannot be fixed on this phone. Write down the patient\'s name and tell your supervisor today.</string>
+
+    <!-- RECORD_REJECTED. A validation reject. On any table but patients this is an app defect. -->
+    <string name="failed_sync_rejected_title">The server would not accept this record</string>
+    <string name="failed_sync_rejected_body">Something in this record is missing or not allowed, so the server turned it down. Sending it again unchanged will not work. Write down the patient\'s name and tell your supervisor today.</string>
+
+    <!--
+      RETRIES_EXHAUSTED. The cap S-2 added ran out. The ONE cause with a button, because the
+      record is not the problem and the thing it was waiting for may have landed since.
+      Says "five times" because MAX_SYNC_ATTEMPTS is 5; if that constant moves, this moves.
+    -->
+    <string name="failed_sync_retries_exhausted_title">This record is waiting on another record</string>
+    <string name="failed_sync_retries_exhausted_body">This record was tried five times and something it needs was still not on the server. Nothing is wrong with this record. Send it again now. If it fails again, tell your supervisor.</string>
+
+    <!-- RECORD_TOO_LARGE. Stamped on this phone; the record never left it. -->
+    <string name="failed_sync_too_large_title">This record is too big to send</string>
+    <string name="failed_sync_too_large_body">This record is larger than the server accepts, so it stays on this phone. Sending it again will not help. Write down the patient\'s name and tell your supervisor today.</string>
+
+    <!--
+      UNRECOGNISED. An unknown code, or no code at all. Admits it does not know rather than
+      guessing, and still offers the one action that is safe to offer.
+    -->
+    <string name="failed_sync_unrecognised_title">This record did not reach the server</string>
+    <string name="failed_sync_unrecognised_body">The server turned it down and this app does not know why. Send it again once. If it fails again, write down the patient\'s name and tell your supervisor.</string>
+
+    <!--
+      ================================================================================
+      PR-7: the plain-language read-back surface.
+
+      Third feature on the strings.xml side of the convention fork (after S-4's
+      kernel_failure_* and S-3's failed_sync_*). Everything else in this app still uses
+      inline constants. The fork is still undecided and is recorded, not resolved, here.
+
+      Same copy rules as both blocks above, plus four this feature adds, because this
+      feature refuses more often than it answers by design:
+
+      - A REFUSAL IS NOT A FAULT. Most of these are a gate doing its job. Nothing here
+        may read as "the app is broken" unless the app is actually broken
+        (readback_refusal_assembly_failed and readback_refusal_rejected_input).
+      - NEVER IMPLY THE RECORD IS WRONG. The report above the sheet is the clinical
+        document and it is complete. Several of these strings point the worker back at
+        it, because reading the report to the patient is always available and always
+        correct, and it is the remedy for every refusal that has no button.
+      - NEVER SHOW OR PROMISE PARTIAL TEXT. A withheld answer is withheld whole. The
+        seam returns a refusal carrying no text at all, so there is nothing to leak,
+        and the copy must not suggest a partial answer exists somewhere.
+      - NO BUTTON THE DECODE CANNOT HONOUR. Decoding is greedy, temperature 0, fixed
+        seed, so re-running the SAME question produces the SAME output byte for byte.
+        A "Try again" on a refusal caused by the answer's content or length is a button
+        that provably cannot work. Those offer "Ask something else" instead.
+      ================================================================================
+    -->
+
+    <!-- The entry point, on the report screen, under the report itself. -->
+    <string name="readback_open">Read this back in plain language</string>
+    <string name="readback_title">Plain-language read-back</string>
+    <string name="readback_close">Close</string>
+
+    <!-- The one question. There is no second turn and no history anywhere on this path. -->
+    <string name="readback_question_label">What do you want read back?</string>
+    <string name="readback_question_help">Ask about this patient\'s medicines, how to take them, or what the doctor decided. One question at a time.</string>
+    <string name="readback_ask">Ask</string>
+
+    <!--
+      The waiting state. Honest and indeterminate: it appears the moment the request
+      leaves, not when text arrives, and it shows no bar and no percentage because
+      nothing here knows how far along a generation is. Measured p50 is about 4 seconds
+      and a full-length answer about 11, so the worker is told roughly what to expect
+      rather than left guessing.
+    -->
+    <string name="readback_generating">Preparing the read-back…</string>
+    <string name="readback_generating_note">This usually takes a few seconds. You can stop and go back to the report at any time.</string>
+    <string name="readback_stop">Stop</string>
+
+    <!--
+      The answer. The disclaimer is not decoration: the report is the clinical document
+      and this is a restatement of it, so the worker is told which one wins if they
+      disagree.
+    -->
+    <string name="readback_answer_title">Read-back</string>
+    <string name="readback_answer_disclaimer">This only puts the report above into simpler words. It adds nothing. If the two differ, the report above is the correct one.</string>
+    <string name="readback_ask_another">Ask something else</string>
+    <string name="readback_retry">Try again</string>
+
+    <!-- EMPTY_QUESTION. Guarded by a disabled button too; this is the second line. -->
+    <string name="readback_refusal_empty_question_title">Type a question first</string>
+    <string name="readback_refusal_empty_question_body">Write what you want read back, then press Ask.</string>
+
+    <!-- QUESTION_TOO_LONG. Over MAX_QUESTION_CHARS. -->
+    <string name="readback_refusal_question_too_long_title">That question is too long</string>
+    <string name="readback_refusal_question_too_long_body">Shorten it to one or two short sentences, then press Ask.</string>
+
+    <!-- RECORD_TOO_LARGE. Refused rather than trimmed; a cut record is answered about incompletely. -->
+    <string name="readback_refusal_record_too_large_title">This visit is too long to read back</string>
+    <string name="readback_refusal_record_too_large_body">Too much is written on this visit for a read-back to cover it safely. Read the report above with the patient instead.</string>
+
+    <!-- NOT_APPROVED. The gate the whole feature rests on. Not an error. -->
+    <string name="readback_refusal_not_approved_title">The doctor has not approved this visit yet</string>
+    <string name="readback_refusal_not_approved_body">A read-back only works after a doctor has signed off the prescription. Wait for the doctor\'s decision, then open this again.</string>
+
+    <!-- CASE_UNRESOLVABLE. -->
+    <string name="readback_refusal_case_unresolvable_title">This visit could not be opened</string>
+    <string name="readback_refusal_case_unresolvable_body">This visit is not on this phone any more. Go back and open it again from the patient\'s record.</string>
+
+    <!-- ASSEMBLY_FAILED. A real app defect, and named as one. -->
+    <string name="readback_refusal_assembly_failed_title">Something went wrong in this app</string>
+    <string name="readback_refusal_assembly_failed_body">The report could not be prepared for a read-back. This is a problem on this phone, not with the patient\'s record. Trying again will not help. Tell your supervisor.</string>
+
+    <!--
+      OUT_OF_SCOPE_PHRASING. The worker asked for a drug or disease property rather
+      than a read-back. Says what this can do, not that the worker did wrong.
+    -->
+    <string name="readback_refusal_out_of_scope_phrasing_title">This can only read back what is written</string>
+    <string name="readback_refusal_out_of_scope_phrasing_body">You asked about a medicine or a condition in general. This can only put what the doctor wrote for this patient into simpler words. Ask about this prescription instead.</string>
+
+    <!-- OUT_OF_SCOPE_INTENT. No read-back-shaped intent matched. Offers examples. -->
+    <string name="readback_refusal_out_of_scope_intent_title">Ask about this visit</string>
+    <string name="readback_refusal_out_of_scope_intent_body">This only reads out what the doctor wrote for this patient. Try asking what the medicines are, how to take them, or what the doctor decided.</string>
+
+    <!-- OUT_OF_SCOPE_UNTETHERED. Named a drug or dose absent from the approved record. -->
+    <string name="readback_refusal_out_of_scope_untethered_title">That is not on this prescription</string>
+    <string name="readback_refusal_out_of_scope_untethered_body">You asked about a medicine or a dose that is not written on this visit. Ask about what is on the report above.</string>
+
+    <!--
+      OUTPUT_NOT_GROUNDED. The gate working, and the hardest of the eighteen to word.
+      It must not say the record is wrong, must not say the app broke, and must not
+      hint that an answer exists behind the refusal. It says what the limit is and
+      sends the worker back to a question the record can answer. No "Try again": the
+      decode is deterministic, so the identical question produces the identical
+      ungrounded answer and the identical refusal.
+    -->
+    <string name="readback_refusal_output_not_grounded_title">That cannot be answered from this record</string>
+    <string name="readback_refusal_output_not_grounded_body">Answering would have meant going beyond what the doctor wrote, so nothing was shown. Nothing is wrong with the patient\'s record. Ask about what is on the report above.</string>
+
+    <!-- ENGINE_UNREACHABLE. The normal daily condition of a rural PHC, and said so. -->
+    <string name="readback_refusal_engine_unreachable_title">This phone is not connected</string>
+    <string name="readback_refusal_engine_unreachable_body">A read-back needs a connection. The report above is complete, and you can read it with the patient now. Try the read-back again when this phone is back on Wi-Fi or mobile data.</string>
+
+    <!--
+      SECURE_CONNECTION_FAILED. The one string in this block that tells a worker NOT to
+      try again, in those words. PR-6 added this class precisely because the offline and
+      generic-failure classes both mean "keep tapping", and one cause of a TLS failure is
+      interception, where tapping again means sending the patient\'s details once more to
+      whoever is reading them.
+    -->
+    <string name="readback_refusal_secure_connection_failed_title">The connection is not secure</string>
+    <string name="readback_refusal_secure_connection_failed_body">This phone could not make a safe connection. Do not try again. Read the report above with the patient, and tell your supervisor.</string>
+
+    <!-- ENGINE_TIMEOUT. Connected, no answer in time. The one class where pressing again now is right. -->
+    <string name="readback_refusal_engine_timeout_title">The read-back took too long</string>
+    <string name="readback_refusal_engine_timeout_body">The connection was made but no answer came back in time. Try again now.</string>
+
+    <!--
+      ENGINE_UNAVAILABLE. Four states behind one worker action: the read-back is switched
+      off for this deployment, the backend has stopped calling the service, the service is
+      loaded but busy, or a read-back is already running on this phone. All four mean
+      "wait, then try", so no button: one that is pressed instantly is the wrong remedy for
+      every one of them.
+    -->
+    <string name="readback_refusal_engine_unavailable_title">The read-back is not available right now</string>
+    <string name="readback_refusal_engine_unavailable_body">It is busy or not running at the moment. Wait a minute, then open this again. The report above is complete, and you can read it with the patient now.</string>
+
+    <!-- ENGINE_REJECTED_INPUT. Unretryable, and a build emitting these is misconfigured. -->
+    <string name="readback_refusal_engine_rejected_input_title">The read-back could not be sent</string>
+    <string name="readback_refusal_engine_rejected_input_body">This request was turned down and sending it again unchanged will not work. Read the report above with the patient, and tell your supervisor.</string>
+
+    <!-- PROMPT_CONTROL_TOKENS. The injection guard, on the phone or one hop in. Plain words, no
+         code, no button: the offending text may be in the approved record rather than in the
+         question, so "ask something else" is advice that may be impossible to follow. -->
+    <string name="readback_refusal_prompt_control_tokens_title">The read-back was not sent</string>
+    <string name="readback_refusal_prompt_control_tokens_body">Something written in this record or in your question uses symbols the AI would read as an instruction, so nothing was sent and nothing was changed. Read the report above with the patient, and tell your supervisor what was written.</string>
+
+    <!-- ENGINE_FAILED. The catch-all. One press, then fall back to the report. -->
+    <string name="readback_refusal_engine_failed_title">The read-back did not work</string>
+    <string name="readback_refusal_engine_failed_body">Something went wrong while preparing it. Try once more. If it fails again, read the report above with the patient.</string>
+
+    <!--
+      OUTPUT_TRUNCATED. The answer was cut off at the length limit and was therefore
+      withheld whole. NOT a system error, and the copy must not read as one: the service
+      answered, correctly, and said the answer was incomplete.
+      No "Try again", deliberately, against the refusal enum\'s own KDoc. That KDoc says
+      "a second generation may fit", which was written before the decode parameters were
+      settled; decoding is greedy at temperature 0 with a fixed seed, so the same question
+      produces the same cut-off answer every time. A shorter question is the only action
+      that can change the outcome.
+    -->
+    <string name="readback_refusal_output_truncated_title">The read-back was cut short</string>
+    <string name="readback_refusal_output_truncated_body">The answer stopped before it was finished, so none of it was shown. Half an instruction is not safe to read to a patient. Ask a shorter question, or read the report above with the patient.</string>
+
+    <!--
+      SERVED_MODEL_MISMATCH. A safety stop, not a fault the worker caused, and the second
+      string that says do not try again. This phone could not confirm which AI answered,
+      which means the checks that strip unsafe output were built for a different one.
+    -->
+    <string name="readback_refusal_served_model_mismatch_title">The read-back cannot be trusted right now</string>
+    <string name="readback_refusal_served_model_mismatch_body">This phone could not confirm which AI answered, so nothing was shown. Do not try again. Read the report above with the patient, and tell your supervisor today.</string>
 </resources>

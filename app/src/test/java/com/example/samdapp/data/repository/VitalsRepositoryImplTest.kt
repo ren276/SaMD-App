@@ -27,16 +27,19 @@ class FakeObservationDao : ObservationDao {
     override fun observeForEncounter(encounterId: String): Flow<List<ObservationEntity>> =
         store.map { rows -> rows.filter { it.encounterId == encounterId } }
 
-    override suspend fun getPendingForSync(): List<ObservationEntity> =
-        store.value.filter { it.syncState == com.example.samdapp.domain.model.SyncState.PENDING }
+    override suspend fun getPendingForSync(retryEligibleBefore: java.time.Instant): List<ObservationEntity> =
+        store.value.filter { it.syncState == com.example.samdapp.domain.model.SyncState.PENDING || it.syncState == com.example.samdapp.domain.model.SyncState.RETRYABLE }
 
     override suspend fun applySyncResult(
         id: String,
         syncState: com.example.samdapp.domain.model.SyncState,
         serverVersion: Int?,
         syncErrorCode: String?,
+        syncErrorMessage: String?,
         attemptAt: java.time.Instant,
         sentLocalModifiedAt: java.time.Instant,
+        maxAttempts: Int,
+        retryExhaustedCode: String,
     ) {
         store.value = store.value.map {
             if (it.id == id && it.localModifiedAt == sentLocalModifiedAt) {
@@ -45,8 +48,20 @@ class FakeObservationDao : ObservationDao {
         }
     }
 
+    override suspend fun requeueFailed(id: String) {
+        store.value = store.value.map {
+            if (it.id == id && it.syncState == com.example.samdapp.domain.model.SyncState.FAILED) {
+                it.copy(
+                    syncState = com.example.samdapp.domain.model.SyncState.PENDING, syncAttemptCount = 0,
+                    syncErrorCode = null, syncErrorMessage = null,
+                )
+            } else it
+        }
+    }
+
     override fun observeFailedSyncCount(): Flow<Int> =
         store.map { rows -> rows.count { it.syncState == com.example.samdapp.domain.model.SyncState.FAILED } }
+    override suspend fun getFailedForReview(): List<com.example.samdapp.data.local.dao.FailedSyncRow> = emptyList()
 }
 
 class VitalsRepositoryImplTest {

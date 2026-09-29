@@ -36,6 +36,15 @@ TEST_DATABASE_URL = os.environ.get(
     "postgresql+asyncpg://samd:samd_dev_only@localhost:5432/samd_test",
 )
 
+# S-5 measured (scratchpad/s5-abdm-response-unpacking.md section 0): app.config.Settings reads
+# ABDM_MODE from the environment / .env ahead of its own "stub" default, so a machine whose local
+# .env or docker-compose.yml sets a live ABDM_MODE makes the WHOLE suite silently transact against
+# the real government gateway, not just a knowingly-live test. The 14 failures that produced were
+# previously misdiagnosed in scratchpad as "environmental, missing ABDM credentials"; they are
+# failed calls to https://dev.abdm.gov.in. This name is the one, explicit, deliberate way to lift
+# the guard; nothing else does.
+ABDM_LIVE_TESTS_OPT_IN = "SAMD_ALLOW_LIVE_ABDM_TESTS"
+
 TEST_FACILITY_ID = "PHC-TEST-0001"
 TEST_WORKER_NAME = "Test Worker"
 # sha256("test worker|ASHA_WORKER") truncated to 16 hex characters, the same derivation
@@ -45,8 +54,35 @@ TEST_WORKER_ID = "949ad656774570f6"
 TEST_PIN = "482915"
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _stub_abdm_gateway() -> Iterator[None]:
+    """Forces ABDM_MODE=stub for this whole test session, overriding any live value the process
+    environment or a local .env/docker-compose.yml would otherwise supply (see the module-level
+    comment on ABDM_LIVE_TESTS_OPT_IN above). Setting the environment variable, not editing
+    Settings' default, is what wins: pydantic-settings ranks an explicit env var above a .env file,
+    so this is impossible to trip accidentally by just running pytest, and the deliberate bypass
+    (SAMD_ALLOW_LIVE_ABDM_TESTS=1) is the only thing that lifts it.
+
+    Session scoped and autouse so it takes effect before test_settings (below) — which depends on
+    it explicitly for ordering — or any other Settings() construction in the suite ever reads the
+    environment.
+    """
+    if os.environ.get(ABDM_LIVE_TESTS_OPT_IN) == "1":
+        yield
+        return
+    previous = os.environ.get("ABDM_MODE")
+    os.environ["ABDM_MODE"] = "stub"
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("ABDM_MODE", None)
+        else:
+            os.environ["ABDM_MODE"] = previous
+
+
 @pytest.fixture(scope="session")
-def test_settings() -> Settings:
+def test_settings(_stub_abdm_gateway: None) -> Settings:
     return Settings(  # type: ignore[call-arg]
         environment="dev",
         require_https=False,

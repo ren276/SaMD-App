@@ -88,7 +88,7 @@ class EvaluateReportFailureSyncSafetyTest {
             ),
         )
 
-        val pending = dao.getPendingForSync()
+        val pending = dao.getPendingForSync(Instant.now())
 
         assertEquals(
             "only the real report may reach the outbox; the failure row must never be pushable",
@@ -119,7 +119,7 @@ class EvaluateReportFailureSyncSafetyTest {
         assertEquals(
             "the failure and the real report must be the SAME physical row (same id), not two rows",
             1,
-            db.evaluateReportDao().getPendingForSync().count { it.caseRecordId == caseRecordId },
+            db.evaluateReportDao().getPendingForSync(Instant.now()).count { it.caseRecordId == caseRecordId },
         )
     }
 }

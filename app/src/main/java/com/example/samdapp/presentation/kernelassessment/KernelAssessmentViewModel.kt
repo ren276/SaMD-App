@@ -10,6 +10,7 @@ import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.model.AttachmentType
 import com.example.samdapp.domain.model.EvaluateReportOutput
+import com.example.samdapp.domain.kernel.KernelFailure
 import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.domain.model.KernelReportOutput
 import com.example.samdapp.domain.repository.ConsultationRepository
@@ -48,6 +49,13 @@ data class AssessmentDisplay(
      *  flavors bind no mock). Distinguishes "the AI genuinely couldn't run" from a mock result,
      *  so the screen can show a retry affordance instead of a fabricated assessment. */
     val isUnavailable: Boolean,
+    /** Why there is no assessment, when [isUnavailable] and the cause was classified. Null both
+     *  on a successful display and on the two UNAVAILABLE states that are not failures (the
+     *  kernel answered with an empty differential; no payload could be built). The screen turns
+     *  this into copy via [kernelFailureCopy] and into a retry affordance via
+     *  [KernelFailure.advice], so it is the enum that travels here, not a pre-rendered string:
+     *  a ViewModel has no Context and must not resolve resources. */
+    val failure: KernelFailure?,
     val sourceLabel: String,
     /** Per-candidate lines. Evaluate source: `"ICD (confidence%) — why"`. Kernel fallback: plain
      *  differential names (no per-candidate confidence/reasoning in that older contract shape). */
@@ -68,6 +76,7 @@ private fun EvaluateReportOutput.toDisplay(): AssessmentDisplay {
         requiresHumanVerification = safetyAndTriage.requiresHumanReview,
         isMockFallback = false,
         isUnavailable = false,
+        failure = null,
         sourceLabel = "Real-time AI inference (/api/v1/evaluate)",
         differentialLines = summary.differential.map {
             "${it.icdCandidate} (${(it.adjustedConfidence * 100).toInt()}%) — ${it.why}"
@@ -98,6 +107,8 @@ private fun stalledDisplay(): AssessmentDisplay = AssessmentDisplay(
     requiresHumanVerification = true,
     isMockFallback = false,
     isUnavailable = true,
+    // No row exists, so no cause was ever classified. Reach-neutral copy, same as before.
+    failure = null,
     sourceLabel = UNAVAILABLE_SOURCE_LABEL,
     differentialLines = emptyList(),
     reasoningLines = listOf(GenerateKernelReportUseCase.UNAVAILABLE_REASONING_SUMMARY),
@@ -112,6 +123,7 @@ private fun KernelReportOutput.toDisplay(): AssessmentDisplay = AssessmentDispla
     requiresHumanVerification = requiredHumanVerification,
     isMockFallback = inferenceSource == InferenceSource.MOCK_FALLBACK,
     isUnavailable = inferenceSource == InferenceSource.UNAVAILABLE,
+    failure = failureCode,
     sourceLabel = when (inferenceSource) {
         InferenceSource.REAL_INFERENCE -> "Real-time AI inference (/v1/assess)"
         InferenceSource.MOCK_FALLBACK -> "Offline fallback (mock) — ML server unavailable"

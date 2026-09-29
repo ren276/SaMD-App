@@ -75,6 +75,21 @@ DEVICE_AUDIT_ACTIONS: frozenset[str] = frozenset(
         "referral_created",
         "referral_status_changed",
         "report_exported",
+        # SLM approved-record readback (slm-guardrail-service-contract-memo.md section 9.4), one
+        # per pipeline outcome: invocation, input refusal, output suppression, sanitizer counts.
+        # Added with the Kotlin AuditAction values in the same commit, for the reason this whole
+        # file exists: a device action this set does not accept is rejected at sync, "rejected"
+        # maps to SyncState.FAILED on the device, no drain re-collects a FAILED row and nothing
+        # renders failedCount, so a split commit silently and permanently loses exactly the rows
+        # that prove clinical narrative left the device. Not emitted yet; the seam's audit stage is
+        # not built. Same posture as voice_field_* and referral_status_changed: accepting a
+        # not-yet-emitted value now is cheap, accepting it late needs a coordinated field migration.
+        # Payload is measured metadata only in every case, never the question text, never the
+        # generated text, never a drug name.
+        "slm_readback_input_refused",
+        "slm_readback_invoked",
+        "slm_readback_output_suppressed",
+        "slm_readback_sanitizer_activity",
         "social_history_saved",
         "transcription_completed",
         # Pi gateway acquisition seam (PR4a/PR4b): received on an accepted instrument reading,

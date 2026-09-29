@@ -91,13 +91,30 @@ async def write_out_of_band(
        Phase 4 sync push has the identical failure-path shape, so this is a named helper now
        instead of a pattern re-derived a third time.
 
-    2. THE DEADLOCK RULE. Never call this with `work` touching a row the CALLER's still-open
-       transaction holds a lock on. This is not theoretical: Phase 1's refresh-token reuse path
-       revoked a token chain in the request session and then tried to re-touch the same rows out
-       of band before the request session released its locks, self-deadlocking the connection
-       pool. The fix there (and the pattern to follow) is to finish and commit any recovery work
-       needed on the SAME rows in its own explicit session first, then call this helper only for
-       the audit/log write that does not need those rows.
+    2. THE DEADLOCK RULE. Never call this with `work` that appends an audit row (app.services.audit
+       .append) when the CALLER's still-open request session has already appended an audit row for
+       the same facility earlier in the same request. `audit.append` takes
+       `pg_advisory_xact_lock(facility)`, transaction scoped, to serialise chain appends per
+       facility; it is held until the request's transaction commits or rolls back. If the request
+       session holds that lock and this helper's out-of-band session then tries to append for the
+       same facility, the out-of-band session blocks on the same key while the request session is
+       waiting on `write_out_of_band` to return — a permanent deadlock, not a slow query, and not
+       specific to any one row: the two sessions never touch the same table row at all, only the
+       same facility-scoped advisory lock. MEASURED,
+       `backend/scratchpad/s5-abdm-response-unpacking.md` section 2:
+       `pg_stat_activity` showed the request session idle in transaction holding the lock while
+       the out-of-band session sat `active`/`Lock`/`advisory` on the identical key, unrecovered
+       until the connections were killed.
+       The rule this implies for any caller: finish every audit append this request will make
+       BEFORE the first call that can reach a `_fail`-shaped out-of-band write, or route the whole
+       failure path (state change and audit row together) through one out-of-band call the way
+       `abdm_adapter.service._fail` does, never split across an in-request append and a later
+       out-of-band one. Phase 1's refresh-token reuse path is the row-level instance of the same
+       family: it revoked a token chain in the request session and then tried to re-touch the same
+       rows out of band before the request session released its locks. The fix there (and the
+       pattern to follow when only a row lock, not the facility audit lock, is in play) is to
+       finish and commit any recovery work needed on the SAME rows in its own explicit session
+       first, then call this helper only for the audit/log write that does not need those rows.
 
     3. IT SWALLOWS ITS OWN EXCEPTIONS, BY DESIGN. If `work` raises, that is logged at ERROR with
        `context` and NOT re-raised. A failure to record an event must never mask the clinical

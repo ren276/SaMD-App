@@ -2,6 +2,7 @@ package com.example.samdapp.data.sync
 
 import com.example.samdapp.domain.connectivity.ConnectivityController
 import com.example.samdapp.domain.repository.CaseRecordRepository
+import com.example.samdapp.domain.sync.FailedSyncRecord
 import com.example.samdapp.domain.sync.SyncState
 import com.example.samdapp.domain.sync.SyncStatus
 import kotlinx.coroutines.CoroutineScope
@@ -75,6 +76,15 @@ class SyncStatusImpl @Inject constructor(
         syncOutboxRepository.observeFailedCount(),
     ) { pendingCount, syncing, lastSynced, failedCount ->
         SyncState(lastSyncedAt = lastSynced, pendingCount = pendingCount, isSyncing = syncing, failedCount = failedCount)
+    }
+
+    /** Straight delegation. The classification and the patient-name lookup live in
+     *  [RoomSyncOutboxRepository.failedRecords], next to the DAOs they read; this seam exists
+     *  only so the presentation layer never sees [SyncOutboxRepository]. */
+    override suspend fun failedRecords(): List<FailedSyncRecord> = syncOutboxRepository.failedRecords()
+
+    override suspend fun sendFailedRecordAgain(record: FailedSyncRecord) {
+        syncOutboxRepository.requeueFailed(record.table, record.recordId)
     }
 
     override suspend fun syncNow(): Result<Unit> {

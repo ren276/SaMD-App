@@ -11,8 +11,10 @@ from __future__ import annotations
 from typing import Any
 
 import abdm_adapter.client as client_module
+import abdm_adapter.service as abdm_service
 import httpx
 import pytest
+from abdm_adapter.errors import RetryClass
 from fastapi import FastAPI
 from httpx import AsyncClient
 from sqlalchemy import select, text
@@ -821,6 +823,219 @@ async def test_profile_fetch_malformed_expires_in_fails_session_with_persisted_r
         )
     ).scalars()
     assert any(session_id in payload for payload in failed_audit_rows)
+
+
+# ---------------------------------------------------------------------------
+# verify_otp: malformed enrol response body, unpacked before any state change
+# ---------------------------------------------------------------------------
+
+_ENROL_TOKENS_OK = {"token": "x-token-live", "expiresIn": 1800, "refreshToken": "r"}
+_ENROL_PROFILE_OK = {
+    "ABHANumber": "91-7561-4088-0001",
+    "firstName": "Sunita",
+    "lastName": "Devi",
+    "dob": "12-04-1991",
+    "gender": "F",
+    "mobile": "******0903",
+    "phrAddress": ["sunita.devi0001@sbx"],
+    "abhaType": "STANDARD",
+    "abhaStatus": "ACTIVE",
+}
+
+
+@pytest.mark.parametrize(
+    ("case", "enrol_body"),
+    [
+        ("no_abha_profile", {"message": "ok", "tokens": _ENROL_TOKENS_OK}),
+        ("no_tokens", {"message": "ok", "ABHAProfile": _ENROL_PROFILE_OK}),
+        (
+            "tokens_without_token",
+            {
+                "message": "ok",
+                "tokens": {"expiresIn": 1800},
+                "ABHAProfile": _ENROL_PROFILE_OK,
+            },
+        ),
+        (
+            "tokens_without_expires_in",
+            {
+                "message": "ok",
+                "tokens": {"token": "x-token-live"},
+                "ABHAProfile": _ENROL_PROFILE_OK,
+            },
+        ),
+    ],
+)
+async def test_verify_otp_malformed_enrol_body_fails_session_with_persisted_row(
+    case: str,
+    enrol_body: dict[str, Any],
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    app: FastAPI,
+    test_settings: Settings,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`enrol/byAadhaar` can answer HTTP 200 with no error shape -- which
+    `classify_generic_enrollment_error` correctly calls ok=True -- and still be missing
+    `ABHAProfile`, `tokens`, `tokens.token` or `tokens.expiresIn`. Indexing those raises
+    `KeyError`/`TypeError` inside verify_otp, outside every try block.
+
+    Before this fix, that unpack ran AFTER `txn.state = OTP_VERIFIED`, after `session.flush()` and
+    after the ABHA_OTP_VERIFIED audit row, so the escaping exception took all three down with
+    `session_scope`'s rollback: the row stayed at OTP_REQUESTED, was never marked FAILED, and no
+    audit row of any kind recorded that the attempt happened. Same `_fail`-bypass trap as
+    test_live_mode_malformed_profile_body_fails_session_with_persisted_row, one endpoint earlier.
+
+    This is also the regression guard for the ordering itself, asserted on outcomes rather than on
+    line order: moving the unpack back below the state change makes `state == "FAILED"` and the
+    ABHA_SESSION_FAILED row fail, because both are written out of band by `_fail`, which an
+    uncaught exception never reaches.
+    """
+    session_id = await _start(client, auth_headers)
+    await _submit_identity(client, auth_headers, session_id)
+
+    live_settings = test_settings.model_copy(update={"abdm_mode": "live"})
+    monkeypatch.setitem(app.dependency_overrides, settings_dep, lambda: live_settings)
+
+    enrol_call_reached = False
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/sessions"):
+            return httpx.Response(200, json={"accessToken": "gw-token", "expiresIn": 1800})
+        if path.endswith("/certificate"):
+            return httpx.Response(
+                200,
+                json={
+                    "publicKey": _LIVE_CERT_PUBLIC_KEY_B64_DER,
+                    "encryptionAlgorithm": "RSA/ECB/OAEPWithSHA-1AndMGF1Padding",
+                },
+            )
+        if path.endswith("/enrol/byAadhaar"):
+            nonlocal enrol_call_reached
+            enrol_call_reached = True
+            return httpx.Response(200, json=enrol_body)
+        raise AssertionError(f"unexpected request to {path}")
+
+    real_init = httpx.AsyncClient.__init__
+
+    def patched_init(self: httpx.AsyncClient, *args: object, **kwargs: object) -> None:
+        kwargs["transport"] = httpx.MockTransport(handler)
+        real_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", patched_init)
+
+    response = await client.post(
+        f"/api/v1/abha/registration-sessions/{session_id}/otp",
+        json={"otp": OTP_VALID, "mobile_number": MOBILE_SAME_AS_AADHAAR},
+        headers=auth_headers,
+    )
+    assert enrol_call_reached is True
+    assert response.status_code == 502
+    assert response.json()["code"] == ErrorCode.ABHA_UPSTREAM_ERROR.value
+
+    txn = await session.get(AbhaTransaction, session_id)
+    assert txn is not None
+    assert txn.state == "FAILED"
+    assert txn.last_error_code == ErrorCode.ABHA_UPSTREAM_ERROR.value
+    # The fixed transport-error message, not `_result_from_local_error`'s. This is the only
+    # observable that distinguishes the two at this boundary: `retry_class` is internal to
+    # `AbdmResult` and is neither persisted nor put in the error envelope, so the RETRYABLE
+    # classification is asserted directly in test_malformed_enrol_body_is_classified_retryable.
+    assert txn.last_error_detail == "The ABDM gateway did not respond as expected."
+    # Nothing about this attempt may claim the OTP was verified.
+    assert txn.abha_number is None
+    assert txn.external_token_encrypted is None
+
+    actions = set(
+        (
+            await session.execute(
+                select(AuditEvent.action).where(AuditEvent.payload.contains(session_id))
+            )
+        ).scalars()
+    )
+    assert AuditAction.ABHA_OTP_VERIFIED.value not in actions
+    assert AuditAction.ABHA_ENROLLED.value not in actions
+    assert AuditAction.ABHA_SESSION_FAILED.value in actions
+
+
+async def test_submit_identity_missing_txn_id_fails_session_with_persisted_row(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    app: FastAPI,
+    test_settings: Settings,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The sibling site, `submit_identity`'s `result.body["txnId"]`. Its ORDER was already safe
+    (the unpack precedes the state change, so no flush could ever claim an OTP had been
+    requested), but the read itself was unguarded, so a missing `txnId` escaped `_fail` the same
+    way: rolled back to STARTED, never FAILED, nothing recording the attempt. Guarded now, for
+    the same reason `verify_otp` is."""
+    session_id = await _start(client, auth_headers)
+
+    live_settings = test_settings.model_copy(update={"abdm_mode": "live"})
+    monkeypatch.setitem(app.dependency_overrides, settings_dep, lambda: live_settings)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/sessions"):
+            return httpx.Response(200, json={"accessToken": "gw-token", "expiresIn": 1800})
+        if path.endswith("/certificate"):
+            return httpx.Response(
+                200,
+                json={
+                    "publicKey": _LIVE_CERT_PUBLIC_KEY_B64_DER,
+                    "encryptionAlgorithm": "RSA/ECB/OAEPWithSHA-1AndMGF1Padding",
+                },
+            )
+        if path.endswith("/request/otp"):
+            return httpx.Response(200, json={"message": "OTP sent"})  # no txnId
+        raise AssertionError(f"unexpected request to {path}")
+
+    real_init = httpx.AsyncClient.__init__
+
+    def patched_init(self: httpx.AsyncClient, *args: object, **kwargs: object) -> None:
+        kwargs["transport"] = httpx.MockTransport(handler)
+        real_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", patched_init)
+
+    response = await client.post(
+        f"/api/v1/abha/registration-sessions/{session_id}/identity",
+        json={"aadhaar_number": AADHAAR},
+        headers=auth_headers,
+    )
+    assert response.status_code == 502
+    assert response.json()["code"] == ErrorCode.ABHA_UPSTREAM_ERROR.value
+
+    txn = await session.get(AbhaTransaction, session_id)
+    assert txn is not None
+    assert txn.state == "FAILED"
+    assert txn.last_error_code == ErrorCode.ABHA_UPSTREAM_ERROR.value
+    assert txn.external_txn_id is None
+
+    actions = set(
+        (
+            await session.execute(
+                select(AuditEvent.action).where(AuditEvent.payload.contains(session_id))
+            )
+        ).scalars()
+    )
+    assert AuditAction.ABHA_IDENTITY_SUBMITTED.value not in actions
+    assert AuditAction.ABHA_SESSION_FAILED.value in actions
+
+
+def test_malformed_enrol_body_is_classified_retryable() -> None:
+    """The typed-failure side of the test above: a malformed-body `KeyError` routes into the
+    existing `_result_from_transport_error`, which is RETRYABLE (a gateway that answered badly
+    once may answer correctly on the next call) with ABHA_UPSTREAM_ERROR. Asserted here because
+    `retry_class` never reaches the HTTP boundary."""
+    result = abdm_service._result_from_transport_error(KeyError("ABHAProfile"))
+    assert result.ok is False
+    assert result.error_code == ErrorCode.ABHA_UPSTREAM_ERROR
+    assert result.retry_class == RetryClass.RETRYABLE
 
 
 # ---------------------------------------------------------------------------

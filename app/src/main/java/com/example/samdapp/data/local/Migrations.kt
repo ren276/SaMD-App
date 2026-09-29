@@ -526,3 +526,86 @@ val MIGRATION_18_19 = object : Migration(18, 19) {
         connection.execSQL("ALTER TABLE `consultation_documents` ADD COLUMN `pageCount` INTEGER")
     }
 }
+
+/**
+ * Adds `kernel_reports.failureCode`: WHY an [com.example.samdapp.domain.model.InferenceSource.UNAVAILABLE]
+ * row has no assessment, as a [com.example.samdapp.domain.kernel.KernelFailure] name.
+ *
+ * Nullable with no default and no backfill, deliberately. Every row written before this migration
+ * was produced by the single `catch (e: Exception)` that collapsed ten typed failures onto one
+ * outcome, so the cause was never recorded and cannot be recovered. Null means "not known", which
+ * is true, and inventing a value here would put a fabricated remedy on a real clinical record.
+ *
+ * Device-local, so this does not touch the sync contract: `failureCode` is absent from
+ * `KernelReportSyncPayloadDto` and never reaches the backend, the same choice
+ * `evaluate_reports.failureCode` already made.
+ */
+val MIGRATION_19_20 = object : Migration(19, 20) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL("ALTER TABLE `kernel_reports` ADD COLUMN `failureCode` TEXT")
+    }
+}
+
+/**
+ * Adds `syncAttemptCount` and `syncErrorMessage` to every table with a sync outbox state, so a
+ * retryable rejection can be retried a bounded number of times and so the reason can be shown to
+ * a human. Sibling of `MIGRATION_12_13`, which added the sync columns these two join, and it
+ * reuses that migration's per-table helper shape for the same reason: twenty-one tables carrying
+ * one concept should be written once, not twenty-one times.
+ *
+ * **No backfill, on either column.** `syncAttemptCount` defaults to 0 and `syncErrorMessage` to
+ * NULL. Zero is the true count for a row written before attempts were counted, and NULL is the
+ * true message for a rejection whose message the old code discarded at the seam. Deriving a
+ * number from a row that never had one would be asserting rather than deriving, and the
+ * `MIGRATION_18_19` and `MIGRATION_19_20` KDocs make the same commitment.
+ *
+ * **Existing FAILED rows stay FAILED.** No row changes state here. Some of them are rows that
+ * would have synced under the new `RETRYABLE` classification, and S-1's absence verdict
+ * establishes that re-pushing them is safe, but that one-time re-push is a separate,
+ * owner-gated decision and it does not ship in this migration.
+ *
+ * **Every table gets identical treatment, including one that is not drained.**
+ * `consultation_documents` is deliberately unwired from the outbox (its `getPendingForSync` is
+ * never called, it is absent from `RoomSyncOutboxRepository.collectPendingRecords` and from
+ * `applyAck`'s `when`) but it is a Room entity carrying the same sync columns, so its schema has
+ * to match its entity or Room's own validation fails on the next open. It gains the columns and
+ * stays unwired. No other table needs different treatment: the twenty drained tables differ only
+ * in primary key name, which these two columns do not touch.
+ */
+val MIGRATION_20_21 = object : Migration(20, 21) {
+    override fun migrate(connection: SQLiteConnection) {
+        fun addRetryColumns(table: String) {
+            connection.execSQL(
+                "ALTER TABLE `$table` ADD COLUMN `syncErrorMessage` TEXT",
+            )
+            connection.execSQL(
+                "ALTER TABLE `$table` ADD COLUMN `syncAttemptCount` INTEGER NOT NULL DEFAULT 0",
+            )
+        }
+
+        // The twenty tables the outbox actually pushes, in TABLE_REGISTRY rank order so this
+        // list can be read against backend/core/app/services/sync.py's own.
+        addRetryColumns("patients")
+        addRetryColumns("encounters")
+        addRetryColumns("consultations")
+        addRetryColumns("attachments")
+        addRetryColumns("observations")
+        addRetryColumns("ailments")
+        addRetryColumns("medical_history_items")
+        addRetryColumns("allergies")
+        addRetryColumns("family_history_entries")
+        addRetryColumns("social_histories")
+        addRetryColumns("medication_entries")
+        addRetryColumns("case_records")
+        addRetryColumns("kernel_reports")
+        addRetryColumns("evaluate_reports")
+        addRetryColumns("diagnosis_feedback")
+        addRetryColumns("prescriptions")
+        addRetryColumns("medication_lines")
+        addRetryColumns("referrals")
+        addRetryColumns("abha_profiles")
+        addRetryColumns("audit_log")
+        // The twenty-first: schema only, still unwired. See this migration's KDoc.
+        addRetryColumns("consultation_documents")
+    }
+}

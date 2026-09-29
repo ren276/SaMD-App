@@ -51,5 +51,12 @@ data class SyncResultDto(
     @SerializedName("server_version") val serverVersion: Int? = null,
     val code: String? = null,
     val message: String? = null,
+    /** Present on `rejected` only: the backend's own `SyncRetryClass` name, telling the outbox
+     *  whether resending these identical bytes can ever succeed. Nullable because non-rejected
+     *  results carry none and because a backend predating this field sends none; parsed through
+     *  [com.example.samdapp.domain.model.parseSyncRetryClass], never read as a raw string by a
+     *  caller. NEVER inferred from [code]: that inference is the mirror drift this seam exists
+     *  to remove. */
+    @SerializedName("retry_class") val retryClass: String? = null,
     @SerializedName("server_state") val serverState: Map<String, Any?>? = null,
 )

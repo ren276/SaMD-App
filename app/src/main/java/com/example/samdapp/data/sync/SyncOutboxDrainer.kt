@@ -6,6 +6,7 @@ import com.example.samdapp.data.remote.SyncPushService
 import com.example.samdapp.data.remote.dto.SyncPushRequestDto
 import com.example.samdapp.data.remote.dto.SyncRecordDto
 import com.example.samdapp.data.remote.dto.SyncResultDto
+import com.example.samdapp.domain.model.SyncRetryClass
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.time.Instant
@@ -47,12 +48,53 @@ class SyncOutboxDrainer @Inject constructor(
 
     suspend fun drain(): Result<Unit> = drainMutex.withLock { drainLocked() }
 
+    /**
+     * **Termination, stated exhaustively, because this is a `while (true)` over a table the loop
+     * body also writes to.**
+     *
+     * Each pass collects rows, sends them, and applies their acks. A pass ends the loop when the
+     * collect comes back empty or a send fails. The danger S-2 introduces is a row that leaves
+     * the pass still eligible: before RETRYABLE existed every acked row moved to a state the
+     * predicate excludes, so the set strictly shrank. A RETRYABLE row does NOT leave the
+     * predicate, so it would be collected again on the very next pass, inside the same drain,
+     * forever.
+     *
+     * Two independent guards, and the loop needs only one of them to terminate:
+     *
+     * 1. `RETRY_MIN_INTERVAL`, in SQL. Every DAO's drain query excludes a row whose
+     *    `lastSyncAttemptAt` is newer than the cutoff, and `applySyncResult` stamps that column
+     *    on every ack. So an acked RETRYABLE row is ineligible for the next five minutes and
+     *    cannot be re-collected by this drain.
+     * 2. [attempted], here, in memory. A row whose ack never applied (the guarded UPDATE matched
+     *    zero rows, because a clinical edit changed `localModifiedAt` while the record was in
+     *    flight) keeps its old timestamp and IS still eligible, so guard 1 does not cover it.
+     *    That case predates S-2 and could already spin. This set closes it: a pass that produces
+     *    no record this drain has not already attempted ends the loop.
+     *
+     * Guard 2 alone bounds the loop at one pass per distinct record id, which is finite. Guard 1
+     * is what stops the NEXT drain from immediately re-trying, and the attempt cap is what stops
+     * the drain after that. A row re-collected on a later drain is the intended behaviour, not a
+     * spin: that is how a 23503 child syncs once its parent lands.
+     */
     private suspend fun drainLocked(): Result<Unit> {
-        resumeInFlightBatch()?.let { resumed -> if (resumed.isFailure) return resumed }
+        val attempted = mutableSetOf<Pair<String, String>>()
 
+        // Seeded with the resumed batch's members BEFORE the loop, not left empty. A resumed
+        // batch is an attempt like any other, and a row it acks as RETRYABLE is still collectable
+        // the instant the loop below starts. MEASURED: without this seeding, a crash-then-resume
+        // charged that row two attempts in one drain rather than one, because the resume's ack
+        // landed outside the guard and the first loop pass picked the row straight back up.
+        // Guard 1 (the SQL interval) would have hidden this in production and not in the fake,
+        // which is exactly why the guard is not allowed to depend on it.
+        resumeInFlightBatch()?.let { resumed ->
+            attempted += resumed.members
+            if (resumed.result.isFailure) return resumed.result
+        }
         while (true) {
             val pending = repository.collectPendingRecords()
+                .filter { (it.table to it.id) !in attempted }
             if (pending.isEmpty()) return Result.success(Unit)
+            attempted += pending.map { it.table to it.id }
             val packed = packer.pack(pending)
             failOversizedRecordsLocally(packed.oversized)
             for (batch in packed.batches) {
@@ -74,21 +116,33 @@ class SyncOutboxDrainer @Inject constructor(
                     status = "rejected",
                     code = "SAMD-SYNC-RECORD-TOO-LARGE",
                     message = "Record exceeds the outbox's per-record size budget (${SyncBatchPacker.MAX_BYTES} bytes).",
+                    // The second, device-local writer of a `rejected` ack, and the only one the
+                    // backend never sees: this record was never sent, so it is absent server side
+                    // by construction rather than by the savepoint analysis that covers real
+                    // rejections. TERMINAL because the same bytes will exceed the same ceiling
+                    // forever; only a smaller record helps. Set explicitly, because a synthesized
+                    // ack that left this null would silently inherit the conservative default and
+                    // this path's own reasoning would live nowhere.
+                    retryClass = SyncRetryClass.TERMINAL.name,
                 ),
                 sentLocalModifiedAt = record.clientUpdatedAt,
             )
         }
     }
 
-    /** Null if there was nothing to resume. A non-null result must be checked by the caller —
+    /** What a resume did: the outcome, plus which (table, id) pairs it attempted so
+     *  [drainLocked] can exclude them from its own first pass. */
+    private data class ResumedBatch(val result: Result<Unit>, val members: Set<Pair<String, String>>)
+
+    /** Null if there was nothing to resume. A non-null result must be checked by the caller:
      *  [drain] stops the whole run on failure rather than piling a fresh batch on top of an
      *  un-acked one. */
-    private suspend fun resumeInFlightBatch(): Result<Unit>? {
+    private suspend fun resumeInFlightBatch(): ResumedBatch? {
         val saved = inFlightBatchStore.load().getOrElse { e ->
             // Unreadable, not "none": proceeding as if there were no in-flight batch could mint a
             // fresh batch_id for rows the backend already applied under the lost batch_id. Fail
             // the whole drain instead — see InFlightBatchStore.load's KDoc.
-            return Result.failure(e)
+            return ResumedBatch(Result.failure(e), emptySet())
         } ?: return null
         val savedRevisions = saved.members.associate { (it.table to it.id) to it.localModifiedAtEpochMilli }
         val records = repository.collectPendingRecords().filter { (it.table to it.id) in savedRevisions }
@@ -99,7 +153,10 @@ class SyncOutboxDrainer @Inject constructor(
             inFlightBatchStore.clear()
             return null
         }
-        return sendAndApply(SyncBatch(saved.batchId, records), alreadyPersisted = true, revisionOverrides = savedRevisions)
+        return ResumedBatch(
+            sendAndApply(SyncBatch(saved.batchId, records), alreadyPersisted = true, revisionOverrides = savedRevisions),
+            records.map { it.table to it.id }.toSet(),
+        )
     }
 
     /** [revisionOverrides] carries the *originally persisted* sent-revision per (table, id) for a

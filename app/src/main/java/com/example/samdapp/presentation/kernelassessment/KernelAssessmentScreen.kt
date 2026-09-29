@@ -28,7 +28,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.example.samdapp.R
+import com.example.samdapp.domain.kernel.KernelFailure
+import com.example.samdapp.domain.kernel.KernelRetryAdvice
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -80,7 +84,11 @@ internal fun KernelAssessmentContent(uiState: KernelAssessmentUiState, actions: 
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             if (display.isUnavailable) {
-                UnavailableCard(isRetrying = uiState.isRetrying, onRetry = actions::onRetry)
+                UnavailableCard(
+                    failure = display.failure,
+                    isRetrying = uiState.isRetrying,
+                    onRetry = actions::onRetry,
+                )
             } else {
                 ConfidenceGauge(display)
                 ExplainabilityCard(display)
@@ -121,23 +129,43 @@ internal fun KernelAssessmentContent(uiState: KernelAssessmentUiState, actions: 
 
 /** Honest failure state — kernel-mock production safety fix. Shown instead of the confidence
  *  gauge/explainability cards when [AssessmentDisplay.isUnavailable] is true: no fabricated
- *  diagnosis, just the fact that the AI assessment did not run, with a retry affordance. */
+ *  diagnosis, just what went wrong and what to do about it.
+ *
+ *  The title and body come from [kernelFailureCopy], so they name the record that failed rather
+ *  than the feature that did not run. Until this change both were the same two hardcoded
+ *  sentences for all ten failure classes, which told a worker whose patient had never reached
+ *  the server that the AI had failed, and to press Retry forever.
+ *
+ *  The button follows [com.example.samdapp.domain.kernel.KernelRetryAdvice] and is ABSENT for
+ *  two of the three cases. A button that cannot work is worse than no button: it teaches a
+ *  worker that pressing is the remedy, and the remedy here is on another screen or with a
+ *  supervisor. */
 @Composable
-private fun UnavailableCard(isRetrying: Boolean, onRetry: () -> Unit) {
+private fun UnavailableCard(failure: KernelFailure?, isRetrying: Boolean, onRetry: () -> Unit) {
+    val copy = kernelFailureCopy(failure)
     Card(colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
-                "Assessment unavailable",
+                stringResource(copy.titleRes),
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onErrorContainer,
             )
             Text(
-                "The AI did not produce a result for this case. No diagnosis was generated.",
+                stringResource(copy.bodyRes),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onErrorContainer,
             )
-            Button(onClick = onRetry, enabled = !isRetrying) {
-                Text(if (isRetrying) "Retrying…" else "Retry")
+            // A null failure is a reached-but-empty kernel or a stalled case with no row: the
+            // pre-existing retryable state, which keeps its button.
+            val offerRetry = failure == null || failure.advice == KernelRetryAdvice.RETRY_NOW
+            if (offerRetry) {
+                Button(onClick = onRetry, enabled = !isRetrying) {
+                    Text(
+                        stringResource(
+                            if (isRetrying) R.string.kernel_failure_retrying else R.string.kernel_failure_retry,
+                        ),
+                    )
+                }
             }
         }
     }

@@ -5,6 +5,8 @@ import com.example.samdapp.data.local.entity.KernelReportEntity
 import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.domain.model.KernelReportOutput
 import com.example.samdapp.domain.model.RiskCategory
+import com.example.samdapp.domain.model.MAX_SYNC_ATTEMPTS
+import com.example.samdapp.domain.model.RETRY_EXHAUSTED_CODE
 import com.example.samdapp.domain.model.SyncState
 import com.example.samdapp.domain.model.UrgencyLevel
 import java.time.Instant
@@ -45,16 +47,19 @@ class FakeKernelReportDao : KernelReportDao {
     override suspend fun getServerVersion(id: String): Int? =
         store.value.firstOrNull { it.id == id }?.serverVersion
 
-    override suspend fun getPendingForSync(): List<KernelReportEntity> =
-        store.value.filter { it.syncState == SyncState.PENDING }
+    override suspend fun getPendingForSync(retryEligibleBefore: Instant): List<KernelReportEntity> =
+        store.value.filter { it.syncState == SyncState.PENDING || it.syncState == SyncState.RETRYABLE }
 
     override suspend fun applySyncResult(
         id: String,
         syncState: SyncState,
         serverVersion: Int?,
         syncErrorCode: String?,
+        syncErrorMessage: String?,
         attemptAt: Instant,
         sentLocalModifiedAt: Instant,
+        maxAttempts: Int,
+        retryExhaustedCode: String,
     ) {
         store.value = store.value.map {
             if (it.id == id && it.localModifiedAt == sentLocalModifiedAt) {
@@ -63,8 +68,20 @@ class FakeKernelReportDao : KernelReportDao {
         }
     }
 
+    override suspend fun requeueFailed(id: String) {
+        store.value = store.value.map {
+            if (it.id == id && it.syncState == SyncState.FAILED) {
+                it.copy(
+                    syncState = SyncState.PENDING, syncAttemptCount = 0,
+                    syncErrorCode = null, syncErrorMessage = null,
+                )
+            } else it
+        }
+    }
+
     override fun observeFailedSyncCount(): Flow<Int> =
         store.map { rows -> rows.count { it.syncState == SyncState.FAILED } }
+    override suspend fun getFailedForReview(): List<com.example.samdapp.data.local.dao.FailedSyncRow> = emptyList()
 
     /** Read-back helper, standing in for a direct-DB assertion (no in-memory Room on plain JVM
      *  here) — the same role `MigrationTest15To16`'s cursor queries play on-device. */
@@ -109,6 +126,7 @@ class KernelReportRepositoryImplTest {
         inferenceEndedAt = Instant.ofEpochMilli(1000),
         requiredHumanVerification = false,
         inferenceSource = inferenceSource,
+        failureCode = null,
     )
 
     @Test
@@ -151,8 +169,11 @@ class KernelReportRepositoryImplTest {
             syncState = SyncState.SYNCED,
             serverVersion = 3,
             syncErrorCode = null,
+            syncErrorMessage = null,
             attemptAt = Instant.ofEpochMilli(5000),
             sentLocalModifiedAt = dao.rowsForCase("case-1").single().localModifiedAt,
+            maxAttempts = MAX_SYNC_ATTEMPTS,
+            retryExhaustedCode = RETRY_EXHAUSTED_CODE,
         )
 
         repository.save(report(id = "attempt-2", caseRecordId = "case-1", predictedCondition = "Dengue"))

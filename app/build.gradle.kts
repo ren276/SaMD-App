@@ -293,7 +293,48 @@ tasks.named("cyclonedxBom", org.cyclonedx.gradle.CycloneDxTask::class) {
 // reported BUILD SUCCESSFUL until the task was forced to rerun, at which point it failed
 // correctly. Declared here so the gate cannot be skipped by an up-to-date check.
 tasks.withType<Test>().configureEach {
-    inputs.dir(layout.projectDirectory.dir("src/main"))
-        .withPropertyName("mainSourcesScannedByEgressProofTests")
+    // The WHOLE source tree, not just src/main, because the source-scanning tests read whichever
+    // trees their claim is about and Gradle only knows about the ones the variant compiles.
+    //
+    // MEASURED during PR-6, and it is the same defect as the backend-mirror one below, found for
+    // the eleventh time. SlmEngineIsUnreachableFromPresentationTest asserts that no FLAVOR source
+    // set binds an SlmEngine, so it reads src/dev, src/staging and src/prod. With only src/main
+    // declared, adding a stub engine to src/staging left `:app:testDevDebugUnitTest UP-TO-DATE`
+    // and served the previous green result: the guard against a fabricated clinical narrative
+    // reachable in a shipped build reported satisfied without running. The dev variant does not
+    // compile src/staging, so nothing else made that file an input.
+    //
+    // Declared as `src` rather than as four named directories deliberately. Naming them fixes
+    // today's test and leaves the next source-scanning test to rediscover this, which is exactly
+    // how this arrived at eleven instances. The cost is that an androidTest edit also invalidates
+    // the unit test task, which is one extra run of a suite that takes seconds.
+    inputs.dir(layout.projectDirectory.dir("src"))
+        .withPropertyName("sourceTreeScannedBySourceScanningTests")
         .withPathSensitivity(PathSensitivity.RELATIVE)
+
+    // Backend files that unit tests READ AS TEXT to check a device/backend mirror. Without these
+    // declared, Gradle does not know the tests depend on them, marks the test task UP-TO-DATE on
+    // a backend-only change, and the guard never runs. MEASURED during S-1: adding a value to
+    // app/models/enums.py's SyncRetryClass left `testDevDebugUnitTest UP-TO-DATE` and the stale
+    // green result on disk, so the drift the test exists to catch went unreported. The
+    // AuditActionBackendMirrorTest that predates it had the same hole for the same reason, which
+    // is why both files are listed rather than only the new one.
+    //
+    // Missing files are tolerated: a checkout without backend/ simply has no mirror to compare,
+    // which both tests already handle (pytest skips; the Kotlin side fails loudly on a missing
+    // repo root, which is the correct signal there).
+    inputs.files(
+        rootProject.layout.projectDirectory.file("backend/core/app/models/enums.py"),
+        rootProject.layout.projectDirectory.file("backend/core/app/domain/audit_actions_device.py"),
+        // S-3: SyncFailureMessageMirrorTest matches on the literal constraint messages this
+        // module writes, because a duplicate ABHA and a missing field share one error code.
+        rootProject.layout.projectDirectory.file("backend/core/app/services/sync.py"),
+        // PR-8: SlmControlTokenMirrorTest reads the device-facing code the proxy relays for the
+        // service's SAMD-SLM-8009, and the 4xx branch that must not touch the circuit breaker.
+        rootProject.layout.projectDirectory.file("backend/core/app/errors.py"),
+        rootProject.layout.projectDirectory.file("backend/core/app/services/slm.py"),
+    )
+        .withPropertyName("backendMirrorSourcesReadByMirrorTests")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+        .optional()
 }

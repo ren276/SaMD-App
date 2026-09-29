@@ -19,10 +19,17 @@ import java.io.File
  * owns it. A ViewModel therefore cannot inject it, construct it, or hold it, because it cannot
  * name it.
  *
- * **What it does not prove:** anything about a later stage's Hilt binding in the data layer (which
- * is expected to appear and is expected to update the allowlist below), and nothing about
- * reflection. The property being defended is that generation is reachable only through
- * `SlmReadbackUseCase`, where the scope gates are.
+ * **What it does not prove:** nothing about reflection. The property being defended is that
+ * generation is reachable only through `SlmReadbackUseCase`, where the scope gates are.
+ *
+ * **PR-6 added the two files this test's previous KDoc said were expected**, the data-layer binding
+ * and the Hilt module that provides it, and the allowlist below grew from two names to four. That
+ * growth is the test working: a fourth name appearing was a deliberate edit here, in the same
+ * commit, rather than something that happened quietly.
+ *
+ * The scan is a substring match, so `RemoteSlmEngine` and `SlmEngineIsUnreachableFromPresentationTest`
+ * both contain `SlmEngine`. The DTO and the Retrofit service are deliberately written without
+ * naming either, which keeps the list at the files that actually hold or implement the type.
  */
 class SlmEngineIsUnreachableFromPresentationTest {
 
@@ -51,11 +58,78 @@ class SlmEngineIsUnreachableFromPresentationTest {
             .sorted()
 
         assertEquals(
-            "A new file names SlmEngine. If a later stage is binding the engine in the data layer, " +
-                "add it here deliberately; if it is a ViewModel, memo section 9.1 says no.",
-            listOf("SlmEngine.kt", "SlmReadbackUseCase.kt"),
+            "A new file names SlmEngine. The engine is declared in SlmEngine.kt, held by the seam " +
+                "in SlmReadbackUseCase.kt, implemented once in RemoteSlmEngine.kt and bound once " +
+                "in SlmNetworkModule.kt. A fifth name is a deliberate edit here; if it is a " +
+                "ViewModel, memo section 9.1 says no.",
+            listOf(
+                "RemoteSlmEngine.kt",
+                "SlmEngine.kt",
+                "SlmNetworkModule.kt",
+                "SlmReadbackUseCase.kt",
+            ),
             files,
         )
+    }
+
+    /**
+     * **Step 3's claim, as an assertion rather than a sentence in a memo.** The engine binds to the
+     * same remote implementation in dev, staging and prod, because that is the shipping
+     * architecture, and **no flavor source set contains an `SlmEngine` implementation of any kind**.
+     *
+     * The hazard is specific and it is this project's recurring one. `MockBoundaryModule` documents
+     * the opposite posture for `VitalsSource` and `KernelFallbackSource`: those bind mock clinical
+     * data in `src/dev/` and honest-unavailable implementations in `src/staging/` and `src/prod/`,
+     * precisely so fabricated clinical values cannot be reached outside dev. A stub readback engine
+     * would be the same hazard in the same clothes, except worse, because the thing it fabricates is
+     * clinical narrative that reads exactly like a real answer and that satisfies the identity gate
+     * by construction, answering with whatever pin it was compiled against. H-09 and H-13 are both
+     * in the register for this shape.
+     *
+     * Scanning the three flavor trees rather than asserting the binding's location is deliberate: a
+     * test that only checked that `src/main/` binds the engine would pass while a flavor bound a
+     * second one over the top of it.
+     */
+    @Test
+    fun noFlavorSourceSetImplementsOrBindsTheEngine() {
+        val hits = FLAVORS.filter { it.isDirectory }
+            .flatMap { flavor -> scan(kotlinSourcesUnder(flavor), listOf("SlmEngine")) }
+
+        assertTrue(
+            "A flavor source set names SlmEngine. The engine binds to RemoteSlmEngine in " +
+                "src/main/ for every flavor, and a flavor-local implementation or binding would be " +
+                "a fabricated clinical narrative reachable in whichever builds ship that flavor " +
+                "(H-09, H-13). Found:\n" + hits.joinToString("\n"),
+            hits.isEmpty(),
+        )
+    }
+
+    /**
+     * Non-vacuity for the flavor scan, which would otherwise pass by finding no directories at all.
+     * The three flavor trees exist and hold real Kotlin, MEASURED here rather than assumed, and the
+     * positive control proves the scanner would have found a hit in them if one were there.
+     */
+    @Test
+    fun theFlavorScanRootsResolveAndHoldSources() {
+        val missing = FLAVORS.filterNot { it.isDirectory }
+        assertTrue(
+            "Flavor source roots are missing, so the flavor scan proves nothing: " +
+                missing.joinToString { it.path },
+            missing.isEmpty(),
+        )
+        FLAVORS.forEach { flavor ->
+            val count = kotlinSourcesUnder(flavor).size
+            assertTrue("Scanned only $count Kotlin files under ${flavor.path}.", count > 0)
+        }
+        // Positive control: the scanner finds a term that IS present in every flavor tree, so a
+        // clean SlmEngine result is a real absence rather than a scanner that reads nothing.
+        FLAVORS.forEach { flavor ->
+            assertTrue(
+                "Positive control failed: no file under ${flavor.path} names 'Module', so the " +
+                    "scanner is not reading these trees and the flavor assertion proves nothing.",
+                scan(kotlinSourcesUnder(flavor), listOf("Module")).isNotEmpty(),
+            )
+        }
     }
 
     /**
@@ -99,5 +173,9 @@ class SlmEngineIsUnreachableFromPresentationTest {
         val PRESENTATION = File(MAIN_SOURCES, "java/com/example/samdapp/presentation")
 
         const val SEAM = "java/com/example/samdapp/domain/slm/SlmReadbackUseCase.kt"
+
+        /** Sibling of [MAIN_SOURCES]: `src/main` resolves, so `src/dev` and its siblings do too. */
+        val FLAVORS: List<File> =
+            listOf("dev", "staging", "prod").map { File(MAIN_SOURCES.parentFile, it) }
     }
 }

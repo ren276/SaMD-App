@@ -10,7 +10,7 @@ import httpx
 from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.adapters.kernel.circuit_breaker import KernelCircuitBreakers
+from app.adapters.kernel.circuit_breaker import CircuitBreaker, KernelCircuitBreakers
 from app.config import Settings, get_settings
 from app.db.session import session_scope
 from app.errors import ErrorCode, SamdError
@@ -129,3 +129,23 @@ def kernel_breakers_dep(request: Request) -> KernelCircuitBreakers:
 
 KernelClientDep = Annotated[httpx.AsyncClient, Depends(kernel_client_dep)]
 KernelBreakersDep = Annotated[KernelCircuitBreakers, Depends(kernel_breakers_dep)]
+
+
+def slm_client_dep(request: Request) -> httpx.AsyncClient | None:
+    """The shared SLM client, or None when the hop is not configured.
+
+    None is a legitimate state, not a missing dependency: build_slm_client refuses to construct a
+    client without SLM_SERVICE_TOKEN (app/adapters/slm/client.py), so the lifespan leaves this
+    unset on a deployment that has no readback service or has not been given the shared secret.
+    app/services/slm.py turns that into a 503 and no outbound call. An unauthenticated call on
+    this hop is not a degraded mode.
+    """
+    return getattr(request.app.state, "slm_client", None)
+
+
+def slm_breaker_dep(request: Request) -> CircuitBreaker:
+    return request.app.state.slm_breaker  # type: ignore[no-any-return]
+
+
+SlmClientDep = Annotated[httpx.AsyncClient | None, Depends(slm_client_dep)]
+SlmBreakerDep = Annotated[CircuitBreaker, Depends(slm_breaker_dep)]

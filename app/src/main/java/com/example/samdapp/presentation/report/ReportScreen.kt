@@ -36,13 +36,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
+import com.example.samdapp.R
 import com.example.samdapp.domain.model.UrgencyLevel
 import com.example.samdapp.domain.report.ClinicalReport
+import com.example.samdapp.domain.slm.MAX_QUESTION_CHARS
 import android.widget.Toast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -92,12 +95,20 @@ fun ReportScreen(
                 onExport = viewModel::onExportPdf,
                 padding = padding,
                 actions = viewModel,
+                // Hidden, not disabled, while the flag is off: no dead control for a feature that
+                // is off in every build. Same posture the VOICE_* flags take on the consultation
+                // screen.
+                canOpenReadback = uiState.canOpenReadback,
+                onOpenReadback = viewModel::onOpenReadback,
             )
         }
     }
 
     if (uiState.showReferralSheet) {
         ReferralSheet(uiState = uiState, actions = viewModel)
+    }
+    if (uiState.showReadbackSheet) {
+        ReadbackSheet(uiState = uiState, actions = viewModel)
     }
     uiState.referralConfirmationMessage?.let { message ->
         AlertDialog(
@@ -116,6 +127,8 @@ private fun ReportContent(
     onExport: () -> Unit,
     padding: PaddingValues,
     actions: ReportReferralActions,
+    canOpenReadback: Boolean,
+    onOpenReadback: () -> Unit,
 ) {
     val context = LocalContext.current
     val logoBitmap by produceState<android.graphics.Bitmap?>(initialValue = null) {
@@ -187,6 +200,137 @@ private fun ReportContent(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+
+        // Below the report and below the two actions that concern the record itself, because it
+        // is an aid to reading the thing above it rather than a step in the workflow. Absent, not
+        // greyed out, when the flag is off or no physician decision has been committed.
+        if (canOpenReadback) {
+            OutlinedButton(
+                onClick = onOpenReadback,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+            ) {
+                Text(stringResource(R.string.readback_open), style = MaterialTheme.typography.titleMedium)
+            }
+        }
+    }
+}
+
+/**
+ * The read-back surface: one question, one answer or one refusal, and no third thing.
+ *
+ * A [ModalBottomSheet] over the report rather than a route of its own, following this screen's own
+ * `ReferralSheet` idiom. That is not only consistency. A route would need a new `NavKey`, an entry
+ * in the secured-route set, a row in the PHI-free back-stack fixture and a decision about what it
+ * restores to after process death; a sheet whose state lives in the ViewModel needs none of those
+ * and restores, correctly, to a closed sheet over a re-assembled report.
+ *
+ * **There is no follow-up input anywhere in here, and the type system is what guarantees it.**
+ * [ReadbackState] has one answer slot and no list, so `when` below has exactly one branch that
+ * draws a text field, and it is the branch with no answer in it. "Ask something else" returns to
+ * that branch with the previous question and the previous answer both cleared, so at most one turn
+ * is ever on screen and nothing from a previous turn travels with the next.
+ */
+@Composable
+private fun ReadbackSheet(uiState: ReportUiState, actions: ReportReadbackActions) {
+    val sheetState = rememberModalBottomSheetState()
+    ModalBottomSheet(onDismissRequest = actions::onDismissReadback, sheetState = sheetState) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(16.dp).padding(bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(stringResource(R.string.readback_title), style = MaterialTheme.typography.titleLarge)
+
+            when (val state = uiState.readback) {
+                ReadbackState.Idle -> {
+                    Text(
+                        stringResource(R.string.readback_question_help),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedTextField(
+                        value = uiState.readbackQuestion,
+                        onValueChange = actions::onReadbackQuestionChange,
+                        label = { Text(stringResource(R.string.readback_question_label)) },
+                        minLines = 2,
+                        isError = uiState.readbackQuestion.length > MAX_QUESTION_CHARS,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Button(
+                        onClick = actions::onAskReadback,
+                        enabled = uiState.canAskReadback,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                    ) {
+                        Text(stringResource(R.string.readback_ask), style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+
+                ReadbackState.Generating -> {
+                    // Indeterminate, and never a bar or a percentage. Nothing on this device knows
+                    // how far along a generation is, and a progress bar that is invented is a lie
+                    // a worker calibrates against.
+                    SamdLoadingIndicator(modifier = Modifier.padding(vertical = 24.dp))
+                    Text(stringResource(R.string.readback_generating), style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        stringResource(R.string.readback_generating_note),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedButton(
+                        onClick = actions::onCancelReadback,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                    ) {
+                        Text(stringResource(R.string.readback_stop), style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+
+                is ReadbackState.Answer -> {
+                    Text(stringResource(R.string.readback_answer_title), style = MaterialTheme.typography.titleMedium)
+                    Text(state.text, style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        stringResource(R.string.readback_answer_disclaimer),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedButton(
+                        onClick = actions::onAskAnotherReadback,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                    ) {
+                        Text(stringResource(R.string.readback_ask_another), style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+
+                is ReadbackState.Refused -> {
+                    // Every refusal renders here, from its own copy pair. There is no fall-through
+                    // branch and no generic message: slmRefusalCopy is total over the enum.
+                    val copy = slmRefusalCopy(state.reason)
+                    Text(stringResource(copy.titleRes), style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(copy.bodyRes), style = MaterialTheme.typography.bodyMedium)
+                    // No text is rendered here under any refusal, because Refused carries none.
+                    when (copy.retry) {
+                        SlmRetryOffer.ASK_AGAIN -> OutlinedButton(
+                            onClick = actions::onAskAnotherReadback,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                        ) {
+                            Text(stringResource(R.string.readback_ask_another), style = MaterialTheme.typography.titleMedium)
+                        }
+                        SlmRetryOffer.RETRY_NOW -> OutlinedButton(
+                            onClick = actions::onRetryReadback,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                        ) {
+                            Text(stringResource(R.string.readback_retry), style = MaterialTheme.typography.titleMedium)
+                        }
+                        // Nothing. The copy for these names the remedy, which is the report above
+                        // or a supervisor, and a button here would offer a fourth thing that is
+                        // not one.
+                        SlmRetryOffer.NONE -> Unit
+                    }
+                }
+            }
+
+            TextButton(onClick = actions::onDismissReadback, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.readback_close))
+            }
         }
     }
 }

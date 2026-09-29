@@ -148,4 +148,30 @@ object FeatureFlags {
      *  Default ON: hidden-until-approved is the safe default. See
      *  [com.example.samdapp.domain.report.ReportFormatter]. */
     const val PRESCRIPTION_APPROVAL_GATE_ENABLED = true
+
+    /** The plain-language read-back of an approved record, on
+     *  [com.example.samdapp.presentation.report.ReportScreen]. Off = the button is hidden, not
+     *  merely disabled, and [com.example.samdapp.presentation.report.ReportViewModel] refuses to
+     *  open the sheet, so [com.example.samdapp.domain.slm.SlmReadbackUseCase] has no reachable
+     *  caller and nothing on the generation path runs. Same shape as the `VOICE_*` flags: the
+     *  binding exists in every flavor and the surface is what this gates.
+     *
+     *  **A `const val`, off in every flavor, not a `BuildConfig` field.** That is the majority
+     *  mechanism in this file and the one every "not yet safe to reach" flag uses;
+     *  [SCREEN_SECURITY_ENABLED] is the single `BuildConfig` case and it is flavor-gated because
+     *  it is genuinely meant to differ per flavor. This one is not. There is no build in which
+     *  the read-back should be on today, so a per-flavor mechanism would be a knob with no
+     *  correct second position.
+     *
+     *  **Stays `false`, and flipping it is not a flag change.** What is built is the device half:
+     *  the seam, its gates, the transport, and this surface. What is not built or not proven is
+     *  everything on the other side of the wire. The generation service does not exist in this
+     *  repository at all; the GPU host it would run on has a full Docker filesystem, so its
+     *  container, GPU reservation and loopback publish are configured and unproven; no end-to-end
+     *  run has happened on real hardware; and six hazard items covering this path are pending
+     *  operator sign-off. Turning this on before those is turning on a clinical feature whose
+     *  answer path nobody has watched work.
+     *
+     *  See [com.example.samdapp.presentation.report.ReportScreen]. */
+    const val SLM_READBACK_ENABLED = false
 }

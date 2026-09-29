@@ -88,6 +88,7 @@ fun testKernelReportOutput(
     urgencyLevel = com.example.samdapp.domain.model.UrgencyLevel.ROUTINE,
     inferenceStartedAt = Instant.EPOCH, inferenceEndedAt = Instant.EPOCH,
     requiredHumanVerification = requiredHumanVerification, inferenceSource = inferenceSource,
+    failureCode = null,
 )
 
 /** Deterministic [com.example.samdapp.domain.kernel.KernelFallbackSource] test double — null by
@@ -591,10 +592,39 @@ class FakeSyncStatus : SyncStatus {
     override val state: Flow<SyncState> = _state.asStateFlow()
     var syncCalls = 0
 
+    /** The failed rows this fake hands back, and the count it reports, kept in step by
+     *  [setFailedRecords] so a test cannot set up a card that says 2 over a list of 3. */
+    private var failed = listOf<com.example.samdapp.domain.sync.FailedSyncRecord>()
+    val sentAgain = mutableListOf<com.example.samdapp.domain.sync.FailedSyncRecord>()
+    var failedRecordsCalls = 0
+        private set
+
+    fun setFailedRecords(records: List<com.example.samdapp.domain.sync.FailedSyncRecord>) {
+        failed = records
+        _state.value = _state.value.copy(failedCount = records.size)
+    }
+
     override suspend fun syncNow(): Result<Unit> {
         syncCalls++
-        _state.value = SyncState(lastSyncedAt = Instant.EPOCH, pendingCount = 0, isSyncing = false)
+        _state.value = SyncState(
+            lastSyncedAt = Instant.EPOCH,
+            pendingCount = 0,
+            isSyncing = false,
+            failedCount = failed.size,
+        )
         return Result.success(Unit)
+    }
+
+    override suspend fun failedRecords(): List<com.example.samdapp.domain.sync.FailedSyncRecord> {
+        failedRecordsCalls++
+        return failed
+    }
+
+    /** Requeue really removes the row here, so a test can assert the list shrinks rather than
+     *  only that the call happened. */
+    override suspend fun sendFailedRecordAgain(record: com.example.samdapp.domain.sync.FailedSyncRecord) {
+        sentAgain += record
+        setFailedRecords(failed.filterNot { it.table == record.table && it.recordId == record.recordId })
     }
 }
 
@@ -704,16 +734,19 @@ class FakeAuditLogDao : AuditLogDao {
     override fun observeByUserId(userId: String, limit: Int): Flow<List<AuditLogEntity>> =
         flowOf(inserted.filter { it.userId == userId }.take(limit))
 
-    override suspend fun getPendingForSync(): List<AuditLogEntity> =
-        inserted.filter { it.syncState == com.example.samdapp.domain.model.SyncState.PENDING }
+    override suspend fun getPendingForSync(retryEligibleBefore: java.time.Instant): List<AuditLogEntity> =
+        inserted.filter { it.syncState == com.example.samdapp.domain.model.SyncState.PENDING || it.syncState == com.example.samdapp.domain.model.SyncState.RETRYABLE }
 
     override suspend fun applySyncResult(
         id: String,
         syncState: com.example.samdapp.domain.model.SyncState,
         serverVersion: Int?,
         syncErrorCode: String?,
+        syncErrorMessage: String?,
         attemptAt: java.time.Instant,
         sentLocalModifiedAt: java.time.Instant,
+        maxAttempts: Int,
+        retryExhaustedCode: String,
     ) {
         val index = inserted.indexOfFirst { it.id == id && it.localModifiedAt == sentLocalModifiedAt }
         if (index >= 0) {
@@ -723,7 +756,19 @@ class FakeAuditLogDao : AuditLogDao {
         }
     }
 
+    override suspend fun requeueFailed(id: String) {
+        val index = inserted.indexOfFirst { it.id == id && it.syncState == com.example.samdapp.domain.model.SyncState.FAILED }
+        if (index >= 0) {
+            inserted[index] = inserted[index].copy(
+                syncState = com.example.samdapp.domain.model.SyncState.PENDING, syncAttemptCount = 0,
+                syncErrorCode = null, syncErrorMessage = null,
+            )
+            refreshFailedSyncCount()
+        }
+    }
+
     override fun observeFailedSyncCount(): Flow<Int> = _failedSyncCount.asStateFlow()
+    override suspend fun getFailedForReview(): List<com.example.samdapp.data.local.dao.FailedSyncRow> = emptyList()
 }
 
 class FakeConsultationDocumentRepository : com.example.samdapp.domain.repository.ConsultationDocumentRepository {

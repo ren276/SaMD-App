@@ -16,9 +16,17 @@ import com.example.samdapp.domain.model.KernelPayload
 interface RemoteKernelSource {
 
     /**
-     * Sends [payload] to the remote kernel and returns a parsed [KernelAssessmentResult].
-     * Throws on any failure (IOException, HttpException, etc.) — the caller ([GenerateKernelReportUseCase])
-     * catches and falls back to the local mock.
+     * Sends [payload] to the remote kernel and returns a [KernelApiResult].
+     *
+     * Does NOT throw on failure, which it did until this change. A thrown `HttpException` carries
+     * only the status line in its `message`, so the caller's `catch` had no way to tell a 404
+     * "this case is not on the server" from a 502 "the kernel is down", and collapsed both onto
+     * [com.example.samdapp.domain.model.InferenceSource.UNAVAILABLE] with one piece of advice.
+     * The sealed return type makes the distinction the compiler's problem: a new case fails the
+     * build at every call site until it is handled.
+     *
+     * `CancellationException` is still thrown, and must be: it is the caller's coroutine being
+     * cancelled, not a server outcome.
      *
      * [patientAge] and [patientSex] are clinical signals (not PII) required by the XGBoost
      * classifier and are NOT part of [KernelPayload] (which enforces the pseudonymization
@@ -28,7 +36,7 @@ interface RemoteKernelSource {
         payload: KernelPayload,
         patientAge: Int,
         patientSex: String,
-    ): KernelAssessmentResult
+    ): KernelApiResult<KernelAssessmentResult>
 }
 
 /**

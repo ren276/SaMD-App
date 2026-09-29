@@ -156,6 +156,46 @@ enum class AuditAction(val value: String) {
      *  the corrupt case specifically means an app update invalidated every stack on every device,
      *  which nobody would otherwise find out about. */
     NAV_STACK_RESTORE_DISCARDED("nav_stack_restore_discarded"),
+
+    /** SLM approved-record readback (`scratchpad/slm-guardrail-service-contract-memo.md` §9.4), one
+     *  per pipeline outcome the seam owes a row for. Added with the backend mirror entries in
+     *  `backend/core/app/domain/audit_actions_device.py` in the same commit: a device action the
+     *  mirror does not accept is rejected at sync, `rejected` maps to `SyncState.FAILED`
+     *  (`SyncAckMapping.kt:14`), no drain re-collects a FAILED row and nothing renders
+     *  `failedCount`, so a split commit is silent permanent loss of exactly the rows that prove
+     *  clinical narrative left the device.
+     *
+     *  **Not emitted yet.** The seam's audit stage is not built; these land now so that the
+     *  vocabulary agreement is already in place when it is, same reasoning the `VOICE_FIELD_*`
+     *  values were added ahead of their caller.
+     *
+     *  Payload is measured metadata only, on every one of them: case id, tier, model id and
+     *  version, prompt-template version, token counts, latency, refusal reason code, suppression
+     *  counts. **Never the question text, never the generated text, never a drug name.** Same rule
+     *  `VOICE_FIELD_*` follows for the transcript and `PRESCRIPTION_APPROVED` follows for the drug.
+     *
+     *  The invocation row. One per readback that reached the engine. */
+    SLM_READBACK_INVOKED("slm_readback_invoked"),
+
+    /** Input refused before the engine was called: an empty or oversized question, an unapproved or
+     *  unresolvable record, or an input-scope refusal. The reason code alone, never the question.
+     *  This row existing while [SLM_READBACK_INVOKED] does not is the evidence that the gate
+     *  refused before anything was generated. */
+    SLM_READBACK_INPUT_REFUSED("slm_readback_input_refused"),
+
+    /** Output suppressed after generation: the grounding gate, a served-model mismatch, or a
+     *  truncated generation. The whole output was withheld, never edited into compliance. */
+    SLM_READBACK_OUTPUT_SUPPRESSED("slm_readback_output_suppressed"),
+
+    /** What [com.example.samdapp.domain.slm.SlmStreamSanitizer] removed, as counts: spans,
+     *  characters, dropped known tokens, and unknown bracketed constructs. Counts only, never the
+     *  suppressed text, which is unvalidated model prose about a patient.
+     *
+     *  This is the detector row. A non-zero unknown count means the served model emitted a construct
+     *  the sanitizer was not built for, and a spans count that quietly falls to zero across a model
+     *  change is what PR-1 established the counts alone could not distinguish from a clean
+     *  generation. Neither is visible anywhere else. */
+    SLM_READBACK_SANITIZER_ACTIVITY("slm_readback_sanitizer_activity"),
 }
 
 /** Builds the JSON blob stored in AuditLogEntity.payload from a flat set of fields. */

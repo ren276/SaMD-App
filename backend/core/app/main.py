@@ -21,14 +21,16 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.adapters.kernel.circuit_breaker import KernelCircuitBreakers
+from app.adapters.kernel.circuit_breaker import CircuitBreaker, KernelCircuitBreakers
 from app.adapters.kernel.client import build_kernel_client
+from app.adapters.slm.client import build_slm_client
 from app.api import admin as admin_routes
 from app.api.v1 import auth as auth_routes
 from app.api.v1 import encounters as encounter_routes
 from app.api.v1 import health as health_routes
 from app.api.v1 import kernel as kernel_routes
 from app.api.v1 import patients as patient_routes
+from app.api.v1 import slm as slm_routes
 from app.api.v1 import sync as sync_routes
 from app.config import get_settings
 from app.db.session import dispose_engine
@@ -76,10 +78,31 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         cooldown_seconds=settings.kernel_circuit_cooldown_seconds,
     )
 
+    # The SLM hop is authenticated or it does not exist: build_slm_client raises without the
+    # shared secret, and app.state.slm_client stays None, which app/services/slm.py turns into a
+    # 503 with no outbound call. A deployment with no readback service simply never sets
+    # SLM_SERVICE_TOKEN, and nothing else has to change.
+    app.state.slm_client = None
+    if settings.slm_service_token:
+        app.state.slm_client = build_slm_client(
+            base_url=settings.slm_base_url,
+            service_token=settings.slm_service_token,
+            connect_timeout_seconds=settings.slm_connect_timeout_seconds,
+            read_timeout_seconds=settings.slm_read_timeout_seconds,
+        )
+    else:
+        logger.warning("slm_readback_not_configured", reason="SLM_SERVICE_TOKEN is empty")
+    app.state.slm_breaker = CircuitBreaker(
+        threshold=settings.slm_circuit_threshold,
+        cooldown_seconds=settings.slm_circuit_cooldown_seconds,
+    )
+
     try:
         yield
     finally:
         await app.state.kernel_client.aclose()
+        if app.state.slm_client is not None:
+            await app.state.slm_client.aclose()
         await dispose_engine()
         logger.info("shutdown")
 
@@ -158,6 +181,7 @@ def create_app() -> FastAPI:
     app.include_router(patient_routes.router)
     app.include_router(encounter_routes.router)
     app.include_router(kernel_routes.router)
+    app.include_router(slm_routes.router)
     app.include_router(sync_routes.router)
     app.include_router(abha_routes)
 

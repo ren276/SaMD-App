@@ -6,6 +6,7 @@ import com.example.samdapp.domain.auth.AuthSession
 import com.example.samdapp.domain.model.Patient
 import com.example.samdapp.domain.repository.CaseRecordRepository
 import com.example.samdapp.domain.repository.PatientRepository
+import com.example.samdapp.domain.sync.FailedSyncRecord
 import com.example.samdapp.domain.sync.SyncState
 import com.example.samdapp.domain.sync.SyncStatus
 import com.example.samdapp.domain.usecase.GetTodaysPatientsUseCase
@@ -34,6 +35,15 @@ data class HomeUiState(
     val isLoadingRoster: Boolean = true,
     val sync: SyncState = SyncState(),
     val resumableEncounter: ResumableEncounter? = null,
+    /** True while the worker has the failed-record list open. The list is a dialog over Home,
+     *  not a destination: a worker who does not know they have a problem never navigates to a
+     *  screen they have no reason to open, and discoverability is the whole point of it. */
+    val isFailedRecordsOpen: Boolean = false,
+    val isLoadingFailedRecords: Boolean = false,
+    /** Fetched when the list is opened, not observed. [SyncState.failedCount] is already inside
+     *  the sync flow this ViewModel collects, so the card that shows the number costs nothing;
+     *  the twenty queries behind the list are kept off the launch path (perf audit F2A-01). */
+    val failedRecords: List<FailedSyncRecord> = emptyList(),
 )
 
 @HiltViewModel
@@ -85,5 +95,33 @@ class HomeViewModel @Inject constructor(
 
     fun onSyncNow() {
         viewModelScope.launch { syncStatus.syncNow() }
+    }
+
+    fun onOpenFailedRecords() {
+        _uiState.update { it.copy(isFailedRecordsOpen = true, isLoadingFailedRecords = true) }
+        viewModelScope.launch { loadFailedRecords() }
+    }
+
+    fun onDismissFailedRecords() {
+        // The list is dropped, not kept: it is a snapshot, and a stale one is worse than a
+        // second fetch. The count behind the card keeps flowing either way.
+        _uiState.update {
+            it.copy(isFailedRecordsOpen = false, isLoadingFailedRecords = false, failedRecords = emptyList())
+        }
+    }
+
+    /** The only action the list offers, and only for the causes where the record is not believed
+     *  to be wrong. Re-reads the list afterwards so the requeued row leaves it; the count on the
+     *  card updates itself, because it is a Flow over the same rows. */
+    fun onSendFailedRecordAgain(record: FailedSyncRecord) {
+        viewModelScope.launch {
+            syncStatus.sendFailedRecordAgain(record)
+            loadFailedRecords()
+        }
+    }
+
+    private suspend fun loadFailedRecords() {
+        val records = syncStatus.failedRecords()
+        _uiState.update { it.copy(failedRecords = records, isLoadingFailedRecords = false) }
     }
 }

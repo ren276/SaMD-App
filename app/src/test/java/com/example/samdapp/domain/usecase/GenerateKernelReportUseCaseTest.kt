@@ -14,10 +14,15 @@ import com.example.samdapp.testutil.FakeKernelReportRepository
 import com.example.samdapp.testutil.testKernelReportOutput
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.example.samdapp.domain.kernel.KernelApiResult
+import com.example.samdapp.domain.kernel.KernelFailure
 import java.io.IOException
+import java.net.SocketTimeoutException
+import javax.net.ssl.SSLException
 
 /** Stub RemoteKernelSource that always throws IOException — simulates the ML server being offline. */
 private class OfflineKernelSource : RemoteKernelSource {
@@ -25,9 +30,9 @@ private class OfflineKernelSource : RemoteKernelSource {
         payload: KernelPayload,
         patientAge: Int,
         patientSex: String,
-    ): KernelAssessmentResult {
-        throw IOException("Simulated network unavailability")
-    }
+    ): KernelApiResult<KernelAssessmentResult> = KernelApiResult.Unreachable(
+        IOException("Simulated network unavailability"),
+    )
 }
 
 /** Stub RemoteKernelSource that always throws CancellationException — simulates the calling
@@ -37,7 +42,7 @@ private class CancellingKernelSource : RemoteKernelSource {
         payload: KernelPayload,
         patientAge: Int,
         patientSex: String,
-    ): KernelAssessmentResult {
+    ): KernelApiResult<KernelAssessmentResult> {
         throw CancellationException("Simulated coroutine cancellation")
     }
 }
@@ -52,7 +57,8 @@ private class EmptyDifferentialKernelSource : RemoteKernelSource {
         payload: KernelPayload,
         patientAge: Int,
         patientSex: String,
-    ): KernelAssessmentResult = KernelAssessmentResult(
+    ): KernelApiResult<KernelAssessmentResult> = KernelApiResult.Success(
+        KernelAssessmentResult(
         predictedCondition = null,
         confidenceScore = 0.0,
         triageUrgency = "ROUTINE",
@@ -62,7 +68,28 @@ private class EmptyDifferentialKernelSource : RemoteKernelSource {
         differentials = emptyList(),
         recommendedInvestigations = emptyList(),
         modelVersion = "xgboost-v1",
+        ),
     )
+}
+
+/** Stub RemoteKernelSource answering with a chosen non-Success result, so the use case's own
+ *  classification and persistence can be exercised per failure class without a Retrofit stub. */
+private class FailingKernelSource(private val result: KernelApiResult<KernelAssessmentResult>) : RemoteKernelSource {
+    override suspend fun assess(
+        payload: KernelPayload,
+        patientAge: Int,
+        patientSex: String,
+    ): KernelApiResult<KernelAssessmentResult> = result
+}
+
+/** Stub RemoteKernelSource that throws a non-cancellation exception out of assess() itself,
+ *  which after this change can only mean a bug on this device. */
+private class ThrowingKernelSource : RemoteKernelSource {
+    override suspend fun assess(
+        payload: KernelPayload,
+        patientAge: Int,
+        patientSex: String,
+    ): KernelApiResult<KernelAssessmentResult> = throw IllegalStateException("device-side bug")
 }
 
 /** Stub RemoteKernelSource that always succeeds — simulates the ML server being reachable, to
@@ -72,7 +99,8 @@ private class WorkingKernelSource : RemoteKernelSource {
         payload: KernelPayload,
         patientAge: Int,
         patientSex: String,
-    ): KernelAssessmentResult = KernelAssessmentResult(
+    ): KernelApiResult<KernelAssessmentResult> = KernelApiResult.Success(
+        KernelAssessmentResult(
         predictedCondition = "Viral fever",
         confidenceScore = 0.82,
         triageUrgency = "ROUTINE",
@@ -82,6 +110,7 @@ private class WorkingKernelSource : RemoteKernelSource {
         differentials = listOf("Dengue", "Typhoid"),
         recommendedInvestigations = emptyList(),
         modelVersion = "xgboost-v1",
+        ),
     )
 }
 
@@ -237,5 +266,113 @@ class GenerateKernelReportUseCaseTest {
         val result = useCase("case-1", payload())
 
         assertTrue(result.isFailure)
+    }
+
+    // ── The classified failure must reach the persisted row ──────────────────
+
+    @Test
+    fun `a 404 case-not-on-server is persisted as CASE_NOT_ON_SERVER, not as a generic unavailable`() = runTest {
+        val repo = FakeKernelReportRepository()
+        val source = FailingKernelSource(
+            KernelApiResult.Failure(code = "SAMD-ENC-4002", httpStatus = 404, message = "Case record not found."),
+        )
+        val useCase = GenerateKernelReportUseCase(
+            repo, FakeDeviceInfoProvider(), source, FakeKernelFallbackSource(result = null), FakeAuditLogger(),
+        )
+
+        val output = useCase("case-1", payload()).getOrThrow()
+
+        assertEquals(InferenceSource.UNAVAILABLE, output.inferenceSource)
+        assertEquals(KernelFailure.CASE_NOT_ON_SERVER, output.failureCode)
+        // Persisted, not merely returned: the assessment screen reads the ROW, not this return
+        // value, because the work runs asynchronously. A classification that never lands in the
+        // database never reaches a worker.
+        assertEquals(KernelFailure.CASE_NOT_ON_SERVER, repo.saved["case-1"]?.failureCode)
+    }
+
+    @Test
+    fun `each failure class lands its own code on the row`() = runTest {
+        val cases = listOf(
+            KernelApiResult.Unreachable(IOException("offline")) to KernelFailure.OFFLINE,
+            KernelApiResult.Unreachable(SocketTimeoutException("slow")) to KernelFailure.TIMEOUT,
+            KernelApiResult.Unreachable(SSLException("tls")) to KernelFailure.SECURE_CONNECTION_FAILED,
+            KernelApiResult.Failure(null, 401, "x") to KernelFailure.NOT_AUTHORIZED,
+            KernelApiResult.Failure("SAMD-KERN-5005", 422, "x") to KernelFailure.PAYLOAD_REJECTED,
+            KernelApiResult.Failure("SAMD-KERN-5006", 503, "x") to KernelFailure.KERNEL_UNAVAILABLE,
+            KernelApiResult.ProtocolViolation("bad body") to KernelFailure.MALFORMED_RESPONSE,
+            KernelApiResult.Failure("SAMD-FUTURE-9999", 418, "x") to KernelFailure.UNKNOWN,
+        )
+        cases.forEach { (apiResult, expected) ->
+            val repo = FakeKernelReportRepository()
+            val useCase = GenerateKernelReportUseCase(
+                repo,
+                FakeDeviceInfoProvider(),
+                FailingKernelSource(apiResult),
+                FakeKernelFallbackSource(result = null),
+                FakeAuditLogger(),
+            )
+            useCase("case-1", payload())
+            assertEquals("$apiResult should persist as $expected", expected, repo.saved["case-1"]?.failureCode)
+        }
+    }
+
+    @Test
+    fun `an exception thrown out of assess is DEVICE_ERROR, never blamed on the network`() = runTest {
+        val repo = FakeKernelReportRepository()
+        val useCase = GenerateKernelReportUseCase(
+            repo, FakeDeviceInfoProvider(), ThrowingKernelSource(), FakeKernelFallbackSource(result = null), FakeAuditLogger(),
+        )
+
+        useCase("case-1", payload())
+
+        assertEquals(KernelFailure.DEVICE_ERROR, repo.saved["case-1"]?.failureCode)
+    }
+
+    @Test
+    fun `a reached kernel with an empty differential records no failure code`() = runTest {
+        // The kernel WAS reached and did answer. Giving this a KernelFailure would put a remedy
+        // on a screen where there is nothing to remedy, so it stays reach-neutral.
+        val repo = FakeKernelReportRepository()
+        val useCase = GenerateKernelReportUseCase(
+            repo, FakeDeviceInfoProvider(), EmptyDifferentialKernelSource(), FakeKernelFallbackSource(result = null), FakeAuditLogger(),
+        )
+
+        val output = useCase("case-1", payload()).getOrThrow()
+
+        assertEquals(InferenceSource.UNAVAILABLE, output.inferenceSource)
+        assertNull(output.failureCode)
+    }
+
+    @Test
+    fun `a successful assessment records no failure code`() = runTest {
+        val repo = FakeKernelReportRepository()
+        val useCase = GenerateKernelReportUseCase(
+            repo, FakeDeviceInfoProvider(), WorkingKernelSource(), FakeKernelFallbackSource(result = null), FakeAuditLogger(),
+        )
+
+        assertNull(useCase("case-1", payload()).getOrThrow().failureCode)
+    }
+
+    @Test
+    fun `the persisted failure classes do not collapse onto one value`() = runTest {
+        // End-to-end counterpart to KernelFailureClassificationTest's own regression guard: this
+        // one fails if the classification is correct but the use case drops it on the way to the
+        // row, which is the shape the defect would most plausibly come back in.
+        val inputs = listOf(
+            KernelApiResult.Unreachable(IOException("offline")),
+            KernelApiResult.Unreachable(SocketTimeoutException("slow")),
+            KernelApiResult.Failure("SAMD-ENC-4002", 404, "x"),
+            KernelApiResult.Failure("SAMD-KERN-5003", 422, "x"),
+            KernelApiResult.Failure("SAMD-KERN-5001", 502, "x"),
+        )
+        val persisted = inputs.map { apiResult ->
+            val repo = FakeKernelReportRepository()
+            GenerateKernelReportUseCase(
+                repo, FakeDeviceInfoProvider(), FailingKernelSource(apiResult),
+                FakeKernelFallbackSource(result = null), FakeAuditLogger(),
+            )("case-1", payload())
+            repo.saved["case-1"]?.failureCode
+        }
+        assertEquals("five distinct causes must persist as five distinct codes", 5, persisted.distinct().size)
     }
 }

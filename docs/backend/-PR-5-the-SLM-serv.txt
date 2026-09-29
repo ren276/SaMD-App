@@ -1,0 +1,2007 @@
+# PR-5: the SLM service
+
+**Repo:** `/media/acps/twoTBDrive/finetuninggemma4` (the serving repo)
+**Branch:** `pr5-slm-service`, committed, **not pushed**
+**Date:** 2026-09-20
+**Machine:** GPU workstation. NVIDIA GeForce RTX 4070 Ti SUPER, 15.561 GiB total VRAM,
+driver 580.126.09, CUDA 13.0. MEASURED from `nvidia-smi`.
+
+Every claim below is marked MEASURED (observed on this machine in this change) or
+INFERRED (reasoned, not observed). Where something does not exist, this note says
+"does not exist".
+
+The stale read-only clone at `/media/acps/twoTBDrive/maincodes/SaMD-App` was not
+edited and no line number from it is cited.
+
+---
+
+## 0. What was built
+
+A new FastAPI service at `slm_service/`, built beside `litert_edge_engine/edge_server.py`
+and sharing no code with it. The demo server was read for transport shape only and is
+unmodified. MEASURED: `git status` shows no change under `litert_edge_engine/`.
+
+| File | What it holds |
+|---|---|
+| `slm_service/__init__.py` | `GENERATE_PATH` and `HEALTH_PATH` as named constants |
+| `slm_service/config.py` | environment-derived settings, validated eagerly |
+| `slm_service/errors.py` | the `SAMD-SLM-8xxx` registry and the RFC 9457 envelope |
+| `slm_service/schemas.py` | request and response shapes, `extra="forbid"` |
+| `slm_service/identity.py` | `model_id` and the artifact digest, derived from the artifact |
+| `slm_service/engine.py` | load, greedy generation, derived `finish_reason`, deadline, cancel |
+| `slm_service/admission.py` | the in-process bounded queue |
+| `slm_service/security.py` | `X-SLM-Service-Token`, as pure ASGI middleware |
+| `slm_service/observability.py` | the per-request log and its field allowlist |
+| `slm_service/app.py` | the application, the lifespan, the two routes |
+| `slm_service/__main__.py` | entry point, single worker |
+| `deploy/slm/Dockerfile` | CUDA base image |
+| `deploy/slm/docker-compose.yml` | explicit GPU reservation, loopback-only publish |
+| `tests/slm_service/` | 96 tests |
+
+Surface: `POST /v1/generate` and `GET /health`. Nothing else. There is no
+`/v1/chat/completions`, no `/v1/models`, no `/docs`, no `/openapi.json`
+(`docs_url`, `redoc_url` and `openapi_url` are all `None`).
+
+### Properties, and where each one lives
+
+- **Load in a lifespan.** `slm_service/app.py`, the `lifespan` context manager. Nothing
+  loads at module import and nothing loads per request. A load failure re-raises, so
+  the process exits with a log line rather than serving.
+- **Derived identity.** `slm_service/identity.py`. `model_id` and `model_sha256` are read
+  off the artifact on disk. There is no configuration value and no literal that can
+  supply either, and an underivable value raises rather than defaulting. MEASURED: the
+  service reports `model_sha256` `2db5482b20d746879bb3ef79b5203e9075a2e2b98f54ec7c2f281c1477ddc550`,
+  which equals both the Hugging Face content-addressed blob name written by the
+  downloader and the output of coreutils `sha256sum` on `model.safetensors`.
+- **Honest `finish_reason`.** `Engine._derive_finish_reason`. Read off the generation in
+  this order: a caller-declared stop sequence fired, the last token is in the artifact's
+  EOS set, the completion reached the served ceiling, otherwise `error`. Nothing in the
+  service can emit a literal `"stop"`.
+- **Input bound in tokens, rejected.** Enforced twice: in the handler before a GPU slot is
+  taken, and again at the engine boundary. Both are real and both are tested. Tokenization
+  passes `truncation=False` explicitly. The `413` names the measured length and the limit
+  and carries no part of the prompt.
+- **Greedy decoding.** A fresh `GenerationConfig(do_sample=False, num_beams=1, ...)` is
+  passed to `generate`, so the artifact's own generation config (which carries
+  `do_sample: true`, `temperature: 1.0`, `top_k: 64`, `top_p: 0.95`, MEASURED from
+  `generation_config.json`) does not supply defaults. The seed is applied and echoed.
+  MEASURED: ten generations of the same prompt produced byte-identical text.
+- **One worker, a bounded queue.** `slm_service/admission.py`. One generation runs, a
+  configured number wait, anything beyond gets `503` / `SAMD-SLM-8005` with `Retry-After`
+  immediately.
+- **A wall clock the service owns.** A stopping criterion checked at every token boundary,
+  default 40 s, strictly inside the caller's 50 s read budget. On expiry the service drops
+  the tensors, calls `torch.cuda.empty_cache()` and returns `504` / `SAMD-SLM-8007`.
+- **Disconnect actually stops generation.** The handler runs `generate` on a worker thread
+  and polls `request.is_disconnected()` on the event loop; a disconnect sets an event that
+  a stopping criterion reads at the next token boundary.
+- **Auth.** `X-SLM-Service-Token` against setting `SLM_SERVICE_TOKEN`, compared with
+  `hmac.compare_digest`. Fails closed when the setting is unset or blank, and when the
+  header is absent or wrong. The value is never read into a response, a log or a repr.
+  Startup also refuses when the setting is unset.
+- **Health.** Every field is read from live state or the loaded artifact at request time.
+  There is no static literal anywhere in the handler.
+- **Per-request log.** One JSON line, built from an explicit field allowlist. The prompt
+  and the generated text are not parameters of the logging function, so the prohibition is
+  structural rather than a habit of the call sites.
+
+---
+
+## 1. Measured latency
+
+Ten sequential generations, service freshly started, representative readback prompt
+(268 prompt tokens: a five-field snapshot, a four-line prescription set and a follow-up
+line, wrapped in the artifact's chat template). `max_tokens` 512. Wall clock measured at
+the HTTP client, so it includes request, tokenization, generation, decode and response.
+
+| Run | Wall clock | `finish_reason` | prompt tok | completion tok | tok/s |
+|---:|---:|---|---:|---:|---:|
+| 1 (cold) | 4673.4 ms | stop | 268 | 207 | 44.29 |
+| 2 | 4327.6 ms | stop | 268 | 207 | 47.83 |
+| 3 | 4352.8 ms | stop | 268 | 207 | 47.56 |
+| 4 | 4354.3 ms | stop | 268 | 207 | 47.54 |
+| 5 | 4387.7 ms | stop | 268 | 207 | 47.18 |
+| 6 | 4352.8 ms | stop | 268 | 207 | 47.56 |
+| 7 | 4358.9 ms | stop | 268 | 207 | 47.49 |
+| 8 | 4357.1 ms | stop | 268 | 207 | 47.51 |
+| 9 | 4354.8 ms | stop | 268 | 207 | 47.53 |
+| 10 | 4382.8 ms | stop | 268 | 207 | 47.23 |
+
+| Figure | MEASURED |
+|---|---|
+| p50, all ten runs | **4356.0 ms** |
+| p95, all ten runs | **4544.9 ms** |
+| First call | 4673.4 ms |
+| Steady state (runs 2 to 10), p50 | 4354.8 ms |
+| Steady state, p95 | 4385.7 ms |
+| Cold-start penalty on the first call | **318.6 ms** |
+| Sustained decode rate, steady state p50 | **47.53 tokens/s** |
+| Completion length, full readback | 207 tokens, identical on all ten runs |
+
+A second run of the same ten, taken on an already-warm process, gave p50 4398.0 ms and
+p95 4570.3 ms. The two runs agree to within about 1 percent.
+
+**Startup:** 14.0 s wall from process start to `Application startup complete`, with the
+artifact warm in the page cache. That includes the digest computation, which is the larger
+half: `sha256` over the 9.543 GiB weight file took **28.56 s** on a cold page cache and
+6.6 s warm, MEASURED. The digest is recomputed on every start and is not cached, because a
+cache keyed on size and mtime is exactly the check that reports satisfied while the thing
+it checks has changed underneath it.
+
+### Does a full readback fit inside the 40 s service cap?
+
+**MEASURED: yes, with a margin of roughly 9x.**
+
+| Scenario | prompt tok | completion tok | wall clock |
+|---|---:|---:|---:|
+| Four-drug record (representative) | 268 | 207 | 4391 ms |
+| Ten-drug record (stress) | 428 | 328 | 7008 ms |
+| Generation driven to the 512-token ceiling | 286 | 512 | **10819 ms** |
+
+The worst case the current ceiling permits is 10.8 s, which is 27 percent of the 40 s cap.
+
+The contract's §4.3 arithmetic said the service must sustain at least 12.8 tokens/s for a
+512-token generation to fit in 40 s, and recorded that no measurement existed. **MEASURED:
+47.53 tokens/s, about 3.7x the requirement.** The contract's INFERRED "very likely
+comfortable on GPU" is confirmed on this hardware.
+
+### `max_tokens` recommendation
+
+**Keep 512. Do not reduce it, and do not widen the 40 s cap.**
+
+The reasoning is the contract's own: `max_tokens` should be sized so that truncation is
+rare, not merely detectable. MEASURED, a representative four-drug readback completes in
+207 tokens and an unusually large ten-drug readback completes in 328. 512 leaves about 1.6x
+headroom over the stress case, and the cost of that headroom is bounded at 10.8 s, well
+inside the cap. Lowering to 384 would still cover the stress case but would put the backstop
+within 17 percent of an observed real completion, which is where a backstop starts firing
+routinely. Raising it is unnecessary and would spend cap margin for nothing.
+
+INFERRED, not measured: a record with more than about fifteen prescription lines could
+exceed 512 completion tokens. If `finish_reason: length` is ever seen in production on a
+real record, the lever is prompt brevity first and `max_tokens` second, and there is cap
+headroom for 768 (about 16 s) if it is genuinely needed.
+
+---
+
+## 2. Resident VRAM
+
+MEASURED with the model loaded and idle, from the service's own `/health` (which reads
+`torch.cuda.memory_allocated` and `memory_reserved`) and from `nvidia-smi`:
+
+| Figure | Bytes | GiB |
+|---|---:|---:|
+| Torch allocated | 10,255,397,376 | **9.551** |
+| Torch reserved | 10,387,193,856 | 9.674 |
+| GPU total | 16,708,927,488 | 15.561 |
+| Whole-GPU used with the service up (`nvidia-smi`) | | 10.35 (10597 MiB) |
+| Whole-GPU used with the service down | | 0.41 (423 MiB, desktop compositor) |
+
+So the service's own footprint measured at the driver is about **9.94 GiB**, and the weight
+file on disk is 10,246,621,918 bytes (9.543 GiB). The KV cache for a 268-token prompt and a
+512-token completion is small enough to sit inside the allocator's existing reservation:
+allocated rose by only 8.5 MB between a freshly loaded service and one that had served ten
+generations.
+
+**This is the figure that feeds the open question about the target phone, which nobody has
+sized.** Stating it plainly: 9.55 GiB of bfloat16 weights is not a phone-resident model.
+INFERRED, and worth someone checking properly rather than taking from here: reaching a
+typical 8 GiB or 12 GiB handset would need INT4 weight quantization (roughly 2.4 GiB for
+this parameter count) plus dropping the vision and audio towers, and no such artifact
+exists in this repository. `models/litert_bundle/` contains one 782-byte JSON manifest and
+no weights, as the 2026-09-09 audit recorded, and that is still true.
+
+---
+
+## 3. Contract corrections, for the main machine
+
+The contract at `docs/backend/slm-service-contract.md` was written before this service
+existed. Holes in it are expected. Each item below is either already fixed in this repo's
+copy, or is a finding the canonical copy needs.
+
+### 3.1 The endpoint path. **Fixed here. The canonical copy needs the same edit.**
+
+MEASURED: in the 459-line original, no generation endpoint path appears anywhere. `grep`
+for `POST`, `/v1/`, `/api/` and `generate` returns only `/v1/chat/completions` (in the
+sentence disowning the sample app) and `/health`. Both sides had to build against a path
+neither could look up.
+
+The edit, inserted directly under the `## 2. Request` heading and above `### 2.1 Shape`:
+
+```
+**Endpoint: `POST /v1/generate`.**
+
+Named here because v1 of this document specified the request, the envelope, the error vocabulary
+and the timeout budget without ever naming the path they travel on, while both sides had to build
+against one. PR-4 chose `/v1/generate` and pinned it as a named constant on the calling side, so
+this line makes the document match what was built rather than leaving the single field neither side
+could look up. The other path this service exposes is `GET /health` (§5.1).
+```
+
+`/v1/generate` is pinned in this service at `slm_service/__init__.py` as `GENERATE_PATH`,
+matching what PR-4 pinned on the calling side. **Apply the same paragraph to the canonical
+copy so the two do not drift.**
+
+### 3.2 §3.1's example `model_sha256` is the digest of the wrong file
+
+MEASURED. The example envelope gives
+`"model_sha256": "cc8d3a0ce36466ccc1278bf987df5f71db1719b9ca6b4118264f45cb627bfe0f"`.
+In the cached snapshot of `google/gemma-4-E2B-it`, that is the content-addressed blob name
+of **`tokenizer.json`**. The weight file's digest is
+`2db5482b20d746879bb3ef79b5203e9075a2e2b98f54ec7c2f281c1477ddc550`.
+
+The rule in §3.2 is right and the example under it points at the tokenizer. An implementer
+who anchors on the example hashes the wrong artifact and gets a digest that is stable across
+a weight change, which is precisely the failure §3.2 exists to prevent. **Replace the example
+value, or mark it explicitly as illustrative and not from this artifact.**
+
+### 3.3 §3.2 requires deriving `model_id`, and the artifact does not carry its own name
+
+MEASURED, two separate problems.
+
+First, `config.json` for `google/gemma-4-E2B-it` has **no `_name_or_path` key** (top-level
+keys are `architectures`, `audio_config`, `audio_token_id`, `boa_token_id`, `boi_token_id`,
+`dtype`, `eoa_token_id`, `eoa_token_index`, `eoi_token_id`, `eos_token_id`, `image_token_id`,
+`initializer_range`, `model_type`, `text_config`, `tie_word_embeddings`,
+`transformers_version`, `video_token_id`, `vision_config`, `vision_soft_tokens_per_image`).
+There is nothing inside the artifact's files that states the repository it is served as. This
+service derives it from the Hugging Face cache directory layout
+(`models--google--gemma-4-E2B-it`), which is written by the downloader from the repo id
+actually fetched. That is a derivation from the artifact on disk, but it is weaker than §3.2
+implies, and it stops working for an artifact deployed as a plain directory.
+
+Second, and worse: where `_name_or_path` **is** present it can name an upstream ancestor
+rather than the served repository. MEASURED on the second real artifact in the local cache,
+`sentence-transformers/all-MiniLM-L6-v2`, whose `config.json` reports
+`nreimers/MiniLM-L6-H384-uncased`. Preferring that field would make a correctly deployed
+service report a name the caller's pin does not match, and would make two different
+fine-tunes of one ancestor report the same `model_id`.
+
+**The contract should state which source is authoritative**, and in what order. This service
+uses cache layout first, `_name_or_path` second, and refuses to start when neither answers.
+
+### 3.4 There is no error code and no outcome row for an authentication failure
+
+§4.4 requires the backend-to-service hop to be authenticated and leaves the mechanism to the
+service. But §4.1's registry has no code for a rejected credential, and §4.2's table, which
+asserts totality in prose and forbids an "other" row, has **no row for a 401**.
+
+This service allocates **`SAMD-SLM-8008` / 401 / "Service authentication failed"** from the
+same previously unused 8xxx block. The canonical registry must either adopt that number or
+choose another before anything ships, since §9.1 discipline makes it permanent once a caller
+branches on it.
+
+§4.2 also needs a row. `PAYLOAD_REJECTED` is the wrong target: the payload was never
+examined, and a caller that retries a rejected credential the way it retries a bad field will
+loop. §4.2's own rule says the correct response to a failure with no row is to add a row, not
+to widen an existing bucket, so this reads as a new `SlmCallOutcome` value alongside the
+`QUEUE_FULL` gap §4.2.1 already records.
+
+### 3.5 §2.2 does not say whether `prompt` arrives already wrapped in chat control tokens
+
+This is the most consequential hole found, and a test caught it rather than reasoning.
+
+§2.2 says the service performs no chat-template application, no role wrapping and no
+system-prompt injection, and that the prompt "is assembled by the device's seam from a
+versioned template and arrives complete". It does not say what "complete" includes.
+
+MEASURED on this artifact's tokenizer: **`add_special_tokens` is a no-op.** The record text
+and the record text with `add_special_tokens=True` both tokenize to 259 tokens, first token
+`3048`, with no BOS. The BOS token appears only because the artifact's own chat template
+writes the literal string `<bos>`. So anything the template does not write is simply absent,
+and the service cannot add it without becoming the thing §2.2 forbids.
+
+The consequence, MEASURED end to end on the running service, same record, same settings:
+
+| Prompt form | `finish_reason` | completion | text |
+|---|---|---:|---|
+| Record sent raw | `length` | 512 tok | `"\n\nPatient.\n\nPatient.\n\nPatient."` repeated to the ceiling |
+| Record wrapped by the artifact's chat template | `stop` | 207 tok | a correct plain-language readback |
+
+A degenerate completion of that kind is not an error at any layer. It arrives over a `200`,
+it passes the stream sanitizer untouched, and **it passes the output grounding gate by
+construction** for the same reason a truncated readback does: it introduces no drug name and
+no dosing numeral the record did not already contain. It contains almost nothing at all.
+
+In this instance truncation caught it, because the degenerate loop ran to the ceiling and
+reported `length`. That was luck. A degenerate completion that emits EOS early would report
+`stop` and be indistinguishable from a correct readback in every field of the envelope.
+
+**The contract should state that `prompt_template_version` `slm-readback-v1` emits the fully
+templated string, including the artifact's leading BOS and its turn control tokens, and that
+the service feeds it verbatim.** Until it does, the one property this contract exists to
+provide is not provided: the caller cannot tell whether what came back is a readback.
+
+This service cannot reject on the condition, because the contract does not authorise a
+rejection, so it makes it visible instead: the per-request service log carries
+`prompt_starts_with_bos`, derived from the first token id of the tokenized prompt.
+
+### 3.6 §5.1's "load state" cannot discriminate under §5.2's lifespan load
+
+§5.1 says load state "distinguishes starting from serving". §5.2 requires the model to load in
+a lifespan hook. Those two do not compose: a uvicorn worker does not accept connections until
+lifespan startup has returned, so an external caller can never observe `loading`. MEASURED:
+during the 14 s startup, `GET /health` is refused at the TCP layer, not answered with
+`loading`.
+
+The field is implemented honestly (it is read from live state, never a literal) but it can
+only ever read `loaded` from outside. Either accept that and say so, or specify background
+loading, which would make the state observable at the cost of a window where the service is
+up and cannot serve.
+
+### 3.7 `SAMD-SLM-8004` is unreachable under fail-fast startup, and is flagged rather than dressed up
+
+Same root cause as 3.6. Because a load failure is a startup failure, there is no live path on
+which a request meets an unloaded model. The guard exists in `slm_service/app.py` and is
+correct, but **it is a defensive guard, not a live path**, and no test asserts it fires in
+production conditions, because none honestly can.
+
+Saying so explicitly, because a guard that can never fire while a test reports it satisfied is
+the eighth instance's exact shape, and it would be easy to write a test here that manipulates
+`app.state` into an impossible configuration and then claim the path is covered.
+
+### 3.8 `api-contract.md` §0.5 and §0.6 are not on this machine
+
+The contract's Conventions section says §0 of `api-contract.md` applies unchanged, including
+the success envelope (§0.5) and the RFC 9457 error envelope (§0.6). MEASURED: the only copy of
+`api-contract.md` on this machine is inside the stale read-only clone, which this change is
+forbidden to read line numbers from and did not use.
+
+The error envelope here is therefore **INFERRED** from RFC 9457 itself plus this contract's
+own §4.1: `type`, `title`, `status`, `code`, `detail`, `instance`, and `errors[]` on a
+`SAMD-SLM-8001`, served as `application/problem+json`. **Someone with the canonical
+`api-contract.md` must reconcile the field names.** If §0.6 spells the code field differently,
+this service's responses are wrong in a way no test here can detect.
+
+### 3.9 The pinned `transformers` floor in the repo cannot load this artifact
+
+Not a contract item, but it blocks anyone reproducing this. MEASURED: the repository's
+`requirements-docker.txt` pins `transformers>=4.40.0`, and the interpreter on this machine has
+4.44.2 installed, which raises
+`ValueError: The checkpoint you are trying to load has model type gemma4 but Transformers does
+not recognize this architecture.` The artifact's `generation_config.json` records
+`transformers_version: 5.5.0.dev0`.
+
+This service is built and measured against **`transformers==5.5.0`**, pinned exactly in
+`deploy/slm/requirements.txt`, installed into a dedicated virtualenv at
+`/media/acps/twoTBDrive/venv-slm` rather than into the machine's base environment, which was
+left untouched.
+
+---
+
+## 4. Deployment, and what was not verified
+
+`deploy/slm/Dockerfile` uses `pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime`, a CUDA base
+image, and does not reinstall torch from PyPI. `deploy/slm/docker-compose.yml` declares an
+explicit `deploy.resources.reservations.devices` GPU reservation, pins `SLM_DEVICE=cuda`,
+publishes only to `127.0.0.1`, and attaches the service to a private bridge network that
+backend/core joins. `SLM_SERVICE_TOKEN` is required from the operator's environment and is
+absent from the file.
+
+**The image was not built and the container was not run.** MEASURED and stated plainly rather
+than glossed: Docker's root directory is `/var/lib/docker` on a filesystem with **5.5 GiB
+free at 100 percent used**, and the CUDA base image alone exceeds that. `docker compose config`
+parses the file and resolves the GPU reservation and the `127.0.0.1` host binding correctly,
+which is syntax and topology confirmation only.
+
+**Everything measured in sections 1, 2, 5 and 6 was measured against the service running
+directly under uvicorn on this host, not in the container.** INFERRED: containerised latency
+should be within noise of these figures, since the GPU, the driver and the artifact are the
+same and the container adds no proxy hop. Not measured. Someone with disk space should run
+the suite against the built image before this ships.
+
+---
+
+## 5. Tests
+
+**96 tests, all green.** Run with `transformers==5.5.0` from
+`/media/acps/twoTBDrive/venv-slm`, against the real artifact resident on the real GPU:
+
+```
+cd tests/slm_service
+HF_HOME=/media/acps/twoTBDrive/huggingface_cache HF_HUB_OFFLINE=1 \
+  /media/acps/twoTBDrive/venv-slm/bin/python -m pytest
+```
+
+```
+96 passed in 137.82s (0:02:17)
+```
+
+| File | Tests | What it covers |
+|---|---:|---|
+| `test_unit.py` | 42 | admission, the registry, the request schema, the log allowlist, config refusals, the partial-load guard |
+| `test_identity.py` | 12 | derivation, the swapped artifact, the independent digest witnesses |
+| `test_service.py` | 31 | the live service under its shipped defaults |
+| `test_startup.py` | 6 | startup refusals |
+| `test_zz_limits.py` | 5 | the wall clock and a queue that holds nothing |
+
+Two design choices worth naming, both aimed at the shape this project keeps hitting:
+
+**No fake engine anywhere.** Every service test runs against a real uvicorn process with the
+real 9.55 GiB artifact resident on the real GPU. A test asserting against a stand-in that
+re-implemented this service's own policy would keep reporting satisfied while the artifact
+changed underneath it.
+
+**The digest witnesses are not this service's code.** `test_identity.py` checks the derived
+digest against the Hugging Face content-addressed blob name, written by a different program at
+download time, and against coreutils `sha256sum`, a different implementation of the same hash.
+A test that recomputed the digest with the same `hashlib` call the service uses would agree
+with the service no matter what either of them did.
+
+Only one service process is alive at a time, enforced by the fixture. Two are not slower, they
+are an out-of-memory: 2 x 9.55 GiB does not fit in 15.561 GiB.
+
+---
+
+## 6. Mutation checks
+
+The standing rule from eight instances in this project is that a check reporting
+satisfied while the thing it checks has changed underneath it is the characteristic bug
+here. So every property this service establishes was broken deliberately.
+
+Procedure, for each row: hash the file, apply a replacement whose needle is asserted
+**unique against the whole file** (not against a neighbourhood), run the named tests and
+require RED, restore from a byte-for-byte copy, confirm the hash is unchanged, then run
+the same tests again and require GREEN. A hang counts as RED but is not allowed to stall
+the harness, so every run carries a 150 s per-test timeout and a 900 s process timeout.
+
+**20 mutations. All 20 went RED, restored byte-identical, and came back GREEN.**
+
+| # | Mutation | Property it removes | Test that caught it | RED | Restored identical | GREEN |
+|---|---|---|---|---|---|---|
+| M01 | `_derive_finish_reason` returns the literal `"stop"` | honest finish reason, the sample service's exact defect | `test_a_truncated_readback_is_distinguishable_from_a_complete_one` | yes | yes | yes |
+| M02 | tokenizer set to `truncation=True`, handler bound disabled | over-length prompt rejected, never truncated | `test_overlong_prompt_is_rejected_and_not_truncated` | yes | yes | yes |
+| M03 | digest replaced with a hardcoded hex string | digest derived from the artifact | `test_digest_changes_when_one_byte_changes` | yes | yes | yes |
+| M04 | `_derive_model_id` returns a literal repo id | model_id derived from the artifact | `test_cache_layout_wins_over_an_upstream_name_in_config` | yes | yes | yes |
+| M05 | admission capacity check disabled | bounded queue, 503 under saturation | `test_admission_refuses_beyond_capacity` (by timeout) | yes | yes | yes |
+| M06 | cancel stopping criterion removed | disconnect stops generation | `test_disconnected_client_stops_the_generation` | yes | yes | yes |
+| M07 | CUDA availability guard disabled | startup fails without a GPU | `test_startup_fails_when_cuda_is_absent` | yes | yes | yes |
+| M08 | token comparison replaced with `return True` | auth fails closed | `test_authentication_precedes_validation` | yes | yes | yes |
+| M09 | service log allowlist check disabled | prompt and text cannot reach a log | `test_service_log_rejects_a_field_outside_its_allowlist` | yes | yes | yes |
+| M10 | envelope reports `top_k: 64` | decode reports what was applied | `test_decode_reports_what_was_applied_including_what_nobody_sent` | yes | yes | yes |
+| M11 | `extra="forbid"` changed to `"ignore"` | unknown fields rejected, `messages` unreachable | `test_unknown_field_is_rejected_not_ignored` | yes | yes | yes |
+| M12 | temperature validator disabled | temperature must be exactly 0 | `test_out_of_contract_values_are_422_with_errors[temperature]` | yes | yes | yes |
+| M13 | `min(requested, ceiling)` replaced by `requested` | decode ceiling enforced | `test_max_tokens_is_served_as_min_of_request_and_ceiling` | yes | yes | yes |
+| M14 | deadline stopping criterion removed | the service abandons its own generation | `test_the_service_abandons_its_own_generation_at_the_cap` | yes | yes | yes |
+| M15 | model_id conflict check disabled | 409 rather than a substitution | `test_wrong_model_id_is_a_conflict_not_a_substitution` | yes | yes | yes |
+| M16 | auth reverted to `BaseHTTPMiddleware` | disconnect detection survives the middleware stack | `test_disconnected_client_stops_the_generation` | yes | yes | yes |
+| M17 | `stranded_parameters` returns `[]` | a partial load is a load failure | `test_stranded_parameters_catches_a_partially_moved_model` | yes | yes | yes |
+| M18 | `prompt_starts_with_bos` hardcoded `True` | the prompt-completeness signal is read, not asserted | `test_a_prompt_missing_the_artifacts_control_tokens_is_visible_in_the_log` | yes | yes | yes |
+| M19 | health reports a literal model_id and digest | health is never a static literal | `test_health_identity_matches_what_a_generation_reports` | yes | yes | yes |
+| M20 | stop sequence reported as `stop` | `stop_sequence` distinguished from model EOS | `test_stop_sequence_is_reported_as_stop_sequence` | yes | yes | yes |
+
+Three of these deserve a note rather than a row.
+
+**M05 went red by timeout, not by assertion.** With the capacity check disabled, `acquire`
+increments its counter and then waits on a semaphore that is never released, so the test
+deadlocks instead of failing. That is still a correct RED, and it is worth recording that
+the unbounded-queue failure mode on this service is a hang rather than an error, which is
+precisely the shape the contract describes when it says a timeout is indistinguishable at
+the far end from the service being down.
+
+**M07 was refused on its first attempt, by the needle-uniqueness check.** The obvious needle
+`if not torch.cuda.is_available():` occurs twice in `engine.py`: once as the startup guard
+and once inside `vram()`. The harness aborted rather than mutate an ambiguous target. The
+mutation was re-anchored on the `raise CudaUnavailable(` line that follows and then behaved
+as required. This is the guard-needle failure named in the brief, caught on itself.
+
+**M16 is the one that documents why a design choice is load-bearing.** Reverting the auth
+middleware from pure ASGI to `BaseHTTPMiddleware` leaves every auth test green and turns the
+disconnect test red, because `BaseHTTPMiddleware` replaces the downstream `receive` with its
+own queue and `http.disconnect` never reaches the handler. The guard in `app.py` would have
+stayed in the source, looked correct, and never fired.
+
+---
+
+## 7. What a test caught that reasoning did not
+
+Three things. All three were found by running the thing, not by reading it.
+
+**1. The prompt must arrive already wrapped in the artifact's chat control tokens, and
+nothing in the contract says so.** Covered in full at §3.5 above. The first end-to-end
+generation returned `"\n\nPatient.\n\nPatient.\n\nPatient."` repeated to the token ceiling.
+Reasoning had accepted §2.2's "arrives complete" as settled and moved on. This is the most
+serious finding in the change: a degenerate readback that ends in EOS rather than at the
+ceiling would report `finish_reason: stop` and pass every field of the envelope, the stream
+sanitizer, and the output grounding gate.
+
+**2. Deriving `model_id` from `config.json` `_name_or_path` is wrong, and the second real
+artifact proved it.** The first version of `identity.py` preferred `_name_or_path` and fell
+back to the cache layout. `test_swapped_artifact_changes_model_id_and_digest` failed with
+`assert 'nreimers/MiniLM-L6-H384-uncased' == 'sentence-transformers/all-MiniLM-L6-v2'`.
+That field records what a checkpoint was initialised from, not what it is served as. The
+served artifact here has no `_name_or_path` at all, so this would never have shown up
+against `google/gemma-4-E2B-it` alone, and it would have shipped as a latent defect that
+fires the first time someone deploys a fine-tune whose config names its base. The precedence
+is now cache layout first, and two tests pin it.
+
+**3. The auth middleware silently disabled disconnect detection.** Writing auth as
+`@app.middleware("http")` was the obvious choice and every auth test passed. The disconnect
+test failed, showing a generation that ran to completion, `finish_reason: stop`, 207 tokens,
+after the caller had already gone. Reasoning had treated auth placement and disconnect
+detection as unrelated concerns. They are coupled through the ASGI `receive` callable. This
+one is close in shape to the eighth instance from PR-4: a correct-looking guard made
+unreachable by where a middleware sits. Preserved as M16 so it stays caught.
+
+One smaller thing, caught by the harness rather than by a test: the first mutation table had
+a needle that matched twice (M07 above). The uniqueness assertion is worth keeping in any
+future mutation run in this project.
+
+---
+
+## 8. Reproducing
+
+```bash
+# service
+HF_HOME=/media/acps/twoTBDrive/huggingface_cache HF_HUB_OFFLINE=1 \
+SLM_SERVICE_TOKEN=<from the operator's secret store> \
+  /media/acps/twoTBDrive/venv-slm/bin/python -m slm_service
+
+# tests
+cd tests/slm_service
+HF_HOME=/media/acps/twoTBDrive/huggingface_cache HF_HUB_OFFLINE=1 \
+  /media/acps/twoTBDrive/venv-slm/bin/python -m pytest
+```
+
+Settings, all read from the environment: `SLM_SERVICE_TOKEN` (required, never logged),
+`SLM_ARTIFACT_REF`, `SLM_DEVICE` (must be `cuda`), `SLM_MAX_PROMPT_TOKENS` (2048),
+`SLM_DECODE_CEILING` (512), `SLM_GENERATION_DEADLINE_S` (40), `SLM_MAX_QUEUED` (2),
+`SLM_RETRY_AFTER_S` (10), `SLM_DISCONNECT_POLL_S` (0.25), `SLM_HOST` (127.0.0.1),
+`SLM_PORT` (8100).
+
+`SLM_MAX_PROMPT_TOKENS` is 2048 against a measured representative readback of 268 tokens.
+The device's 6000-character bound corresponds to roughly 1550 to 1700 tokens of clinical
+English, so the device's bound stays strictly tighter in practice and a `413` means
+something has drifted, which is what §2.3 asks for.
+
+A dedicated virtualenv at `/media/acps/twoTBDrive/venv-slm` holds `transformers==5.5.0`.
+The machine's base conda environment was not modified; it still has 4.44.2, which cannot
+load this artifact.
+
+---
+
+## 9. Container proof: blocked at the disk step (2026-09-20, follow-up session)
+
+**Model:** Sonnet 5, effort high, with an escalate-and-stop instruction for exactly the
+condition hit below.
+
+**Task:** clear disk, build and run `slm_service/` per `deploy/slm/`, and measure it in
+the container so the host numbers from section 1 above could be compared against a real
+containerised run. Blocked at the first step. Steps 2 through 5 (build, in-container
+measurement, safety re-proof, the backend hop) **did not happen** and nothing below
+should be read as if they did.
+
+### 9.1 The disk, MEASURED
+
+`/var/lib/docker` (from `docker info`) is not a separate mount. It lives on the same
+filesystem as `/`:
+
+```
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/nvme0n1p5  599G  564G  4.0G 100% /
+```
+
+Docker's own accounting, before any reclaim:
+
+```
+TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE
+Images          2         2         20.88GB   117.3MB (0%)
+Containers      2         2         4.792MB   0B (0%)
+Local Volumes   0         0         0B        0B
+Build Cache     27        0         28.59MB   28.59MB
+```
+
+Both images belong to containers that are **running and healthy right now**, not stopped
+and not dangling:
+
+| Container | Image | Size | Status | Published |
+|---|---|---:|---|---|
+| `gemma4-pharma-inference` | `gemma4-pharma-service:latest` | 9.34 GB | Up 7 hours (healthy) | `0.0.0.0:8000->8000` |
+| `samd-classifier` | `samd-classifier:latest` | 11.7 GB | Up 7 hours (healthy) | `0.0.0.0:8001->8000` |
+
+`gemma4-pharma-inference` is the demo `edge_server.py` container from before this branch
+existed, still up, still published on all interfaces. Noted because it is exactly the
+defect class this PR-5 work exists to not repeat, not because anything was done about it
+here: stopping or removing a live, healthy container is outside "Docker's own build
+cache, dangling images and stopped containers" and outside this task's authorisation.
+
+`docker images -f dangling=true` returned nothing. `docker ps -a -f status=exited`
+returned nothing. There was no stopped container and no dangling image to reclaim from.
+
+**Reclaimed:** `docker builder prune -f` freed the full 28.59MB of build cache. After it,
+`docker system df` reports `Build Cache 21 0 0B 0B` and `df -h /` still reads `4.0G`
+available (the change is below the rounding step at this scale). This is the entirety of
+what Docker's own caches had to give.
+
+**What is needed:** the base image `pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime`
+measures **3.21 GB compressed** across its layers, MEASURED from
+`docker manifest inspect` summed programmatically. Uncompressed on disk during extraction
+this is larger; INFERRED, not measured, commonly 1.3 to 2x. On top of that, the service's
+own layer installs `transformers==5.5.0`, `accelerate`, `huggingface_hub`, `fastapi`,
+`uvicorn[standard]` (torch itself is not reinstalled, deliberately, since it ships in the
+base image). 28.59MB reclaimed against a pull that needs several GB, on a filesystem with
+4.0GB free, does not clear the bar the brief set: "If Docker's caches do not yield enough
+... STOP."
+
+### 9.2 What else is using the filesystem, reported and not touched
+
+```
+553G	/
+506G	/home
+ 24G	/usr
+ 18G	/var
+4.7G	/opt
+```
+
+```
+496G	/home/acps
+136G	/home/acps/UnrealEngine
+ 76G	/home/acps/Final Working Files
+ 38G	/home/acps/Documents
+ 32G	/home/acps/dgx_pav
+ 31G	/home/acps/anaconda3
+ 26G	/home/acps/f_work
+ 20G	/home/acps/SDV Project 2025
+ 15G	/home/acps/mtrl-auto-uav
+ 13G	/home/acps/MyProject3
+ 11G	/home/lokesh
+ 11G	/home/acps/.cache
+8.4G	/home/acps/.steam
+5.8G	/home/acps/Downloads
+5.2G	/home/acps/.gradle
+```
+
+None of this is Docker's, none of it is this repository's, and none of it was created by
+this task. It is unrelated personal and project data spanning at least a dozen other
+projects and a second user account (`lokesh`). Reclaiming the several GB a CUDA build
+needs would mean choosing what to remove or move from that list, or stopping one of the
+two live containers above, either of which is a decision for the operator, not something
+to infer from a task brief that only authorised Docker's own caches.
+
+### 9.3 Why this stops here rather than escalating past it
+
+The brief's own condition: **"ESCALATE to Opus 5 high and STOP if freeing disk space
+would touch anything outside Docker's own caches."** MEASURED, it would. Docker's own
+caches yielded 28.59MB; the smallest plausible path to enough headroom for the CUDA pull
+touches either a live container this task has no authority to stop, or gigabytes of
+another user's unrelated files. Both are outside the boundary the brief drew. Stopping
+here rather than making that call is the instruction, not a judgement call being second-guessed.
+
+### 9.4 What did not happen
+
+Steps 2 to 5 were not attempted: the image was not built, no container was brought up, no
+in-container GPU or network proof was taken, no in-container measurement was taken, and
+no re-proof of the safety properties against a container was done. Everything in
+sections 1 to 8 above remains what it was: measured on the host under uvicorn, not in a
+container. Whether the containerised path behaves the same is still unproven.
+
+### 9.5 What the operator needs to decide before this can proceed
+
+One of:
+- Free several GB on `/` from the `/home/acps` list above (an operator call: nothing
+  there is this task's to move or delete), or
+- Point Docker's data root at a filesystem with room (`/media/acps/twoTBDrive` has 1.6TB
+  free, MEASURED earlier in this branch's history), which changes where every image and
+  container on this machine lives and is itself a decision with consequences for the two
+  running services above, or
+- Stop and remove `gemma4-pharma-inference` and/or `samd-classifier` to reclaim their
+  20.88GB, which takes two running, healthy services down.
+
+Nothing above was decided or acted on here.
+
+---
+
+## 10. Data-root relocation: blocked at the Step 0 gate (2026-09-21)
+
+**Model:** Opus 5, effort high. Task: relocate Docker's data-root from `/var/lib/docker`
+to `/media/acps/twoTBDrive` so a CUDA image pull has room, per the operator's decision
+after section 9. **No container was stopped, no file was moved, no config was edited, no
+daemon was touched.** Everything below is read-only inspection through the Docker API
+socket and the filesystem's own public metadata (`df`, `findmnt`, `/etc/fstab`,
+`systemctl show`, world-readable files). Two independent gate failures stopped the plan
+before Step 1 began, exactly where the brief said to stop rather than proceed on a hope.
+
+### 10.1 The four gate checks
+
+**1. Filesystem type of `/media/acps/twoTBDrive`.** MEASURED: `ext4`
+(`/dev/nvme1n1p1`, `findmnt` and `mount` agree). ext4 is a filesystem overlay2 supports.
+One sub-question could not be settled: overlay2 specifically needs the `d_type` /
+`filetype` feature enabled on the ext4 volume, and confirming that requires
+`tune2fs -l` or `dumpe2fs -h` against the raw block device, both of which returned
+`Permission denied while trying to open /dev/nvme1n1p1` under this account (the device
+node is root-owned, mode not readable by `acps`, and `acps` is not in the `disk` group).
+**INFERRED, not measured:** almost certainly enabled, because the `filetype` feature has
+been e2fsprogs' default for over a decade and disabling it requires deliberately passing
+`-O ^filetype` at format time, and because the root filesystem is also ext4 and is
+already running overlay2 successfully (`dockerd`'s own startup log: `"using prior storage
+driver: overlay2"`). Not proof about a *different* partition. Whoever runs Step 2 with
+root should confirm with one `tune2fs -l` before trusting it.
+
+**2. Free space on twoTBDrive, and current size of `/var/lib/docker`.** MEASURED, the
+first half: twoTBDrive has 1.6 TiB free of 1.8 TiB (8% used), exactly
+1,719,447,379,968 bytes. **Not measured, the second half:** `/var/lib/docker` is
+`drwx--x--- 12 root root`, and `du -sh /var/lib/docker` as `acps` returns
+`Permission denied while trying to open` every subdirectory; even `du` cannot enter it
+without root. The only figure obtainable without root is what the Docker API reports
+through `docker system df`, which is a logical accounting, not a true on-disk size, and
+excludes whatever containerd or the daemon's own runtime state adds underneath the same
+tree:
+
+```
+TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE
+Images          2         2         20.88GB   117.3MB (0%)
+Containers      2         2         4.792MB   0B (0%)
+Local Volumes   0         0         0B        0B
+Build Cache     21        0         0B        0B
+```
+
+So **20.88 GB is a lower bound**, not the figure Step 1 asked for. The true size needs a
+root-run `du -sh /var/lib/docker`.
+
+**3. Whether twoTBDrive mounts at boot.** MEASURED, and this is where the plan stops.
+**`/media/acps/twoTBDrive` is not in `/etc/fstab`.** The entire file:
+
+```
+UUID=546eced3-1dc0-4a2a-b75a-35e6c20bf838 /               ext4    errors=remount-ro 0       1
+UUID=882F-D6C2  /boot/efi       vfat    umask=0077      0       1
+#/swapfile                                 none            swap    sw              0       0
+UUID=37426374-0cf1-4780-9620-90e722ff2a5b none   swap    sw      0       0
+```
+
+No entry for `nvme1n1p1` or the label `twoTBDrive`. `mount` shows the actual mechanism:
+`rw,nosuid,nodev,relatime,stripe=64,uhelper=udisks2`. `uhelper=udisks2` means this drive
+is mounted by udisks2, the desktop-session automount service, not by systemd at boot and
+not before `docker.service` runs. `docker.service` and `docker.socket` are both
+`systemctl is-enabled` **`enabled`**, meaning systemd starts the daemon automatically on
+every boot, with no dependency on this mount because systemd does not know this mount
+exists as a unit.
+
+This is precisely the failure the brief named: pointing `data-root` at a udisks2 mount
+means that on the next reboot, `dockerd` starts before the drive is necessarily attached,
+and one of two things happens, both bad. Either `/media/acps/twoTBDrive` is an empty
+directory at that moment and Docker silently initialises a **new, empty** data-root
+there, forgetting both running containers and every pulled image ever existed, with
+`restart: unless-stopped` having nothing to restart because the daemon's own state does
+not mention them. Or the daemon fails to start at all if the path does not exist yet.
+Either way, both live services go down on every reboot until someone notices and
+intervenes by hand. **Per the brief's own instruction: "If it is not in fstab with a
+boot-time mount, say so and stop; that has to be fixed first."** Stated here rather than
+worked around.
+
+**4. Init system, and how the two containers start.** MEASURED. systemd manages Docker:
+unit `docker.service`, loaded from `/lib/systemd/system/docker.service`, enabled,
+triggered by `docker.socket` (also enabled), both currently active. Neither container was
+started by hand. Both come from `docker compose`, `restart: unless-stopped`:
+
+| Container | Compose file | Compose project |
+|---|---|---|
+| `gemma4-pharma-inference` | `/media/acps/twoTBDrive/finetuninggemma4/docker-compose.yml` | `finetuninggemma4` |
+| `samd-classifier` | `/media/acps/twoTBDrive/maincodes/SaMDClassifier/docker-compose.yml` | `samdclassifier` |
+
+(`SaMDClassifier` is a sibling directory to the forbidden `SaMD-App` clone, a different
+path; it was not opened, only its path read back from `docker inspect` labels.)
+
+### 10.2 A second, independent blocker: no root access in this session
+
+Beyond the fstab gap, Step 2 cannot run regardless: this session has **no non-interactive
+root access**. `sudo -n true`, `sudo -n -v`, and `sudo -n -l` all return
+`sudo: a password is required`. `/etc/sudoers.d/` holds only the distribution's default
+`README`, no custom `NOPASSWD` rule. There is no cached sudo timestamp to ride on. Every
+Step 2 action, stopping the daemon, copying `/var/lib/docker` with hardlinks and xattrs
+intact, editing `/etc/docker/daemon.json`, restarting the daemon, needs root, and nothing
+in this non-interactive tool environment can supply an interactive sudo password. Asking
+the operator to paste one into this session would not be appropriate to act on here
+either. Root-level execution of Step 2, once the fstab gap is fixed, has to happen in a
+session with actual root, whether that is the operator at a terminal or this assistant
+given a working non-interactive privilege path.
+
+One piece of otherwise-private state was readable without root and is worth recording:
+`/etc/docker/daemon.json` is world-readable (`-rw-r--r-- root root`) and currently holds
+only the NVIDIA runtime registration:
+
+```json
+{
+    "runtimes": {
+        "nvidia": {
+            "args": [],
+            "path": "nvidia-container-runtime"
+        }
+    }
+}
+```
+
+Whoever edits this file for `data-root` needs to merge `"data-root": "<path>"` alongside
+the existing `runtimes` block, not replace it; the GPU containers depend on the latter.
+
+### 10.3 What was not done
+
+Nothing under Step 1 (recording the pre-move state to a file), Step 2 (stopping
+containers, stopping the daemon, copying the tree, editing daemon.json, restarting), or
+Step 3 (verification) was attempted. No container was stopped. `docker builder prune`
+was not re-run in this session; nothing was deleted. `/home` was not touched, for any
+user. The stale `SaMD-App` clone was not opened.
+
+### 10.4 What has to happen before this can proceed
+
+Two things, in order, both outside this session's reach:
+
+1. **Put `/media/acps/twoTBDrive` in `/etc/fstab` with a boot-time mount**, by UUID
+   (`97066a95-9114-4bd8-9f89-e56beba6f10b`, from `blkid`/`lsblk -f` in the prior session),
+   and confirm with a reboot or `mount -a` after an fstab edit that it comes up before
+   `docker.service` would need it, or add an explicit systemd mount unit with
+   `docker.service` ordered `After=`/`Requires=` it. This is a root-level, reboot-tested
+   change and belongs to the operator or a session with real privilege.
+2. **Give the executing session actual root**, interactively or via a scoped
+   `NOPASSWD` sudoers rule for the specific commands Step 2 needs, since none exists now.
+
+Only after both are true does re-attempting Step 2 make sense. Attempting it now would
+either fail outright (no root) or, if root were supplied without first fixing the fstab
+gap, succeed today and silently lose both containers on the next reboot, which is the
+exact failure this gate was written to catch.
+
+### 10.5 Free space for the CUDA build: unchanged
+
+Because nothing moved, the free-space picture from section 9 is unchanged. `/`: 4.0 GiB
+free (`df -h`, MEASURED just now). twoTBDrive: 1.6 TiB free, MEASURED, more than the
+3.21 GB compressed CUDA base image needs many times over, but that space is only useful
+for the build once Docker's data-root actually lives there, which section 10.1 to 10.2
+above says cannot happen yet.
+
+---
+
+## 11. Third attempt at the container build, 2026-09-21: stopped at the Step 0 gate again
+
+This session was tasked to build and prove the `slm_service` container, on the stated
+premise that "Docker's data-root was relocated by the operator outside this session."
+That premise is false, MEASURED. The gate also turned up two facts about the
+pre-existing containers that the task brief asserts the opposite of, one of which
+matters well beyond this build. Nothing was built, nothing was changed, nothing was
+stopped or started.
+
+### 11.1 The data-root was not relocated
+
+MEASURED, `docker info`:
+
+```
+Docker Root Dir: /var/lib/docker
+Storage Driver:  overlayfs
+Server Version:  29.7.2
+```
+
+MEASURED, `/etc/docker/daemon.json` (world-readable, unchanged since 2026-08-10 16:56):
+it still contains only the `runtimes` block quoted in section 10.2. There is no
+`data-root` key. MEASURED, `systemctl cat docker.service`: `ExecStart` is the stock
+`/usr/bin/dockerd -H fd:// --containerd=...` with no `--data-root` override. So the
+relocation was not performed by either available mechanism, and `docker info` (which
+reports the effective value, not the configured one) confirms the daemon is still
+serving out of `/var/lib/docker` on the root filesystem.
+
+### 11.2 Free space: the build still does not fit
+
+MEASURED, `df`:
+
+| Filesystem | Mounted on | Size | Used | Avail | Use% |
+|---|---|---|---|---|---|
+| `/dev/nvme0n1p5` | `/` | 599G | 564G | **4.0G** | **100%** |
+| `/dev/nvme1n1p1` | `/media/acps/twoTBDrive` | 1.8T | 139G | 1.6T | 8% |
+
+Exact figure for `/`: 4,236,292,096 bytes, which is 4.24 GB (3.95 GiB).
+
+MEASURED, `docker manifest inspect pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime`:
+5 layers, compressed total **3.21 GB**, matching the figure in the brief exactly.
+
+That 3.21 GB is the compressed download. What consumes data-root is the *extracted*
+layer set, which for this image is materially larger than its compressed size
+(INFERRED, roughly 6.5 to 7.5 GB, from the usual compression ratio on CUDA and cuDNN
+runtime layers; not independently measured here because pulling it is the very thing
+there is no room for). On top of that comes the `pip install` layer for
+`deploy/slm/requirements.txt` (transformers 5.5.0, accelerate, huggingface_hub,
+fastapi, uvicorn) and the build cache.
+
+So: **4.24 GB available against an extracted base image alone of roughly 7 GB**, before
+a single line of the service is copied in. The build cannot start, let alone finish.
+`docker system df` reports only 117.3 MB reclaimable, so there is nothing to prune back
+into the gap. This is the same wall as sections 9 and 10, unmoved.
+
+### 11.3 The fstab dependency the brief asked about: still absent
+
+MEASURED, `/etc/fstab` contains exactly three entries: `/` by UUID, `/boot/efi` by UUID,
+and swap. There is **no entry for `/media/acps/twoTBDrive`**. MEASURED, `findmnt` shows
+it mounted from `/dev/nvme1n1p1` with `nosuid,nodev,relatime`, the signature of a
+udisks/desktop automount under `/media/<user>/`, not a boot-time fstab mount.
+
+MEASURED, `systemctl show docker.service -p RequiresMountsFor` returns **empty**, and
+nothing in its `After=` list references a mount unit for that device.
+
+As the brief anticipated, this is reported as a finding and not treated as a blocker for
+a build today. It is, however, still a blocker for the *relocation*, for the reason
+section 10.4 gave: moving data-root onto a drive that only mounts when a desktop session
+automounts it, with no ordering against `docker.service`, would work today and lose both
+GPU containers on the next reboot.
+
+### 11.4 Finding: `samd-classifier` is not running
+
+The brief states both pre-existing containers are live. MEASURED, one is not:
+
+```
+NAMES                     STATE     STATUS
+samd-classifier           exited    Exited (0) 2 minutes ago
+gemma4-pharma-inference   running   Up 52 seconds (healthy)
+```
+
+`docker inspect samd-classifier`: `state=exited`, `started=2026-09-20T11:37:19Z`,
+`finished=2026-09-21T01:02:05Z`, `exit=0`, `restarts=0`. It exited cleanly, roughly one
+minute before this session issued its first Docker command. `gemma4-pharma-inference`
+was started at `2026-09-21T01:03:21Z`, about a minute after that, and its logs show more
+than one startup banner.
+
+I cannot explain that churn and I am not going to guess at it. This session ran only
+read-only commands and issued nothing that stops or starts a container; the first
+`docker exec` in this session came after both timestamps. The likeliest reading is
+concurrent operator activity on the box (INFERRED, consistent with the brief's own note
+that the operator has been working outside this session), but `docker events` for the
+window returns nothing, so there is no record here to confirm it. Per the standing rule,
+`samd-classifier` was left exited and was not started.
+
+### 11.5 Finding, and the serious one: the baseline container is serving on CPU
+
+`gemma4-pharma-inference` is running and Docker reports it **healthy**. It is also
+running entirely on the CPU. MEASURED four independent ways:
+
+1. Its own health endpoint, the verification the brief asked for:
+   `{"status":"healthy","device":"cpu","gpu_name":"CPU","vram_allocated_gb":"N/A"}`
+2. `docker inspect`: `Runtime=runc`, `DeviceRequests=null`. The container was never
+   given a GPU.
+3. Inside the container: `/dev/nvidia*` does not exist, `nvidia-smi` is not installed.
+4. Inside the container: `torch 2.14.0+cu130`, `cuda_available False`, `device_count 0`.
+
+Its startup log says so in plain text: `Initializing Edge Inference Engine on device:
+cpu...`, and it loaded the adapter and began serving anyway.
+
+Corroborating from the host side: `nvidia-smi` reports the RTX 4070 Ti SUPER at
+**498 MiB used of 16,376 MiB, with zero compute processes**. No model is resident on the
+GPU on this box at all right now.
+
+This is precisely the failure mode the `slm_service` Dockerfile's header comment was
+written against, quoted verbatim from `deploy/slm/Dockerfile` (flagged quote, contains
+the source's own punctuation):
+
+> a slim Python base with no CUDA runtime, a compose file with no device reservation,
+> and DEVICE=auto compose into a service that starts, serves, and takes minutes per
+> generation. That is not an error anywhere
+
+It is live, in the baseline container, today. Two consequences worth stating:
+
+- **The healthcheck is blind to it.** `docker ps` says healthy and the endpoint says
+  healthy, while the device field in the very same JSON body says `cpu`. Anything that
+  gates on health status alone cannot see this.
+- **It changes what "the PR-5 baseline" means.** The PR-5 host measurements
+  (p50 4356.0 ms and the rest) were taken on the host under uvicorn on the GPU. They do
+  not sit beside this container in its current state; this container is a CPU service.
+  Any comparison drawn against `gemma4-pharma-inference` as it is running now would be
+  comparing a GPU path to a CPU path.
+
+Per the standing rule this container was not stopped, altered or reconfigured. It is
+recorded, not acted on.
+
+### 11.6 Two corrections to the brief, both minor
+
+- The build assets are not in `slm_service/`. That directory holds only the Python
+  package (11 tracked modules, no Dockerfile). The Dockerfile and compose file are at
+  `deploy/slm/Dockerfile` and `deploy/slm/docker-compose.yml`, and the compose build
+  context is the repository root. Not a blocker, just a path correction for whoever runs
+  the build next.
+- `SLM_SERVICE_TOKEN` is **not set** in this session's environment (presence checked,
+  value neither read nor printed). `deploy/slm/docker-compose.yml` declares it as
+  `${SLM_SERVICE_TOKEN:?...}`, so `docker compose up` would refuse to start even with
+  disk available. Whoever runs the build has to supply it from the operator environment
+  or secret store first.
+
+### 11.7 What this session did and did not do
+
+Read-only throughout. No image was pulled or built. No container was created, started,
+stopped, removed or reconfigured. No file under `/home` was touched, for any user. No
+`.env`, secret, keystore or token file was opened; `SLM_SERVICE_TOKEN` was tested for
+presence only and the HF cache directory was listed one level deep without reading the
+`token` entry inside it. The old Docker data-root is intact and untouched. The stale
+`SaMD-App` clone was not opened. The only repository change is this section.
+
+Steps 1 through 4 of the task (build, run, GPU proof, loopback proof, CUDA-absent
+failure proof, the ten-generation re-measurement, the VRAM and ceiling figures, the
+seven safety properties including control-token wrapping, and the backend/core hop) were
+**not attempted**, because all of them are downstream of an image that cannot be built
+in 4.24 GB.
+
+### 11.8 What has to happen before a fourth attempt
+
+In order. The first two are unchanged from section 10.4 and remain the operator's:
+
+1. **Free space, or relocate data-root.** The build needs roughly 7 GB for the extracted
+   base plus several more for the pip layer; `/` has 4.24 GB and 117 MB reclaimable.
+   Either reclaim space on `/` or move data-root to the 1.6 TB free on twoTBDrive.
+2. **Fix the fstab gap first if relocating.** `/media/acps/twoTBDrive` in `/etc/fstab`
+   by UUID, plus `RequiresMountsFor=` or an explicit `After=`/`Requires=` ordering on
+   `docker.service`, tested across a reboot. Relocating without this trades a disk
+   problem for a silent-data-loss-on-reboot problem.
+3. **Root.** Still no non-interactive privilege path in this environment (section 10.1).
+4. **`SLM_SERVICE_TOKEN` supplied** to the shell that runs `docker compose up`.
+5. **Decide what to do about `gemma4-pharma-inference` running on CPU** (section 11.5).
+   Not a build blocker, but it invalidates it as a GPU baseline until resolved.
+
+### 11.9 Recorded, not acted on: retiring the pharma container
+
+Carried forward from the brief, unchanged and still the operator's decision: once
+`slm_service` is proven, `gemma4-pharma-inference` has no remaining purpose beyond being
+the PR-5 baseline, and retiring it would free disk (its image is 9.34 GB, MEASURED via
+`docker images`) and VRAM. Section 11.5 adds a wrinkle: it is currently holding no VRAM
+at all, because it is on the CPU, so the reclaim available today is the 9.34 GB of disk
+and no VRAM. That 9.34 GB, plus `samd-classifier`'s 11.7 GB image if that too is
+retired, is on its own comfortably more than the CUDA build needs, which makes this
+decision one possible route through blocker 1 above rather than a tidy-up to do
+afterwards. Still not acted on.
+
+### 11.10 What remains unproven
+
+Everything the container was supposed to demonstrate. The service has never run in a
+container: not the GPU path, not the loopback-only binding, not the designed
+CUDA-absent startup failure, not the in-container latency or VRAM or ceiling figures,
+not the over-length rejection, the `length` finish reason, the derived `model_id` and
+artifact digest, the 503 with `Retry-After`, the disconnect-frees-GPU behaviour, the
+token fail-closed path, and not control-token wrapping, which section 7 flagged as the
+most dangerous property in the service because an unwrapped prompt passes every
+downstream gate by construction. All of it still rests solely on the host-under-uvicorn
+evidence from PR-5.
+
+---
+
+## 12. Pharma container removal, 2026-09-21: already done, and a correction that changes the disk verdict
+
+This session was tasked to reclaim disk by removing `gemma4-pharma-inference` and its
+image, and nothing else. Two things came out of it. The removal had already happened
+before this session started, so nothing was removed here. And in checking why the
+removal had reclaimed no space, the reason emerged: **section 11 measured the wrong
+filesystem, and the wrong Docker daemon.** The disk blocker that stopped three attempts
+at the container build does not exist.
+
+### 12.1 The removal had already happened
+
+MEASURED. The previous session inspected `gemma4-pharma-inference` running at
+2026-09-21T01:05Z. At the start of this session both the container and the image are
+absent:
+
+```
+docker ps -a --filter name=gemma           ->  no rows
+docker images --filter reference=*gemma*   ->  no rows
+docker ps -a  ->  samd-classifier only, exited (0)
+docker images ->  samd-classifier:latest, aed04856d263, 11.7GB
+```
+
+Nothing in this session removed them. Whoever did it acted between the two sessions,
+consistent with the concurrent operator activity noted in section 11.4. This is recorded
+as observed, not claimed as work done here.
+
+`samd-classifier`'s image is present and untouched: `aed04856d263`, 11.7 GB, MEASURED.
+Per the standing rule it was not removed, and its exited container was left alone too.
+
+Detail of what was removed, the mount inventory, the volume check and the recovery path
+are in `docs/backend/pharma-container-removal-record.md`, written this session. One gap
+is flagged there honestly: the image ID was never captured before the image was deleted,
+so it cannot be identified by digest after the fact.
+
+### 12.2 No volume was at risk
+
+MEASURED, two independent ways. `docker volume ls` returns no rows, so the daemon has
+zero named volumes. And `docker-compose.yml` declares no top-level `volumes:` key, with
+every entry in the service's volume list being a host bind path
+(`./litert_edge_engine/edge_server.py`, `./models`, and the read-only HF cache at
+`/media/acps/twoTBDrive/huggingface_cache`). Nothing was pruned, and there was nothing to
+prune. All three bind sources are still on disk.
+
+### 12.3 Free space before and after: unchanged, and that is the clue
+
+MEASURED, `df -B1` on `/`:
+
+| Point | Bytes free on `/` | GiB free |
+|---|---|---|
+| Previous session, container still running | 4,236,292,096 | 3.945 |
+| This session, container and image gone | 4,234,899,456 | 3.944 |
+
+The delta is **-1,392,640 bytes**, that is, slightly *less* free space after a 9.34 GB
+image was deleted. twoTBDrive also reads 139G used at both points.
+
+A 9.34 GB deletion that frees nothing is not a rounding artefact, so the question is
+where that image actually lived.
+
+### 12.4 The correction: two daemons, and the images were never on `/`
+
+MEASURED, `docker context ls`:
+
+```
+default           unix:///var/run/docker.sock
+desktop-linux *   unix:///home/acps/.docker/desktop/docker.sock
+```
+
+There are two Docker daemons on this box, and `desktop-linux` is the active context.
+Every `docker` command in section 11 and in this session went to **Docker Desktop**, not
+to the system daemon. Confirmed from `docker info`: `Operating System: Docker Desktop`,
+`Name: docker-desktop`, `Kernel Version: 6.12.76-linuxkit`. That is a VM.
+
+Two consequences for section 11, both of which invalidate its central conclusion:
+
+1. **`Docker Root Dir: /var/lib/docker` is a path inside the VM**, not on the host.
+   Section 11.1 read it as a host path and concluded the data-root had not been moved.
+2. **`/etc/docker/daemon.json` is the system daemon's config, not Docker Desktop's.**
+   Section 11.1 inspected it for a `data-root` key and found none. It would not find one
+   there regardless of what Docker Desktop is configured to do. The system daemon
+   (`dockerd`, PID 2078) is running but this user has no permission on its socket
+   (`permission denied` on `/var/run/docker.sock`), so its contents remain unverified
+   from here.
+
+The operator's relocation was real. MEASURED, the Docker Desktop VM disk is at:
+
+```
+/media/acps/twoTBDrive/docker data/DockerDesktop/Docker.raw
+  apparent size : 642.5 GB
+  actual on disk:  40.7 GB (37.93 GiB), sparse
+```
+
+So Docker Desktop's images have been living on twoTBDrive all along. The `/` filesystem,
+which sections 9, 10 and 11 all treated as the constraint, holds no Docker Desktop image
+data at all. Its 564 GB of use is 506 GB of `/home` (UnrealEngine at 136G, assorted
+datasets and zips), which is the operator's and off limits.
+
+This also explains 12.3 exactly. Deleting the image freed 9.34 GB *inside* `Docker.raw`.
+A sparse file does not shrink when data inside it is deleted, absent a TRIM or compaction
+pass, so neither `/` nor twoTBDrive shows the reclaim (INFERRED, standard sparse-image
+behaviour; the unchanged 139G on twoTBDrive across both sessions is consistent with it).
+The freed 9.34 GB is real and is available to the next build, inside the VM disk.
+
+### 12.5 Can the CUDA build proceed: yes, with a number
+
+The relevant figure is not `/`. It is the space available to `Docker.raw` on twoTBDrive,
+plus the unallocated room inside the image.
+
+MEASURED, `df -B1 /media/acps/twoTBDrive`:
+
+```
+1,719,447,007,232 bytes free  =  1719.4 GB  =  1601.4 GiB  =  1.564 TiB
+```
+
+INFERRED, room inside the VM disk: 642.5 GB apparent ceiling less roughly 21 GB
+currently used by `samd-classifier` (11.66 GB) and build cache (9.22 GB), leaving on the
+order of 620 GB before the virtual disk is full. Marked INFERRED because free space
+inside the VM filesystem was not read directly; doing so would mean running a container,
+which this task did not authorise.
+
+The build needs 3.21 GB compressed, roughly 7 GB extracted, plus a pip layer for
+transformers, accelerate and fastapi at roughly 2 to 3 GB. Call it **10 to 12 GB**.
+
+Against 1719.4 GB free on the host filesystem and roughly 620 GB inside the disk image,
+that is a headroom factor of roughly **140x** on the binding constraint. The build is
+viable with very large margin. The answer to "is there enough space" is not merely yes;
+the disk was never the blocker for a Docker Desktop build, and three sessions reported
+it as one because they measured `/`.
+
+There is also 9.224 GB of reclaimable build cache reported by `docker system df`. It was
+**not** pruned, because this task was scoped to the pharma container and nothing else.
+It is not needed: the margin above does not depend on it.
+
+### 12.6 What this changes about the remaining blockers
+
+Section 11.8 listed five things needed before a fourth build attempt. Disk was number
+one and it is void. Of the rest:
+
+- **fstab and `RequiresMountsFor`**: still a genuine finding, and now a sharper one.
+  Docker Desktop's entire disk image sits on a drive that automounts under
+  `/media/acps/` with no fstab entry and no ordering against any Docker unit. That is
+  not a future risk, it is the present configuration of the live daemon.
+- **Root**: not needed for a Docker Desktop build; the user owns that socket.
+- **`SLM_SERVICE_TOKEN`**: still required, still absent from the environment.
+- **`gemma4-pharma-inference` on CPU**: now moot as a baseline question, since the
+  container no longer exists. The PR-5 host figures remain the only baseline.
+
+### 12.7 What this session did and did not do
+
+Read-only with respect to Docker: no container or image was created, started, stopped or
+removed, and no volume or build cache was pruned. Nothing under `/home` was modified;
+`/home` was read for directory sizes only, to locate the VM disk, and no file content
+under it was opened. No `.env`, secret, keystore or token file was read. The
+`samd-classifier` image was not touched. `/media/acps/twoTBDrive/maincodes/SaMD-App` was
+not opened. The Docker data-root was not relocated. The only changes are this section and
+`docs/backend/pharma-container-removal-record.md`.
+
+---
+
+## 13. Fourth attempt at the container build, 2026-09-21: stopped at the Step 0 GPU gate
+
+The disk blocker of sections 9 through 12 is genuinely gone. This attempt stopped one
+gate later, on a condition the brief anticipated: **the active Docker daemon cannot
+attach a GPU at all.** Nothing was built. The CUDA base image was not pulled.
+
+### 13.1 Active context, stated up front
+
+MEASURED, `docker context show`: **`desktop-linux`**.
+
+MEASURED, `docker context ls`:
+
+```
+NAME              DESCRIPTION                              DOCKER ENDPOINT
+default           Current DOCKER_HOST based configuration  unix:///var/run/docker.sock
+desktop-linux *   Docker Desktop                           unix:///home/acps/.docker/desktop/docker.sock
+```
+
+Every Docker-derived figure in this section is from **desktop-linux** unless explicitly
+labelled otherwise. No reading was taken from the `default` daemon, because its socket
+is not readable by this user (13.4).
+
+### 13.2 The store: VM path versus host path
+
+MEASURED, `docker info` on desktop-linux:
+
+```
+Docker Root Dir : /var/lib/docker
+Storage Driver  : overlayfs
+Operating System: Docker Desktop
+Kernel Version  : 6.12.76-linuxkit
+Name            : docker-desktop
+```
+
+`/var/lib/docker` here is a **VM path, not a host path**. Three MEASURED reasons, so this
+is not taken on trust the way sections 9 to 11 took it:
+
+1. `Operating System: Docker Desktop`, `Name: docker-desktop`, and a `linuxkit` kernel.
+   The daemon reporting that path is running inside the VM.
+2. The host's `/var/lib/docker` is `drwx--x--- root root` and belongs to the system
+   `dockerd` (PID 2078), a different daemon.
+3. The desktop-linux store is a sparse disk image on the host, located and measured in
+   section 12.4 and re-measured now.
+
+MEASURED, HOST path of the desktop-linux store and the free space that actually
+constrains it:
+
+```
+/media/acps/twoTBDrive/docker data/DockerDesktop/Docker.raw
+  apparent : 642.5 GB
+  on disk  :  40.7 GB (37.93 GiB), sparse
+
+filesystem /dev/nvme1n1p1 on /media/acps/twoTBDrive
+  free: 1,719,446,929,408 bytes = 1719.4 GB = 1601.4 GiB
+```
+
+Disk is not a constraint on this build by any reading.
+
+### 13.3 The gate that stopped this attempt: desktop-linux cannot reach the GPU
+
+MEASURED, HOST, `nvidia-smi`: NVIDIA GeForce RTX 4070 Ti SUPER, driver 580.126.09,
+16,376 MiB total, **488 MiB used, 15,448 MiB free, zero compute processes**. The GPU is
+present, healthy and idle on the host.
+
+It is not reachable from the active daemon. Five independent MEASURED facts:
+
+1. **A device request is refused outright.** A throwaway `--rm` container asking for a
+   GPU fails at the daemon, before any image concern:
+
+   ```
+   docker run --rm --gpus all samd-classifier:latest ...
+   docker: Error response from daemon: failed to discover GPU vendor from CDI:
+           no known GPU vendor found
+   ```
+
+2. **No NVIDIA runtime is registered on desktop-linux.** `docker info` runtimes are
+   exactly `['io.containerd.runc.v2', 'runc']`. There is no `nvidia` entry.
+3. **The VM has no NVIDIA device nodes.** Inside a container on this daemon,
+   `/dev/nvidia*` does not exist.
+4. **The VM kernel has no NVIDIA driver.** `/proc/driver/nvidia` does not exist inside
+   the VM. The linuxkit kernel has no driver to bind the card.
+5. **The host's NVIDIA plumbing belongs to the other daemon.** `/var/run/cdi/nvidia.yaml`
+   (22,614 bytes) and `/usr/bin/nvidia-container-runtime` both exist on the HOST, and
+   `/etc/docker/daemon.json` registers the `nvidia` runtime (section 10.2). All of that
+   configures the **system** `dockerd`, not Docker Desktop.
+
+So the GPU capability on this box is real, and it is wired to the daemon this user
+cannot talk to.
+
+Per the brief, this is a STOP. Building here would produce, at best, the service's
+designed loud failure: `deploy/slm/Dockerfile` pins `ENV SLM_DEVICE=cuda` and the
+compose file reserves an `nvidia` device, so the container would refuse to start rather
+than fall back to CPU. That is the correct behaviour and worth stating as a point in the
+service's favour, since the removed pharma container did the opposite (section 11.5).
+But proving a refusal-to-start costs a roughly 10 GB pull and proves nothing about the
+GPU path, the latency figures, or any of the seven safety properties. It was not done.
+
+### 13.4 Why the other daemon was not used
+
+MEASURED. `docker -c default info` returns
+`permission denied while trying to connect to the Docker daemon socket at
+unix:///var/run/docker.sock`. MEASURED, `id -nG`: this user is **not in the `docker`
+group**. The system daemon is running (`systemctl is-active docker.service` -> `active`,
+PID 2078) and is the GPU-capable one, but reaching it needs either root or a group
+change, both of which are operator actions and outside what this session may do.
+
+### 13.5 SLM_SERVICE_TOKEN
+
+MEASURED, presence only, value neither read nor echoed: **not set in this session's
+shell**.
+
+A `.env` file exists at the repository root. Its existence was checked; it was not
+opened. INFERRED, from documented Compose behaviour: invoking
+`docker compose -f deploy/slm/docker-compose.yml` sets the project directory to
+`deploy/slm/`, and Compose would look for `deploy/slm/.env`, which is absent (MEASURED).
+The repository-root `.env` would therefore **not** be picked up automatically; the
+operator would need `--env-file` or `--project-directory`, or the variable exported in
+the invoking shell. Since the build was stopped at 13.3 this was not exercised, and it
+remains an open item rather than a proven blocker.
+
+### 13.6 Inventory at the time of the stop
+
+MEASURED, desktop-linux:
+
+```
+CONTAINERS: samd-classifier   exited (0)     (untouched)
+IMAGES    : samd-classifier:latest  aed04856d263  11.7GB   (untouched)
+system df : Images 11.66GB | Containers 4.78MB | Volumes 0B | Build cache 9.224GB
+```
+
+MEASURED, HOST GPU across everything resident: **488 MiB of 16,376 MiB in use, zero
+compute processes**. No model is resident on the GPU on this box. With the pharma
+container gone and `samd-classifier` exited, nothing holds VRAM, so the headroom question
+for a 512-token ceiling does not arise yet and cannot be answered until the service runs
+somewhere with a GPU.
+
+### 13.7 Configuration finding, recorded and not acted on
+
+Docker Desktop's entire store, the 642.5 GB `Docker.raw`, sits on `/media/acps/twoTBDrive`,
+which MEASURED has no `/etc/fstab` entry and is mounted `nosuid,nodev,relatime` under
+`/media/<user>/`, the signature of a desktop automount. MEASURED,
+`systemctl show docker.service -p RequiresMountsFor` is empty, and nothing orders any
+Docker unit after that mount.
+
+This is the live daemon's present configuration, not a hypothetical. A reboot that brings
+Docker up before (or without) that automount brings it up against a missing store. Stated
+for the operator; not acted on, and nothing was relocated or reconfigured.
+
+### 13.8 What this session did and did not do
+
+No image was pulled or built. No compose project was started. Nothing was relocated, no
+build cache was pruned, and neither daemon was reconfigured. Two throwaway `--rm`
+containers were run from the existing `samd-classifier:latest` image with overridden
+commands, purely to interrogate the VM for GPU device nodes; both exited and removed
+themselves, and the image and its exited container are untouched (MEASURED in 13.6).
+Nothing under `/home` was modified, and no file content under it was read. No `.env`,
+secret, keystore or token file was opened. The SaMD-App clone was not touched.
+
+Steps 1 through 4 were not attempted. All of them are downstream of a GPU the active
+daemon cannot see.
+
+### 13.9 What remains unproven
+
+Unchanged from section 11.10, and now for a different reason. The service has still never
+run in a container. Unproven: the GPU path; loopback-only publishing (which the brief
+correctly flags as behaving differently through a Docker Desktop VM and which therefore
+cannot be assumed from the compose file); the designed CUDA-absent startup failure; the
+in-container p50, p95, first-call, sustained tokens per second, resident VRAM and
+512-token ceiling wall time; and all seven safety properties, including control-token
+wrapping, which section 7 flagged as the most dangerous because an unwrapped prompt ends
+at EOS, reports `finish_reason stop`, and so passes the device sanitizer and the
+grounding gate by construction. Every figure in PR-5 still rests solely on the host
+uvicorn run.
+
+### 13.10 What has to happen next
+
+The build itself is now blocked on exactly one thing, and it is the operator's:
+
+1. **Run the build under the system daemon**, which is the GPU-capable one. That needs
+   either root or this user added to the `docker` group, plus `SLM_SERVICE_TOKEN`
+   supplied to the invoking shell. Docker Desktop is not a viable target for this service
+   on this box, and no amount of retrying under `desktop-linux` will change that.
+   Note the system daemon's data-root is the HOST `/var/lib/docker`, on `/`, which has
+   only 3.94 GiB free (MEASURED). So a system-daemon build reintroduces the disk problem
+   that never actually applied to Docker Desktop, and the data-root relocation discussed
+   in section 10 becomes genuinely necessary, together with the fstab and
+   `RequiresMountsFor` work in 13.7.
+
+For a real end-to-end run, beyond the above and all still outstanding:
+
+2. `backend/core` up on the main machine.
+3. The phone on the same network as it.
+4. The readback flag flipped in a dev build.
+5. A real approved record to read back.
+
+Step 4 of the brief, the single direct call to the containerised service shaped as
+`backend/core`'s SLM proxy would send it, was not attempted: there is no containerised
+service to call.
+
+## 14. Container proof, 2026-09-21: the service is running on the GPU and all seven properties re-proved
+
+The first session in this series that had a container to measure. Sections 9 through 13 each
+stopped at a Step 0 gate. This one did not: `samd-slm-service:1` was up and healthy on
+`127.0.0.1:8100` at the start, and everything below is MEASURED against that running
+container, not read from source.
+
+Method note: the measurement client ran **inside** the container (`docker exec`, `httpx` to
+`127.0.0.1:8100`), which is what "measure in-container" asks for and which also keeps
+`SLM_SERVICE_TOKEN` inside the container's environment. The container's rootfs is
+`ReadonlyRootfs=true`, so `docker cp` is refused; scripts were written to the `/tmp` tmpfs
+over `docker exec` stdin instead.
+
+### 14.1 Container versus host
+
+Ten sequential generations, service restarted to a cold state first, same representative
+readback prompt as section 1 (`tests/slm_service/readback_prompt.py`, `wire_prompt()`,
+268 prompt tokens). Host figures are section 1's, under uvicorn on the host.
+
+| Metric | Host (PR-5) | Container | Delta |
+|---|---:|---:|---:|
+| p50, ten calls | 4356.0 ms | 4441.0 ms | +2.0% |
+| p95, ten calls | 4544.9 ms | 4627.4 ms | +1.8% |
+| First call | 4673.4 ms | 4758.6 ms | +1.8% |
+| Steady state, calls 2-10 (p50) | n/a | 4440.7 ms | n/a |
+| Sustained tokens per second | 47.53 | 46.61 | -1.9% |
+| 512-token ceiling, wall time | 10.8 s | 11020.1 ms | +2.0% |
+| Completion length, full readback | 207 tokens | 207 tokens | none |
+| `finish_reason`, full readback | `stop` | `stop` | none |
+
+Per-call container walls: 4758.6, 4410.4, 4445.9, 4432.0, 4440.7, 4442.0, 4435.3, 4466.9,
+4432.5, 4441.3 ms. All ten returned 268 prompt tokens, 207 completion tokens,
+`finish_reason stop`, and **byte-identical text** across all ten. The 512-token ceiling was
+measured twice, 11020.1 ms and 11015.5 ms.
+
+Every delta is about 2%, in the same direction, and far inside the 20% the brief set as the
+threshold needing an explanation. The explanation, INFERRED from the measurements above: the
+NVIDIA container runtime passes the device through without interposing on the CUDA path, so
+the container adds nothing to the part of the work that dominates the wall time, and the
+uniform ~2% is CPU-side container overhead on the tokenise-and-sample path. Supporting the
+same reading, MEASURED: the container carries no CPU or memory limit at all
+(`NanoCpus=0 CpuQuota=0 Memory=0` on a 32-core host), so nothing is being throttled.
+
+### 14.2 The GPU claim, proved without trusting health
+
+The brief was right not to trust `health`. MEASURED at `slm_service/app.py:166`, the `device`
+field is `settings.device`, which is the `SLM_DEVICE` environment variable echoed back. It is
+a configuration value and it would read `cuda` whether or not a model was on a GPU.
+
+What does prove the GPU, all MEASURED:
+
+1. **Host-side PID identity.** `docker inspect` gives the container main PID as 139380;
+   `nvidia-smi --query-compute-apps` lists exactly one compute process, PID 139380, holding
+   10158 MiB. The process holding the VRAM *is* the container's serving process.
+2. **Torch sees CUDA inside the container.** `torch 2.4.1+cu124`, `cuda_available True`,
+   `device_count 1`, `NVIDIA GeForce RTX 4070 Ti SUPER`, and a test tensor allocated to
+   `cuda:0`.
+3. **The model's parameters are on cuda, derived from the live model object.**
+   `Engine.vram()` (`slm_service/engine.py:352-360`) indexes
+   `torch.cuda.memory_allocated(self.model.device.index)`. A model on CPU has
+   `model.device.index is None` and the call would report roughly zero. The running service
+   reports `vram_allocated_bytes 10255397376` (9.55 GiB). That figure is only reachable if
+   the parameters are resident on the CUDA device.
+4. **Utilisation rises for exactly the duration of the work.** Sampling the host once a
+   second across the ten-call run: 0-1% before, then 56-66% continuously for 44 consecutive
+   samples, then 0% in the first sample after the tenth call returned.
+
+### 14.3 The network claim
+
+MEASURED. `ss -ltn` shows the host listener as `127.0.0.1:8100` only, and
+`HostConfig.PortBindings` is `{"8100/tcp":[{"HostIp":"127.0.0.1","HostPort":"8100"}]}`.
+Reachability, `GET /health`, four-second connect timeout:
+
+| Interface | Address | Result |
+|---|---|---|
+| `lo` | 127.0.0.1:8100 | HTTP 200 |
+| `enp4s0` (LAN, wired) | 10.203.5.168:8100 | refused, curl rc=7 |
+| `wlo1` (LAN, wireless) | 10.203.4.203:8100 | refused, curl rc=7 |
+| `docker0` | 172.17.0.1:8100 | refused, curl rc=7 |
+
+**Worth recording for the main machine:** the loopback-only property is entirely a property
+of the published port, not of the application. MEASURED, the container's own environment
+carries `SLM_HOST=0.0.0.0`, so uvicorn inside the container binds all interfaces. Anything
+that changes the publish specification, or runs this image with `network_mode: host`, exposes
+the service to the LAN with no second line of defence. The compose file is load-bearing here
+in a way the application is not.
+
+### 14.4 The seven properties, re-proved in the container
+
+| # | Property | Result | Evidence |
+|---|---|---|---|
+| 1 | Over-length prompt rejected, not truncated | PASS | `overlong_wire_prompt()`, 3460 tokens. HTTP **413**, `application/problem+json`, code `SAMD-SLM-8003`, detail `prompt is 3460 tokens; the limit is 2048 tokens. The prompt was rejected, not truncated.` |
+| 2 | Decode ceiling reports `length`, not `stop` | PASS | Raw record, `max_tokens 512`. HTTP 200, `finish_reason length`, `completion_tokens 512`, wall 11020.1 ms |
+| 3 | Envelope identity is the derived artifact value | PASS | Envelope `model_id google/gemma-4-E2B-it`, `model_sha256 2db5482b...ddc550`; both string-equal to `/health`. A request naming `google/gemma-4-E4B-it` is refused **409** `SAMD-SLM-8002`, not silently served |
+| 4 | Queue returns 503 with `Retry-After` when full | PASS | Six concurrent against `queue_capacity 3`: three served (11046.8, 22100.6, 33065.6 ms), three refused **503** `SAMD-SLM-8005` with `Retry-After: 10` in 9.0-9.7 ms. Mid-flight `/health` read `depth=2 running=1` |
+| 5 | Disconnect stops generation and frees VRAM | PASS | See 14.5 |
+| 6 | Wrong or absent token fails closed | PASS | Absent, wrong (64 zeros), and empty token all **401** `SAMD-SLM-8008`. `/health` stays exempt at 200. A malformed body with no token returns 401, not 422, so authentication precedes validation |
+| 7 | Control-token wrapping | See 14.6 | The property does not hold the way the brief states it |
+
+Property 4 exposed something worth carrying to the main machine. The three served requests
+ran strictly serially at 11, 22 and 33 seconds, which confirms concurrency 1. But MEASURED in
+`slm_service/app.py`, `started` is set *after* `await admission.acquire()`, and the deadline
+criterion is armed inside `Engine.generate`. **The 40 s `generation_deadline_s` bounds decode
+time only; it does not bound client-observed latency.** A request that waits behind two
+ceiling-length generations is answered at 33 s having never come close to tripping the
+service's own cap. A caller with a timeout under 35 s will give up on requests this service
+considers healthy, and the queue depth of 2 is what sets that number, not the deadline.
+
+### 14.5 VRAM behaviour, and property 5 in detail
+
+Resident VRAM is stable and the transient cost of a generation is small. MEASURED:
+
+| State | `vram_allocated_bytes` | nvidia-smi, process | nvidia-smi, whole GPU |
+|---|---:|---:|---:|
+| Idle, loaded | 10255397376 | 10158 MiB | 10576 MiB |
+| Mid-generation, 207-token readback | not sampled | 10164 MiB | 10601 MiB |
+| At the 512-token ceiling | not sampled | 10168 MiB | 10582 MiB |
+
+Property 5 was driven at socket level, because the point is to close the connection rather
+than to let a client library finish. A raw-record generation (about 11 s to the ceiling) was
+started over a bare socket, the socket was closed at t=3.0 s, and `/health` was polled once a
+second throughout:
+
+```
+baseline            allocated=10255397376  reserved=10391388160  running=0 depth=0
+t=1.0s in-flight    allocated=10262140928  reserved=10391388160  running=1 depth=0
+t=2.0s in-flight    allocated=10262948352  reserved=10391388160  running=1 depth=0
+t=3.0s in-flight    allocated=10263934976  reserved=10391388160  running=1 depth=0
+--- client socket closed at t=3.0s ---
+t=4.0s after close  allocated=10255397376  reserved=10380902400  running=0 depth=0
+... unchanged through t=15.1s
+```
+
+Allocated VRAM climbs monotonically with the KV cache while decoding (+8.54 MB by t=3.0 s),
+and one second after the socket closes it is back at **10255397376 bytes, byte-identical to
+baseline**. Reserved dropped too, 10391388160 to 10380902400. `queue_running` returned to 0,
+so the admission slot was released as well.
+
+Generation genuinely stopped rather than merely losing its reader. Host GPU utilisation ran
+56-63% for four samples and was at 1% in the sample after the close, roughly eight seconds
+before the ceiling would have been reached. The service's own log agrees:
+
+```
+"outcome":"client_disconnected","status":499,"finish_reason":"error",
+"duration_ms":3259.452,"completion_tokens":152,"served_max_tokens":512
+```
+
+152 of a possible 512 tokens, abandoned 3259 ms in, against a socket closed at 3.0 s.
+
+### 14.6 Property 7: the service does not wrap, and the brief's premise needs correcting
+
+Two corrections, both MEASURED.
+
+**First, the service performs no control-token wrapping at all, by design.** There is no
+`apply_chat_template` and no `chat_template` reference anywhere under `slm_service/`
+(grep returns nothing). `Engine.generate` calls the tokenizer on `body.prompt` directly.
+`Engine.prompt_starts_with_bos` says so in terms: `"The service applies no chat template and
+injects no preamble, so the prompt must arrive complete"` (verbatim quote from
+`slm_service/engine.py`, flagged). So property 7 as the brief words it, "prove the service
+wraps the prompt in the artifact's chat control tokens", **cannot be proved, because the
+service does not do it.** Wrapping is the caller's obligation. This is section 3.5's finding,
+unchanged, and the container does not alter it.
+
+**Second, the brief's description of the raw-path failure is inverted.** The brief states
+that an unwrapped prompt "ends at EOS, and reports `finish_reason stop`, so it passes the
+device sanitizer and grounding gate by construction". MEASURED in the container, on the same
+record, it does not: it runs to the ceiling and reports `length`.
+
+| Prompt form | HTTP | `finish_reason` | completion | text |
+|---|---:|---|---:|---|
+| Record sent raw, 259 tok | 200 | `length` | 512 | `"\n\nPatient.\n\nPatient.\n\nPatient."` to the ceiling |
+| Record wrapped by the artifact's template, 268 tok | 200 | `stop` | 207 | a correct plain-language readback |
+
+This reproduces section 3.5's table exactly. The distinction matters because it is the whole
+of the residual risk: in *this* instance truncation caught the degenerate loop and reported
+`length`, which a caller can see. Section 3.5's point, which stands, is that this was luck. A
+degenerate completion that happened to emit EOS early would report `stop` and be
+indistinguishable from a correct readback in every field of the envelope. The brief has
+folded the hypothetical danger into the measured observation; the measured observation is
+the milder of the two.
+
+What *can* be proved, and is, is the positive half: the service feeds the prompt verbatim, so
+a correctly wrapped prompt produces a correct readback where the raw path degenerates. The
+wrapped prompt's tokenisation begins `<bos><|turn>user\n` and ends `<turn|>\n<|turn>model\n`
+(268 tokens against the raw record's 259), and it yields the correct 207-token readback shown
+above, ten times out of ten, byte-identical.
+
+The service's one defence is observational, and it works. MEASURED across this session's
+requests, the per-request log carries `prompt_starts_with_bos`: `true` on 13 wrapped
+requests, `false` on 5 raw ones. An operator can see the condition. A caller cannot.
+
+Section 3.5's recommendation is unchanged and is now the single most important open item
+from this session: **the contract must state that `prompt_template_version slm-readback-v1`
+denotes the fully templated string, including the artifact's leading BOS and its turn control
+tokens, and that the service feeds it verbatim.**
+
+### 14.7 Things that behaved differently in the container
+
+Three, all explained, none affecting the measurements.
+
+1. **`docker cp` is refused**, because `ReadonlyRootfs=true`. `/tmp` is a tmpfs and is
+   writable, so scripts were delivered over `docker exec` stdin. The tmpfs is wiped on
+   restart, which is correct behaviour and simply has to be worked around.
+2. **`AutoTokenizer.from_pretrained("google/gemma-4-E2B-it")` fails inside the container**
+   with `PermissionError: /hf-cache/token`, where the host run does not. Explanation:
+   `huggingface_hub` consults `$HF_HOME/token` when given a repo id, the container runs as
+   uid 10001, and that file is mode 600 owned by `acps`. The service itself never hits this
+   because it loads from a resolved snapshot directory rather than a repo id. The test
+   fixture was pointed at the same snapshot directory and then behaved identically to the
+   host.
+3. **A hardening observation that follows from (2).** The bind mount
+   `/mnt/twotb/huggingface_cache:/hf-cache:ro` carries the Hugging Face token file into the
+   container's mount namespace. It was not read and its contents are not known here; only its
+   mode and owner were inspected. It is unreadable today solely because of the uid mismatch.
+   If this image is ever run as root, or the cache is ever re-owned, the HF token is readable
+   by the service process. The service has no need of it: `HF_HUB_OFFLINE=1` and the artifact
+   is loaded from a local directory. A narrower mount, or a `token`-free cache directory,
+   would remove the exposure.
+
+Otherwise the container matched the host in every observable: same prompt tokenisation, same
+completion length, same text, same finish reasons, same error codes and statuses, same VRAM
+figures within the KV-cache transient.
+
+### 14.8 Step 4 not attempted: backend/core is not reachable from this box
+
+Stopped at step 3 as the brief directs. MEASURED:
+
+- No `backend/` directory exists in the serving repo.
+- Nothing resembling `backend/core` is listening on this host; the only non-loopback
+  listeners are ssh, VNC, RDP and similar.
+- The only `backend/core` source on this box is the stale read-only clone at
+  `/mnt/twotb/maincodes/SaMD-App` (HEAD `a219da9`, 2026-09-18), which was not modified. A
+  case-insensitive grep for `slm` across its entire `backend/core` tree returns **nothing**.
+  The SLM proxy does not exist in the source available here.
+
+So there is no proxy to shape a call after and no service to call. The one hop stays
+unproved, and it cannot be proved from this machine.
+
+### 14.9 Infrastructure fixes that got here, worth a separate commit
+
+Not made in this session, and recorded because sections 9 through 13 are a record of being
+blocked by exactly these. The drive was moved to `/mnt/twotb`, the system daemon's data-root
+was relocated to `/mnt/twotb/docker-system`, and both compose files' HF-cache mounts were
+repointed off the old `/media/acps/twoTBDrive` path.
+
+Those repointings are **uncommitted and both are malformed.** MEASURED from `git diff`:
+
+- `docker-compose.yml` reads `- /mnt/twotb/huggingface_cache`. The container path and the
+  `:ro` flag are gone. In compose short syntax a bare path is an anonymous volume mounted at
+  that path *inside* the container, so this no longer mounts the host cache at all.
+- `deploy/slm/docker-compose.yml` reads
+  `            - /mnt/twotb/huggingface_cache:/hf-cache:ro` at twelve spaces of indentation
+  against the file's six. It parses, and it is what the running container was built from, but
+  it does not match the file around it.
+
+The running container is correct regardless: `docker inspect` shows the bind
+`/mnt/twotb/huggingface_cache -> /hf-cache rw=false`. The repository is what is wrong. The
+first of those two would break a rebuild. Both should be fixed and committed on their own,
+separately from this note.
+
+### 14.10 Operational note: the service token was exposed in the session terminal
+
+Recorded because it requires an action. During this session a shell check written as
+`${SLM_SERVICE_TOKEN:-NO}` expanded to the value rather than to a presence flag, printing the
+64-character token to the terminal and the session transcript. The value is not reproduced
+here or anywhere else in this repository. **The token should be rotated**, in the container's
+environment file and in whatever backend/core will present, before the end-to-end run.
+
+### 14.11 What remains for a real end-to-end run
+
+The service itself is now proved on this box: GPU-resident, loopback-only, within 2% of the
+host on every latency figure, and correct on all seven properties to the extent each one
+actually applies (property 7 being the caller's obligation, not the service's). What is left is entirely
+outside this container:
+
+1. **`backend/core` up on the main machine**, with an SLM proxy that does not yet exist in
+   any source on this box.
+2. **The contract fixed for `slm-readback-v1`** so the proxy is obliged to send the fully
+   templated string, BOS and turn control tokens included. Until then the proxy can send a
+   raw record and receive a degenerate completion over a 200 that the grounding gate passes.
+3. **The phone on the same network as backend/core.**
+4. **The readback flag flipped in a dev build.**
+5. **A real approved record to read back.**
+6. **The service token rotated** (14.10), and the compose mounts fixed and committed (14.9).
+
+Also worth deciding before that run: the caller's HTTP timeout, which must exceed 35 s or it
+will abandon requests the service is serving normally (14.4).
+
+## 15. PR-5b, 2026-09-21: templating into the service, an injection guard, the deadline fix, and the mount
+
+Section 14 proved the container ran correctly. It also recorded why, end to end, it would
+have produced nothing usable: the service applied no chat template, the device sends plain
+text, and PR-4's proxy forwards it unchanged, so every readback would have degenerated to
+`"Patient."` repeated and been refused downstream as `OUTPUT_TRUNCATED`. PR-5b closes that,
+and three things next to it.
+
+### 15.1 Templating moves into the service
+
+`Engine.apply_template` applies the loaded artifact's own
+`tokenizer.apply_chat_template([{"role": "user", "content": prompt}], tokenize=False,
+add_generation_prompt=True)`. Derived from the artifact, never a written grammar: a literal
+`"<bos><|turn>user\n"` would survive a change of artifact and tokenize into ordinary text,
+which degenerates rather than erroring, and degeneration is precisely what this change
+exists to remove.
+
+**Decision, stated because the brief asks for it: the whole caller string goes in as one
+user turn, and is not split into a system turn and a user turn.** MEASURED, this artifact's
+template does support a system turn: `apply_chat_template` with a system message renders
+`<bos><|turn>system\nSYS<turn|>\n<|turn>user\nHELLO<turn|>\n<|turn>model\n`, so the
+capability is there and the choice is not forced by the artifact.
+
+It is refused anyway, on three grounds:
+
+1. Splitting means deciding where the instruction ends and the record begins. The caller
+   sends one string whose shape is owned by `prompt_template_version`, and the only way for
+   the service to find that boundary is to parse clinical text. A service that parses the
+   record to decide what to put in a system turn is doing clinical reasoning about a record
+   a physician has already approved.
+2. The contract's unit is `prompt_template_version`. If the service split the string, the
+   version would no longer describe what reached the model, and the field that exists to
+   make the prompt reproducible would stop doing so.
+3. It would change the contract shape silently, which the brief forbids and which nothing
+   here needs. MEASURED, one user turn produces a correct readback: `finish_reason stop`,
+   207 completion tokens, byte-identical across ten runs.
+
+If a system turn is ever wanted, it belongs in the device's template and in a new
+`prompt_template_version`, not in a service-side split of a string the service did not
+compose.
+
+The input bound now measures the templated string, because that is what occupies the model's
+context. MEASURED on this artifact the template adds a fixed 9 tokens (259 plain, 268
+templated), so a caller sitting exactly on 2048 is refused at 2057. That is the safe
+direction, and the 413 detail says which number was measured.
+
+`prompt_starts_with_bos` is kept and its meaning has inverted. It no longer reports what the
+caller sent; it reports whether the service's own templating produced what it should, and is
+true under correct operation. It is still derived from the first token id rather than
+asserted, because it is the only place a template that stopped writing BOS would be visible:
+that failure does not raise.
+
+### 15.2 The injection guard, SAMD-SLM-8009
+
+Before templating, a prompt containing any of the loaded artifact's special or added tokens
+as text is refused with the new code `SAMD-SLM-8009`, HTTP 422.
+
+The set is derived, never written: the union of `tokenizer.all_special_tokens` and
+`tokenizer.get_added_vocab()`. MEASURED on this artifact the two agree at 24 entries,
+including `<bos>`, `<|turn>`, `<turn|>`, `<|channel>`, `<channel|>`, the tool and image and
+audio tokens. A hardcoded list would keep reporting a clean prompt after the artifact renamed
+its tokens, which is the same defect as a hardcoded `model_id`. The engine refuses to finish
+loading if the set comes back empty, because an empty set is a guard that admits everything
+while still reporting that it ran.
+
+Matching is substring matching on the caller's raw string, deliberately, rather than asking
+the tokenizer what it would produce. Asking the tokenizer whether it would emit a control
+token is asking the thing being attacked to grade the attack.
+
+**Refused, never stripped.** The caller text carries a physician's free-text working
+diagnosis and a health worker's free-text question. Silently editing that on its way to a
+readback the clinician has already approved is worse than refusing to serve it, and the
+detail says `rejected, not sanitised` so that a caller reading it cannot conclude its text
+was cleaned up and sent. The detail names the tokens found, which are fixed vocabulary
+strings and carry no PHI, and never any part of the prompt.
+
+The guard runs before the length bound, so it inspects exactly what the caller sent, before
+anything has been added to it. MEASURED: an over-length prompt that also carries control
+tokens is refused as an injection (422), not as a length violation (413).
+
+It also closes double-templating. A caller that assembled the prompt the way PR-5 required is
+now refused rather than templated twice. This matters because double templating does not
+error on its own: it tokenizes, generates and returns a 200, so without the guard the
+transition from PR-5 to PR-5b would silently change what the model sees.
+
+The per-request log carries `control_tokens_found`, a count. MEASURED, the count and nothing
+else: the log line for an injected prompt containing `PT-4471-K` and `Metformin` contains
+neither string.
+
+### 15.3 The deadline is armed at arrival
+
+Section 14.4 recorded that `generation_deadline_s` bounded decode only, because `started` was
+set after `await admission.acquire()` and the deadline criterion was armed inside
+`Engine.generate`. A queued request was therefore granted a fresh full budget when it reached
+the model.
+
+The clock is now read at the top of the handler and the generation is given what is left of
+it. If nothing is left, the request is abandoned before generation starts, with
+`SAMD-SLM-8007` and the log outcome `deadline_expired_in_queue`.
+
+MEASURED, at a 3 s deadline with two concurrent requests, which is the shape that isolates
+this:
+
+| Deadline armed | First request | Second request |
+|---|---:|---:|
+| After admission (before PR-5b) | 504 at 3.07 s | 504 at **6.09 s** |
+| At arrival (PR-5b) | 504 at 3.06 s | 504 at **3.06 s** |
+
+**A correction to the brief's framing, MEASURED.** The brief describes the exposure as a
+queued 512-token request answering near 73 s. That figure came from section 14, where a
+512-token request meant a degenerate generation running to the ceiling in about 11 s. Once
+templating lands, the same request is a correct readback that ends at EOS after 207 tokens in
+about 4.4 s, so the realistic worst case at the shipped settings is smaller than 73 s. The
+defect was real and is fixed; its magnitude at the shipped settings is INFERRED to be roughly
+4.4 s of wait per queued request plus a fresh 40 s, not 73 s. This mattered in practice: it
+made the first version of the regression test pass against the bug, because the test assumed
+generations that no longer happen.
+
+Alongside it, a request whose expected wait alone would exceed its remaining budget is
+refused at arrival with 503 and `Retry-After`, rather than admitted to expire in the queue. A
+request refused now can be retried; one that expires in the queue has held a slot, produced
+nothing, and told the caller only that it timed out. MEASURED with the control removed, four
+concurrent requests against a 6 s deadline produced `[200, 504, 504, 504]`; with it, at least
+one fast 503.
+
+The estimate comes from `WaitEstimator`, the worst of the last eight completed generations on
+this artifact and this GPU, multiplied by the number of admitted requests ahead. The worst
+rather than the mean, because admitting onto a queue of slow generations because the average
+is fast is the expensive direction. Cancelled generations are not observed, since their
+duration measures the client rather than the service.
+
+**A stated gap.** Before the first generation completes there is no sample, the estimate is
+`None`, and no arrival-time refusal can fire. On a freshly started service the deadline is
+the only protection until one generation has finished. Inventing a default would mean
+refusing real traffic on a number nobody measured, which this project does not do.
+
+The arrival-time refusal reuses `SAMD-SLM-8005` rather than taking a tenth code. The caller's
+correct action is identical in both cases, honour `Retry-After` and come back, so a second
+code would widen the contract surface for a distinction the caller cannot act on. The service
+log carries the distinction, `queue_wait_exceeds_deadline` against `queue_full`, for whoever
+is tuning the queue.
+
+### 15.4 The mount, and the token file
+
+`deploy/slm/docker-compose.yml` now mounts only the hub directory, at the same six-space
+indentation as its siblings:
+
+```
+      - /mnt/twotb/huggingface_cache/hub:/hf-cache/hub:ro
+```
+
+`HF_HOME` stays `/hf-cache`, so `huggingface_hub` still finds its snapshots, but
+`$HF_HOME/token` is no longer inside the container at all. Section 14.7 recorded that the old
+cache-root mount carried the Hugging Face token file into the container's mount namespace,
+where the only thing keeping it unread was that the process runs as uid 10001 and the file is
+mode 600. MEASURED, both mount forms against the same image:
+
+| Mount | `/hf-cache/token` | artifact reachable |
+|---|---|---|
+| `/mnt/twotb/huggingface_cache:/hf-cache:ro` (old) | **visible** | yes |
+| `/mnt/twotb/huggingface_cache/hub:/hf-cache/hub:ro` (new) | absent | yes |
+
+A side effect worth recording: with no token file present, `huggingface_hub` no longer raises
+`PermissionError` on `$HF_HOME/token`, so `AutoTokenizer.from_pretrained` by repo id now
+works inside the container. Section 14.7 item 2 is resolved rather than worked around.
+
+The root `docker-compose.yml` line 26 had lost its container path and its `:ro` and had become
+an anonymous volume, which would have broken a rebuild. Restored to
+`- /mnt/twotb/huggingface_cache:/root/.cache/huggingface:ro`. That file serves the retired
+pharma demo and was not started. Both files validate under `docker compose config`.
+
+### 15.5 Tests and mutation checks
+
+113 tests green: 101 under the GPU in a container built from the new image, and 12 identity
+tests on the host, where the second artifact's cache is natively readable so `/home` never
+had to be mounted.
+
+The standing rule, now at its fourteenth instance. Each property was broken, confirmed RED,
+restored, and verified byte-identical by sha256 against a hash taken before any mutation.
+
+| # | Mutation | Expected RED | Result |
+|---|---|---|---|
+| M1 | `apply_template` returns the prompt unchanged | templating tests | RED: `finish_reason` `'length' != 'stop'`, `prompt_tokens` 259 against 268, `prompt_starts_with_bos` false. The exact PR-5 degeneration |
+| M2 | guard neutered, `found = []` | 7 guard tests | RED: the injected prompt returned **200**. Without the guard an injection is served |
+| M3 | control-token set hardcoded to 3 of the 24 | the enumerating test | RED: `'<audio|>' was not refused`, 200 |
+| M4 | deadline armed after admission | the queued-deadline test | RED: slowest request 6.31 s against a 3 s deadline |
+| M5 | arrival-time refusal removed | the arrival-refusal test | RED: `[200, 504, 504, 504]`, no 503 at all |
+| M6 | old cache-root mount restored | token absent | RED: `/hf-cache/token` **visible** inside the container |
+
+All six restored, `sha256sum -c` clean on every file, full suite re-run green.
+
+**One mutation initially failed to go RED, and the test was wrong rather than the code.** M4
+first ran against a test built on an 8 s deadline and 512-token requests, assuming those took
+about 11 s as section 14 measured. They no longer do: templating turned them into correct
+207-token readbacks of about 4.4 s, so neither request ever reached the deadline and the test
+passed against the bug. It was rebuilt on a 3 s deadline, which one correct readback is
+certain to exceed, and then separated the two behaviours cleanly at 3.06 s against 6.09 s.
+Recording it because it is the project's characteristic bug appearing inside the check for
+the project's characteristic bug: a regression test whose premise had been invalidated by the
+change it was guarding.
+
+### 15.6 The cost of templating
+
+Ten sequential calls, plain-text prompt, service restarted cold, same record.
+
+| Metric | Section 14 (pre-templating) | PR-5b | Delta |
+|---|---:|---:|---:|
+| p50 | 4441.0 ms | 4455.4 ms | +14.4 ms, +0.3% |
+| p95 | 4627.4 ms | 4794.1 ms | +166.7 ms, +3.6% |
+| First call | 4758.6 ms | 4815.5 ms | +1.2% |
+| Steady state 2-10 (p50) | 4440.7 ms | 4454.3 ms | +0.3% |
+| Sustained | 46.61 tok/s | 46.46 tok/s | -0.3% |
+| Completion, `finish_reason` | 207, `stop` | 207, `stop` | none |
+
+Templating costs about 14 ms at p50, which is INFERRED to be CPU-side string formatting over
+268 tokens and is below run-to-run variance. The p95 delta is one slow tenth call (4768.0 ms)
+in a ten-sample window, not a distribution change. All ten returned byte-identical text.
+
+### 15.7 For the MAIN MACHINE: the paragraph `docs/backend/slm-service-contract.md` must carry
+
+PR-6's contract edit may have written the opposite of all four of these. The paragraph below
+is to be copied verbatim rather than reconstructed.
+
+> **2.2 Prompt assembly.** The caller sends `prompt` as plain text: the readback instruction,
+> the approved record and the health worker's question, assembled by the device's seam from
+> the template named in `prompt_template_version`. The caller does not apply the artifact's
+> chat template and does not wrap the prompt in control tokens of any kind. **The service
+> applies the loaded artifact's own chat template**, taking the caller's whole string as a
+> single `user` turn with a generation prompt appended, using the template the artifact
+> declares rather than any grammar written into the service. The string is not split into a
+> system turn and a user turn; a system preamble, if one is ever required, belongs in the
+> device's template and in a new `prompt_template_version`.
+>
+> **2.3 Control tokens in caller text.** A `prompt` containing any of the loaded artifact's
+> special or added tokens as text is rejected with `SAMD-SLM-8009` (HTTP 422). The rejected
+> set is derived from the artifact's tokenizer, not enumerated in this contract, so it
+> follows a change of artifact. The prompt is **rejected, never sanitised**: the service does
+> not strip, escape or otherwise alter caller text, because that text carries a physician's
+> free-text working diagnosis and a health worker's free-text question. This rule is a
+> prompt-injection control and it is also what refuses a caller that has already applied the
+> chat template itself, which would otherwise be templated twice and return a well-formed
+> 200 over a prompt nobody intended.
+>
+> **4.3 Deadlines.** `generation_deadline_s` is measured **from request arrival**, not from
+> the moment the request reaches the model. Time spent waiting in the service's queue is
+> spent out of the same budget, so the caller's observed latency is bounded by the deadline
+> regardless of queue depth. A request whose expected queue wait alone would exceed its
+> remaining budget is refused at arrival with `SAMD-SLM-8005` (HTTP 503) and a `Retry-After`
+> header, rather than admitted to expire in the queue. A request that exhausts its budget
+> while waiting is abandoned with `SAMD-SLM-8007` (HTTP 504) before generation starts.
+
+The error registry gains one row, and the eight that precede it are unchanged and not
+renumbered:
+
+> | `SAMD-SLM-8009` | 422 | Prompt contains artifact control tokens |
+
+### 15.8 Recorded, not acted on
+
+**Dev connectivity from `backend/core` to this service.** An SSH local forward from the main
+machine, which keeps the loopback bind on this box intact and encrypts the hop. Nothing about
+the service changes for it. Production needs TLS or WireGuard, and that belongs on H-28's
+residual list, not here.
+
+**The infrastructure fixes deserve their own commit.** The drive moved to `/mnt/twotb`, the
+system daemon's data-root relocated, and both compose HF-cache mounts repointed. Sections 9
+through 13 are a record of being blocked by exactly these. The compose repointings are
+carried in this commit because PR-5b had to correct both files anyway (one was an anonymous
+volume, one was misindented, and the SLM one needed narrowing to the hub directory), but the
+drive move and the data-root relocation are unrecorded in git and should be written up
+separately.
+
+### 15.9 What is left for the operator
+
+Unchanged from 14.11 except where PR-5b closed an item.
+
+1. **`backend/core` up on the main machine**, with an SLM proxy that still does not exist in
+   any source on this box.
+2. **The contract updated** with 15.7's paragraph. PR-5b removes the risk section 14.6
+   described, but only for callers that send plain text; the contract is what makes that
+   obligation binding.
+3. **The phone on the same network as `backend/core`.**
+4. **The readback flag flipped in a dev build.**
+5. **A real approved record to read back.**
+6. **The service brought back up with the rotated token.** See 15.10.
+
+The caller timeout note from 14.4 is resolved: with the deadline armed at arrival, a caller
+timeout above `generation_deadline_s` is now sufficient, and the 35 s figure no longer
+applies.
+
+### 15.10 State this session left the box in
+
+The service container is **stopped**. It was stopped to free the GPU for the test suite, and
+was not restarted, because bringing it up requires the rotated `SLM_SERVICE_TOKEN` and this
+session's shell does not carry it. Restarting from the running container's own environment
+would have redeployed the pre-rotation token that section 14.10 recorded as leaked.
+
+The operator brings it up from a shell that has the rotated token exported:
+
+```
+cd /mnt/twotb/finetuninggemma4
+docker compose -f deploy/slm/docker-compose.yml up -d
+```
+
+The image `samd-slm-service:1` is already built from this commit's code. A throwaway image
+`samd-slm-service-test:1` also exists, which is that image plus pytest; it is how the GPU
+suite was run and it is not for production.

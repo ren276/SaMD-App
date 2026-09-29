@@ -3,6 +3,7 @@ package com.example.samdapp.data.sync
 import com.example.samdapp.data.remote.dto.SyncResultDto
 import com.example.samdapp.domain.model.SyncState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 /** api-contract.md §6.1's Android handling rule, table-driven: every status the backend can
@@ -38,8 +39,14 @@ class SyncAckMappingTest {
         assertEquals(SyncState.FAILED, result("rejected").toLocalSyncState())
     }
 
-    @Test(expected = IllegalStateException::class)
-    fun `an unrecognized status is a hard error, not silently ignored`() {
-        result("something-new-the-backend-added").toLocalSyncState()
+    /** Was `@Test(expected = IllegalStateException::class)` until S-3. The throw escaped
+     *  `RoomSyncOutboxRepository.applyAck` and took every LATER ack in the same batch with it,
+     *  which is the same drain-wide outage S-1 had already fixed for an unknown table one layer
+     *  down. S-1 could not fix it here because skipping leaves the row PENDING and the drain
+     *  loop was not yet bounded; S-2 bounded it, so this is now a recorded skip. The assertion
+     *  is inverted rather than deleted, so the decision stays visible in the test file. */
+    @Test
+    fun `an unrecognized status maps to null, so the caller can skip it without losing the batch`() {
+        assertNull(result("something-new-the-backend-added").toLocalSyncState())
     }
 }
