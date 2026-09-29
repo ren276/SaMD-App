@@ -16,8 +16,7 @@ interface AilmentDao {
     /** Phase 6b outbox — see PatientDao.getPendingForSync's KDoc. `audioLocalUri` is excluded
      *  from the wire payload (SyncRecordMappers.kt / SAMD-SYNC-6006), not from this query: a
      *  soft-deleted row still syncs its `deletedAt`. */
-    @Query("SELECT * FROM ailments WHERE syncState IN ('PENDING', 'RETRYABLE') "
-            + "AND (lastSyncAttemptAt IS NULL OR lastSyncAttemptAt <= :retryEligibleBefore) "
+    @Query("SELECT * FROM ailments WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " "
             + "ORDER BY localModifiedAt ASC")
     suspend fun getPendingForSync(retryEligibleBefore: Instant): List<AilmentEntity>
 

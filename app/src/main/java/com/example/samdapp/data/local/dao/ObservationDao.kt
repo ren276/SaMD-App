@@ -14,8 +14,7 @@ interface ObservationDao {
     suspend fun insertAll(observations: List<ObservationEntity>)
 
     /** Phase 6b outbox — see PatientDao.getPendingForSync's KDoc. */
-    @Query("SELECT * FROM observations WHERE syncState IN ('PENDING', 'RETRYABLE') "
-            + "AND (lastSyncAttemptAt IS NULL OR lastSyncAttemptAt <= :retryEligibleBefore) "
+    @Query("SELECT * FROM observations WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " "
             + "ORDER BY localModifiedAt ASC")
     suspend fun getPendingForSync(retryEligibleBefore: Instant): List<ObservationEntity>
 

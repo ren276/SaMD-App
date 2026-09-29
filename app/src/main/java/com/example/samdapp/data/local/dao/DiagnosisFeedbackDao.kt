@@ -28,8 +28,7 @@ interface DiagnosisFeedbackDao {
      *  (`PhysicianDecision.REJECT`) is a normal row here that must sync successfully like any
      *  other — "sync-rejected" (the outbox's `FAILED` state below) is a transport concept and
      *  never means the clinical decision itself; do not conflate the two. */
-    @Query("SELECT * FROM diagnosis_feedback WHERE syncState IN ('PENDING', 'RETRYABLE') "
-            + "AND (lastSyncAttemptAt IS NULL OR lastSyncAttemptAt <= :retryEligibleBefore) "
+    @Query("SELECT * FROM diagnosis_feedback WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " "
             + "ORDER BY localModifiedAt ASC")
     suspend fun getPendingForSync(retryEligibleBefore: Instant): List<DiagnosisFeedbackEntity>
 

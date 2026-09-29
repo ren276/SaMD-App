@@ -18,8 +18,7 @@ interface AbhaProfileDao {
     suspend fun getByAbhaId(abhaId: String): AbhaProfileEntity?
 
     /** Phase 6b outbox — see PatientDao.getPendingForSync's KDoc. */
-    @Query("SELECT * FROM abha_profiles WHERE syncState IN ('PENDING', 'RETRYABLE') "
-            + "AND (lastSyncAttemptAt IS NULL OR lastSyncAttemptAt <= :retryEligibleBefore) "
+    @Query("SELECT * FROM abha_profiles WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " "
             + "ORDER BY localModifiedAt ASC")
     suspend fun getPendingForSync(retryEligibleBefore: Instant): List<AbhaProfileEntity>
 

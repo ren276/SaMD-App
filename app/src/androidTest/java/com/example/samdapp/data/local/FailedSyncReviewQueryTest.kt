@@ -107,8 +107,17 @@ class FailedSyncReviewQueryTest {
                 localModifiedAt = Instant.EPOCH,
             ),
         )
+        // kernel_reports has a UNIQUE index on caseRecordId and upsert is REPLACE, so a second
+        // report for case-1 would delete kr-1. The PENDING report belongs to its own case.
+        db.caseRecordDao().insert(
+            CaseRecordEntity(
+                id = "case-2", patientId = "pat-1", encounterId = "enc-2", status = CaseStatus.DRAFT,
+                assignedDoctorId = null, createdAt = Instant.EPOCH, updatedAt = Instant.EPOCH,
+                localModifiedAt = Instant.EPOCH,
+            ),
+        )
         db.kernelReportDao().upsert(kernelReport("kr-1", "case-1", SyncState.FAILED))
-        db.kernelReportDao().upsert(kernelReport("kr-2", "case-1", SyncState.PENDING))
+        db.kernelReportDao().upsert(kernelReport("kr-2", "case-2", SyncState.PENDING))
 
         val rows = db.kernelReportDao().getFailedForReview()
 

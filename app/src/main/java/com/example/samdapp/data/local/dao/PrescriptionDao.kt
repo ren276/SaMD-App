@@ -25,8 +25,7 @@ interface PrescriptionDao {
 
     /** Phase 6b outbox — see PatientDao.getPendingForSync's KDoc. Two tables, one DAO, matching
      *  this file's existing convention. */
-    @Query("SELECT * FROM prescriptions WHERE syncState IN ('PENDING', 'RETRYABLE') "
-            + "AND (lastSyncAttemptAt IS NULL OR lastSyncAttemptAt <= :retryEligibleBefore) "
+    @Query("SELECT * FROM prescriptions WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " "
             + "ORDER BY localModifiedAt ASC")
     suspend fun getPendingPrescriptionsForSync(retryEligibleBefore: Instant): List<PrescriptionEntity>
 
@@ -73,8 +72,7 @@ interface PrescriptionDao {
     )
     suspend fun getFailedPrescriptionsForReview(): List<FailedSyncRow>
 
-    @Query("SELECT * FROM medication_lines WHERE syncState IN ('PENDING', 'RETRYABLE') "
-            + "AND (lastSyncAttemptAt IS NULL OR lastSyncAttemptAt <= :retryEligibleBefore) "
+    @Query("SELECT * FROM medication_lines WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " "
             + "ORDER BY localModifiedAt ASC")
     suspend fun getPendingMedicationLinesForSync(retryEligibleBefore: Instant): List<MedicationLineEntity>
 

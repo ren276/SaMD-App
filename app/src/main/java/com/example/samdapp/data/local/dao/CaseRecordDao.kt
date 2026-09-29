@@ -19,8 +19,7 @@ interface CaseRecordDao {
      *  above) this same table also carries. Draining a row here touches only `syncState`/
      *  `serverVersion`/`syncErrorCode`/`lastSyncAttemptAt` via [applySyncResult] below — never
      *  `status`. See PatientDao.getPendingForSync's KDoc for the general shape. */
-    @Query("SELECT * FROM case_records WHERE syncState IN ('PENDING', 'RETRYABLE') "
-            + "AND (lastSyncAttemptAt IS NULL OR lastSyncAttemptAt <= :retryEligibleBefore) "
+    @Query("SELECT * FROM case_records WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " "
             + "ORDER BY localModifiedAt ASC")
     suspend fun getPendingForSync(retryEligibleBefore: Instant): List<CaseRecordEntity>
 

@@ -34,8 +34,7 @@ interface KernelReportDao {
     suspend fun getServerVersion(id: String): Int?
 
     /** Phase 6b outbox — see PatientDao.getPendingForSync's KDoc. */
-    @Query("SELECT * FROM kernel_reports WHERE syncState IN ('PENDING', 'RETRYABLE') "
-            + "AND (lastSyncAttemptAt IS NULL OR lastSyncAttemptAt <= :retryEligibleBefore) "
+    @Query("SELECT * FROM kernel_reports WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " "
             + "ORDER BY localModifiedAt ASC")
     suspend fun getPendingForSync(retryEligibleBefore: Instant): List<KernelReportEntity>
 

@@ -15,8 +15,7 @@ interface PatientDao {
 
     /** Phase 6b outbox: rows this device has never pushed, or has locally re-modified since its
      *  last push. Never `CONFLICT`/`FAILED`/`SYNCED` — see SyncOutboxRepository's KDoc. */
-    @Query("SELECT * FROM patients WHERE syncState IN ('PENDING', 'RETRYABLE') "
-            + "AND (lastSyncAttemptAt IS NULL OR lastSyncAttemptAt <= :retryEligibleBefore) "
+    @Query("SELECT * FROM patients WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " "
             + "ORDER BY localModifiedAt ASC")
     suspend fun getPendingForSync(retryEligibleBefore: Instant): List<PatientEntity>
 

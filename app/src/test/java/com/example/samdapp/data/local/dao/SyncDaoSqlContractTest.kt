@@ -52,38 +52,84 @@ class SyncDaoSqlContractTest {
     /** The one table with sync columns that is deliberately NOT drained. */
     private val unwiredDao = "ConsultationDocumentDao.kt"
 
-    @Test
-    fun `all twenty drained tables select PENDING or RETRYABLE, and the unwired one does not`() {
-        assertEquals(
-            "Exactly twenty drain queries must accept a RETRYABLE row. Fewer means a table whose " +
-                "retryable rejections are silently permanent; more means consultation_documents " +
-                "was wired into the outbox, which is a deliberate decision this test guards.",
-            20,
-            countAcross("syncState IN ('PENDING', 'RETRYABLE')"),
-        )
+    private fun stripComments(text: String): String =
+        Regex("/\\*.*?\\*/", RegexOption.DOT_MATCHES_ALL).replace(text, "")
+            .lineSequence().joinToString("\n") { it.substringBefore("//") }
 
-        val unwired = sources().getValue(unwiredDao)
-        assertTrue(
-            "$unwiredDao must keep its bare PENDING select: it is deliberately not drained, and " +
-                "widening it here would be the first half of wiring it in by accident.",
-            unwired.contains("WHERE syncState = 'PENDING'"),
-        )
-        assertTrue(
-            "$unwiredDao must not gain the RETRYABLE predicate",
-            !unwired.contains("syncState IN ('PENDING', 'RETRYABLE')"),
-        )
+    /** The tables the outbox drains, read from the place that decides it: the calls in
+     *  `RoomSyncOutboxRepository.collectPendingRecords`. Not a number typed into this test, so
+     *  wiring in a twenty-first table changes the expectation here without anyone editing it. */
+    private val drainRegistry: List<Pair<String, String>> by lazy {
+        val samdapp = daoDir.parentFile.parentFile.parentFile
+        val repo = File(samdapp, "data/sync/RoomSyncOutboxRepository.kt")
+        assertTrue("could not read $repo", repo.isFile)
+        Regex("""(\w+Dao)\.(getPending\w*ForSync)\(retryEligibleBefore\)""")
+            .findAll(stripComments(repo.readText()))
+            .map { it.groupValues[1] to it.groupValues[2] }
+            .toList()
+    }
+
+    /** The `@Query` text that decorates [method] inside the DAO interface named for [daoProperty]. */
+    private fun drainQueryFor(daoProperty: String, method: String): String {
+        val iface = "interface " + daoProperty.replaceFirstChar { it.uppercase() }
+        val file = sources().values.firstOrNull { it.contains(Regex("""$iface\b""")) }
+            ?: error("no DAO interface for $daoProperty")
+        val start = file.indexOf(iface)
+        val next = file.indexOf("\ninterface ", start + iface.length)
+        val body = file.substring(start, if (next == -1) file.length else next)
+        val fn = body.indexOf("fun $method(retryEligibleBefore")
+        assertTrue("$daoProperty.$method not found with a retryEligibleBefore parameter", fn >= 0)
+        return body.substring(body.lastIndexOf("@Query", fn), fn)
     }
 
     @Test
-    fun `every drain query gates on the retry interval, so a drain cannot re-collect within itself`() {
+    fun `every drained table builds its drain query from the one shared eligibility fragment`() {
+        val registry = drainRegistry
+        assertTrue("the drain registry parsed empty", registry.isNotEmpty())
+        assertEquals("a table is registered twice", registry.size, registry.toSet().size)
+
+        registry.forEach { (dao, method) ->
+            assertTrue(
+                "$dao.$method must build its query from SyncSql.PENDING_ELIGIBILITY_FRAGMENT",
+                drainQueryFor(dao, method).contains("SyncSql.PENDING_ELIGIBILITY_FRAGMENT"),
+            )
+        }
+
+        // No DAO may carry a drain query the registry does not know about, or the reverse.
         assertEquals(
-            "Every drain query must exclude a row attempted more recently than RETRY_MIN_INTERVAL. " +
-                "Without it the only thing stopping SyncOutboxDrainer.drainLocked from re-sending " +
-                "a RETRYABLE row inside one drain is the in-memory `attempted` set, and a single " +
-                "guard on a spin loop is not enough.",
-            20,
-            countAcross("lastSyncAttemptAt IS NULL OR lastSyncAttemptAt <= :retryEligibleBefore"),
+            "a DAO declares a retryEligibleBefore drain query that collectPendingRecords never calls",
+            registry.size,
+            countAcross("(retryEligibleBefore: Instant)"),
         )
+
+        // The old inline copies must not come back, in either spelling.
+        // SyncSql.kt legitimately holds the one definition, so it is the only file left out.
+        fun countOutsideSyncSql(needle: String) = sources().filterKeys { it != "SyncSql.kt" }.values
+            .sumOf { Regex(Regex.escape(needle)).findAll(it).count() }
+        assertEquals("an inline PENDING/RETRYABLE predicate is back", 0, countOutsideSyncSql("syncState IN ('PENDING', 'RETRYABLE')"))
+        assertEquals("an inline cutoff predicate is back", 0, countOutsideSyncSql("lastSyncAttemptAt <= :retryEligibleBefore"))
+
+        val unwired = sources().getValue(unwiredDao)
+        assertTrue(
+            "$unwiredDao must keep its bare PENDING select: it is deliberately not drained.",
+            unwired.contains("WHERE syncState = 'PENDING'"),
+        )
+        assertTrue("$unwiredDao must not use the shared fragment", !unwired.contains("SyncSql."))
+    }
+
+    @Test
+    fun `the shared fragment lets PENDING bypass the cutoff and makes RETRYABLE honour it`() {
+        val fragment = SyncSql.PENDING_ELIGIBILITY_FRAGMENT
+        val pendingBranch = fragment.substringBefore("'RETRYABLE'")
+        val retryableBranch = fragment.substring(fragment.indexOf("'RETRYABLE'"))
+
+        assertTrue("PENDING must be a bare, always-eligible branch", pendingBranch.contains("syncState = 'PENDING' OR"))
+        assertTrue("the PENDING branch must not mention the cutoff", !pendingBranch.contains("lastSyncAttemptAt"))
+        assertTrue(
+            "the RETRYABLE branch must wait on the cutoff",
+            retryableBranch.contains("lastSyncAttemptAt <= :retryEligibleBefore"),
+        )
+        assertTrue("a never-attempted RETRYABLE row must be eligible", retryableBranch.contains("lastSyncAttemptAt IS NULL"))
     }
 
     @Test
