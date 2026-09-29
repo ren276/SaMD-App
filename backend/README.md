@@ -52,6 +52,38 @@ no Gradle edit. Point it at the host machine's LAN IP, not `localhost`.
 The XGBoost kernel is deliberately not a compose service. It stays a separate process on the LAN
 in dev; the backend reaches it through `KERNEL_BASE_URL`.
 
+### Switching ABHA / ABDM Mode (Stub vs. Live)
+
+`docker-compose.yml` defaults to `ABDM_MODE=stub`, so local development and unit tests do not depend
+on external sandbox connectivity. Live mode is opted into by setting `ABDM_MODE=live` in the shell
+or in `backend/.env`; nothing in the compose file needs editing. The same pattern applies to
+`SLM_BASE_URL` and `KERNEL_BASE_URL`, which default to `host.docker.internal` on ports 8100 and 8000.
+
+To run against the live ABDM sandbox:
+
+1. **Set the variables:**
+   - Set `ABDM_MODE=live` (shell or `.env`).
+   - Ensure `ABDM_CLIENT_ID`, `ABDM_CLIENT_SECRET`, and the sandbox URL variables are set in
+     `backend/core/.env`.
+
+2. **Rebuild Docker from scratch without cache:**
+   Because `abdm-adapter` is packaged and installed directly into `/opt/venv` during the multi-stage
+   Docker build, reusing cached layers or existing containers risks executing stale wheel files,
+   cached bytecode, or lingering container state. **Always restart from scratch without cache:**
+
+   ```bash
+   cd backend
+   docker compose down
+   docker compose build --no-cache api
+   docker compose up -d --force-recreate
+   ```
+
+3. **Verify the active mode:**
+   ```bash
+   curl -s http://localhost:8080/health | grep abdm_mode
+   # Output must show: "abdm_mode":"live"
+   ```
+
 ## Provisioning accounts
 
 There is no self-service registration, no self-service PIN reset, and no user-management API
