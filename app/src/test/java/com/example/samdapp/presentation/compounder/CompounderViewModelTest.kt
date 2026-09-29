@@ -487,4 +487,18 @@ class CompounderViewModelTest {
 
         assertEquals(ObservationSource.MANUAL, vm.uiState.value.source)
     }
+
+    @Test
+    fun `the demo fill strips a device mark from blood glucose`() = runTest(mainDispatcherRule.dispatcher) {
+        val source = FakeVitalsSource().apply { nextResult = glucoseAccepted() }
+        val vm = viewModel(source)
+        vm.onStartAcquisition()
+        assertEquals(VitalsFieldProvenance.DEVICE, vm.uiState.value.fieldProvenance[VitalsField.BLOOD_GLUCOSE_MG_DL])
+        assertEquals(ObservationSource.DEVICE, vm.uiState.value.source)
+
+        vm.fillDemoData()
+
+        assertNull(vm.uiState.value.fieldProvenance[VitalsField.BLOOD_GLUCOSE_MG_DL])
+        assertEquals(ObservationSource.MANUAL, vm.uiState.value.source)
+    }
 }
