@@ -33,7 +33,9 @@ services:
       DATABASE_URL: postgresql+asyncpg://samd:${POSTGRES_PASSWORD:-samd_dev_only}@db:5432/samd
       ENVIRONMENT: dev
       REQUIRE_HTTPS: "false"
-      ABDM_MODE: stub
+      ABDM_MODE: ${ABDM_MODE:-stub}
+      SLM_BASE_URL: ${SLM_BASE_URL:-http://host.docker.internal:8100}
+      KERNEL_BASE_URL: ${KERNEL_BASE_URL:-http://host.docker.internal:8000}
     # Port 8080 matches the dev flavor's BACKEND_BASE_URL (http://<LAN-IP>:8080/), so no Gradle
     # edit is needed to point a device at a locally running backend.
     ports:
@@ -46,6 +48,12 @@ services:
     command: >
       sh -c "alembic upgrade head &&
              uvicorn app.main:app --host 0.0.0.0 --port 8080"
+    # host.docker.internal does not resolve automatically on Linux (unlike Mac/Windows).
+    # This mapping is required for SLM_BASE_URL=http://host.docker.internal:8100 to reach
+    # the SSH tunnel that is listening on the host's loopback. Without it the container gets
+    # "Name or service not known" which surfaces as SAMD-SLM-8020.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 volumes:
   samd_pgdata:
