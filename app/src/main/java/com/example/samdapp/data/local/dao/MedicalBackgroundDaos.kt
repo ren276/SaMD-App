@@ -22,8 +22,7 @@ interface MedicalHistoryItemDao {
     fun observeForPatient(patientId: String): Flow<List<MedicalHistoryItemEntity>>
 
     /** Phase 6b outbox — see PatientDao.getPendingForSync's KDoc. */
-    @Query("SELECT * FROM medical_history_items WHERE syncState IN ('PENDING', 'RETRYABLE') "
-            + "AND (lastSyncAttemptAt IS NULL OR lastSyncAttemptAt <= :retryEligibleBefore) "
+    @Query("SELECT * FROM medical_history_items WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " "
             + "ORDER BY localModifiedAt ASC")
     suspend fun getPendingForSync(retryEligibleBefore: Instant): List<MedicalHistoryItemEntity>
 
@@ -80,8 +79,7 @@ interface MedicationEntryDao {
     fun observeForPatient(patientId: String): Flow<List<MedicationEntryEntity>>
 
     /** Phase 6b outbox — see PatientDao.getPendingForSync's KDoc. */
-    @Query("SELECT * FROM medication_entries WHERE syncState IN ('PENDING', 'RETRYABLE') "
-            + "AND (lastSyncAttemptAt IS NULL OR lastSyncAttemptAt <= :retryEligibleBefore) "
+    @Query("SELECT * FROM medication_entries WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " "
             + "ORDER BY localModifiedAt ASC")
     suspend fun getPendingForSync(retryEligibleBefore: Instant): List<MedicationEntryEntity>
 
@@ -138,8 +136,7 @@ interface AllergyDao {
     fun observeForPatient(patientId: String): Flow<List<AllergyEntity>>
 
     /** Phase 6b outbox — see PatientDao.getPendingForSync's KDoc. */
-    @Query("SELECT * FROM allergies WHERE syncState IN ('PENDING', 'RETRYABLE') "
-            + "AND (lastSyncAttemptAt IS NULL OR lastSyncAttemptAt <= :retryEligibleBefore) "
+    @Query("SELECT * FROM allergies WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " "
             + "ORDER BY localModifiedAt ASC")
     suspend fun getPendingForSync(retryEligibleBefore: Instant): List<AllergyEntity>
 
@@ -196,8 +193,7 @@ interface FamilyHistoryEntryDao {
     fun observeForPatient(patientId: String): Flow<List<FamilyHistoryEntryEntity>>
 
     /** Phase 6b outbox — see PatientDao.getPendingForSync's KDoc. */
-    @Query("SELECT * FROM family_history_entries WHERE syncState IN ('PENDING', 'RETRYABLE') "
-            + "AND (lastSyncAttemptAt IS NULL OR lastSyncAttemptAt <= :retryEligibleBefore) "
+    @Query("SELECT * FROM family_history_entries WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " "
             + "ORDER BY localModifiedAt ASC")
     suspend fun getPendingForSync(retryEligibleBefore: Instant): List<FamilyHistoryEntryEntity>
 
@@ -262,8 +258,7 @@ interface SocialHistoryDao {
 
     /** Phase 6b outbox — see PatientDao.getPendingForSync's KDoc. `patientId` IS this table's
      *  primary key (one row per patient), so it doubles as the sync record id. */
-    @Query("SELECT * FROM social_histories WHERE syncState IN ('PENDING', 'RETRYABLE') "
-            + "AND (lastSyncAttemptAt IS NULL OR lastSyncAttemptAt <= :retryEligibleBefore) "
+    @Query("SELECT * FROM social_histories WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " "
             + "ORDER BY localModifiedAt ASC")
     suspend fun getPendingForSync(retryEligibleBefore: Instant): List<SocialHistoryEntity>
 

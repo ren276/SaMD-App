@@ -41,8 +41,7 @@ interface EvaluateReportDao {
      *  H-14 safety property: a persisted evaluate-failure marker must never be pushable to the
      *  backend as a real report, enforced here rather than relying on every caller to check. */
     @Query(
-        "SELECT * FROM evaluate_reports WHERE syncState IN ('PENDING', 'RETRYABLE') " +
-        "AND (lastSyncAttemptAt IS NULL OR lastSyncAttemptAt <= :retryEligibleBefore) " +
+        "SELECT * FROM evaluate_reports WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " " +
         "AND failureCode IS NULL " +
         "ORDER BY localModifiedAt ASC",
     )

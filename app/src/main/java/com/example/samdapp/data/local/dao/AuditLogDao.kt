@@ -22,8 +22,7 @@ interface AuditLogDao {
 
     /** Phase 6b outbox — see PatientDao.getPendingForSync's KDoc. `op` is `"insert"` for this
      *  table (SyncRecordMappers.kt), matching its append-only nature server side too. */
-    @Query("SELECT * FROM audit_log WHERE syncState IN ('PENDING', 'RETRYABLE') "
-            + "AND (lastSyncAttemptAt IS NULL OR lastSyncAttemptAt <= :retryEligibleBefore) "
+    @Query("SELECT * FROM audit_log WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " "
             + "ORDER BY localModifiedAt ASC")
     suspend fun getPendingForSync(retryEligibleBefore: Instant): List<AuditLogEntity>
 
