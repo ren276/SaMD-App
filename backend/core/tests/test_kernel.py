@@ -83,7 +83,7 @@ def scripted_kernel() -> ScriptedKernel:
 @pytest.fixture
 def breakers() -> KernelCircuitBreakers:
     # Short threshold and cooldown: the circuit-breaker tests need to trip and recover quickly.
-    return KernelCircuitBreakers(threshold=2, cooldown_seconds=0.05)
+    return KernelCircuitBreakers(threshold=2, cooldown_seconds=0.5)
 
 
 @pytest.fixture
