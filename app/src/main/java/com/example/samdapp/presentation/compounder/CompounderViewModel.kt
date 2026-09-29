@@ -415,6 +415,7 @@ class CompounderViewModel @AssistedInject constructor(
                 weightKg = DemoPatientProfile.WEIGHT_KG,
                 heightCm = DemoPatientProfile.HEIGHT_CM,
                 painScore = DemoPatientProfile.PAIN_SCORE,
+                bloodGlucoseMgDl = DemoPatientProfile.BLOOD_GLUCOSE,
                 captureMethod = VitalsCaptureMethod.DIGITAL_MONITOR,
                 newAilmentDescription = DemoPatientProfile.AILMENT.description,
                 newAilmentSeverity = DemoPatientProfile.AILMENT.severity,
@@ -755,6 +756,7 @@ private val DEMO_WRITTEN_FIELDS = setOf(
     VitalsField.RESPIRATORY_RATE,
     VitalsField.WEIGHT_KG,
     VitalsField.HEIGHT_CM,
+    VitalsField.BLOOD_GLUCOSE_MG_DL,
 )
 
 /** Seeds provenance from a prefill snapshot: DEVICE for every field the source actually supplied. */
