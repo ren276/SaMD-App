@@ -100,10 +100,11 @@ async def write_out_of_band(
        same facility, the out-of-band session blocks on the same key while the request session is
        waiting on `write_out_of_band` to return — a permanent deadlock, not a slow query, and not
        specific to any one row: the two sessions never touch the same table row at all, only the
-       same facility-scoped advisory lock. MEASURED, `backend/scratchpad/s5-abdm-response-unpacking.md`
-       section 2: `pg_stat_activity` showed the request session idle in transaction holding the
-       lock while the out-of-band session sat `active`/`Lock`/`advisory` on the identical key,
-       unrecovered until the connections were killed.
+       same facility-scoped advisory lock. MEASURED,
+       `backend/scratchpad/s5-abdm-response-unpacking.md` section 2:
+       `pg_stat_activity` showed the request session idle in transaction holding the lock while
+       the out-of-band session sat `active`/`Lock`/`advisory` on the identical key, unrecovered
+       until the connections were killed.
        The rule this implies for any caller: finish every audit append this request will make
        BEFORE the first call that can reach a `_fail`-shaped out-of-band write, or route the whole
        failure path (state change and audit row together) through one out-of-band call the way

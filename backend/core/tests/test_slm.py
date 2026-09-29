@@ -140,7 +140,7 @@ def scripted_slm() -> ScriptedSlm:
 @pytest.fixture
 def slm_breaker() -> CircuitBreaker:
     # Short threshold and cooldown so the breaker tests trip and recover quickly.
-    return CircuitBreaker(threshold=2, cooldown_seconds=0.05)
+    return CircuitBreaker(threshold=2, cooldown_seconds=0.5)
 
 
 @pytest.fixture
