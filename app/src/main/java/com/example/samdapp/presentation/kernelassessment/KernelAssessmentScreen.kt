@@ -175,8 +175,10 @@ private fun UnavailableCard(failure: KernelFailure?, isRetrying: Boolean, onRetr
 /** Why verification is required, stated truthfully: an emergency or an unrecognised result is
  *  not "confidence below 90%", and saying so under a 100% figure contradicted itself. */
 internal fun verificationNotice(display: AssessmentDisplay): String = when {
-    display.isRuleBasedEmergency ->
+    display.isCriticalVitalsFlag ->
         "⚠ Emergency: critical vitals. Refer now; physician verification is required."
+    display.isEmergency ->
+        "⚠ Emergency referral. Refer now; physician verification is required."
     display.confidencePercent < 90 ->
         "⚠ Confidence below 90%: this case requires physician verification before any diagnosis is finalized."
     else ->
@@ -196,7 +198,7 @@ internal fun ConfidenceGauge(display: AssessmentDisplay) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (display.isRuleBasedEmergency) {
+            if (display.isEmergency) {
                 Card(
                     colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
                     modifier = Modifier.fillMaxWidth().padding(top = 12.dp).testTag(EMERGENCY_BANNER_TAG),
@@ -208,13 +210,16 @@ internal fun ConfidenceGauge(display: AssessmentDisplay) {
                             color = MaterialTheme.colorScheme.onErrorContainer,
                         )
                         Text(
-                            "Critical vitals (rule-based)",
+                            if (display.isCriticalVitalsFlag) "Critical vitals (rule-based)" else "Emergency referral",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onErrorContainer,
                         )
                     }
                 }
-            } else Row(
+            }
+            // The red flag's 1.0 is a rule's literal, so it gets no bar. An EMERGENCY urgency on a
+            // real model class keeps its prediction and confidence on screen.
+            if (!display.isCriticalVitalsFlag) Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.padding(top = 12.dp).testTag(CONFIDENCE_BAR_TAG),
             ) {

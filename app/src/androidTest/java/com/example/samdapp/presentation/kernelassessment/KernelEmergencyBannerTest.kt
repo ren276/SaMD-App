@@ -9,18 +9,20 @@ import org.junit.Test
 
 /**
  * The classifier's red-flag result must read as an emergency, never as a 100% model confidence:
- * its 1.0 is a literal from a rule, not a probability.
+ * its 1.0 is a literal from a rule, not a probability. Any other EMERGENCY result is an emergency
+ * too, but its prediction and confidence are the model's own, so they stay and it is never called
+ * critical vitals.
  */
 class KernelEmergencyBannerTest {
 
     @get:Rule
     val composeRule = createComposeRule()
 
-    private fun display(ruleBasedEmergency: Boolean, percent: Int) = AssessmentDisplay(
-        predictedCondition = if (ruleBasedEmergency) "critical_vitals_flag" else "moderate_risk",
+    private fun display(emergency: Boolean, criticalVitals: Boolean, percent: Int) = AssessmentDisplay(
+        predictedCondition = if (criticalVitals) "critical_vitals_flag" else "high_risk",
         icdCode = null,
         confidencePercent = percent,
-        requiresHumanVerification = ruleBasedEmergency,
+        requiresHumanVerification = emergency,
         isMockFallback = false,
         isUnavailable = false,
         failure = null,
@@ -29,12 +31,17 @@ class KernelEmergencyBannerTest {
         reasoningLines = emptyList(),
         evidenceFor = emptyList(),
         evidenceAgainst = emptyList(),
-        isRuleBasedEmergency = ruleBasedEmergency,
+        isEmergency = emergency,
+        isCriticalVitalsFlag = criticalVitals,
     )
 
+    private val redFlag = display(emergency = true, criticalVitals = true, percent = 100)
+    private val urgencyOnlyEmergency = display(emergency = true, criticalVitals = false, percent = 97)
+    private val modelResult = display(emergency = false, criticalVitals = false, percent = 98)
+
     @Test
-    fun ruleBasedEmergencyShowsTheBannerAndNoPercentage() {
-        composeRule.setContent { ConfidenceGauge(display(ruleBasedEmergency = true, percent = 100)) }
+    fun theRedFlagShowsTheCriticalVitalsBannerAndNoPercentage() {
+        composeRule.setContent { ConfidenceGauge(redFlag) }
 
         composeRule.onNodeWithTag(EMERGENCY_BANNER_TAG).assertExists()
         composeRule.onNodeWithText("Critical vitals (rule-based)").assertExists()
@@ -43,8 +50,19 @@ class KernelEmergencyBannerTest {
     }
 
     @Test
+    fun anEmergencyOnAModelClassKeepsItsConfidenceAndIsNotCalledCriticalVitals() {
+        composeRule.setContent { ConfidenceGauge(urgencyOnlyEmergency) }
+
+        composeRule.onNodeWithTag(EMERGENCY_BANNER_TAG).assertExists()
+        composeRule.onNodeWithText("Emergency referral").assertExists()
+        composeRule.onNodeWithText("Critical vitals (rule-based)").assertDoesNotExist()
+        composeRule.onNodeWithTag(CONFIDENCE_BAR_TAG).assertExists()
+        composeRule.onNodeWithText("97%").assertExists()
+    }
+
+    @Test
     fun aModelResultShowsTheConfidenceBarAndNoBanner() {
-        composeRule.setContent { ConfidenceGauge(display(ruleBasedEmergency = false, percent = 98)) }
+        composeRule.setContent { ConfidenceGauge(modelResult) }
 
         composeRule.onNodeWithTag(CONFIDENCE_BAR_TAG).assertExists()
         composeRule.onNodeWithText("98%").assertExists()
@@ -53,8 +71,9 @@ class KernelEmergencyBannerTest {
 
     @Test
     fun theVerificationNoticeNamesTheRealReason() {
-        val emergency = verificationNotice(display(ruleBasedEmergency = true, percent = 100))
-        assertTrue(emergency, emergency.contains("critical vitals"))
-        assertTrue(emergency, !emergency.contains("below 90%"))
+        val redFlagNotice = verificationNotice(redFlag)
+        assertTrue(redFlagNotice, redFlagNotice.contains("critical vitals") && !redFlagNotice.contains("below 90%"))
+        val emergencyNotice = verificationNotice(urgencyOnlyEmergency)
+        assertTrue(emergencyNotice, emergencyNotice.contains("Emergency referral") && !emergencyNotice.contains("critical vitals"))
     }
 }

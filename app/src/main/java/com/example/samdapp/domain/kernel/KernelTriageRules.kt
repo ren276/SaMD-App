@@ -53,9 +53,7 @@ object KernelTriageRules {
         val risk: RiskCategory,
         val requiresVerification: Boolean,
         val unrecognised: Map<UnrecognisedField, String>,
-    ) {
-        val isRuleBasedEmergency: Boolean get() = urgency == UrgencyLevel.EMERGENCY
-    }
+    )
 
     fun triage(triageUrgency: String, predictedCondition: String, confidence: Double): Triage {
         val unrecognised = mutableMapOf<UnrecognisedField, String>()
@@ -69,8 +67,9 @@ object KernelTriageRules {
         return Triage(urgency, risk, requiresVerification, unrecognised)
     }
 
-    /** The red-flag result, identified by what it is (its differential or its urgency), which is
-     *  what the report screen uses to show a rule-based emergency instead of a percentage. */
-    fun isRuleBasedEmergency(predictedCondition: String?, urgency: UrgencyLevel): Boolean =
-        predictedCondition == CRITICAL_VITALS_FLAG || urgency == UrgencyLevel.EMERGENCY
+    /** The classifier's rule-based red flag, identified by its differential, never by its 1.0.
+     *  Only this result replaces the confidence bar and is described as critical vitals: an
+     *  EMERGENCY urgency on a real model class is still an emergency, but its prediction and
+     *  confidence are the model's own and stay on screen. */
+    fun isCriticalVitalsFlag(predictedCondition: String?): Boolean = predictedCondition == CRITICAL_VITALS_FLAG
 }

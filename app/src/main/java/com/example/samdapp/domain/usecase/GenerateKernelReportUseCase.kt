@@ -263,7 +263,6 @@ class GenerateKernelReportUseCase @Inject constructor(
             if (triage.unrecognised.isNotEmpty()) recordUnrecognisedOutput(caseRecordId, result, triage)
             val urgency = triage.urgency
             val risk = triage.risk
-            val ruleBased = KernelTriageRules.isRuleBasedEmergency(result.predictedCondition, urgency)
 
             val reasoningSummary = buildString {
                 append("ML risk model triage: ${result.triageUrgency}. ")
@@ -271,7 +270,7 @@ class GenerateKernelReportUseCase @Inject constructor(
                 if (result.recommendedInvestigations.isNotEmpty()) {
                     append("Recommended investigations: ${result.recommendedInvestigations.joinToString(", ")}. ")
                 }
-                if (ruleBased && result.predictedCondition == KernelTriageRules.CRITICAL_VITALS_FLAG) {
+                if (KernelTriageRules.isCriticalVitalsFlag(result.predictedCondition)) {
                     // The classifier's red-flag gate, not the model: its 1.0 is a literal, not a
                     // probability, so it is never stated as one.
                     append("Critical vitals (rule-based red flag), not a model prediction.")
