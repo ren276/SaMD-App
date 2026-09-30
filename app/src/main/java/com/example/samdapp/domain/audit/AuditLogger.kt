@@ -104,6 +104,13 @@ enum class AuditAction(val value: String) {
      *  exists for this case and the whole point of the fix is that none gets invented. */
     KERNEL_EMPTY_DIFFERENTIAL("kernel_empty_differential"),
 
+    /** The kernel answered with a `triage_urgency` or `condition_tier` this build does not
+     *  recognise. The report is still written, failed closed (at least URGENT, HIGH risk,
+     *  verification required) by `KernelTriageRules`; this records which field and the verbatim
+     *  token: `auditPayload("triage_urgency" to ..., "condition_tier" to ..., "modelVersion" to ...)`,
+     *  only the unrecognised fields present. Model vocabulary, never PHI. */
+    KERNEL_UNRECOGNISED_OUTPUT("kernel_unrecognised_output"),
+
     /** ASR track (`scratchpad/asr-field-audit-memo.md` B.4), one per state in the
      *  confirmation-gate model. Field-level provenance only, no transcript: `auditPayload("slot"
      *  to ..., "provenance" to ..., "asrModelId" to ..., "asrModelVersion" to ..., "charCount"

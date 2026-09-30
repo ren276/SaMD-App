@@ -1,0 +1,49 @@
+{
+  "_provenance": "Captured 2026-09-29 from SaMDClassifier commit 63e85af (git archive of the committed tree, not the working tree), run in SaMDClassifier's own .venv through FastAPI TestClient POST /v1/assess. Real classifier output: do not hand-edit, re-capture instead. An identical copy lives in app/src/test/resources/classifier-fixtures/ and backend/core/tests/fixtures/classifier/.",
+  "classifier_commit": "63e85af",
+  "endpoint": "/v1/assess",
+  "request": {
+    "case_token": "case-fixture-high",
+    "age": 55,
+    "sex": "M",
+    "systolic_bp": 150.0,
+    "diastolic_bp": 95.0,
+    "bmi": 31.0,
+    "heart_rate": 110.0,
+    "random_glucose": 180.0,
+    "spo2": 91.0
+  },
+  "response": {
+    "case_token": "case-fixture-high",
+    "safety_screen_passed": true,
+    "triage_urgency": "URGENT",
+    "differential_diagnosis": [
+      {
+        "condition_tier": "high_risk",
+        "probability": 1.0,
+        "evidence_for": [
+          "Systolic Bp: 150.0",
+          "Diastolic Bp: 95.0",
+          "Bmi: 31.0",
+          "Heart Rate: 110.0",
+          "Spo2: 91.0",
+          "Glucose: 180.0"
+        ],
+        "evidence_against": [
+          "Age: 55.0"
+        ]
+      }
+    ],
+    "recommended_investigations": [
+      "Lipid Profile",
+      "HbA1c Test",
+      "Fasting Blood Sugar",
+      "ECG (Resting)",
+      "Serum Creatinine"
+    ],
+    "model_metadata": {
+      "version": "toy-v0.6-observed-glucose-4tier",
+      "calibrated": true
+    }
+  }
+}

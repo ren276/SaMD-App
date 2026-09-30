@@ -24,7 +24,7 @@ def _response(**overrides: Any) -> dict[str, Any]:
         "triage_urgency": "ROUTINE",
         "differential_diagnosis": [
             {
-                "condition_tier": "Viral upper respiratory infection",
+                "condition_tier": "moderate_risk",
                 "probability": 0.81,
                 "evidence_for": ["fever 3 days"],
                 "evidence_against": ["no chest findings"],
@@ -45,9 +45,9 @@ def _response(**overrides: Any) -> dict[str, Any]:
 def test_normal_case_takes_the_top_differential() -> None:
     result = derive_assess(_response())
 
-    assert result.predicted_condition == "Viral upper respiratory infection"
+    assert result.predicted_condition == "moderate_risk"
     assert result.confidence_score == pytest.approx(0.81)
-    # 0.81 is below the 0.85 LOW floor and at or above the 0.65 MODERATE floor.
+    # Risk comes from the class (v2), and 0.81 is below the 0.90 verification threshold.
     assert result.risk_category == "MODERATE"
     assert result.requires_human_verification is True
     assert result.derivation_rule_version == DERIVATION_RULE_VERSION
@@ -75,8 +75,9 @@ def test_the_rule_version_is_returned_on_every_path() -> None:
     ],
 )
 def test_requires_human_verification_boundary(probability: float, expected: bool) -> None:
+    # A recognised class and urgency, so only the confidence threshold decides.
     body = _response(
-        differential_diagnosis=[{"condition_tier": "X", "probability": probability}],
+        differential_diagnosis=[{"condition_tier": "low_risk", "probability": probability}],
     )
     assert derive_assess(body).requires_human_verification is expected
 
@@ -88,38 +89,62 @@ def test_the_threshold_constant_is_the_one_the_android_use_case_uses() -> None:
 
 
 # ---------------------------------------------------------------------------
-# risk_category: the A0 Case 1 mapping, copied from GenerateKernelReportUseCase.tryRealApi
+# risk_category and urgency (v2): risk from the predicted class, never from confidence (D-11
+# resolved); an explicit urgency vocabulary; anything unrecognised fails closed.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
-    ("triage_urgency", "probability", "expected"),
+    ("condition_tier", "probability", "expected"),
     [
-        # The EMERGENCY branch wins regardless of confidence, including at a confidence that
-        # would otherwise be LOW.
-        ("EMERGENCY", 0.99, "HIGH"),
-        ("EMERGENT", 0.99, "HIGH"),
-        ("emergency", 0.99, "HIGH"),  # uppercase() on the device
-        # Outside EMERGENCY the mapping grades model uncertainty, not clinical severity, so a
-        # higher confidence lands in a LOWER risk band. Reproduced from Android unchanged; see
-        # D-11 and the _risk_category docstring.
-        ("ROUTINE", 0.85, "LOW"),
-        ("ROUTINE", 0.90, "LOW"),
-        ("URGENT", 0.849999, "MODERATE"),
-        ("URGENT", 0.65, "MODERATE"),
-        ("ROUTINE", 0.649999, "HIGH"),
-        ("ROUTINE", 0.10, "HIGH"),
-        # An urgency string the kernel invents is not EMERGENCY, so the confidence bands decide.
-        # No coercion to ROUTINE, no crash.
-        ("SOMETHING_NEW", 0.90, "LOW"),
+        # v1 mapped a confidence of 0.85 or more to LOW whatever the class. Class decides now.
+        ("high_risk", 0.99, "HIGH"),
+        ("high_risk", 0.50, "HIGH"),
+        ("moderate_risk", 0.99, "MODERATE"),
+        ("low_risk", 0.99, "LOW"),
+        ("low_risk", 0.10, "LOW"),
+        ("critical_vitals_flag", 1.0, "HIGH"),
+        # A class the classifier does not emit fails closed.
+        ("SOMETHING_NEW", 0.99, "HIGH"),
     ],
 )
-def test_risk_category_mapping(triage_urgency: str, probability: float, expected: str) -> None:
+def test_risk_category_comes_from_the_class(
+    condition_tier: str, probability: float, expected: str
+) -> None:
     body = _response(
-        triage_urgency=triage_urgency,
-        differential_diagnosis=[{"condition_tier": "X", "probability": probability}],
+        differential_diagnosis=[{"condition_tier": condition_tier, "probability": probability}],
     )
     assert derive_assess(body).risk_category == expected
+
+
+@pytest.mark.parametrize(
+    ("triage_urgency", "expected_urgency", "expected_verification"),
+    [
+        ("EMERGENCY_REFERRAL", "EMERGENCY", True),  # verification regardless of confidence
+        ("emergency_referral", "EMERGENCY", True),  # uppercase() on the device
+        ("URGENT", "URGENT", False),
+        ("MONITOR", "ROUTINE", False),
+        ("ROUTINE", "ROUTINE", False),
+        # Defensive aliases: never sent today, never downgraded to the fail-closed URGENT.
+        ("EMERGENCY", "EMERGENCY", True),
+        ("EMERGENT", "EMERGENCY", True),
+        # Tokens the classifier never sends fail closed.
+        ("SOMETHING_NEW", "URGENT", True),
+        ("", "URGENT", True),
+    ],
+)
+def test_urgency_vocabulary_and_fail_closed_default(
+    triage_urgency: str, expected_urgency: str, expected_verification: bool
+) -> None:
+    body = _response(
+        triage_urgency=triage_urgency,
+        differential_diagnosis=[{"condition_tier": "low_risk", "probability": 0.99}],
+    )
+    derived = derive_assess(body)
+    assert (derived.urgency_level, derived.requires_human_verification) == (
+        expected_urgency,
+        expected_verification,
+    )
 
 
 def test_critical_is_never_assigned() -> None:

@@ -26,6 +26,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
@@ -106,7 +107,7 @@ internal fun KernelAssessmentContent(uiState: KernelAssessmentUiState, actions: 
             if (display.requiresHumanVerification) {
                 Card(colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
                     Text(
-                        "⚠ Confidence below 90% — this case requires physician verification before any diagnosis is finalized.",
+                        verificationNotice(display),
                         color = MaterialTheme.colorScheme.onErrorContainer,
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(12.dp),
@@ -171,8 +172,19 @@ private fun UnavailableCard(failure: KernelFailure?, isRetrying: Boolean, onRetr
     }
 }
 
+/** Why verification is required, stated truthfully: an emergency or an unrecognised result is
+ *  not "confidence below 90%", and saying so under a 100% figure contradicted itself. */
+internal fun verificationNotice(display: AssessmentDisplay): String = when {
+    display.isRuleBasedEmergency ->
+        "⚠ Emergency: critical vitals. Refer now; physician verification is required."
+    display.confidencePercent < 90 ->
+        "⚠ Confidence below 90%: this case requires physician verification before any diagnosis is finalized."
+    else ->
+        "⚠ This result was flagged for physician verification before any diagnosis is finalized."
+}
+
 @Composable
-private fun ConfidenceGauge(display: AssessmentDisplay) {
+internal fun ConfidenceGauge(display: AssessmentDisplay) {
     Card {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
             Text(
@@ -184,9 +196,27 @@ private fun ConfidenceGauge(display: AssessmentDisplay) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Row(
+            if (display.isRuleBasedEmergency) {
+                Card(
+                    colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp).testTag(EMERGENCY_BANNER_TAG),
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            "EMERGENCY",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                        Text(
+                            "Critical vitals (rule-based)",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                    }
+                }
+            } else Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(top = 12.dp),
+                modifier = Modifier.padding(top = 12.dp).testTag(CONFIDENCE_BAR_TAG),
             ) {
                 LinearProgressIndicator(
                     progress = { display.confidencePercent / 100f },
@@ -251,3 +281,5 @@ private fun LiabilityRow(
     }
 }
 
+internal const val EMERGENCY_BANNER_TAG = "kernel_emergency_banner"
+internal const val CONFIDENCE_BAR_TAG = "kernel_confidence_bar"

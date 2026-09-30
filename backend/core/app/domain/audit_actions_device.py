@@ -58,6 +58,7 @@ DEVICE_AUDIT_ACTIONS: frozenset[str] = frozenset(
         # value, because a device action this set does not accept is a permanent silent sync
         # rejection of a row the device will keep re-sending.
         "kernel_empty_differential",
+        "kernel_unrecognised_output",
         "kernel_response_received",
         "medical_history_item_added",
         "medication_added",

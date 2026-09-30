@@ -337,4 +337,12 @@ tasks.withType<Test>().configureEach {
         .withPropertyName("backendMirrorSourcesReadByMirrorTests")
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .optional()
+
+    // ClassifierFixtureMirrorTest asserts this directory is byte-identical to
+    // src/test/resources/classifier-fixtures. Without it declared, an edit to only the backend
+    // copy leaves the test task UP-TO-DATE and the drift unreported, the same hole as above.
+    inputs.dir(rootProject.layout.projectDirectory.dir("backend/core/tests/fixtures/classifier"))
+        .withPropertyName("backendClassifierFixturesReadByMirrorTest")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+        .optional()
 }

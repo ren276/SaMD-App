@@ -11,6 +11,7 @@ import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.model.AttachmentType
 import com.example.samdapp.domain.model.EvaluateReportOutput
 import com.example.samdapp.domain.kernel.KernelFailure
+import com.example.samdapp.domain.kernel.KernelTriageRules
 import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.domain.model.KernelReportOutput
 import com.example.samdapp.domain.repository.ConsultationRepository
@@ -63,6 +64,9 @@ data class AssessmentDisplay(
     val reasoningLines: List<String>,
     val evidenceFor: List<String>,
     val evidenceAgainst: List<String>,
+    /** The classifier's rule-based red flag (or any EMERGENCY result). Shown as an emergency
+     *  banner, never as a percentage: its 1.0 is a literal, not a model probability. */
+    val isRuleBasedEmergency: Boolean = false,
 )
 
 private fun EvaluateReportOutput.toDisplay(): AssessmentDisplay {
@@ -124,6 +128,8 @@ private fun KernelReportOutput.toDisplay(): AssessmentDisplay = AssessmentDispla
     isMockFallback = inferenceSource == InferenceSource.MOCK_FALLBACK,
     isUnavailable = inferenceSource == InferenceSource.UNAVAILABLE,
     failure = failureCode,
+    isRuleBasedEmergency = inferenceSource == InferenceSource.REAL_INFERENCE &&
+        KernelTriageRules.isRuleBasedEmergency(predictedCondition, urgencyLevel),
     sourceLabel = when (inferenceSource) {
         InferenceSource.REAL_INFERENCE -> "Real-time AI inference (/v1/assess)"
         InferenceSource.MOCK_FALLBACK -> "Offline fallback (mock) — ML server unavailable"

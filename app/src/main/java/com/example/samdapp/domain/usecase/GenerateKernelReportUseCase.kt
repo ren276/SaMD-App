@@ -5,8 +5,10 @@ import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.config.DeviceInfoProvider
 import com.example.samdapp.domain.kernel.KernelApiResult
+import com.example.samdapp.domain.kernel.KernelAssessmentResult
 import com.example.samdapp.domain.kernel.KernelFailure
 import com.example.samdapp.domain.kernel.KernelFallbackSource
+import com.example.samdapp.domain.kernel.KernelTriageRules
 import com.example.samdapp.domain.kernel.RemoteKernelSource
 import com.example.samdapp.domain.kernel.classifyKernelFailure
 import com.example.samdapp.domain.model.InferenceSource
@@ -64,7 +66,7 @@ class GenerateKernelReportUseCase @Inject constructor(
     private val auditLogger: AuditLogger,
 ) {
     companion object {
-        const val HUMAN_VERIFICATION_CONFIDENCE_THRESHOLD = 0.90
+        const val HUMAN_VERIFICATION_CONFIDENCE_THRESHOLD = KernelTriageRules.HUMAN_VERIFICATION_CONFIDENCE_THRESHOLD
         /** Model-version tag stamped on a dev-flavor mock fallback result — see
          *  `MockKernelFallbackSource` in `src/dev/`. */
         const val MOCK_MODEL_VERSION = "mock-kernel-v0.1"
@@ -253,20 +255,15 @@ class GenerateKernelReportUseCase @Inject constructor(
             val inferenceEndedAt = Instant.now()
             val confidence = result.confidenceScore
 
-            // Map triage_urgency string → our existing UrgencyLevel enum
-            val urgency = when (result.triageUrgency.uppercase()) {
-                "EMERGENCY", "EMERGENT" -> UrgencyLevel.EMERGENCY
-                "URGENT"                -> UrgencyLevel.URGENT
-                else                    -> UrgencyLevel.ROUTINE
-            }
-
-            // Infer risk category from confidence + urgency
-            val risk = when {
-                urgency == UrgencyLevel.EMERGENCY  -> RiskCategory.HIGH
-                confidence >= 0.85                 -> RiskCategory.LOW
-                confidence >= 0.65                 -> RiskCategory.MODERATE
-                else                               -> RiskCategory.HIGH
-            }
+            val triage = KernelTriageRules.triage(
+                triageUrgency = result.triageUrgency,
+                predictedCondition = result.predictedCondition,
+                confidence = confidence,
+            )
+            if (triage.unrecognised.isNotEmpty()) recordUnrecognisedOutput(caseRecordId, result, triage)
+            val urgency = triage.urgency
+            val risk = triage.risk
+            val ruleBased = KernelTriageRules.isRuleBasedEmergency(result.predictedCondition, urgency)
 
             val reasoningSummary = buildString {
                 append("ML risk model triage: ${result.triageUrgency}. ")
@@ -274,7 +271,13 @@ class GenerateKernelReportUseCase @Inject constructor(
                 if (result.recommendedInvestigations.isNotEmpty()) {
                     append("Recommended investigations: ${result.recommendedInvestigations.joinToString(", ")}. ")
                 }
-                append("Top differential (${result.predictedCondition}) at ${(confidence * 100).toInt()}% confidence.")
+                if (ruleBased && result.predictedCondition == KernelTriageRules.CRITICAL_VITALS_FLAG) {
+                    // The classifier's red-flag gate, not the model: its 1.0 is a literal, not a
+                    // probability, so it is never stated as one.
+                    append("Critical vitals (rule-based red flag), not a model prediction.")
+                } else {
+                    append("Top differential (${result.predictedCondition}) at ${(confidence * 100).toInt()}% confidence.")
+                }
             }
 
             KernelReportOutput(
@@ -296,7 +299,7 @@ class GenerateKernelReportUseCase @Inject constructor(
                 urgencyLevel = urgency,
                 inferenceStartedAt = inferenceStartedAt,
                 inferenceEndedAt = inferenceEndedAt,
-                requiredHumanVerification = confidence < HUMAN_VERIFICATION_CONFIDENCE_THRESHOLD,
+                requiredHumanVerification = triage.requiresVerification,
                 inferenceSource = InferenceSource.REAL_INFERENCE,
                 // A real assessment exists, so there is nothing to explain away.
                 failureCode = null,
@@ -372,4 +375,31 @@ class GenerateKernelReportUseCase @Inject constructor(
         // EvaluateReportEntity.failureCode.
         failureCode = failure,
     )
+
+    /** A classifier token this build does not know. The report is still written, failed closed by
+     *  [KernelTriageRules], and this breadcrumb records which field and what value, so a
+     *  classifier/device mismatch surfaces in the audit trail instead of as a silent default.
+     *  Guarded like the empty-differential breadcrumb: a failed audit write must not turn a real
+     *  assessment into a fallback. */
+    private suspend fun recordUnrecognisedOutput(
+        caseRecordId: String,
+        result: KernelAssessmentResult,
+        triage: KernelTriageRules.Triage,
+    ) {
+        logger.warning("Kernel output not recognised, case $caseRecordId: ${triage.unrecognised}")
+        try {
+            auditLogger.log(
+                action = AuditAction.KERNEL_UNRECOGNISED_OUTPUT,
+                caseRecordId = caseRecordId,
+                payload = auditPayload(
+                    *triage.unrecognised.map { (field, value) -> field.wireName to value.take(64) }.toTypedArray(),
+                    "modelVersion" to result.modelVersion,
+                ),
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.warning("Could not record kernel unrecognised-output audit event: ${e.message}")
+        }
+    }
 }
