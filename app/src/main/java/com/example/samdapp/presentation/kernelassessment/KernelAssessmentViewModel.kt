@@ -11,8 +11,10 @@ import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.model.AttachmentType
 import com.example.samdapp.domain.model.EvaluateReportOutput
 import com.example.samdapp.domain.kernel.KernelFailure
+import com.example.samdapp.domain.kernel.KernelTriageRules
 import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.domain.model.KernelReportOutput
+import com.example.samdapp.domain.model.UrgencyLevel
 import com.example.samdapp.domain.repository.ConsultationRepository
 import com.example.samdapp.domain.repository.EvaluateReportRepository
 import com.example.samdapp.domain.repository.KernelReportRepository
@@ -63,6 +65,11 @@ data class AssessmentDisplay(
     val reasoningLines: List<String>,
     val evidenceFor: List<String>,
     val evidenceAgainst: List<String>,
+    /** Any EMERGENCY result, including the red flag. Shown with an emergency banner. */
+    val isEmergency: Boolean = false,
+    /** The classifier's rule-based red flag only. Its banner replaces the percentage bar, since
+     *  its 1.0 is a literal, not a model probability. */
+    val isCriticalVitalsFlag: Boolean = false,
 )
 
 private fun EvaluateReportOutput.toDisplay(): AssessmentDisplay {
@@ -124,6 +131,10 @@ private fun KernelReportOutput.toDisplay(): AssessmentDisplay = AssessmentDispla
     isMockFallback = inferenceSource == InferenceSource.MOCK_FALLBACK,
     isUnavailable = inferenceSource == InferenceSource.UNAVAILABLE,
     failure = failureCode,
+    isEmergency = inferenceSource == InferenceSource.REAL_INFERENCE &&
+        (urgencyLevel == UrgencyLevel.EMERGENCY || KernelTriageRules.isCriticalVitalsFlag(predictedCondition)),
+    isCriticalVitalsFlag = inferenceSource == InferenceSource.REAL_INFERENCE &&
+        KernelTriageRules.isCriticalVitalsFlag(predictedCondition),
     sourceLabel = when (inferenceSource) {
         InferenceSource.REAL_INFERENCE -> "Real-time AI inference (/v1/assess)"
         InferenceSource.MOCK_FALLBACK -> "Offline fallback (mock) — ML server unavailable"

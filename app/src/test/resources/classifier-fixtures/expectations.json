@@ -1,0 +1,116 @@
+{
+  "_about": "Expected triage for the real classifier fixtures in this directory, read by BOTH app/src/test/.../KernelEmergencyUrgencyFixtureTest.kt and backend/core/tests/test_kernel_emergency_fixtures.py. Identical copies live in app/src/test/resources/classifier-fixtures/ and backend/core/tests/fixtures/classifier/; ClassifierFixtureMirrorTest fails if they differ. 'edit' replaces one field of the real response before it is derived: triage_urgency, or the top differential's condition_tier.",
+  "cases": [
+    {
+      "name": "spo2_85",
+      "fixture": "assess_spo2_85.json",
+      "edit": {},
+      "expected": {
+        "urgency": "EMERGENCY",
+        "risk": "HIGH",
+        "verification": true,
+        "unrecognised": []
+      }
+    },
+    {
+      "name": "sbp_185",
+      "fixture": "assess_sbp_185.json",
+      "edit": {},
+      "expected": {
+        "urgency": "EMERGENCY",
+        "risk": "HIGH",
+        "verification": true,
+        "unrecognised": []
+      }
+    },
+    {
+      "name": "dbp_112",
+      "fixture": "assess_dbp_112.json",
+      "edit": {},
+      "expected": {
+        "urgency": "EMERGENCY",
+        "risk": "HIGH",
+        "verification": true,
+        "unrecognised": []
+      }
+    },
+    {
+      "name": "high_risk_urgent",
+      "fixture": "assess_high_risk_urgent.json",
+      "edit": {},
+      "expected": {
+        "urgency": "URGENT",
+        "risk": "HIGH",
+        "verification": false,
+        "unrecognised": []
+      }
+    },
+    {
+      "name": "monitor_moderate",
+      "fixture": "assess_normal_model_branch.json",
+      "edit": {},
+      "expected": {
+        "urgency": "ROUTINE",
+        "risk": "MODERATE",
+        "verification": false,
+        "unrecognised": []
+      }
+    },
+    {
+      "name": "unknown_urgency",
+      "fixture": "assess_normal_model_branch.json",
+      "edit": {
+        "triage_urgency": "SOME_FUTURE_TOKEN"
+      },
+      "expected": {
+        "urgency": "URGENT",
+        "risk": "MODERATE",
+        "verification": true,
+        "unrecognised": [
+          "triage_urgency"
+        ]
+      }
+    },
+    {
+      "name": "unknown_class",
+      "fixture": "assess_normal_model_branch.json",
+      "edit": {
+        "condition_tier": "some_future_class"
+      },
+      "expected": {
+        "urgency": "ROUTINE",
+        "risk": "HIGH",
+        "verification": true,
+        "unrecognised": [
+          "condition_tier"
+        ]
+      }
+    },
+    {
+      "name": "alias_emergency",
+      "fixture": "assess_high_risk_urgent.json",
+      "edit": {
+        "triage_urgency": "EMERGENCY"
+      },
+      "expected": {
+        "urgency": "EMERGENCY",
+        "risk": "HIGH",
+        "verification": true,
+        "unrecognised": []
+      }
+    },
+    {
+      "name": "alias_emergent",
+      "fixture": "assess_high_risk_urgent.json",
+      "edit": {
+        "triage_urgency": "EMERGENT"
+      },
+      "expected": {
+        "urgency": "EMERGENCY",
+        "risk": "HIGH",
+        "verification": true,
+        "unrecognised": []
+      }
+    }
+  ]
+}

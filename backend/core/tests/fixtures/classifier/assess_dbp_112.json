@@ -1,0 +1,39 @@
+{
+  "_provenance": "Captured 2026-09-29 from SaMDClassifier commit 63e85af (git archive of the committed tree, not the working tree), run in SaMDClassifier's own .venv through FastAPI TestClient POST /v1/assess. Real classifier output: do not hand-edit, re-capture instead. An identical copy lives in app/src/test/resources/classifier-fixtures/ and backend/core/tests/fixtures/classifier/.",
+  "classifier_commit": "63e85af",
+  "endpoint": "/v1/assess",
+  "request": {
+    "age": 58,
+    "sex": "F",
+    "systolic_bp": 128.0,
+    "diastolic_bp": 112.0,
+    "bmi": 26.0,
+    "heart_rate": 84.0,
+    "random_glucose": 110.0,
+    "spo2": 97.0,
+    "case_token": "case-fixture-dbp"
+  },
+  "response": {
+    "case_token": "case-fixture-dbp",
+    "safety_screen_passed": false,
+    "triage_urgency": "EMERGENCY_REFERRAL",
+    "differential_diagnosis": [
+      {
+        "condition_tier": "critical_vitals_flag",
+        "probability": 1.0,
+        "evidence_for": [
+          "Critical Threshold Breach: SpO2 97.0%, Systolic BP 128.0 mmHg, Diastolic BP 112.0 mmHg"
+        ],
+        "evidence_against": []
+      }
+    ],
+    "recommended_investigations": [
+      "Immediate Oxygen Therapy",
+      "Emergency Medical Transfer"
+    ],
+    "model_metadata": {
+      "version": "toy-v0.6-observed-glucose-4tier",
+      "calibrated": true
+    }
+  }
+}

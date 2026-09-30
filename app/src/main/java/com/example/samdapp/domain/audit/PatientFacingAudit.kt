@@ -34,6 +34,7 @@ private fun String.toPatientFacingDescription(): String = when (this) {
     // Mapped explicitly rather than left to the generic fallback, which would read "PHC worker
     // updated your record" and attribute an AI-side non-result to a person.
     AuditAction.KERNEL_EMPTY_DIFFERENTIAL.value -> "Kernel AI did not produce a result for your case"
+    AuditAction.KERNEL_UNRECOGNISED_OUTPUT.value -> "Kernel AI returned a result that was flagged for physician review"
     AuditAction.TRANSCRIPTION_COMPLETED.value -> "Your audio note was transcribed"
     AuditAction.CONSULTATION_LOCKED.value -> "Your consultation was finalized and saved"
     AuditAction.CASE_SENT_TO_DOCTOR.value -> "Sent for doctor review"
