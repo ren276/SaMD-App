@@ -27,12 +27,24 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import com.example.samdapp.domain.auth.AuthSession
+import com.example.samdapp.domain.auth.CadreTier
+import com.example.samdapp.domain.auth.toCadreTier
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
+
+/** One differential candidate. [scorePercent] is the model's raw score and is shown to
+ *  [CadreTier.PHYSICIAN] only; [why] is the classifier's own explanation, which embeds its scores
+ *  ("ranked #2 (31.2%) ... confidence boosted to 52.1%"), so it is physician-only as well. */
+data class DifferentialLine(
+    val label: String,
+    val scorePercent: Int? = null,
+    val why: String? = null,
+)
 
 /**
  * Unified view of "the AI assessment for this case" — sourced PRIMARILY from the real
@@ -59,10 +71,14 @@ data class AssessmentDisplay(
      *  a ViewModel has no Context and must not resolve resources. */
     val failure: KernelFailure?,
     val sourceLabel: String,
-    /** Per-candidate lines. Evaluate source: `"ICD (confidence%) — why"`. Kernel fallback: plain
-     *  differential names (no per-candidate confidence/reasoning in that older contract shape). */
-    val differentialLines: List<String>,
+    /** Per-candidate lines. Evaluate source: ICD candidate with its score and `why`. Kernel
+     *  fallback: plain differential names (no per-candidate score/reasoning in that older
+     *  contract shape). What is shown of each depends on the role, see the screen. */
+    val differentialLines: List<DifferentialLine>,
+    /** Role-neutral reasoning. Never carries the model score: it is rendered separately, by role. */
     val reasoningLines: List<String>,
+    /** The classifier's own scored explanation of its top candidate. Physician-only. */
+    val modelExplanationLines: List<String> = emptyList(),
     val evidenceFor: List<String>,
     val evidenceAgainst: List<String>,
     /** Any EMERGENCY result, including the red flag. Shown with an emergency banner. */
@@ -86,9 +102,10 @@ private fun EvaluateReportOutput.toDisplay(): AssessmentDisplay {
         failure = null,
         sourceLabel = "Real-time AI inference (/api/v1/evaluate)",
         differentialLines = summary.differential.map {
-            "${it.icdCandidate} (${(it.adjustedConfidence * 100).toInt()}%) — ${it.why}"
+            DifferentialLine(it.icdCandidate, (it.adjustedConfidence * 100).toInt(), it.why)
         },
-        reasoningLines = listOfNotNull(top?.why),
+        reasoningLines = emptyList(),
+        modelExplanationLines = listOfNotNull(top?.why),
         evidenceFor = emptyList(),
         evidenceAgainst = emptyList(),
     )
@@ -142,7 +159,7 @@ private fun KernelReportOutput.toDisplay(): AssessmentDisplay = AssessmentDispla
         // with an empty differential. Naming a cause here would be wrong half the time.
         InferenceSource.UNAVAILABLE -> UNAVAILABLE_SOURCE_LABEL
     },
-    differentialLines = differentials,
+    differentialLines = differentials.map { DifferentialLine(it) },
     reasoningLines = listOf(reasoningSummary),
     evidenceFor = evidenceFor,
     evidenceAgainst = evidenceAgainst,
@@ -157,7 +174,10 @@ data class KernelAssessmentUiState(
      *  A uri that survived three screens is not evidence the attachment was persisted; the row
      *  is. Null means no audio leg, which sends the case straight to Acknowledgement. */
     val audioUri: String? = null,
+    /** Fails closed: a worker tier until a session says otherwise. Only PHYSICIAN sees the score. */
+    val cadreTier: CadreTier = CadreTier.COMMUNITY,
 ) {
+    val showModelScore: Boolean get() = cadreTier == CadreTier.PHYSICIAN
     val canContinue: Boolean get() = !isLoading && liabilityAcknowledged
 }
 
@@ -190,6 +210,7 @@ class KernelAssessmentViewModel @AssistedInject constructor(
     private val consultationRepository: ConsultationRepository,
     private val assessmentQueueScheduler: AssessmentQueueScheduler,
     private val auditLogger: AuditLogger,
+    private val authSession: AuthSession,
 ) : ViewModel(), KernelAssessmentActions {
 
     @AssistedFactory
@@ -230,6 +251,13 @@ class KernelAssessmentViewModel @AssistedInject constructor(
                 ?.uri
             _uiState.update { it.copy(audioUri = audioUri) }
             audioUri
+        }
+        // The tier gates the model score. A null session is a worker, never a physician.
+        viewModelScope.launch {
+            authSession.currentUser().collect { session ->
+                val tier = session?.role?.toCadreTier() ?: CadreTier.COMMUNITY
+                _uiState.update { it.copy(cadreTier = tier) }
+            }
         }
         // Collected, not one-shot: the async submission queue means no report row is guaranteed
         // to exist yet when this screen opens. workState tells apart "still processing" (show a
