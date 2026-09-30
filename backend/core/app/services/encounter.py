@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import CurrentWorker
 from app.errors import ErrorCode, SamdError
+from app.logging import get_logger
+from app.middleware.request_id import current_request_id
 from app.models.attachment import Attachment
 from app.models.clinical import Ailment, CaseRecord, Observation
 from app.models.encounter import Consultation, Encounter
@@ -34,6 +37,9 @@ ALLOWED_TRANSITIONS: dict[CaseStatus, frozenset[CaseStatus]] = {
     CaseStatus.PRESCRIPTION_RECEIVED: frozenset(),
     CaseStatus.ABANDONED: frozenset(),
 }
+
+
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -104,6 +110,47 @@ async def create_encounter(
     return encounter, True
 
 
+# Leading "how recent is this row" columns per table, newest first. received_at and id follow
+# as tie-breakers. A table's own inference or edit time beats the server receipt time, which
+# only reflects when a sync batch happened to land.
+_RECENCY_COLUMNS: dict[type, tuple[str, ...]] = {
+    CaseRecord: ("updated_at", "created_at"),
+    Consultation: ("updated_at", "created_at"),
+    KernelReport: ("inference_ended_at",),
+    EvaluateReport: ("inference_ended_at",),
+    DiagnosisFeedback: ("created_at",),
+    Prescription: ("created_at",),
+}
+
+
+async def _current_row[T](
+    session: AsyncSession, model: type[T], key_column: Any, key_value: str
+) -> T | None:
+    """The newest row of `model` for one key, deterministically, warning on duplicates.
+
+    Stopgap: none of these tables has a UNIQUE constraint on its key, so duplicates can exist
+    and an unordered .first() returned an arbitrary one. The real fix is UNIQUE constraints
+    plus dedup. The warning measures whether duplicates actually occur: table and key column
+    names, a count and the request id only, never a key value or any row content.
+    """
+    order = [getattr(model, name).desc().nulls_last() for name in _RECENCY_COLUMNS[model]]
+    order += [model.received_at.desc(), model.id.desc()]  # type: ignore[attr-defined]
+    rows = list(
+        (
+            await session.execute(select(model).where(key_column == key_value).order_by(*order))
+        ).scalars()
+    )
+    if len(rows) > 1:
+        logger.warning(
+            "duplicate_rows_for_key",
+            table=model.__tablename__,  # type: ignore[attr-defined]
+            key_column=key_column.key,
+            count=len(rows),
+            request_id=current_request_id(),
+        )
+    return rows[0] if rows else None
+
+
 async def get_encounter_bundle(
     session: AsyncSession, worker: CurrentWorker, encounter_id: str
 ) -> EncounterBundle:
@@ -117,14 +164,8 @@ async def get_encounter_bundle(
             ErrorCode.AUTH_ROLE_FORBIDDEN, detail="This record belongs to another facility."
         )
 
-    consultation = (
-        (
-            await session.execute(
-                select(Consultation).where(Consultation.encounter_id == encounter_id)
-            )
-        )
-        .scalars()
-        .first()
+    consultation = await _current_row(
+        session, Consultation, Consultation.encounter_id, encounter_id
     )
 
     attachments = (
@@ -162,53 +203,23 @@ async def get_encounter_bundle(
         ).scalars()
     )
 
-    case_record = (
-        (await session.execute(select(CaseRecord).where(CaseRecord.encounter_id == encounter_id)))
-        .scalars()
-        .first()
-    )
+    case_record = await _current_row(session, CaseRecord, CaseRecord.encounter_id, encounter_id)
 
     kernel_report = evaluate_report = diagnosis_feedback = prescription = None
     medication_lines: list[MedicationLine] = []
 
     if case_record is not None:
-        kernel_report = (
-            (
-                await session.execute(
-                    select(KernelReport).where(KernelReport.case_record_id == case_record.id)
-                )
-            )
-            .scalars()
-            .first()
+        kernel_report = await _current_row(
+            session, KernelReport, KernelReport.case_record_id, case_record.id
         )
-        evaluate_report = (
-            (
-                await session.execute(
-                    select(EvaluateReport).where(EvaluateReport.case_record_id == case_record.id)
-                )
-            )
-            .scalars()
-            .first()
+        evaluate_report = await _current_row(
+            session, EvaluateReport, EvaluateReport.case_record_id, case_record.id
         )
-        diagnosis_feedback = (
-            (
-                await session.execute(
-                    select(DiagnosisFeedback).where(
-                        DiagnosisFeedback.case_record_id == case_record.id
-                    )
-                )
-            )
-            .scalars()
-            .first()
+        diagnosis_feedback = await _current_row(
+            session, DiagnosisFeedback, DiagnosisFeedback.case_record_id, case_record.id
         )
-        prescription = (
-            (
-                await session.execute(
-                    select(Prescription).where(Prescription.case_record_id == case_record.id)
-                )
-            )
-            .scalars()
-            .first()
+        prescription = await _current_row(
+            session, Prescription, Prescription.case_record_id, case_record.id
         )
         if prescription is not None:
             medication_lines = list(

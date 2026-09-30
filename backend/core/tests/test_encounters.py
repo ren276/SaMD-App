@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
+import pytest
 from httpx import AsyncClient
-from sqlalchemy import text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.errors import ErrorCode
+from app.models.clinical import CaseRecord
+from app.models.encounter import Consultation
 from app.models.enums import CaseStatus
+from app.models.kernel import DiagnosisFeedback, EvaluateReport, KernelReport
+from app.models.prescription import Prescription
+from app.services import encounter as encounter_service
 from tests.conftest import TEST_FACILITY_ID
 from tests.test_patients import PATIENT_ID, create
 
@@ -365,3 +371,214 @@ async def test_encounter_timestamps_are_utc_with_an_explicit_z(
 async def test_encounter_endpoints_require_authentication(client: AsyncClient) -> None:
     assert (await client.get(f"/api/v1/encounters/{ENCOUNTER_ID}")).status_code == 401
     assert (await client.post("/api/v1/encounters", json=encounter_body())).status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Current row per key (stopgap ORDER BY; the real fix is UNIQUE constraints plus dedup)
+# ---------------------------------------------------------------------------
+
+
+def _ts(minute: int) -> datetime:
+    return datetime(2026, 8, 16, 10, minute, tzinfo=UTC)
+
+
+# Each maker takes (id, recency, received): `recency` fills the table's leading recency column
+# (see _RECENCY_COLUMNS in services/encounter.py), `received` fills received_at.
+def _kernel_row(row_id: str, recency: datetime, received: datetime) -> KernelReport:
+    return KernelReport(
+        id=row_id,
+        case_record_id=CASE_ID,
+        predicted_condition="Viral fever",
+        confidence_score=0.8,
+        differentials=[],
+        reasoning_summary="r",
+        evidence_for=[],
+        evidence_against=[],
+        model_version="v",
+        device_id="dev-1",
+        software_version="1.0",
+        risk_category="LOW",
+        urgency_level="ROUTINE",
+        inference_started_at=_ts(0),
+        inference_ended_at=recency,
+        required_human_verification=False,
+        inference_source="REAL_INFERENCE",
+        facility_id=TEST_FACILITY_ID,
+        received_at=received,
+    )
+
+
+def _evaluate_row(row_id: str, recency: datetime, received: datetime) -> EvaluateReport:
+    return EvaluateReport(
+        id=row_id,
+        case_record_id=CASE_ID,
+        payload_json={},
+        inference_started_at=_ts(0),
+        inference_ended_at=recency,
+        facility_id=TEST_FACILITY_ID,
+        received_at=received,
+    )
+
+
+def _feedback_row(row_id: str, recency: datetime, received: datetime) -> DiagnosisFeedback:
+    return DiagnosisFeedback(
+        id=row_id,
+        case_record_id=CASE_ID,
+        icd_candidate="A09",
+        physician_decision="AGREE",
+        created_at=recency,
+        facility_id=TEST_FACILITY_ID,
+        received_at=received,
+    )
+
+
+def _prescription_row(row_id: str, recency: datetime, received: datetime) -> Prescription:
+    return Prescription(
+        id=row_id,
+        patient_id=PATIENT_ID,
+        encounter_id=ENCOUNTER_ID,
+        case_record_id=CASE_ID,
+        doctor_id="doc-1",
+        diagnosis="Viral fever",
+        created_at=recency,
+        facility_id=TEST_FACILITY_ID,
+        received_at=received,
+    )
+
+
+def _consultation_row(row_id: str, recency: datetime, received: datetime) -> Consultation:
+    return Consultation(
+        id=row_id,
+        patient_id=PATIENT_ID,
+        encounter_id=ENCOUNTER_ID,
+        chief_complaint="fever",
+        created_at=recency,
+        updated_at=recency,
+        facility_id=TEST_FACILITY_ID,
+        received_at=received,
+    )
+
+
+def _case_record_row(row_id: str, recency: datetime, received: datetime) -> CaseRecord:
+    return CaseRecord(
+        id=row_id,
+        patient_id=PATIENT_ID,
+        encounter_id=ENCOUNTER_ID,
+        status=CaseStatus.SAVED_LOCALLY.value,
+        created_at=recency,
+        updated_at=recency,
+        facility_id=TEST_FACILITY_ID,
+        received_at=received,
+    )
+
+
+# Each case is (older row, newer row); the older one is inserted FIRST so an unordered
+# .first() returns it. The recency columns are NOT NULL on every table, so a NULL timestamp
+# cannot be persisted; the tie cases cover the fall-through that NULLS LAST would reach.
+_ORDER_CASES = {
+    "recency": (("a-old", _ts(5), _ts(9)), ("z-new", _ts(6), _ts(1))),
+    "tie_on_recency_uses_received_at": (("a-old", _ts(5), _ts(1)), ("z-new", _ts(5), _ts(2))),
+    "full_tie_uses_id": (("a-old", _ts(5), _ts(1)), ("z-new", _ts(5), _ts(1))),
+}
+
+# (row maker, model, bundle key, needs a case record seeded first)
+_TABLES = [
+    (_kernel_row, KernelReport, "kernel_report", True),
+    (_evaluate_row, EvaluateReport, "evaluate_report", True),
+    (_feedback_row, DiagnosisFeedback, "diagnosis_feedback", True),
+    (_prescription_row, Prescription, "prescription", True),
+    (_consultation_row, Consultation, "consultation", False),
+    (_case_record_row, CaseRecord, "case_record", False),
+]
+_TABLE_IDS = [t[2] for t in _TABLES]
+
+
+async def _commit_each(session: AsyncSession, make_row: Any, rows: Any) -> None:
+    for row in rows:  # separate commits pin the heap order to insertion order
+        session.add(make_row(*row))
+        await session.commit()
+
+
+@pytest.mark.parametrize("case", list(_ORDER_CASES))
+@pytest.mark.parametrize(("make_row", "model", "key", "needs_case"), _TABLES, ids=_TABLE_IDS)
+async def test_doctor_view_returns_the_latest_row_for_the_key(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    doctor_headers: dict[str, str],
+    session: AsyncSession,
+    make_row: Any,
+    model: Any,
+    key: str,
+    needs_case: bool,
+    case: str,
+) -> None:
+    await seed_patient_and_encounter(client, auth_headers)
+    if needs_case:
+        await seed_case_record(session, CaseStatus.SAVED_LOCALLY)
+    await _commit_each(session, make_row, _ORDER_CASES[case])
+
+    # Persisted rows, not just the response: the duplicates really are in the table.
+    stored = (await session.execute(select(func.count()).select_from(model))).scalar_one()
+    assert stored == 2
+
+    response = await client.get(f"/api/v1/encounters/{ENCOUNTER_ID}", headers=doctor_headers)
+    assert response.status_code == 200
+    assert response.json()["data"][key]["id"] == "z-new"
+
+
+class _LogSpy:
+    def __init__(self) -> None:
+        self.warnings: list[tuple[str, dict[str, Any]]] = []
+
+    def warning(self, event: str, **fields: Any) -> None:
+        self.warnings.append((event, fields))
+
+
+async def test_duplicate_rows_for_a_key_log_one_structured_warning(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    doctor_headers: dict[str, str],
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spy = _LogSpy()
+    monkeypatch.setattr(encounter_service, "logger", spy)
+    await seed_patient_and_encounter(client, auth_headers)
+    await seed_case_record(session, CaseStatus.SAVED_LOCALLY)
+    await _commit_each(session, _kernel_row, _ORDER_CASES["recency"])
+
+    response = await client.get(f"/api/v1/encounters/{ENCOUNTER_ID}", headers=doctor_headers)
+    assert response.status_code == 200
+
+    assert len(spy.warnings) == 1
+    event, fields = spy.warnings[0]
+    assert event == "duplicate_rows_for_key"
+    # Exactly these fields: no key value, no row content, no PHI.
+    assert set(fields) == {"table", "key_column", "count", "request_id"}
+    assert fields["table"] == "kernel_reports"
+    assert fields["key_column"] == "case_record_id"
+    assert fields["count"] == 2
+    assert fields["request_id"] == response.headers["X-Request-ID"]
+
+
+async def test_single_rows_log_no_duplicate_warning(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    doctor_headers: dict[str, str],
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spy = _LogSpy()
+    monkeypatch.setattr(encounter_service, "logger", spy)
+    await seed_patient_and_encounter(client, auth_headers)
+    await seed_case_record(session, CaseStatus.SAVED_LOCALLY)
+    await _commit_each(session, _kernel_row, _ORDER_CASES["recency"][:1])
+    await _commit_each(session, _consultation_row, _ORDER_CASES["recency"][:1])
+
+    data = (await client.get(f"/api/v1/encounters/{ENCOUNTER_ID}", headers=doctor_headers)).json()[
+        "data"
+    ]
+
+    assert data["kernel_report"]["id"] == "a-old"
+    assert data["consultation"]["id"] == "a-old"
+    assert spy.warnings == []
