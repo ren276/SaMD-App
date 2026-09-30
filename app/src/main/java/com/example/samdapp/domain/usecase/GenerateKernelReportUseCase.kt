@@ -275,7 +275,9 @@ class GenerateKernelReportUseCase @Inject constructor(
                     // probability, so it is never stated as one.
                     append("Critical vitals (rule-based red flag), not a model prediction.")
                 } else {
-                    append("Top differential (${result.predictedCondition}) at ${(confidence * 100).toInt()}% confidence.")
+                    // No score in the text: it is stored numerically in confidenceScore and shown by
+                    // role, so a worker never reads it in a summary line.
+                    append("Top differential (${result.predictedCondition}).")
                 }
             }
 

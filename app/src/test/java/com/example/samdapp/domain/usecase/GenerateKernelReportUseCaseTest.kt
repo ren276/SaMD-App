@@ -183,6 +183,20 @@ class GenerateKernelReportUseCaseTest {
     }
 
     @Test
+    fun `the reasoning summary carries no percentage, the score is stored numerically`() = runTest {
+        val repo = FakeKernelReportRepository()
+        val useCase = GenerateKernelReportUseCase(
+            repo, FakeDeviceInfoProvider(), WorkingKernelSource(), FakeKernelFallbackSource(result = null), FakeAuditLogger(),
+        )
+
+        val output = useCase("case-1", payload()).getOrThrow()
+
+        assertTrue(output.reasoningSummary, !Regex("""\d+(\.\d+)?\s?%""").containsMatchIn(output.reasoningSummary))
+        assertTrue(output.reasoningSummary, !output.reasoningSummary.contains("confidence", ignoreCase = true))
+        assertEquals(0.82, output.confidenceScore, 0.0)
+    }
+
+    @Test
     fun `confidence always lands in 0-1 and drives requiredHumanVerification at the 90 percent threshold on the real path`() = runTest {
         val repo = FakeKernelReportRepository()
         val fallback = FakeKernelFallbackSource(result = null)

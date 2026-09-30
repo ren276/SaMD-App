@@ -3,6 +3,7 @@ package com.example.samdapp.presentation.kernelassessment
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -41,7 +42,7 @@ class KernelEmergencyBannerTest {
 
     @Test
     fun theRedFlagShowsTheCriticalVitalsBannerAndNoPercentage() {
-        composeRule.setContent { ConfidenceGauge(redFlag) }
+        composeRule.setContent { ConfidenceGauge(redFlag, showModelScore = true) }
 
         composeRule.onNodeWithTag(EMERGENCY_BANNER_TAG).assertExists()
         composeRule.onNodeWithText("Critical vitals (rule-based)").assertExists()
@@ -51,29 +52,33 @@ class KernelEmergencyBannerTest {
 
     @Test
     fun anEmergencyOnAModelClassKeepsItsConfidenceAndIsNotCalledCriticalVitals() {
-        composeRule.setContent { ConfidenceGauge(urgencyOnlyEmergency) }
+        composeRule.setContent { ConfidenceGauge(urgencyOnlyEmergency, showModelScore = true) }
 
         composeRule.onNodeWithTag(EMERGENCY_BANNER_TAG).assertExists()
         composeRule.onNodeWithText("Emergency referral").assertExists()
         composeRule.onNodeWithText("Critical vitals (rule-based)").assertDoesNotExist()
         composeRule.onNodeWithTag(CONFIDENCE_BAR_TAG).assertExists()
-        composeRule.onNodeWithText("97%").assertExists()
+        composeRule.onNodeWithText("Model score 97% (uncalibrated)").assertExists()
     }
 
     @Test
     fun aModelResultShowsTheConfidenceBarAndNoBanner() {
-        composeRule.setContent { ConfidenceGauge(modelResult) }
+        composeRule.setContent { ConfidenceGauge(modelResult, showModelScore = true) }
 
         composeRule.onNodeWithTag(CONFIDENCE_BAR_TAG).assertExists()
-        composeRule.onNodeWithText("98%").assertExists()
+        composeRule.onNodeWithText("Model score 98% (uncalibrated)").assertExists()
         composeRule.onNodeWithTag(EMERGENCY_BANNER_TAG).assertDoesNotExist()
     }
 
     @Test
     fun theVerificationNoticeNamesTheRealReason() {
-        val redFlagNotice = verificationNotice(redFlag)
-        assertTrue(redFlagNotice, redFlagNotice.contains("critical vitals") && !redFlagNotice.contains("below 90%"))
-        val emergencyNotice = verificationNotice(urgencyOnlyEmergency)
-        assertTrue(emergencyNotice, emergencyNotice.contains("Emergency referral") && !emergencyNotice.contains("critical vitals"))
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        // The emergency wording is the same for both roles.
+        for (showScore in listOf(true, false)) {
+            val redFlagNotice = verificationNotice(context, redFlag, showScore)
+            assertTrue(redFlagNotice, redFlagNotice.contains("critical vitals") && !redFlagNotice.contains("0.90"))
+            val emergencyNotice = verificationNotice(context, urgencyOnlyEmergency, showScore)
+            assertTrue(emergencyNotice, emergencyNotice.contains("Emergency referral") && !emergencyNotice.contains("critical vitals"))
+        }
     }
 }

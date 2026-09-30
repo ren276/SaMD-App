@@ -319,4 +319,16 @@
     -->
     <string name="readback_refusal_served_model_mismatch_title">The read-back cannot be trusted right now</string>
     <string name="readback_refusal_served_model_mismatch_body">This phone could not confirm which AI answered, so nothing was shown. Do not try again. Read the report above with the patient, and tell your supervisor today.</string>
+
+    <!--
+      AI assessment panel: how the model's numeric score is shown, by role.
+      Workers see NO number anywhere on this screen (memo D2): only the prediction, the
+      verification flag and a plain-words reason. Physicians see the raw score, labelled for what
+      it is: a model score, not a calibrated probability. Role is self-asserted (H-06), so this
+      is an automation-bias control, not an access control.
+    -->
+    <string name="assessment_model_score">Model score %1$d%% (uncalibrated)</string>
+    <string name="assessment_differential_with_score">%1$s (model score %2$d%%, uncalibrated)</string>
+    <string name="assessment_notice_low_score_physician">⚠ Model score below 0.90 (uncalibrated): physician verification required.</string>
+    <string name="assessment_notice_low_certainty_worker">⚠ Physician verification required: the model is not certain about this result.</string>
 </resources>

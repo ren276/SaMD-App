@@ -5,7 +5,11 @@ import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.testutil.FakeAssessmentQueueScheduler
 import com.example.samdapp.domain.model.Attachment
 import com.example.samdapp.domain.model.AttachmentType
+import com.example.samdapp.domain.auth.CadreTier
+import com.example.samdapp.domain.auth.UserSession
+import com.example.samdapp.domain.auth.UserRole
 import com.example.samdapp.testutil.FakeAuditLogger
+import com.example.samdapp.testutil.FakeAuthSession
 import com.example.samdapp.testutil.FakeConsultationRepository
 import com.example.samdapp.testutil.testConsultation
 import com.example.samdapp.testutil.FakeEvaluateReportRepository
@@ -43,6 +47,7 @@ class KernelAssessmentViewModelTest {
         evaluateReportRepository: FakeEvaluateReportRepository = FakeEvaluateReportRepository(),
         scheduler: FakeAssessmentQueueScheduler = FakeAssessmentQueueScheduler(),
         consultationRepository: FakeConsultationRepository = FakeConsultationRepository(),
+        authSession: FakeAuthSession = FakeAuthSession(),
     ): KernelAssessmentViewModel = KernelAssessmentViewModel(
         caseRecordId = caseRecordId,
         consultationId = "consult-$caseRecordId",
@@ -51,7 +56,35 @@ class KernelAssessmentViewModelTest {
         consultationRepository = consultationRepository,
         assessmentQueueScheduler = scheduler,
         auditLogger = FakeAuditLogger(),
+        authSession = authSession,
     )
+
+    private fun tierFor(role: UserRole?): CadreTier {
+        val session = role?.let { UserSession(userId = "u", name = "n", role = it) }
+        val vm = viewModel("case-1", authSession = FakeAuthSession(session))
+        mainDispatcherRule.dispatcher.scheduler.advanceUntilIdle()
+        return vm.uiState.value.cadreTier
+    }
+
+    @Test
+    fun `a null session fails closed to a worker tier and the score is hidden`() = runTest(mainDispatcherRule.dispatcher) {
+        val vm = viewModel("case-1", authSession = FakeAuthSession(null))
+        advanceUntilIdle()
+
+        assertEquals(CadreTier.COMMUNITY, vm.uiState.value.cadreTier)
+        assertFalse(vm.uiState.value.showModelScore)
+    }
+
+    @Test
+    fun `only the physician tier is shown the model score`() = runTest(mainDispatcherRule.dispatcher) {
+        advanceUntilIdle()
+        assertEquals(CadreTier.PHYSICIAN, tierFor(UserRole.DOCTOR))
+        assertEquals(CadreTier.LICENSED_CLINICAL, tierFor(UserRole.NURSE))
+        assertEquals(CadreTier.LICENSED_CLINICAL, tierFor(UserRole.COMPOUNDER))
+        assertEquals(CadreTier.COMMUNITY, tierFor(UserRole.ASHA_WORKER))
+        assertTrue(KernelAssessmentUiState(cadreTier = CadreTier.PHYSICIAN).showModelScore)
+        assertFalse(KernelAssessmentUiState(cadreTier = CadreTier.LICENSED_CLINICAL).showModelScore)
+    }
 
     @Test
     fun `UNAVAILABLE kernel result maps to isUnavailable true and a distinguishing source label`() = runTest(mainDispatcherRule.dispatcher) {

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import android.content.Context
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
@@ -28,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -91,8 +93,8 @@ internal fun KernelAssessmentContent(uiState: KernelAssessmentUiState, actions: 
                     onRetry = actions::onRetry,
                 )
             } else {
-                ConfidenceGauge(display)
-                ExplainabilityCard(display)
+                ConfidenceGauge(display, uiState.showModelScore)
+                ExplainabilityCard(display, uiState.showModelScore)
             }
             if (display.isMockFallback) {
                 Card(colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)) {
@@ -107,7 +109,7 @@ internal fun KernelAssessmentContent(uiState: KernelAssessmentUiState, actions: 
             if (display.requiresHumanVerification) {
                 Card(colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
                     Text(
-                        verificationNotice(display),
+                        verificationNotice(LocalContext.current, display, uiState.showModelScore),
                         color = MaterialTheme.colorScheme.onErrorContainer,
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(12.dp),
@@ -173,20 +175,33 @@ private fun UnavailableCard(failure: KernelFailure?, isRetrying: Boolean, onRetr
 }
 
 /** Why verification is required, stated truthfully: an emergency or an unrecognised result is
- *  not "confidence below 90%", and saying so under a 100% figure contradicted itself. */
-internal fun verificationNotice(display: AssessmentDisplay): String = when {
+ *  not "model score below 0.90", and saying so under a 100% figure contradicted itself.
+ *  A worker is told the reason in plain words with no number; only a physician is shown the
+ *  score threshold. Emergency wording is the same for both. */
+internal fun verificationNotice(context: Context, display: AssessmentDisplay, showModelScore: Boolean): String = when {
     display.isCriticalVitalsFlag ->
         "⚠ Emergency: critical vitals. Refer now; physician verification is required."
     display.isEmergency ->
         "⚠ Emergency referral. Refer now; physician verification is required."
-    display.confidencePercent < 90 ->
-        "⚠ Confidence below 90%: this case requires physician verification before any diagnosis is finalized."
+    display.confidencePercent < 90 -> context.getString(
+        if (showModelScore) R.string.assessment_notice_low_score_physician
+        else R.string.assessment_notice_low_certainty_worker,
+    )
     else ->
         "⚠ This result was flagged for physician verification before any diagnosis is finalized."
 }
 
+/** A worker sees the candidate only. A physician sees its score, labelled uncalibrated, and the
+ *  classifier's own explanation. */
 @Composable
-internal fun ConfidenceGauge(display: AssessmentDisplay) {
+private fun differentialText(line: DifferentialLine, showModelScore: Boolean): String {
+    if (!showModelScore || line.scorePercent == null) return line.label
+    val scored = stringResource(R.string.assessment_differential_with_score, line.label, line.scorePercent)
+    return line.why?.let { "$scored — $it" } ?: scored
+}
+
+@Composable
+internal fun ConfidenceGauge(display: AssessmentDisplay, showModelScore: Boolean) {
     Card {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
             Text(
@@ -218,20 +233,19 @@ internal fun ConfidenceGauge(display: AssessmentDisplay) {
                 }
             }
             // The red flag's 1.0 is a rule's literal, so it gets no bar. An EMERGENCY urgency on a
-            // real model class keeps its prediction and confidence on screen.
-            if (!display.isCriticalVitalsFlag) Row(
-                verticalAlignment = Alignment.CenterVertically,
+            // real model class keeps its prediction on screen. The score itself is physician-only:
+            // a worker gets no bar and no number, only the verification notice below.
+            if (showModelScore && !display.isCriticalVitalsFlag) Column(
                 modifier = Modifier.padding(top = 12.dp).testTag(CONFIDENCE_BAR_TAG),
             ) {
+                Text(
+                    stringResource(R.string.assessment_model_score, display.confidencePercent),
+                    style = MaterialTheme.typography.titleMedium,
+                )
                 LinearProgressIndicator(
                     progress = { display.confidencePercent / 100f },
-                    modifier = Modifier.fillMaxWidth(0.75f).heightIn(min = 8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp).heightIn(min = 8.dp),
                     color = if (display.requiresHumanVerification) Color(0xFFB00020) else MaterialTheme.colorScheme.primary,
-                )
-                Text(
-                    "${display.confidencePercent}%",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(start = 12.dp),
                 )
             }
             if (display.differentialLines.isNotEmpty()) {
@@ -240,19 +254,22 @@ internal fun ConfidenceGauge(display: AssessmentDisplay) {
                     style = MaterialTheme.typography.titleSmall,
                     modifier = Modifier.padding(top = 12.dp),
                 )
-                display.differentialLines.forEach { Text("• $it", style = MaterialTheme.typography.bodyMedium) }
+                display.differentialLines.forEach {
+                    Text("• ${differentialText(it, showModelScore)}", style = MaterialTheme.typography.bodyMedium)
+                }
             }
         }
     }
 }
 
 @Composable
-private fun ExplainabilityCard(display: AssessmentDisplay) {
+private fun ExplainabilityCard(display: AssessmentDisplay, showModelScore: Boolean) {
     Card {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            if (display.reasoningLines.isNotEmpty()) {
+            val reasoning = display.reasoningLines + if (showModelScore) display.modelExplanationLines else emptyList()
+            if (reasoning.isNotEmpty()) {
                 Text("Reasoning", style = MaterialTheme.typography.titleSmall)
-                display.reasoningLines.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                reasoning.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
             }
             if (display.evidenceFor.isNotEmpty()) {
                 Text("Evidence for", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
