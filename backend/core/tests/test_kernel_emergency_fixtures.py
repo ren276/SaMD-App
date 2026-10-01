@@ -60,3 +60,21 @@ def test_backend_rule_version_equals_the_shared_fixture_value() -> None:
     """The device suite asserts its own constant against the same value (no hand-kept parity)."""
     shared = json.loads((_FIXTURES / "expectations.json").read_text())["derivation_rule_version"]
     assert DERIVATION_RULE_VERSION == shared
+
+
+# The classifier build the fixtures were captured from. PR 6 replaces this with the pin file.
+_PINNED_CLASSIFIER_COMMIT = "5e1ca00"
+
+
+@pytest.mark.parametrize("path", sorted(_FIXTURES.glob("assess_*.json")), ids=lambda p: p.name)
+def test_fixtures_were_captured_from_the_pinned_classifier_and_carry_model_identity(
+    path: Path,
+) -> None:
+    """A fixture older than the model-identity change would agree with consumers that read keys the
+    classifier no longer relies on, which is how `version` vs `model_version` went unnoticed."""
+    fixture = json.loads(path.read_text())
+    assert fixture["classifier_commit"] == _PINNED_CLASSIFIER_COMMIT
+    metadata = fixture["response"]["model_metadata"]
+    assert isinstance(metadata["model_version"], str) and metadata["model_version"]
+    assert len(metadata["model_sha256"]) == 64
+    assert "calibrated" in metadata

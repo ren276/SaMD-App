@@ -1,6 +1,6 @@
 {
-  "_provenance": "Captured 2026-09-29 from SaMDClassifier commit 63e85af (git archive of the committed tree, not the working tree), run in SaMDClassifier's own .venv through FastAPI TestClient POST /v1/assess. Real classifier output: do not hand-edit, re-capture instead. An identical copy lives in app/src/test/resources/classifier-fixtures/ and backend/core/tests/fixtures/classifier/.",
-  "classifier_commit": "63e85af",
+  "_provenance": "Captured 2026-10-01 from SaMDClassifier commit 5e1ca00 (git archive of the committed tree, not the working tree), run in SaMDClassifier's own .venv through FastAPI TestClient POST /v1/assess. Real classifier output: do not hand-edit, re-capture instead. An identical copy lives in app/src/test/resources/classifier-fixtures/ and backend/core/tests/fixtures/classifier/.",
+  "classifier_commit": "5e1ca00",
   "endpoint": "/v1/assess",
   "request": {
     "case_token": "case-fixture-high",
@@ -35,15 +35,17 @@
       }
     ],
     "recommended_investigations": [
-      "Lipid Profile",
-      "HbA1c Test",
-      "Fasting Blood Sugar",
       "ECG (Resting)",
-      "Serum Creatinine"
+      "Fasting Blood Sugar",
+      "Serum Creatinine",
+      "HbA1c Test",
+      "Lipid Profile"
     ],
     "model_metadata": {
+      "model_version": "toy-v0.6-observed-glucose-4tier",
       "version": "toy-v0.6-observed-glucose-4tier",
-      "calibrated": true
+      "model_sha256": "1621668c636e935d446f0868913b8ac8d98a36fbfaafbdd0f6c7816a22991603",
+      "calibrated": false
     }
   }
 }
