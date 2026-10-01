@@ -457,15 +457,16 @@ async def test_idempotent_replay_is_verbatim_and_does_not_double_write(
 # ---------------------------------------------------------------------------
 
 
-async def test_stale_is_acked_as_success_and_not_applied(
+async def test_stale_is_an_exact_replay_acked_as_success_and_not_applied(
     client: AsyncClient, auth_headers: dict[str, str], session: AsyncSession
 ) -> None:
+    """Stale means ONE thing: an identical write (same client_updated_at, same content) was
+    already applied, so SYNCED on the device is truthful. A different batch_id does not change
+    that."""
     await push(client, auth_headers, [patient_record(client_updated_at="2026-08-16T09:41:30.000Z")])
 
     response = await push(
-        client,
-        auth_headers,
-        [patient_record(client_updated_at="2026-08-16T09:00:00.000Z", full_name="Someone Else")],
+        client, auth_headers, [patient_record(client_updated_at="2026-08-16T09:41:30.000Z")]
     )
 
     assert response.status_code == 200
@@ -476,6 +477,48 @@ async def test_stale_is_acked_as_success_and_not_applied(
 
     patient = (await session.execute(select(Patient).where(Patient.id == PATIENT_ID))).scalar_one()
     assert patient.server_version == 1
+    assert patient.full_name == "Sunita Devi"
+
+
+async def test_the_same_timestamp_with_different_content_is_a_conflict_not_stale(
+    client: AsyncClient, auth_headers: dict[str, str], session: AsyncSession
+) -> None:
+    """Calling it stale would tell the device its write was applied when it was not."""
+    await push(client, auth_headers, [patient_record(client_updated_at="2026-08-16T09:41:30.000Z")])
+
+    response = await push(
+        client,
+        auth_headers,
+        [patient_record(client_updated_at="2026-08-16T09:41:30.000Z", full_name="Someone Else")],
+    )
+
+    data = response.json()["data"]
+    assert data["results"][0]["status"] == "conflict"
+    assert data["stale"] == 0
+    patient = (await session.execute(select(Patient).where(Patient.id == PATIENT_ID))).scalar_one()
+    assert (patient.server_version, patient.full_name) == (1, "Sunita Devi")
+
+
+async def test_an_older_write_without_base_version_is_a_conflict_not_stale(
+    client: AsyncClient, auth_headers: dict[str, str], session: AsyncSession
+) -> None:
+    """A write genuinely older than the stored one must not be acked as synced: the server keeps
+    the newer data and the device is told there is a conflict."""
+    await push(client, auth_headers, [patient_record(client_updated_at="2026-08-16T09:41:30.000Z")])
+
+    response = await push(
+        client,
+        auth_headers,
+        [patient_record(client_updated_at="2026-08-16T09:00:00.000Z", full_name="Someone Else")],
+    )
+
+    data = response.json()["data"]
+    assert data["results"][0]["status"] == "conflict"
+    assert data["conflicted"] == 1
+    assert data["stale"] == 0
+
+    patient = (await session.execute(select(Patient).where(Patient.id == PATIENT_ID))).scalar_one()
+    assert (patient.server_version, patient.full_name) == (1, "Sunita Devi")
 
 
 # ---------------------------------------------------------------------------
@@ -724,7 +767,8 @@ async def test_counts_equal_results_tallies(
         client,
         auth_headers,
         [
-            patient_record(client_updated_at="2026-08-16T09:00:00.000Z"),  # stale
+            patient_record(),  # stale: an exact replay of the seeded write
+            patient_record(client_updated_at="2026-08-16T09:00:00.000Z"),  # conflict: older
             patient_record(record_id="Zz9YbT3wQ1", full_name="New Patient"),  # applied
             encounter_record(
                 base_version=99, client_updated_at="2026-08-17T00:00:00.000Z"
@@ -748,7 +792,7 @@ async def test_counts_equal_results_tallies(
     assert data["rejected"] == by_status.get("rejected", 0)
     assert data["received"] == len(results)
     assert data["received"] == sum(by_status.values())
-    assert by_status == {"stale": 1, "applied": 1, "conflict": 1, "rejected": 1, "duplicate": 1}
+    assert by_status == {"stale": 1, "applied": 1, "conflict": 2, "rejected": 1, "duplicate": 1}
 
 
 # ---------------------------------------------------------------------------

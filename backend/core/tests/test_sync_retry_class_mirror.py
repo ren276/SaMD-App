@@ -34,8 +34,9 @@ _DEVICE_ENUM = _REPO_ROOT / "app/src/main/java/com/example/samdapp/domain/model/
 
 # The number of `_reject(...)` call sites in app/services/sync.py. Pinned so that ADDING a reject
 # path is a deliberate act that updates this number, rather than something that slips in
-# classified by copy-paste. The diagnosis counted seventeen; re-counted here from the AST.
-_EXPECTED_REJECT_SITES = 17
+# classified by copy-paste. The diagnosis counted seventeen; re-counted here from the AST. The
+# eighteenth is the per-record catch-all in _apply_one (RETRYABLE: a server defect, not the record).
+_EXPECTED_REJECT_SITES = 18
 
 
 def _reject_calls() -> list[ast.Call]:

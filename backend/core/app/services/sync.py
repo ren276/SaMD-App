@@ -29,13 +29,14 @@ from typing import Any
 
 from sqlalchemy import Date, DateTime, select
 from sqlalchemy import inspect as sa_inspect
-from sqlalchemy.exc import DataError, IntegrityError
+from sqlalchemy.exc import DataError, IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import utcnow
 from app.deps import CurrentWorker
 from app.domain.audit_actions_device import DEVICE_AUDIT_ACTIONS
 from app.errors import ErrorCode, SamdError
+from app.logging import get_logger
 from app.models.abha import AbhaProfile
 from app.models.attachment import Attachment
 from app.models.clinical import Ailment, CaseRecord, Observation
@@ -58,9 +59,13 @@ from app.schemas.sync import MAX_RECORDS, SyncPushEnvelope
 from app.services import audit as audit_service
 from app.services.patient import apply_blind_indexes
 
+logger = get_logger(__name__)
+
 # Columns SyncMixin adds that a client may never set directly; always excluded from every table's
 # client-writable set regardless of what else a table's TableSpec declares.
-_SYNC_MIXIN_OWNED = frozenset({"facility_id", "server_version", "received_at", "sync_state"})
+_SYNC_MIXIN_OWNED = frozenset(
+    {"facility_id", "server_version", "received_at", "sync_state", "client_updated_at"}
+)
 
 AUDIT_LOG_TABLE = "audit_log"
 AUDIT_LOG_RANK = 20
@@ -219,17 +224,45 @@ def _attr_map(spec: TableSpec) -> dict[str, str]:
     return {alias_by_attr.get(attr, attr): attr for attr in attrs}
 
 
-def _timestamp_attr(spec: TableSpec) -> str:
-    """The column compared against client_updated_at for last-write-wins.
+def _resolve_write(
+    stored_ts: datetime | None,
+    stored_version: int,
+    incoming_ts: datetime,
+    base_version: int | None,
+    *,
+    same_content: bool = True,
+) -> str:
+    """Decide what an incoming write to an EXISTING row does: "stale", "conflict" or "apply".
 
-    api-contract.md section 6.1 says "stored updated_at" without naming a column per table. Most
-    of the twenty tables have one; the rest (history-style child rows: allergies, observations,
-    medication entries, and so on) have only created_at, because they are written once per visit
-    and never mutated in place. updated_at is used where the column exists, created_at otherwise.
-    This is an implementation choice the contract left implicit, not a divergence from it; see the
-    Phase 4 report.
+    Compares the incoming client_updated_at with the STORED client_updated_at and uses
+    base_version and server_version. No other column takes part. Evaluated in this order:
+
+    1. Stored client_updated_at is set and equals the incoming one: "stale" when the content is
+       also the same. An exact replay of a write already applied (a retried batch, a lost ack
+       resent under a new batch_id). Stale means exactly this, which is why SYNCED on the device
+       is truthful. It comes BEFORE the base_version check, so a resend whose base_version has
+       since moved on is still stale, not a conflict. The SAME timestamp with DIFFERENT content
+       (two devices writing a natural-key row in the same millisecond, or two saves of one row in
+       the same millisecond) is a "conflict": calling it stale would tell the device its write was
+       applied when it was not, and the data would be lost without a signal.
+    2. base_version present and different from server_version: "conflict".
+    3. base_version present and equal to server_version: "apply". A matching base_version proves
+       the write was made on top of the latest server state, so no wall-clock comparison runs and a
+       device clock that runs behind cannot lose a write.
+    4. base_version absent: last-write-wins on client_updated_at. A stored NULL (a row from before
+       alembic 0009) or a later incoming value applies. An EARLIER incoming value is "conflict",
+       not stale: the write is genuinely older than what the server holds, the device must not be
+       told it is synced, and the server keeps the newer data.
+
+    A new row (no existing row) never reaches here: it is inserted and stores its own timestamp.
     """
-    return "updated_at" if hasattr(spec.model, "updated_at") else "created_at"
+    if stored_ts is not None and incoming_ts == stored_ts:
+        return "stale" if same_content else "conflict"
+    if base_version is not None:
+        return "apply" if base_version == stored_version else "conflict"
+    if stored_ts is None or incoming_ts > stored_ts:
+        return "apply"
+    return "conflict"
 
 
 def _constraint_sqlstate(exc: IntegrityError | DataError) -> str | None:
@@ -312,6 +345,16 @@ def _server_state(spec: TableSpec, row: Any) -> dict[str, Any]:
     return {key: getattr(row, attr) for key, attr in _attr_map(spec).items()}
 
 
+def _same_content(existing: Any, incoming: dict[str, Any]) -> bool:
+    """True when every column the incoming write carries already holds that value.
+
+    Compared over the incoming keys only: an identical replay carries the same keys, and a payload
+    that omits an optional field (a null is omitted on the wire) must not read as a difference.
+    Values are the coerced ones (aware datetimes, parsed JSON), and encrypted columns are already
+    decrypted on the loaded row, so plain equality is the right comparison."""
+    return all(getattr(existing, attr) == value for attr, value in incoming.items())
+
+
 async def _apply_generic(
     session: AsyncSession,
     worker: CurrentWorker,
@@ -377,33 +420,14 @@ async def _apply_generic(
             SyncRetryClass.TERMINAL,
         )
 
-    if existing is not None:
-        if base_version is not None and base_version != existing.server_version:
-            return {
-                "table": table,
-                "id": record_id,
-                "status": "conflict",
-                "server_state": _server_state(spec, existing),
-            }
-        stored_ts = getattr(existing, _timestamp_attr(spec))
-        if client_updated_at <= stored_ts:
-            return {
-                "table": table,
-                "id": record_id,
-                "status": "stale",
-                "server_version": existing.server_version,
-            }
-
     columns = sa_inspect(model).columns
-    attrs = {
+    incoming = {
         attr_map[key]: _coerce_value(columns[attr_map[key]].type, value)
         for key, value in data.items()
     }
-    if "synced_to_cloud_at" in spec.server_owned:
-        attrs["synced_to_cloud_at"] = utcnow()
-    if table == "evaluate_reports" and isinstance(attrs.get("payload_json"), str):
+    if table == "evaluate_reports" and isinstance(incoming.get("payload_json"), str):
         try:
-            attrs["payload_json"] = json.loads(attrs["payload_json"])
+            incoming["payload_json"] = json.loads(incoming["payload_json"])
         except json.JSONDecodeError:
             return _reject(
                 table,
@@ -412,6 +436,38 @@ async def _apply_generic(
                 "payload_json: invalid JSON.",
                 SyncRetryClass.TERMINAL,
             )
+
+    if existing is not None:
+        decision = _resolve_write(
+            existing.client_updated_at,
+            existing.server_version,
+            client_updated_at,
+            base_version,
+            # Only read when the timestamps are equal, where it decides stale versus conflict.
+            same_content=(
+                existing.client_updated_at != client_updated_at or _same_content(existing, incoming)
+            ),
+        )
+        if decision == "conflict":
+            return {
+                "table": table,
+                "id": record_id,
+                "status": "conflict",
+                "server_state": _server_state(spec, existing),
+            }
+        if decision == "stale":
+            return {
+                "table": table,
+                "id": record_id,
+                "status": "stale",
+                "server_version": existing.server_version,
+            }
+
+    attrs = dict(incoming)
+    # Server-owned: stored from the envelope, never accepted from the payload.
+    attrs["client_updated_at"] = client_updated_at
+    if "synced_to_cloud_at" in spec.server_owned:
+        attrs["synced_to_cloud_at"] = utcnow()
 
     if existing is not None:
         for attr, value in attrs.items():
@@ -659,6 +715,34 @@ async def _apply_one(
             ErrorCode.SYNC_RECORD_INVALID,
             _constraint_message(exc),
             _constraint_retry_class(exc),
+        )
+    except SQLAlchemyError:
+        # A database-level failure other than a constraint (a dead connection, a deadlock, a
+        # server shutting down) means the session itself may be unusable. It fails the WHOLE batch
+        # so the device retries the whole batch, rather than marking one record against a broken
+        # session.
+        raise
+    except Exception as exc:
+        # An application bug while applying ONE record. Its savepoint has already rolled back, so
+        # the rest of the batch is untouched, and the batch must not be 500ed for it: before this,
+        # one such record returned 500 for the whole batch, rolled back every other record and the
+        # idempotency row, and the device resent the same batch for ever.
+        # RETRYABLE, not TERMINAL: a server defect that a deploy can fix must not condemn
+        # recoverable clinical data. The device retries the record up to MAX_SYNC_ATTEMPTS, then
+        # shows it as failed with "Send again". Only the exception CLASS is logged: a message can
+        # echo patient content.
+        logger.error(
+            "sync_record_unexpected_error",
+            table=table,
+            record_id=safe_id,
+            error_class=type(exc).__name__,
+        )
+        return _reject(
+            table,
+            safe_id,
+            ErrorCode.SYS_INTERNAL,
+            "server error applying this record.",
+            SyncRetryClass.RETRYABLE,
         )
 
     return result

@@ -1067,17 +1067,49 @@ Note on attachments: `attachments.uri` is a device-local `content://` or file UR
 meaningless server side. It is stored as `local_uri` with `blob_status = "NOT_UPLOADED"`. Binary
 upload is out of scope for v1 (§10).
 
+> **PROPOSED, pending operator sign-off.** This replaces the rule below, which compared
+> `client_updated_at` with a stored data column (`updated_at`, else `created_at`). Four tables had
+> neither column, so re-syncing an existing row of them failed with a server error for the whole
+> batch. The comparison is now against a stored `client_updated_at` that the server keeps for every
+> synced table (alembic 0009).
+
 **Conflict resolution (Phase 4).** Last write wins, keyed on `client_updated_at`, because in
 Phases 1 through 4 exactly one device writes any given record and there is no pull path, so a true
-conflict cannot arise from normal operation. Concretely:
+conflict cannot arise from normal operation, with one exception: two tables are keyed on a natural
+key (`social_histories` on the patient, `abha_profiles` on the ABHA id), so two devices can write
+the same row. The server evaluates five rules **in this order**, comparing the incoming
+`client_updated_at` with the **stored** `client_updated_at` (the revision of the last accepted
+write, stored from the request envelope and never from `data`):
 
-- `client_updated_at` newer than the stored `updated_at`: applied, `server_version` incremented.
-- `client_updated_at` older than or equal to the stored `updated_at`: **not** applied, acknowledged
-  as `stale`. This is not an error. It is the expected result of a retried batch.
-- `base_version` present and not matching the stored `server_version`: acknowledged as `conflict`
-  with the server's current values, and not applied.
+1. **No existing row: inserted**, with its `client_updated_at` stored.
+2. **Exact replay: `stale`.** The stored `client_updated_at` is set and equals the incoming one,
+   **and every field the write carries already holds the same value**. The write was already
+   applied (a retried batch, or a lost acknowledgement resent under a new `batch_id`). Not applied,
+   acknowledged `stale` with the current `server_version`. The same `client_updated_at` with
+   different content (two devices writing a natural-key row in the same millisecond, or two saves
+   of one row in the same millisecond) is **`conflict`**, not `stale`. **`stale`
+   means an identical write was already applied, and nothing else**, which is why `SYNCED` is the
+   correct state for the device. This rule comes first, so a replay whose `base_version` has since
+   moved on is `stale`, not `conflict`.
+3. **`base_version` present and not equal to the stored `server_version`: `conflict`.** Not
+   applied; the response carries the server's current values.
+4. **`base_version` present and equal to the stored `server_version`: applied**, `client_updated_at`
+   stored and `server_version` incremented. No timestamp comparison runs: a matching `base_version`
+   proves the write was made on top of the latest server state, so a device whose clock is behind
+   cannot lose a write.
+5. **`base_version` absent: last write wins on `client_updated_at`.** A stored `client_updated_at`
+   of NULL (a row written before alembic 0009) or an incoming value later than the stored one:
+   applied. An incoming value **earlier** than the stored one: **`conflict`**, not `stale`. The
+   write is genuinely older than what the server holds, the server keeps the newer data, and the
+   device must not be told it is synced.
+
 - `audit_log` is append-only: a repeat insert of an existing id is acknowledged `duplicate` and is
   never overwritten (REQ-AUD-02).
+
+**Unexpected error on one record.** A failure while applying a single record that is not a
+database error is a per-record `rejected` result with code `SAMD-SYS-9005` and `retry_class`
+`RETRYABLE`; the rest of the batch is applied and the batch is acknowledged normally. A
+database-level failure still fails the whole batch (503), so the device retries it whole.
 
 Field-level merge for non-conflicting fields is Phase 3 of the roadmap and lands only when a pull
 path creates a second writer. Adding merge logic before a second writer exists is speculative
@@ -1090,10 +1122,13 @@ implementation: a unique constraint, an upsert keyed on `(facility_id, case_reco
 explicit supersede-then-insert all satisfy it, and the mechanism is the backend's choice. What is
 fixed:
 
-- A pushed assessment for a `case_record_id` that already has one **replaces** it when its
-  `client_updated_at` is newer, and is acknowledged `stale` when it is not — the same
-  last-write-wins rule as above, applied on `case_record_id` rather than on the record `id`.
-  Newest-write-wins is the clinical rule, not just the sync rule: the common case is a retry
+- A pushed assessment for a `case_record_id` that already has one follows the five rules above,
+  applied on `case_record_id` rather than on the record `id`. A re-assessment that carries the
+  `base_version` of the current row **replaces** it (rule 4), whatever the device clock says. With
+  no `base_version`, one whose `client_updated_at` is later replaces it (rule 5), and one that is
+  earlier, such as an older assessment arriving late, is acknowledged **`conflict`** (rule 3 or 5)
+  and does not replace it. It is never `stale`: `stale` means an identical write was already
+  applied (rule 2). Newest-write-wins is the clinical rule, not just the sync rule: the common case is a retry
   superseding a failed or `UNAVAILABLE` attempt, and the retry is the assessment the clinician
   acted on.
 - The record `id` differs between the superseded row and its replacement. The device mints a fresh
@@ -1169,7 +1204,8 @@ Current server classification, by rejection cause:
   (sqlstates `23502`, `23514`), and any constraint violation whose sqlstate this server does not
   classify.
 
-**Android handling rule:** mark a record synced on `applied`, `stale`, or `duplicate`. Keep it
+**Android handling rule:** mark a record synced on `applied`, `stale` (an identical write was
+already applied, so this is truthful), or `duplicate`. Keep it
 pending and surface it for review on `conflict`. On `rejected`, branch on `retry_class` per the
 table above: `TERMINAL` and `CONFLICT` stop the retry loop, which is what protects a field
 device's battery; `RETRYABLE` does not, because the row is not malformed and abandoning it loses

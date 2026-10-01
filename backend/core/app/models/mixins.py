@@ -54,6 +54,13 @@ class SyncMixin:
         server_default=SyncState.RECEIVED.value,
         index=True,
     )
+    # The client_updated_at of the last write this row accepted, stored from the sync envelope and
+    # never from the payload. It is the sync revision the last-write-wins comparison runs on:
+    # comparing it against a data column (updated_at, created_at, inference_ended_at) compares two
+    # different things, and four tables had no such column at all. NULL on rows written before
+    # alembic 0009: they count as older than any incoming write and are not back-filled, because a
+    # guessed value from a column that means something else would be a fabricated revision.
+    client_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 def sync_state_check(table_name: str) -> CheckConstraint:
