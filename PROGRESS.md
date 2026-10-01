@@ -5094,3 +5094,61 @@ says "design-stage only, no code exists" and stays that way until a controlled-d
 it. The memo stays PROPOSED.
 
 Not committed as of this entry.
+
+
+## Sync re-sync fix: last-write-wins on a stored client_updated_at - 2026-10-01
+
+Branch `fix/sync-resync-timestamp`, backend only, not merged. Three behaviour commits, each green
+on its own, then this entry, then a separate PROPOSED `api-contract.md` commit.
+Recon and design: `scratchpad/sync-resync-fix-memo.md`.
+
+**The defect.** Re-syncing an existing row of `kernel_reports`, `evaluate_reports`,
+`medication_lines` or `referrals` raised `AttributeError` (`_timestamp_attr` fell back to a
+`created_at` those models do not have). It escaped the per-record savepoint and answered 500 for the
+WHOLE batch, rolling back every other record and the idempotency row. The device resends that
+batch under the same `batch_id` first on every drain and stops when it fails, so one re-saved
+report blocked every later sync from that device, with Home saying "Up to date". The realistic
+trigger is re-assessment of a case whose first report had already synced. Proven on a clean master
+worktree. The comparator was also wrong on the other 15 tables (no stale detection on the eleven
+`created_at` tables). It had not fired in the running backend's current container (7 startup log
+lines, no unhandled exception); earlier history is unknown.
+
+**The fix.**
+- `dfc6cd8` Alembic 0009 adds a nullable, server-owned `client_updated_at` to the 19 synced tables
+  (on `SyncMixin`). No backfill: a stored NULL counts as older than any incoming write. Migration
+  executed by `test_alembic_0009_sync_client_updated_at.py` (upgrade, downgrade, re-upgrade, and
+  Alembic autogenerate parity, shown able to fail by removing one table).
+- `ccf3331` the five-rule comparator `_resolve_write`: no row inserts; an exact replay is `stale`
+  (outranks conflict); a wrong `base_version` is `conflict`; a matching `base_version` applies
+  whatever the clocks say; with no `base_version` it is last-write-wins and an OLDER write is
+  `conflict`, not stale. Stale now means only an identical write already applied.
+- `a9a88f3` containment: a non-database exception on one record is rejected `SAMD-SYS-9005`,
+  RETRYABLE, class-only logging; a database-level error still fails the batch (503).
+
+**Known limitation, accepted (R3).** Two saves of one row within the same millisecond carry equal
+`localModifiedAt` (Room stores epoch milliseconds), so the second would read as an exact replay and
+be acknowledged `stale`. Not realistic for human edits, theoretical for the automated retry path.
+Closed by the strictly-increasing timestamp in item 1 below.
+
+**Filed items, not built here.**
+1. **NEXT PR, "sync failure visibility" (device). Must merge before any pilot use.**
+   - Surface `CONFLICT` next to `FAILED` (today a `conflict` ack is never retried and never shown:
+     the failed count and list read `FAILED` only).
+   - An outbox-blocked state, so Home never says "Up to date" while the outbox cannot drain.
+   - "Sync now" surfaces its `Result` (`HomeViewModel.onSyncNow` discards it).
+   - Fix the false KDoc at `SyncOutboxRepository.kt:26-29` ("sits surfaced for review").
+   - A `CONFLICT` row must never adopt the ack's `server_version`: otherwise "Send again" would
+     carry a matching `base_version`, pass rule 4, and overwrite newer server data.
+   - Strictly increasing `localModifiedAt` per row (`max(now, previous + 1 ms)`), closing R3.
+2. **Conflict resolution (keep mine or take the server's) needs a pull path.** Its own future
+   design memo.
+3. **The idempotency store has no TTL**, despite the contract's 24 hours: `push()` answers any
+   known `batch_id` from `sync_batches.response_json` with no expiry check.
+4. **A `samd_test` advisory-lock guard against concurrent suite runs.** Two runs against the shared
+   database collide on `drop_all` (`DeadlockDetectedError`), and a table that exists on one branch
+   only breaks the other branch's run.
+
+**PR 4 rebase owed after this merges** (`feat/pr4-model-identity-consumers`): its Alembic 0009
+becomes 0010 (file, `revision`, `down_revision`, `test_alembic_0009.py`, text references),
+`_EXPECTED_REJECT_SITES` becomes 19, the parked stash's PROGRESS text says 0010, and the two
+Alembic test harnesses are unified into one.
