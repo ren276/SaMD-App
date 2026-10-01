@@ -94,7 +94,11 @@ internal fun KernelAssessmentContent(uiState: KernelAssessmentUiState, actions: 
                 )
             } else {
                 ConfidenceGauge(display, uiState.showModelScore)
-                ExplainabilityCard(display, uiState.showModelScore)
+                // A worker on /evaluate has nothing to show here (the classifier's scored explanation
+                // is physician-only), and an empty Card still draws as a blank box.
+                if (hasExplainabilityContent(display, uiState.showModelScore)) {
+                    ExplainabilityCard(display, uiState.showModelScore)
+                }
             }
             if (display.isMockFallback) {
                 Card(colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)) {
@@ -261,6 +265,15 @@ internal fun ConfidenceGauge(display: AssessmentDisplay, showModelScore: Boolean
         }
     }
 }
+
+/** Whether [ExplainabilityCard] has anything to draw for this role. The card is skipped when it
+ *  would be empty: for a worker on the /evaluate path the scored explanation is physician-only, so
+ *  without this the screen showed a blank rounded box. */
+internal fun hasExplainabilityContent(display: AssessmentDisplay, showModelScore: Boolean): Boolean =
+    display.reasoningLines.isNotEmpty() ||
+        (showModelScore && display.modelExplanationLines.isNotEmpty()) ||
+        display.evidenceFor.isNotEmpty() ||
+        display.evidenceAgainst.isNotEmpty()
 
 @Composable
 private fun ExplainabilityCard(display: AssessmentDisplay, showModelScore: Boolean) {
