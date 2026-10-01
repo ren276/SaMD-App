@@ -70,24 +70,28 @@ _AFTER = T0 + timedelta(hours=1)
 
 
 @pytest.mark.parametrize(
-    ("stored_ts", "stored_version", "incoming", "base_version", "expected"),
+    ("stored_ts", "stored_version", "incoming", "base_version", "expected", "same_content"),
     [
         # rule 1: an exact replay is stale, and it outranks the conflict check
-        (_STORED, 3, _STORED, None, "stale"),
-        (_STORED, 3, _STORED, 3, "stale"),
-        (_STORED, 3, _STORED, 1, "stale"),
+        (_STORED, 3, _STORED, None, "stale", True),
+        (_STORED, 3, _STORED, 3, "stale", True),
+        (_STORED, 3, _STORED, 1, "stale", True),
+        # rule 1 with the SAME timestamp but DIFFERENT content: a conflict, never stale
+        (_STORED, 3, _STORED, None, "conflict", False),
+        (_STORED, 3, _STORED, 3, "conflict", False),
+        (_STORED, 3, _STORED, 1, "conflict", False),
         # rule 2: base_version present and different
-        (_STORED, 3, _AFTER, 1, "conflict"),
-        (_STORED, 3, _BEFORE, 99, "conflict"),
+        (_STORED, 3, _AFTER, 1, "conflict", True),
+        (_STORED, 3, _BEFORE, 99, "conflict", True),
         # rule 3: base_version matches, applied whatever the clocks say (clock skew)
-        (_STORED, 3, _AFTER, 3, "apply"),
-        (_STORED, 3, _BEFORE, 3, "apply"),
-        (None, 3, _BEFORE, 3, "apply"),
+        (_STORED, 3, _AFTER, 3, "apply", True),
+        (_STORED, 3, _BEFORE, 3, "apply", True),
+        (None, 3, _BEFORE, 3, "apply", True),
         # rule 4: no base_version, last-write-wins; a stored NULL is older than anything
-        (_STORED, 3, _AFTER, None, "apply"),
-        (_STORED, 3, _BEFORE, None, "conflict"),
-        (None, 3, _BEFORE, None, "apply"),
-        (None, 3, _AFTER, None, "apply"),
+        (_STORED, 3, _AFTER, None, "apply", True),
+        (_STORED, 3, _BEFORE, None, "conflict", True),
+        (None, 3, _BEFORE, None, "apply", True),
+        (None, 3, _AFTER, None, "apply", True),
     ],
 )
 def test_the_decision_for_every_rule_branch(
@@ -96,8 +100,12 @@ def test_the_decision_for_every_rule_branch(
     incoming: datetime,
     base_version: int | None,
     expected: str,
+    same_content: bool,
 ) -> None:
-    assert _resolve_write(stored_ts, stored_version, incoming, base_version) == expected
+    decision = _resolve_write(
+        stored_ts, stored_version, incoming, base_version, same_content=same_content
+    )
+    assert decision == expected
 
 
 # --- building a valid record for any of the 19 tables ---
@@ -337,14 +345,20 @@ async def test_every_comparator_rule_holds_on_every_synced_table(
             table_name, mutated_key, original.get(mutated_key)
         ), step
 
-    # 2. An exact replay (same timestamp) is stale, with any base_version, and changes nothing.
+    # 2. An exact replay (same timestamp, same content) is stale with any base_version.
     for base in (None, 1, 99):
         replay = _record(table_name, rid, iso(T0), base)
         result = await _send(client, auth_headers, replay)
         assert result["status"] == "stale", (table_name, base, result)
         assert result["server_version"] == 1
-    # A replay carrying different content still reads as stale: the revision is what matched.
     await assert_untouched("after replays", 1, T0)
+
+    # 2b. The SAME timestamp with DIFFERENT content is not a replay: conflict, nothing stored.
+    for base in (None, 1, 99):
+        result = await _send(client, auth_headers, changed(base, T0, 2))
+        assert result["status"] == "conflict", (table_name, base, result)
+        assert "server_state" in result
+    await assert_untouched("after same-timestamp different content", 1, T0)
 
     # 3. No base_version and an OLDER timestamp: conflict, the stored row is unchanged.
     result = await _send(client, auth_headers, changed(None, T0 - timedelta(hours=1), 2))
@@ -430,6 +444,67 @@ async def test_a_second_writer_without_base_version_and_an_older_timestamp_gets_
     row = await _row(session, table_name, rid)
     assert (row.server_version, row.client_updated_at) == (1, T0 + timedelta(hours=1))
     assert _persisted(row, table_name, key) == _expected_value(table_name, key, 2)
+
+
+# --- the same timestamp is not enough to be a replay ---
+
+
+@pytest.mark.parametrize("table_name", ["social_histories", "abha_profiles"])
+async def test_two_devices_writing_a_natural_key_row_in_the_same_millisecond_conflict(
+    client: AsyncClient, auth_headers: dict[str, str], session: AsyncSession, table_name: str
+) -> None:
+    """Same client_updated_at, different content, no base_version on the second writer. Acking it
+    stale would tell that device its data was applied; it must be told conflict."""
+    await _seed_parents(client, auth_headers, table_name)
+    rid = _OWN_ID[table_name]
+    first = _record(table_name, rid, iso(T0), None)
+    key = _mutate(table_name, first, 2)
+    assert (await _send(client, auth_headers, first))["status"] == "applied"
+
+    second = _record(table_name, rid, iso(T0), None)
+    _mutate(table_name, second, 7)
+    result = await _send(client, auth_headers, second)
+
+    assert result["status"] == "conflict"
+    row = await _row(session, table_name, rid)
+    assert (row.server_version, row.client_updated_at) == (1, T0)
+    assert _persisted(row, table_name, key) == _expected_value(table_name, key, 2)
+
+
+async def test_two_saves_of_one_report_in_the_same_millisecond_are_not_silently_dropped(
+    client: AsyncClient, auth_headers: dict[str, str], session: AsyncSession
+) -> None:
+    """The accepted same-millisecond limitation narrows to identical content: a different second
+    save is a conflict, not a stale ack that loses it."""
+    await _seed_parents(client, auth_headers, "kernel_reports")
+    first = _record("kernel_reports", "kr-ms", iso(T0), None)
+    key = _mutate("kernel_reports", first, 2)
+    assert (await _send(client, auth_headers, first))["status"] == "applied"
+
+    second = _record("kernel_reports", "kr-ms", iso(T0), 1)
+    _mutate("kernel_reports", second, 3)
+    assert (await _send(client, auth_headers, second))["status"] == "conflict"
+
+    row = await _row(session, "kernel_reports", "kr-ms")
+    assert row.server_version == 1
+    assert _persisted(row, "kernel_reports", key) == _expected_value("kernel_reports", key, 2)
+
+
+async def test_a_replay_that_omits_an_optional_field_is_still_stale(
+    client: AsyncClient, auth_headers: dict[str, str], session: AsyncSession
+) -> None:
+    """Content is compared over the keys the incoming write carries. A null is omitted on the
+    wire, so a replay missing an optional key must not read as a difference."""
+    first = patient_record(client_updated_at=iso(T0), district="Jaipur")
+    assert (await _send(client, auth_headers, first))["status"] == "applied"
+
+    replay = patient_record(client_updated_at=iso(T0))
+    replay["data"].pop("district")
+    result = await _send(client, auth_headers, replay)
+
+    assert result["status"] == "stale"
+    row = await _row(session, "patients", PATIENT_ID)
+    assert (row.server_version, row.district) == (1, "Jaipur")
 
 
 # --- re-assessment, the realistic trigger ---
