@@ -267,6 +267,21 @@ class BlobStatus(StrEnum):
     UPLOADED = "UPLOADED"
 
 
+class RederiveStatus(StrEnum):
+    """kernel_derivation_checks.rederive_status: the outcome of re-deriving one synced kernel
+    report from the stored model output.
+
+    NOT_APPLICABLE is for every report whose inference_source is not REAL_INFERENCE: there is no
+    model output to re-derive, so no derivation and no comparison is run.
+    """
+
+    MATCH = "MATCH"
+    MISMATCH = "MISMATCH"
+    NOT_CHECKED_NO_LINK = "NOT_CHECKED_NO_LINK"
+    NOT_CHECKED_ERROR = "NOT_CHECKED_ERROR"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+
+
 class KernelEndpoint(StrEnum):
     """Which of the two kernel routes a kernel_call_log row is about."""
 

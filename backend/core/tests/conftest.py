@@ -19,7 +19,12 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncConnection,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 import app.models
 from app.config import Settings, get_settings
@@ -30,6 +35,7 @@ from app.models.enums import UserRole
 from app.models.facility import Facility
 from app.models.user import UserAccount
 from app.services.auth import hash_pin
+from tests.alembic_scratch import SCHEMA as SCRATCH_SCHEMA
 
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL",
@@ -132,7 +138,36 @@ async def _database(test_settings: Settings) -> AsyncIterator[None]:
             )
         )
 
-    # Point the application's session factory at the test engine.
+        # Point the application's session factory at the test engine.
+        # create_all does not create triggers, and alembic 0010 does: mirror it here so the
+        # insert-only guarantee on kernel_derivation_checks is exercised by the suite too.
+        await conn.execute(
+            text(
+                """
+                CREATE OR REPLACE FUNCTION kernel_derivation_checks_reject_mutation()
+                RETURNS trigger AS $$
+                BEGIN
+                    RAISE EXCEPTION 'kernel_derivation_checks is insert-only'
+                        USING ERRCODE = 'raise_exception';
+                END;
+                $$ LANGUAGE plpgsql;
+                """
+            )
+        )
+        for trigger, event in (
+            ("trg_kernel_derivation_checks_no_update", "UPDATE"),
+            ("trg_kernel_derivation_checks_no_delete", "DELETE"),
+        ):
+            await conn.execute(
+                text(f"DROP TRIGGER IF EXISTS {trigger} ON kernel_derivation_checks")
+            )
+            await conn.execute(
+                text(
+                    f"CREATE TRIGGER {trigger} BEFORE {event} ON kernel_derivation_checks "
+                    "FOR EACH ROW EXECUTE FUNCTION kernel_derivation_checks_reject_mutation()"
+                )
+            )
+
     session_module._engine = engine
     session_module._sessionmaker = async_sessionmaker(bind=engine, expire_on_commit=False)
 
@@ -264,3 +299,20 @@ async def other_facility_headers(
     )
     await session.commit()
     return await _login_headers(client, OTHER_WORKER_ID)
+
+
+@pytest.fixture
+async def scratch(test_settings: Settings) -> AsyncIterator[AsyncConnection]:
+    """A rolled-back transaction with a scratch schema first on the search_path, for the tests that
+    run Alembic migrations (see tests/alembic_scratch.py)."""
+    engine = create_async_engine(test_settings.database_url, poolclass=None)
+    conn = await engine.connect()
+    trans = await conn.begin()
+    try:
+        await conn.execute(text(f"CREATE SCHEMA {SCRATCH_SCHEMA}"))
+        await conn.execute(text(f"SET LOCAL search_path TO {SCRATCH_SCHEMA}, public"))
+        yield conn
+    finally:
+        await trans.rollback()
+        await conn.close()
+        await engine.dispose()

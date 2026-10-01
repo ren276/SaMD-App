@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy import (
     ARRAY,
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
@@ -20,6 +21,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.domain.kernel_identity import DERIVATION_RULE_VERSION_PATTERN, REQUEST_ID_PATTERN
 from app.models.enums import InferenceSource, PhysicianDecision, RiskCategory, UrgencyLevel
 from app.models.mixins import CLIENT_ID_LENGTH, SyncMixin, enum_check, sync_state_check
 
@@ -39,8 +41,18 @@ class KernelReport(Base, SyncMixin):
         enum_check("risk_category", RiskCategory, "ck_kernel_reports_risk_category"),
         enum_check("urgency_level", UrgencyLevel, "ck_kernel_reports_urgency_level"),
         enum_check("inference_source", InferenceSource, "ck_kernel_reports_inference_source"),
+        CheckConstraint(
+            f"request_id IS NULL OR request_id ~ '{REQUEST_ID_PATTERN}'",
+            name="request_id_format",
+        ),
+        CheckConstraint(
+            "derivation_rule_version IS NULL OR "
+            f"derivation_rule_version ~ '{DERIVATION_RULE_VERSION_PATTERN}'",
+            name="derivation_rule_version_format",
+        ),
         Index("ix_kernel_reports_case_record_id", "case_record_id"),
         Index("ix_kernel_reports_facility_source", "facility_id", "inference_source"),
+        Index("ix_kernel_reports_request_id", "request_id"),
     )
 
     id: Mapped[str] = mapped_column(String(CLIENT_ID_LENGTH), primary_key=True)
@@ -59,7 +71,16 @@ class KernelReport(Base, SyncMixin):
     evidence_for: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, default=list)
     evidence_against: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, default=list)
 
-    model_version: Mapped[str] = mapped_column(String(80), nullable=False)
+    # NULL means the kernel did not say which model answered. It is never a sentinel string.
+    model_version: Mapped[str | None] = mapped_column(String(80))
+    # NULL is read as "not calibrated" wherever it is displayed (fail closed).
+    model_calibrated: Mapped[bool | None] = mapped_column(Boolean)
+    # The proxy's X-Request-ID for the call that produced this report: the key that joins it to
+    # kernel_assessments and kernel_call_log. NULL when the device had no valid one.
+    request_id: Mapped[str | None] = mapped_column(String(36))
+    # The device's KernelTriageRules.DERIVATION_RULE_VERSION when it derived urgency, risk and the
+    # verification flag. NULL on legacy rows and on rows that were not derived from a real result.
+    derivation_rule_version: Mapped[str | None] = mapped_column(String(40))
     icd_code: Mapped[str | None] = mapped_column(String(20))
     device_id: Mapped[str] = mapped_column(String(64), nullable=False)
     software_version: Mapped[str] = mapped_column(String(40), nullable=False)
