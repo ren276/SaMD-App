@@ -1119,10 +1119,13 @@ implementation: a unique constraint, an upsert keyed on `(facility_id, case_reco
 explicit supersede-then-insert all satisfy it, and the mechanism is the backend's choice. What is
 fixed:
 
-- A pushed assessment for a `case_record_id` that already has one **replaces** it when its
-  `client_updated_at` is newer, and is acknowledged `stale` when it is not — the same
-  last-write-wins rule as above, applied on `case_record_id` rather than on the record `id`.
-  Newest-write-wins is the clinical rule, not just the sync rule: the common case is a retry
+- A pushed assessment for a `case_record_id` that already has one follows the five rules above,
+  applied on `case_record_id` rather than on the record `id`. A re-assessment that carries the
+  `base_version` of the current row **replaces** it (rule 4), whatever the device clock says. With
+  no `base_version`, one whose `client_updated_at` is later replaces it (rule 5), and one that is
+  earlier, such as an older assessment arriving late, is acknowledged **`conflict`** (rule 3 or 5)
+  and does not replace it. It is never `stale`: `stale` means an identical write was already
+  applied (rule 2). Newest-write-wins is the clinical rule, not just the sync rule: the common case is a retry
   superseding a failed or `UNAVAILABLE` attempt, and the retry is the assessment the clinician
   acted on.
 - The record `id` differs between the superseded row and its replacement. The device mints a fresh
@@ -1198,7 +1201,8 @@ Current server classification, by rejection cause:
   (sqlstates `23502`, `23514`), and any constraint violation whose sqlstate this server does not
   classify.
 
-**Android handling rule:** mark a record synced on `applied`, `stale`, or `duplicate`. Keep it
+**Android handling rule:** mark a record synced on `applied`, `stale` (an identical write was
+already applied, so this is truthful), or `duplicate`. Keep it
 pending and surface it for review on `conflict`. On `rejected`, branch on `retry_class` per the
 table above: `TERMINAL` and `CONFLICT` stop the retry loop, which is what protects a field
 device's battery; `RETRYABLE` does not, because the row is not malformed and abandoning it loses
