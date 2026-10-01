@@ -54,3 +54,9 @@ def test_derivation_matches_the_shared_expectation(case: dict[str, Any]) -> None
 
 def test_rule_version_was_bumped_for_the_v2_rules() -> None:
     assert DERIVATION_RULE_VERSION == "HAN-07/08-v2"
+
+
+def test_backend_rule_version_equals_the_shared_fixture_value() -> None:
+    """The device suite asserts its own constant against the same value (no hand-kept parity)."""
+    shared = json.loads((_FIXTURES / "expectations.json").read_text())["derivation_rule_version"]
+    assert DERIVATION_RULE_VERSION == shared

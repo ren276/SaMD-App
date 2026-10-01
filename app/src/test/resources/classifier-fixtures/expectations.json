@@ -1,5 +1,6 @@
 {
   "_about": "Expected triage for the real classifier fixtures in this directory, read by BOTH app/src/test/.../KernelEmergencyUrgencyFixtureTest.kt and backend/core/tests/test_kernel_emergency_fixtures.py. Identical copies live in app/src/test/resources/classifier-fixtures/ and backend/core/tests/fixtures/classifier/; ClassifierFixtureMirrorTest fails if they differ. 'edit' replaces one field of the real response before it is derived: triage_urgency, or the top differential's condition_tier.",
+  "derivation_rule_version": "HAN-07/08-v2",
   "cases": [
     {
       "name": "spo2_85",
