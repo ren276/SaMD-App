@@ -60,7 +60,9 @@ from app.services.patient import apply_blind_indexes
 
 # Columns SyncMixin adds that a client may never set directly; always excluded from every table's
 # client-writable set regardless of what else a table's TableSpec declares.
-_SYNC_MIXIN_OWNED = frozenset({"facility_id", "server_version", "received_at", "sync_state"})
+_SYNC_MIXIN_OWNED = frozenset(
+    {"facility_id", "server_version", "received_at", "sync_state", "client_updated_at"}
+)
 
 AUDIT_LOG_TABLE = "audit_log"
 AUDIT_LOG_RANK = 20
