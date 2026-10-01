@@ -1082,9 +1082,12 @@ the same row. The server evaluates five rules **in this order**, comparing the i
 write, stored from the request envelope and never from `data`):
 
 1. **No existing row: inserted**, with its `client_updated_at` stored.
-2. **Exact replay: `stale`.** The stored `client_updated_at` is set and equals the incoming one.
-   The write was already applied (a retried batch, or a lost acknowledgement resent under a new
-   `batch_id`). Not applied, acknowledged `stale` with the current `server_version`. **`stale`
+2. **Exact replay: `stale`.** The stored `client_updated_at` is set and equals the incoming one,
+   **and every field the write carries already holds the same value**. The write was already
+   applied (a retried batch, or a lost acknowledgement resent under a new `batch_id`). Not applied,
+   acknowledged `stale` with the current `server_version`. The same `client_updated_at` with
+   different content (two devices writing a natural-key row in the same millisecond, or two saves
+   of one row in the same millisecond) is **`conflict`**, not `stale`. **`stale`
    means an identical write was already applied, and nothing else**, which is why `SYNCED` is the
    correct state for the device. This rule comes first, so a replay whose `base_version` has since
    moved on is `stale`, not `conflict`.

@@ -5125,10 +5125,12 @@ lines, no unhandled exception); earlier history is unknown.
 - `a9a88f3` containment: a non-database exception on one record is rejected `SAMD-SYS-9005`,
   RETRYABLE, class-only logging; a database-level error still fails the batch (503).
 
-**Known limitation, accepted (R3).** Two saves of one row within the same millisecond carry equal
-`localModifiedAt` (Room stores epoch milliseconds), so the second would read as an exact replay and
-be acknowledged `stale`. Not realistic for human edits, theoretical for the automated retry path.
-Closed by the strictly-increasing timestamp in item 1 below.
+**Known limitation, accepted (R3), narrowed.** Two saves of one row within the same millisecond
+carry equal `localModifiedAt` (Room stores epoch milliseconds). Since the follow-up commit to the
+CodeRabbit review, an equal timestamp is `stale` only when the content is also the same; the same
+timestamp with different content is `conflict`, so a second save is no longer silently dropped
+(cross-device writes to the natural-key tables `social_histories` and `abha_profiles` are covered
+the same way). What remains is invisible-on-the-device conflict, which is item 1 below.
 
 **Filed items, not built here.**
 1. **NEXT PR, "sync failure visibility" (device). Must merge before any pilot use.**
@@ -5139,7 +5141,8 @@ Closed by the strictly-increasing timestamp in item 1 below.
    - Fix the false KDoc at `SyncOutboxRepository.kt:26-29` ("sits surfaced for review").
    - A `CONFLICT` row must never adopt the ack's `server_version`: otherwise "Send again" would
      carry a matching `base_version`, pass rule 4, and overwrite newer server data.
-   - Strictly increasing `localModifiedAt` per row (`max(now, previous + 1 ms)`), closing R3.
+   - Strictly increasing `localModifiedAt` per row (`max(now, previous + 1 ms)`), so two saves of
+     one row never share a timestamp and the conflict above cannot arise from a single device.
 2. **Conflict resolution (keep mine or take the server's) needs a pull path.** Its own future
    design memo.
 3. **The idempotency store has no TTL**, despite the contract's 24 hours: `push()` answers any
