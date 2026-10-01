@@ -221,17 +221,39 @@ def _attr_map(spec: TableSpec) -> dict[str, str]:
     return {alias_by_attr.get(attr, attr): attr for attr in attrs}
 
 
-def _timestamp_attr(spec: TableSpec) -> str:
-    """The column compared against client_updated_at for last-write-wins.
+def _resolve_write(
+    stored_ts: datetime | None,
+    stored_version: int,
+    incoming_ts: datetime,
+    base_version: int | None,
+) -> str:
+    """Decide what an incoming write to an EXISTING row does: "stale", "conflict" or "apply".
 
-    api-contract.md section 6.1 says "stored updated_at" without naming a column per table. Most
-    of the twenty tables have one; the rest (history-style child rows: allergies, observations,
-    medication entries, and so on) have only created_at, because they are written once per visit
-    and never mutated in place. updated_at is used where the column exists, created_at otherwise.
-    This is an implementation choice the contract left implicit, not a divergence from it; see the
-    Phase 4 report.
+    Compares the incoming client_updated_at with the STORED client_updated_at and uses
+    base_version and server_version. No other column takes part. Evaluated in this order:
+
+    1. Stored client_updated_at is set and equals the incoming one: "stale". An exact replay of a
+       write already applied (a retried batch, a lost ack resent under a new batch_id). Stale means
+       exactly this, which is why SYNCED on the device is truthful. It comes BEFORE the conflict
+       check, so a resend whose base_version has since moved on is still stale, not a conflict.
+    2. base_version present and different from server_version: "conflict".
+    3. base_version present and equal to server_version: "apply". A matching base_version proves
+       the write was made on top of the latest server state, so no wall-clock comparison runs and a
+       device clock that runs behind cannot lose a write.
+    4. base_version absent: last-write-wins on client_updated_at. A stored NULL (a row from before
+       alembic 0009) or a later incoming value applies. An EARLIER incoming value is "conflict",
+       not stale: the write is genuinely older than what the server holds, the device must not be
+       told it is synced, and the server keeps the newer data.
+
+    A new row (no existing row) never reaches here: it is inserted and stores its own timestamp.
     """
-    return "updated_at" if hasattr(spec.model, "updated_at") else "created_at"
+    if stored_ts is not None and incoming_ts == stored_ts:
+        return "stale"
+    if base_version is not None:
+        return "apply" if base_version == stored_version else "conflict"
+    if stored_ts is None or incoming_ts > stored_ts:
+        return "apply"
+    return "conflict"
 
 
 def _constraint_sqlstate(exc: IntegrityError | DataError) -> str | None:
@@ -380,15 +402,17 @@ async def _apply_generic(
         )
 
     if existing is not None:
-        if base_version is not None and base_version != existing.server_version:
+        decision = _resolve_write(
+            existing.client_updated_at, existing.server_version, client_updated_at, base_version
+        )
+        if decision == "conflict":
             return {
                 "table": table,
                 "id": record_id,
                 "status": "conflict",
                 "server_state": _server_state(spec, existing),
             }
-        stored_ts = getattr(existing, _timestamp_attr(spec))
-        if client_updated_at <= stored_ts:
+        if decision == "stale":
             return {
                 "table": table,
                 "id": record_id,
@@ -401,6 +425,8 @@ async def _apply_generic(
         attr_map[key]: _coerce_value(columns[attr_map[key]].type, value)
         for key, value in data.items()
     }
+    # Server-owned: stored from the envelope, never accepted from the payload.
+    attrs["client_updated_at"] = client_updated_at
     if "synced_to_cloud_at" in spec.server_owned:
         attrs["synced_to_cloud_at"] = utcnow()
     if table == "evaluate_reports" and isinstance(attrs.get("payload_json"), str):
@@ -662,7 +688,6 @@ async def _apply_one(
             _constraint_message(exc),
             _constraint_retry_class(exc),
         )
-
     return result
 
 
