@@ -23,6 +23,7 @@ the chain rule (see the module's own docstring for why that split must never hap
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any
@@ -35,6 +36,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.base import utcnow
 from app.deps import CurrentWorker
 from app.domain.audit_actions_device import DEVICE_AUDIT_ACTIONS
+from app.domain.kernel_identity import (
+    DERIVATION_RULE_VERSION_RE,
+    MODEL_VERSION_RE,
+    REQUEST_ID_RE,
+)
 from app.errors import ErrorCode, SamdError
 from app.logging import get_logger
 from app.models.abha import AbhaProfile
@@ -174,6 +180,11 @@ class TableSpec:
     # data key -> error code. Checked before the generic unknown-field rejection, so the specific
     # code in api-contract.md's table (SAMD-SYNC-6006) is not swallowed by the generic 6003.
     forbidden: dict[str, ErrorCode] = field(default_factory=dict)
+    # data key -> closed format. A device-supplied string with a closed vocabulary is checked here
+    # and rejected, never normalised and never stored verbatim: the backend does not rewrite
+    # device-owned data. None passes (the column is nullable); anything else must be a string that
+    # matches. The rejection message names the field and never echoes the value.
+    formats: dict[str, re.Pattern[str]] = field(default_factory=dict)
 
 
 _PATIENT_BLIND_INDEXES = frozenset({"name_blind_idx", "mobile_blind_idx", "aadhaar_blind_idx"})
@@ -199,7 +210,15 @@ TABLE_REGISTRY: dict[str, TableSpec] = {
     "social_histories": TableSpec(10, SocialHistory, pk_attr="patient_id"),
     "medication_entries": TableSpec(11, MedicationEntry),
     "case_records": TableSpec(12, CaseRecord),
-    "kernel_reports": TableSpec(13, KernelReport),
+    "kernel_reports": TableSpec(
+        13,
+        KernelReport,
+        formats={
+            "request_id": REQUEST_ID_RE,
+            "derivation_rule_version": DERIVATION_RULE_VERSION_RE,
+            "model_version": MODEL_VERSION_RE,
+        },
+    ),
     "evaluate_reports": TableSpec(14, EvaluateReport),
     "diagnosis_feedback": TableSpec(15, DiagnosisFeedback),
     "prescriptions": TableSpec(16, Prescription),
@@ -371,6 +390,18 @@ async def _apply_generic(
             # A field the device must never send. Same bytes, same answer, forever.
             return _reject(
                 table, record_id, code, f"{key}: forbidden field.", SyncRetryClass.TERMINAL
+            )
+
+    for key, pattern in spec.formats.items():
+        value = data.get(key)
+        if value is not None and not (isinstance(value, str) and pattern.fullmatch(value)):
+            # TERMINAL: the same bytes can never become valid. The value is not echoed.
+            return _reject(
+                table,
+                record_id,
+                ErrorCode.SYNC_RECORD_INVALID,
+                f"{key}: malformed.",
+                SyncRetryClass.TERMINAL,
             )
 
     if table == "referrals":

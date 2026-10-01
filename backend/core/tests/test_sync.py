@@ -17,6 +17,7 @@ import asyncio
 import uuid
 from typing import Any
 
+import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -212,6 +213,8 @@ def kernel_report_record(
     case_record_id: str = CASE_ID,
     inference_source: str = "REAL_INFERENCE",
     client_updated_at: str = "2026-08-16T09:46:00.000Z",
+    data_overrides: dict[str, Any] | None = None,
+    omit: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     data = {
         "case_record_id": case_record_id,
@@ -234,6 +237,9 @@ def kernel_report_record(
         "required_human_verification": False,
         "inference_source": inference_source,
     }
+    data.update(data_overrides or {})
+    for key in omit:  # Gson omits a null field, so a device sends "no model_version" as no key
+        data.pop(key, None)
     return _record("kernel_reports", record_id, client_updated_at, data)
 
 
@@ -335,6 +341,114 @@ async def test_unavailable_inference_source_kernel_report_is_accepted_and_persis
         await session.execute(select(KernelReport).where(KernelReport.id == "kr-unavailable-1"))
     ).scalar_one()
     assert persisted.inference_source == "UNAVAILABLE"
+
+
+# ---------------------------------------------------------------------------
+# kernel_reports model identity fields (PR 4): request_id, derivation_rule_version,
+# model_calibrated, nullable model_version
+# ---------------------------------------------------------------------------
+
+GOOD_REQUEST_ID = "3f2b8c1e-9a4d-4e6f-8b7a-1c2d3e4f5a6b"
+
+
+def _kernel_push_records(**kernel_kwargs: Any) -> list[dict[str, Any]]:
+    return [
+        patient_record(),
+        encounter_record(),
+        case_record_record(),
+        kernel_report_record("kr-identity-1", **kernel_kwargs),
+    ]
+
+
+async def _persisted_kernel_report(session: AsyncSession) -> KernelReport | None:
+    return (
+        await session.execute(select(KernelReport).where(KernelReport.id == "kr-identity-1"))
+    ).scalar_one_or_none()
+
+
+async def test_the_new_identity_fields_are_accepted_and_persisted(
+    client: AsyncClient, auth_headers: dict[str, str], session: AsyncSession
+) -> None:
+    response = await push(
+        client,
+        auth_headers,
+        _kernel_push_records(
+            data_overrides={
+                "request_id": GOOD_REQUEST_ID,
+                "derivation_rule_version": "HAN-07/08-v2",
+                "model_calibrated": False,
+            }
+        ),
+    )
+
+    assert response.json()["data"]["rejected"] == 0
+    row = await _persisted_kernel_report(session)
+    assert row is not None
+    assert row.request_id == GOOD_REQUEST_ID
+    assert row.derivation_rule_version == "HAN-07/08-v2"
+    assert row.model_calibrated is False
+
+
+async def test_a_report_with_no_model_version_key_is_stored_with_null(
+    client: AsyncClient, auth_headers: dict[str, str], session: AsyncSession
+) -> None:
+    response = await push(client, auth_headers, _kernel_push_records(omit=("model_version",)))
+
+    assert response.json()["data"]["rejected"] == 0
+    row = await _persisted_kernel_report(session)
+    assert row is not None
+    assert row.model_version is None
+    assert row.request_id is None
+    assert row.derivation_rule_version is None
+
+
+@pytest.mark.parametrize("legacy", ["remote-kernel", "unavailable"])
+async def test_an_old_device_sentinel_model_version_is_stored_verbatim(
+    client: AsyncClient, auth_headers: dict[str, str], session: AsyncSession, legacy: str
+) -> None:
+    """Old devices still send these. The backend accepts and stores them as sent: kernel_reports is
+    device-owned, the server does not rewrite it, and pre-pilot data is reset, not cleansed."""
+    response = await push(
+        client, auth_headers, _kernel_push_records(data_overrides={"model_version": legacy})
+    )
+
+    assert response.json()["data"]["rejected"] == 0
+    row = await _persisted_kernel_report(session)
+    assert row is not None
+    assert row.model_version == legacy
+    assert row.derivation_rule_version is None
+
+
+@pytest.mark.parametrize(
+    ("field", "bad"),
+    [
+        ("request_id", "not-a-uuid"),
+        ("request_id", GOOD_REQUEST_ID.upper()),
+        ("request_id", "3f2b8c1e-9a4d-1e6f-8b7a-1c2d3e4f5a6b"),
+        ("request_id", 12345),
+        ("derivation_rule_version", "v2"),
+        ("derivation_rule_version", "HAN-07/08-v"),
+        ("derivation_rule_version", "HAN-07/08-v2; DROP TABLE"),
+        ("model_version", "has a space"),
+        ("model_version", "x" * 81),
+        ("model_version", 7),
+    ],
+)
+async def test_a_malformed_identity_field_is_rejected_terminal_without_echoing_it(
+    client: AsyncClient, auth_headers: dict[str, str], session: AsyncSession, field: str, bad: Any
+) -> None:
+    response = await push(client, auth_headers, _kernel_push_records(data_overrides={field: bad}))
+
+    data = response.json()["data"]
+    assert data["rejected"] == 1
+    result = next(r for r in data["results"] if r["table"] == "kernel_reports")
+    assert result["status"] == "rejected"
+    assert result["code"] == ErrorCode.SYNC_RECORD_INVALID.value
+    assert result["retry_class"] == "TERMINAL"
+    assert result["message"] == f"{field}: malformed."
+    assert str(bad) not in result["message"]
+    # Persisted state, not just the ack: the row must not exist.
+    assert await _persisted_kernel_report(session) is None
 
 
 # ---------------------------------------------------------------------------
