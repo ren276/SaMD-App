@@ -13,7 +13,9 @@ import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import httpx
 import pytest
+from fastapi import FastAPI
 from httpx import AsyncClient
 from sqlalchemy import (
     CheckConstraint,
@@ -22,12 +24,17 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    func,
     select,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.errors import ErrorCode
+from app.models.sync import SyncBatch
+from app.services import sync as sync_service
 from app.services.sync import TABLE_REGISTRY, _attr_map, _resolve_write
 from tests.conftest import TEST_FACILITY_ID
 from tests.test_patients import PATIENT_ID
@@ -484,3 +491,113 @@ async def test_the_stored_revision_comes_from_the_envelope_not_the_payload(
     row = await _row(session, "patients", PATIENT_ID)
     assert row.client_updated_at == T0
     assert row.updated_at.year == 2031  # the device's own data column is untouched by the revision
+
+
+# --- containment: one bad record cannot 500 a batch ---
+
+
+class _LogSpy:
+    def __init__(self) -> None:
+        self.errors: list[tuple[str, dict[str, Any]]] = []
+
+    def error(self, event: str, **fields: Any) -> None:
+        self.errors.append((event, fields))
+
+
+def _device_client(app: FastAPI) -> httpx.AsyncClient:
+    """A client that turns a server exception into the HTTP status a real device would see."""
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    return httpx.AsyncClient(transport=transport, base_url="http://testserver")
+
+
+async def test_one_record_that_raises_is_rejected_retryable_and_the_batch_still_applies(
+    app: FastAPI,
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _seed_parents(client, auth_headers, "kernel_reports")
+    spy = _LogSpy()
+    monkeypatch.setattr(sync_service, "logger", spy)
+    real_apply = sync_service._apply_generic
+
+    async def apply_or_blow_up(*args: Any, **kwargs: Any) -> Any:
+        if kwargs["table"] == "kernel_reports":
+            raise RuntimeError("patient detail that must not be logged")
+        return await real_apply(*args, **kwargs)
+
+    monkeypatch.setattr(sync_service, "_apply_generic", apply_or_blow_up)
+    batch = batch_body(
+        [
+            _record("kernel_reports", "kr-bad", iso(T0), None),
+            observation_record("obs-good", client_updated_at=iso(T0)),
+        ]
+    )
+
+    async with _device_client(app) as device:
+        response = await device.post("/api/v1/sync/push", json=batch, headers=auth_headers)
+
+    assert response.status_code == 200
+    results = {(r["table"], r["id"]): r for r in response.json()["data"]["results"]}
+    bad = results[("kernel_reports", "kr-bad")]
+    assert bad["status"] == "rejected"
+    assert bad["code"] == ErrorCode.SYS_INTERNAL.value
+    assert bad["retry_class"] == "RETRYABLE"
+    assert results[("observations", "obs-good")]["status"] == "applied"
+
+    # Persisted state: the valid record and the idempotency row exist, the bad record does not.
+    obs = TABLE_REGISTRY["observations"].model
+    assert (
+        await session.scalar(select(func.count()).select_from(obs).where(obs.id == "obs-good")) == 1
+    )
+    kernel = TABLE_REGISTRY["kernel_reports"].model
+    assert await session.scalar(select(func.count()).select_from(kernel)) == 0
+    assert (
+        await session.scalar(
+            select(func.count())
+            .select_from(SyncBatch)
+            .where(SyncBatch.batch_id == batch["batch_id"])
+        )
+        == 1
+    )
+    # The class name only, never the message.
+    assert spy.errors == [
+        (
+            "sync_record_unexpected_error",
+            {"table": "kernel_reports", "record_id": "kr-bad", "error_class": "RuntimeError"},
+        )
+    ]
+
+
+async def test_a_database_level_failure_still_fails_the_whole_batch(
+    app: FastAPI,
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A dead connection or deadlock may have left the session unusable, so it is NOT contained to
+    one record: the device must retry the whole batch."""
+    await _seed_parents(client, auth_headers, "kernel_reports")
+
+    async def database_down(*args: Any, **kwargs: Any) -> Any:
+        raise OperationalError("SELECT 1", {}, Exception("server closed the connection"))
+
+    monkeypatch.setattr(sync_service, "_apply_generic", database_down)
+    batch = batch_body([observation_record("obs-lost", client_updated_at=iso(T0))])
+
+    async with _device_client(app) as device:
+        response = await device.post("/api/v1/sync/push", json=batch, headers=auth_headers)
+
+    assert response.status_code == 503  # SYS_DATABASE_UNAVAILABLE: the whole batch, not one record
+    obs = TABLE_REGISTRY["observations"].model
+    assert await session.scalar(select(func.count()).select_from(obs)) == 0
+    assert (
+        await session.scalar(
+            select(func.count())
+            .select_from(SyncBatch)
+            .where(SyncBatch.batch_id == batch["batch_id"])
+        )
+        == 0
+    )

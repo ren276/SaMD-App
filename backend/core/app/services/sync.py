@@ -29,13 +29,14 @@ from typing import Any
 
 from sqlalchemy import Date, DateTime, select
 from sqlalchemy import inspect as sa_inspect
-from sqlalchemy.exc import DataError, IntegrityError
+from sqlalchemy.exc import DataError, IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import utcnow
 from app.deps import CurrentWorker
 from app.domain.audit_actions_device import DEVICE_AUDIT_ACTIONS
 from app.errors import ErrorCode, SamdError
+from app.logging import get_logger
 from app.models.abha import AbhaProfile
 from app.models.attachment import Attachment
 from app.models.clinical import Ailment, CaseRecord, Observation
@@ -57,6 +58,8 @@ from app.schemas.common import envelope
 from app.schemas.sync import MAX_RECORDS, SyncPushEnvelope
 from app.services import audit as audit_service
 from app.services.patient import apply_blind_indexes
+
+logger = get_logger(__name__)
 
 # Columns SyncMixin adds that a client may never set directly; always excluded from every table's
 # client-writable set regardless of what else a table's TableSpec declares.
@@ -688,6 +691,35 @@ async def _apply_one(
             _constraint_message(exc),
             _constraint_retry_class(exc),
         )
+    except SQLAlchemyError:
+        # A database-level failure other than a constraint (a dead connection, a deadlock, a
+        # server shutting down) means the session itself may be unusable. It fails the WHOLE batch
+        # so the device retries the whole batch, rather than marking one record against a broken
+        # session.
+        raise
+    except Exception as exc:
+        # An application bug while applying ONE record. Its savepoint has already rolled back, so
+        # the rest of the batch is untouched, and the batch must not be 500ed for it: before this,
+        # one such record returned 500 for the whole batch, rolled back every other record and the
+        # idempotency row, and the device resent the same batch for ever.
+        # RETRYABLE, not TERMINAL: a server defect that a deploy can fix must not condemn
+        # recoverable clinical data. The device retries the record up to MAX_SYNC_ATTEMPTS, then
+        # shows it as failed with "Send again". Only the exception CLASS is logged: a message can
+        # echo patient content.
+        logger.error(
+            "sync_record_unexpected_error",
+            table=table,
+            record_id=safe_id,
+            error_class=type(exc).__name__,
+        )
+        return _reject(
+            table,
+            safe_id,
+            ErrorCode.SYS_INTERNAL,
+            "server error applying this record.",
+            SyncRetryClass.RETRYABLE,
+        )
+
     return result
 
 
