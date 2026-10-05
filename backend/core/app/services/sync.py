@@ -255,8 +255,9 @@ def _resolve_write(
     """Decide what an incoming write to an EXISTING row does: "stale", "conflict" or "apply".
 
     Compares the incoming client_updated_at with the STORED client_updated_at and uses
-    base_version and server_version. No other column takes part. The numbering is
-    api-contract.md section 6.1's, in the order the rules are evaluated:
+    base_version and server_version. Rule 2 also compares content (same_content), and only for an
+    equal timestamp; no other column takes part. The numbering is api-contract.md section 6.1's,
+    in the order the rules are evaluated:
 
     1. No existing row: inserted, with its client_updated_at stored. That case never reaches this
        function: the caller inserts, so the first rule evaluated here is rule 2.
