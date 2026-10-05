@@ -114,6 +114,7 @@ def _build_check(
         rederive_status=status.value,
         rule_version_used=DERIVATION_RULE_VERSION,
         device_rule_version=report.derivation_rule_version,
+        report_server_version=report.server_version,
         mismatch_fields=mismatched,
     )
 

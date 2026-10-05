@@ -12,9 +12,11 @@ from typing import Any
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.enums import CaseStatus
+from app.models.kernel import KernelReport
 from app.models.sync import KernelDerivationCheck
 from tests.test_encounters import ENCOUNTER_ID, seed_case_record, seed_patient_and_encounter
 from tests.test_kernel_identity_schema import _assessment, _check, _report
@@ -152,6 +154,30 @@ async def test_the_latest_check_wins_by_created_at(
 
     assert report["derivation_check"]["status"] == "MATCH"
     assert report["derivation_ok"] is True
+
+
+async def test_a_match_for_an_older_revision_of_the_report_is_not_ok(
+    parents: AsyncSession, client: AsyncClient, doctor_headers: dict[str, str]
+) -> None:
+    """The report was updated to server_version 2 but its check failed to record, so the only
+    check is the MATCH for revision 1. It must not vouch for revision 2."""
+    await _seed(
+        parents,
+        "HAN-07/08-v2",
+        _check(
+            kernel_assessment_id="ka-1",
+            rederive_status="MATCH",
+            report_server_version=1,
+            created_at=T0,
+        ),
+    )
+    await parents.execute(update(KernelReport).values(server_version=2))
+    await parents.commit()
+
+    report = await _kernel_report(client, doctor_headers)
+
+    assert report["derivation_check"]["status"] == "MATCH"
+    assert report["derivation_ok"] is False
 
 
 async def test_checks_with_the_same_created_at_break_the_tie_on_id(

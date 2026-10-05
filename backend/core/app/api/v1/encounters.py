@@ -199,9 +199,11 @@ def _serialise_kernel_report(
 ) -> dict[str, Any]:
     """The kernel report plus how far its derivation can be trusted.
 
-    derivation_ok fails closed: true only for a CURRENT rule version with a recorded MATCH. A
-    missing check, a superseded or unknown version and every NOT_CHECKED or NOT_APPLICABLE
-    outcome are false, so a client that does not understand a value reads "attention needed".
+    derivation_ok fails closed: true only for a CURRENT rule version with a MATCH recorded for
+    this revision of the report (check.report_server_version == report.server_version), so a later
+    write whose check failed to record is never vouched for by an older MATCH. A missing check, a
+    superseded or unknown version and every NOT_CHECKED or NOT_APPLICABLE outcome are false, so a
+    client that does not understand a value reads "attention needed".
     """
     status = derivation_rule_status(report.derivation_rule_version)
     out = _row_to_dict(report, _KERNEL_FIELDS)
@@ -221,6 +223,7 @@ def _serialise_kernel_report(
         status == "CURRENT"
         and check is not None
         and check.rederive_status == RederiveStatus.MATCH.value
+        and check.report_server_version == report.server_version
     )
     return out
 

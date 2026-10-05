@@ -112,6 +112,7 @@ def upgrade() -> None:
         sa.Column("rederive_status", sa.String(length=30), nullable=False),
         sa.Column("rule_version_used", sa.String(length=40), nullable=False),
         sa.Column("device_rule_version", sa.String(length=40), nullable=True),
+        sa.Column("report_server_version", sa.Integer(), nullable=False),
         sa.Column(
             "mismatch_fields",
             sa.ARRAY(sa.Text()),

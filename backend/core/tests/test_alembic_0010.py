@@ -111,6 +111,7 @@ async def test_upgrade_adds_every_column_check_index_table_and_trigger(
         "rederive_status",
         "rule_version_used",
         "device_rule_version",
+        "report_server_version",
         "mismatch_fields",
         "created_at",
     } == set(checks)

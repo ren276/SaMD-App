@@ -328,6 +328,9 @@ class KernelDerivationCheck(Base):
     # Snapshot of the report's derivation_rule_version at check time. The report is device-owned
     # and can be re-synced, so the snapshot keeps each check interpretable on its own.
     device_rule_version: Mapped[str | None] = mapped_column(String(40))
+    # The report's server_version when the check ran: ties the verdict to one revision of the
+    # report, so a later write whose own check failed to record cannot inherit this MATCH.
+    report_server_version: Mapped[int] = mapped_column(Integer, nullable=False)
     mismatch_fields: Mapped[list[str]] = mapped_column(
         ARRAY(Text), nullable=False, server_default=text("'{}'::text[]")
     )

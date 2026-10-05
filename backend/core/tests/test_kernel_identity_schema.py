@@ -68,6 +68,7 @@ def _check(**overrides: Any) -> KernelDerivationCheck:
         "facility_id": TEST_FACILITY_ID,
         "rederive_status": "NOT_CHECKED_NO_LINK",
         "rule_version_used": "HAN-07/08-v2",
+        "report_server_version": 1,
     }
     values.update(overrides)
     return KernelDerivationCheck(**values)

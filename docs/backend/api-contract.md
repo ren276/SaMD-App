@@ -704,8 +704,10 @@ address are not in a list response.
 >   only, never values. `checked_at` is a UTC timestamp with milliseconds and a `Z`, like every
 >   other timestamp in this contract.
 > - `derivation_ok` (boolean, never null), fail closed: `true` only when `derivation_rule_status`
->   is `CURRENT`, a check exists and its `status` is `MATCH`. Every other combination is `false`,
->   including `UNKNOWN`, a missing check, `NOT_APPLICABLE` and every `NOT_CHECKED_*` status. A
+>   is `CURRENT`, a check exists, its `status` is `MATCH` and it was made against the report's
+>   current `server_version`. Every other combination is `false`, including `UNKNOWN`, a missing
+>   check, a `MATCH` for an earlier revision of the report (a later write whose check did not
+>   record), `NOT_APPLICABLE` and every `NOT_CHECKED_*` status. A
 >   client that wants one signal reads this field.
 
 **Error Responses:**
@@ -906,7 +908,8 @@ Retention for `kernel_assessments` follows `kernel_call_log`: 24 months, decisio
 > - **What it holds.** `kernel_report_id`, `facility_id`, `request_id` (exactly as stored on the
 >   report), `kernel_assessment_id` (the same-facility, same-case `ASSESS` row with that
 >   `request_id`, or null), `rederive_status`, `rule_version_used` (the backend's rule version when
->   the check ran), `device_rule_version` (the report's value at check time), `mismatch_fields`
+>   the check ran), `device_rule_version` (the report's value at check time), `report_server_version` (the report's
+>   `server_version` the check was made against), `mismatch_fields`
 >   and `created_at`.
 > - **`rederive_status`.** `MATCH` and `MISMATCH` compare `derive_assess(raw_response)` with the
 >   report's `urgency_level`, `risk_category` and `required_human_verification`. `NOT_APPLICABLE`

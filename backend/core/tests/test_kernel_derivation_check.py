@@ -148,6 +148,7 @@ async def test_a_report_that_agrees_with_the_stored_model_output_is_a_match(
     assert check.facility_id == TEST_FACILITY_ID
     assert check.rule_version_used == DERIVATION_RULE_VERSION
     assert check.device_rule_version == DERIVATION_RULE_VERSION
+    assert check.report_server_version == 1
 
 
 async def test_a_disagreeing_report_is_a_mismatch_naming_fields_only_and_is_not_replaced(
