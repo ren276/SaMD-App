@@ -66,4 +66,12 @@ data class KernelAssessmentResult(
     val differentials: List<String>,
     val recommendedInvestigations: List<String>,
     val modelVersion: String?,
+    /** `model_metadata.calibrated`, or null when the response did not carry it. */
+    val modelCalibrated: Boolean? = null,
+    /** The response's `X-Request-ID`, lowercased, when it is a UUID4; otherwise null. It is the
+     *  link from this report to the backend's stored model output. */
+    val requestId: String? = null,
+    /** True when the response carried no usable `X-Request-ID` (absent or not a UUID4), so
+     *  [requestId] is null for a reason worth an audit breadcrumb rather than by design. */
+    val requestIdUnrecognised: Boolean = false,
 )
