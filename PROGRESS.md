@@ -5267,10 +5267,18 @@ dev flavor, backend at 47b04e2).** Three items, recorded as observed. No fix is 
    (`/health` 200) and the phone was online, so the label misreports the cause. Same class as
    the post-merge review of #62, finding F6B-02 (assessment failure mislabelled as 'ML server
    unavailable').
-3. **Open question for the sync-failure-visibility design memo (INFERRED, not verified):** is the
-   assess job ordered after the encounter's sync push, or can it race the push and hit the same 404
-   with no duplicate involved? In the observed run the 404 followed a rejected patient, so the race
-   case was not exercised. A second run with a unique patient completed `/assess` with 200 and
-   produced a `REAL_INFERENCE` report with a `MATCH` derivation check.
-   A candidate fix exists on unmerged branches fix/sync-before-assess (76a4ac2) and
-   fix/sync-before-assess-wip-parked; not reviewed; may predate #69/#71.
+3. **MEASURED: `AssessmentRunner` awaits `syncNow()` before `/assess` and proceeds whatever it
+   returns** (`AssessmentRunner.kt:82` awaits, the `onFailure` block only logs, the kernel call is
+   at `:88`; the comment at `:73-78` records the same chain). So the 404 `SAMD-ENC-4002` chain
+   occurs on every failed pre-assess sync; no race is required. In the observed run `/sync/push`
+   returned 200 and rejected only the patient record; whether `runNowAndAwait()` reports a
+   per-record terminal reject as a failure was not read, and does not change the outcome, because
+   the runner proceeds either way. A second run with a unique patient completed `/assess` with 200
+   and produced a `REAL_INFERENCE` report with a `MATCH` derivation check. Unmerged branches
+   fix/sync-before-assess (76a4ac2) and fix/sync-before-assess-wip-parked are candidate fixes; not
+   reviewed; may predate #69/#71.
+
+**Filed item, scratchpad references in tracked docs:** tracked docs contain 164 references to
+`scratchpad/` paths, some to untracked files (dangling in any other checkout). Design memos
+(truthfulness memo, PR 4 addendum, sync fix memo) are design records and should be committed under
+a tracked path; other references should be inlined. Sweep pending.
