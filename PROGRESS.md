@@ -5155,3 +5155,28 @@ the same way). What remains is invisible-on-the-device conflict, which is item 1
 becomes 0010 (file, `revision`, `down_revision`, `test_alembic_0009.py`, text references),
 `_EXPECTED_REJECT_SITES` becomes 19, the parked stash's PROGRESS text says 0010, and the two
 Alembic test harnesses are unified into one.
+
+## PR 4 working notes: model identity consumers - 2026-10-05
+
+Branch `feat/pr4-model-identity-consumers`, rebased onto master `6ea86e0` after #69. Commits 1 to 6
+are made (shared rule version, fixtures at classifier `5e1ca00`, Alembic 0010 and models, sync
+ingest, proxy lift, derivation cross-check). A check row is written only when the
+`kernel_reports` write is APPLIED under #69's comparator: a stale replay or a conflict writes none,
+and a re-sync on a matching `base_version` appends a second row. Commit 7 (the DOCTOR view) is next.
+
+**Known hazard: the backend suite shares one `samd_test` database across branches.** The fixture
+builds the schema with `create_all` and tears it down with `drop_all`, so a table that exists on
+one branch and not on another breaks the other branch's run. After running this branch, the
+`kernel_derivation_checks` table is left in `samd_test`; `drop_all` on master (whose metadata does
+not know it) then fails with `cannot drop table kernel_assessments because other objects depend on
+it`. Before running a pre-0010 branch against the same database, drop that table (test database
+only). Two backend runs at the same time collide the same way, as a `DeadlockDetectedError`; run
+one at a time.
+
+**Release constraint (production and pilot): Room v22 is roll-forward only.** This binds the
+pilot release, not day-to-day development, where a database is disposable. `DatabaseModule.kt`
+configures `openHelperFactory` and `addMigrations` and nothing else: there is no
+`fallbackToDestructive*` and no `allowDowngrade`. An older APK opening a v22 database throws
+`IllegalStateException`, and v22 has no downgrade fallback, so a field rollback means wiping the
+app's data and losing every record not yet synced. A bad v22 release is fixed by shipping v23,
+not by reinstalling an earlier build. The backend (Alembic 0010) deploys first.

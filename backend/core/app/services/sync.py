@@ -63,6 +63,7 @@ from app.models.sync import SyncBatch, SyncLogEntry
 from app.schemas.common import envelope
 from app.schemas.sync import MAX_RECORDS, SyncPushEnvelope
 from app.services import audit as audit_service
+from app.services import kernel_derivation_check
 from app.services.patient import apply_blind_indexes
 
 logger = get_logger(__name__)
@@ -738,6 +739,10 @@ async def _apply_one(
                     base_version=base_version,
                     client_updated_at=client_updated_at,
                 )
+                if table == "kernel_reports" and result["status"] == "applied":
+                    report = await session.get(KernelReport, record_id)
+                    if report is not None:
+                        await kernel_derivation_check.record_check(session, worker, report)
     except (IntegrityError, DataError) as exc:
         # The only site that is not uniformly TERMINAL. See _SQLSTATE_RETRY_CLASSES.
         return _reject(
