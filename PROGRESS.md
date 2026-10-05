@@ -5265,9 +5265,12 @@ dev flavor, backend at 47b04e2).** Three items, recorded as observed. No fix is 
    `/api/v1/evaluate`. The device then fell back (the mock in dev; UNAVAILABLE in staging and
    prod) and showed "Offline fallback (mock) - ML server unavailable". The classifier was healthy
    (`/health` 200) and the phone was online, so the label misreports the cause. Same class as
-   F6B-02 (a failure reported as a different cause); see scratchpad/pr62-postmerge-review.md.
+   the post-merge review of #62, finding F6B-02 (assessment failure mislabelled as 'ML server
+   unavailable').
 3. **Open question for the sync-failure-visibility design memo (INFERRED, not verified):** is the
    assess job ordered after the encounter's sync push, or can it race the push and hit the same 404
    with no duplicate involved? In the observed run the 404 followed a rejected patient, so the race
    case was not exercised. A second run with a unique patient completed `/assess` with 200 and
    produced a `REAL_INFERENCE` report with a `MATCH` derivation check.
+   A candidate fix exists on unmerged branches fix/sync-before-assess (76a4ac2) and
+   fix/sync-before-assess-wip-parked; not reviewed; may predate #69/#71.
