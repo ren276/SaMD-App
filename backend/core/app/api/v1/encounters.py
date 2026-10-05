@@ -8,8 +8,11 @@ from typing import Any
 from fastapi import APIRouter, Depends, Request, Response, status
 
 from app.deps import ActiveWorkerDep, CurrentWorker, SessionDep, require_roles
+from app.domain.kernel_derivation import derivation_rule_status
 from app.middleware.request_id import current_request_id, current_timestamp
-from app.models.enums import AuditAction, AuditOrigin, UserRole
+from app.models.enums import AuditAction, AuditOrigin, RederiveStatus, UserRole
+from app.models.kernel import KernelReport
+from app.models.sync import KernelDerivationCheck
 from app.schemas.common import envelope
 from app.schemas.encounter import (
     CaseStatusResult,
@@ -191,6 +194,37 @@ _MEDICATION_LINE_FIELDS = (
 )
 
 
+def _serialise_kernel_report(
+    report: KernelReport, check: KernelDerivationCheck | None
+) -> dict[str, Any]:
+    """The kernel report plus how far its derivation can be trusted.
+
+    derivation_ok fails closed: true only for a CURRENT rule version with a recorded MATCH. A
+    missing check, a superseded or unknown version and every NOT_CHECKED or NOT_APPLICABLE
+    outcome are false, so a client that does not understand a value reads "attention needed".
+    """
+    status = derivation_rule_status(report.derivation_rule_version)
+    out = _row_to_dict(report, _KERNEL_FIELDS)
+    out["derivation_rule_version"] = report.derivation_rule_version
+    out["derivation_rule_status"] = status
+    out["derivation_check"] = (
+        {
+            "status": check.rederive_status,
+            "rule_version_used": check.rule_version_used,
+            "mismatch_fields": list(check.mismatch_fields),
+            "checked_at": check.created_at,
+        }
+        if check is not None
+        else None
+    )
+    out["derivation_ok"] = (
+        status == "CURRENT"
+        and check is not None
+        and check.rederive_status == RederiveStatus.MATCH.value
+    )
+    return out
+
+
 def _serialise_bundle(bundle: EncounterBundle) -> dict[str, Any]:
     """Absent children are null or [], never an omitted key.
 
@@ -222,7 +256,7 @@ def _serialise_bundle(bundle: EncounterBundle) -> dict[str, Any]:
             else None
         ),
         "kernel_report": (
-            _row_to_dict(bundle.kernel_report, _KERNEL_FIELDS)
+            _serialise_kernel_report(bundle.kernel_report, bundle.derivation_check)
             if bundle.kernel_report is not None
             else None
         ),

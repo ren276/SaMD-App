@@ -19,6 +19,7 @@ from app.models.enums import CaseStatus
 from app.models.kernel import DiagnosisFeedback, EvaluateReport, KernelReport
 from app.models.patient import Patient
 from app.models.prescription import MedicationLine, Prescription
+from app.models.sync import KernelDerivationCheck
 from app.schemas.encounter import CaseStatusUpdate, EncounterCreate
 
 # api-contract.md section 4.3. The server, not the client, decides what may follow what.
@@ -53,6 +54,8 @@ class EncounterBundle:
     ailments: list[Ailment]
     case_record: CaseRecord | None
     kernel_report: KernelReport | None
+    # The latest derivation cross-check of kernel_report, or None when none was ever recorded.
+    derivation_check: KernelDerivationCheck | None
     evaluate_report: EvaluateReport | None
     diagnosis_feedback: DiagnosisFeedback | None
     prescription: Prescription | None
@@ -205,13 +208,25 @@ async def get_encounter_bundle(
 
     case_record = await _current_row(session, CaseRecord, CaseRecord.encounter_id, encounter_id)
 
-    kernel_report = evaluate_report = diagnosis_feedback = prescription = None
+    kernel_report = derivation_check = evaluate_report = diagnosis_feedback = prescription = None
     medication_lines: list[MedicationLine] = []
 
     if case_record is not None:
         kernel_report = await _current_row(
             session, KernelReport, KernelReport.case_record_id, case_record.id
         )
+        if kernel_report is not None:
+            # Latest by created_at, then id: two checks can share a timestamp inside one batch.
+            derivation_check = (
+                await session.execute(
+                    select(KernelDerivationCheck)
+                    .where(KernelDerivationCheck.kernel_report_id == kernel_report.id)
+                    .order_by(
+                        KernelDerivationCheck.created_at.desc(), KernelDerivationCheck.id.desc()
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
         evaluate_report = await _current_row(
             session, EvaluateReport, EvaluateReport.case_record_id, case_record.id
         )
@@ -240,6 +255,7 @@ async def get_encounter_bundle(
         ailments=ailments,
         case_record=case_record,
         kernel_report=kernel_report,
+        derivation_check=derivation_check,
         evaluate_report=evaluate_report,
         diagnosis_feedback=diagnosis_feedback,
         prescription=prescription,

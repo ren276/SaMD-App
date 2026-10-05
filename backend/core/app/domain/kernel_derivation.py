@@ -72,6 +72,23 @@ logger = logging.getLogger(__name__)
 # unrecognised result. v1 stored a red-flag EMERGENCY_REFERRAL result as LOW risk with no
 # verification, because it recognised only urgency tokens the classifier never sends.
 DERIVATION_RULE_VERSION: Final[str] = "HAN-07/08-v2"
+# Every earlier version. A bump moves the old value in here in the same commit, so a stored report
+# can be told apart as SUPERSEDED (known, older rules) rather than UNKNOWN.
+SUPERSEDED_DERIVATION_RULE_VERSIONS: Final[frozenset[str]] = frozenset({"HAN-07/08-v1"})
+
+
+def derivation_rule_status(stored_version: str | None) -> str:
+    """CURRENT, SUPERSEDED or UNKNOWN for the rule version a device stored on a report.
+
+    Never None. NULL (every legacy row and every non-REAL row) and any value in neither set, such
+    as a device ahead of the backend, are UNKNOWN: null is never CURRENT.
+    """
+    if stored_version == DERIVATION_RULE_VERSION:
+        return "CURRENT"
+    if stored_version in SUPERSEDED_DERIVATION_RULE_VERSIONS:
+        return "SUPERSEDED"
+    return "UNKNOWN"
+
 
 # KernelTriageRules.HUMAN_VERIFICATION_CONFIDENCE_THRESHOLD. A risk control, not a knob.
 HUMAN_VERIFICATION_CONFIDENCE_THRESHOLD: Final[float] = 0.90
