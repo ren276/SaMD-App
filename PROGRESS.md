@@ -5238,3 +5238,39 @@ configures `openHelperFactory` and `addMigrations` and nothing else: there is no
 `IllegalStateException`, and v22 has no downgrade fallback, so a field rollback means wiping the
 app's data and losing every record not yet synced. A bad v22 release is fixed by shipping v23,
 not by reinstalling an earlier build. The backend (Alembic 0010) deploys first.
+
+**Sync-failure-visibility scope note (found 2026-10-05, uncommitted):** while offline, the
+assessment screen shows an indefinite spinner. The assessment job waits on
+`NetworkType.CONNECTED` (`WorkManagerAssessmentScheduler.kt:35`) and the UI never says it is
+waiting for a network. No timeout fires and no UNAVAILABLE row is saved, because the request is
+never sent. File under the device sync-failure-visibility PR.
+
+**Filed item, dev-only switch to exercise the honest UNAVAILABLE path live:** a
+`local.properties` flag (e.g. `samd.dev.kernelFallback=none`) makes the dev flavor bind the
+always-null fallback used by staging and prod. Today the UNAVAILABLE card and Retry have zero live
+coverage: dev substitutes the mock, and staging points at a placeholder HTTPS URL. Queue before
+sync-failure-visibility.
+
+**Filed, assessment-failure chain from a duplicate-identifier reject (observed 2026-10-05, emulator,
+dev flavor, backend at 47b04e2).** Three items, recorded as observed. No fix is proposed here.
+
+1. **A duplicate patient identifier strands the record, with no on-device recovery.** Registering a
+   patient whose ABHA number, mobile or Aadhaar already exists on the server is rejected by the
+   server as TERMINAL. The device shows "Another record already uses these details ... This cannot
+   be fixed on this phone", and the worker has no edit or merge path (PatientRepository has no
+   update). Severity raised for patient dedupe and merge: a returning patient who is registered a
+   second time gets no AI assessment, because the encounter never reaches the server (item 2).
+2. **`/assess` returns 404 `SAMD-ENC-4002` when the encounter has not reached the server, and the
+   device mislabels it.** The backend logged `samd_error` 404 on `/api/v1/assess` and on
+   `/api/v1/evaluate`. The device then fell back (the mock in dev; UNAVAILABLE in staging and
+   prod) and showed "Offline fallback (mock) - ML server unavailable". The classifier was healthy
+   (`/health` 200) and the phone was online, so the label misreports the cause. Same class as
+   the post-merge review of #62, finding F6B-02 (assessment failure mislabelled as 'ML server
+   unavailable').
+3. **Open question for the sync-failure-visibility design memo (INFERRED, not verified):** is the
+   assess job ordered after the encounter's sync push, or can it race the push and hit the same 404
+   with no duplicate involved? In the observed run the 404 followed a rejected patient, so the race
+   case was not exercised. A second run with a unique patient completed `/assess` with 200 and
+   produced a `REAL_INFERENCE` report with a `MATCH` derivation check.
+   A candidate fix exists on unmerged branches fix/sync-before-assess (76a4ac2) and
+   fix/sync-before-assess-wip-parked; not reviewed; may predate #69/#71.

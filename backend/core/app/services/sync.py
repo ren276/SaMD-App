@@ -255,26 +255,27 @@ def _resolve_write(
     """Decide what an incoming write to an EXISTING row does: "stale", "conflict" or "apply".
 
     Compares the incoming client_updated_at with the STORED client_updated_at and uses
-    base_version and server_version. No other column takes part. Evaluated in this order:
+    base_version and server_version. No other column takes part. The numbering is
+    api-contract.md section 6.1's, in the order the rules are evaluated:
 
-    1. Stored client_updated_at is set and equals the incoming one: "stale" when the content is
-       also the same. An exact replay of a write already applied (a retried batch, a lost ack
+    1. No existing row: inserted, with its client_updated_at stored. That case never reaches this
+       function: the caller inserts, so the first rule evaluated here is rule 2.
+    2. Exact replay: the stored client_updated_at is set and equals the incoming one, and the
+       content is also the same. "stale": a write already applied (a retried batch, a lost ack
        resent under a new batch_id). Stale means exactly this, which is why SYNCED on the device
        is truthful. It comes BEFORE the base_version check, so a resend whose base_version has
        since moved on is still stale, not a conflict. The SAME timestamp with DIFFERENT content
        (two devices writing a natural-key row in the same millisecond, or two saves of one row in
        the same millisecond) is a "conflict": calling it stale would tell the device its write was
        applied when it was not, and the data would be lost without a signal.
-    2. base_version present and different from server_version: "conflict".
-    3. base_version present and equal to server_version: "apply". A matching base_version proves
+    3. base_version present and different from server_version: "conflict".
+    4. base_version present and equal to server_version: "apply". A matching base_version proves
        the write was made on top of the latest server state, so no wall-clock comparison runs and a
        device clock that runs behind cannot lose a write.
-    4. base_version absent: last-write-wins on client_updated_at. A stored NULL (a row from before
+    5. base_version absent: last-write-wins on client_updated_at. A stored NULL (a row from before
        alembic 0009) or a later incoming value applies. An EARLIER incoming value is "conflict",
        not stale: the write is genuinely older than what the server holds, the device must not be
        told it is synced, and the server keeps the newer data.
-
-    A new row (no existing row) never reaches here: it is inserted and stores its own timestamp.
     """
     if stored_ts is not None and incoming_ts == stored_ts:
         return "stale" if same_content else "conflict"
