@@ -609,3 +609,55 @@ val MIGRATION_20_21 = object : Migration(20, 21) {
         addRetryColumns("consultation_documents")
     }
 }
+
+/**
+ * Room 21 to 22: model identity on `kernel_reports` (PR 4, R2 and R3).
+ *
+ * `modelVersion` goes from NOT NULL to nullable, and `requestId`, `modelCalibrated` and
+ * `derivationRuleVersion` are added, all nullable. SQLite cannot relax NOT NULL in place, so the
+ * table is rebuilt from the DDL Room exported to `22.json` (copied with the table name
+ * substituted, so `runMigrationsAndValidate` has no hand-typed drift to reject).
+ *
+ * Nothing references `kernel_reports` and it references nothing, so there is no foreign-key
+ * handling. The copy is column-for-column over the 28 v21 columns, so no value is rewritten: the
+ * old `"remote-kernel"` and `"unavailable"` sentinels stay as they are on rows already written,
+ * and the three new columns are NULL on them. Only rows written from now on carry a NULL
+ * `modelVersion`.
+ */
+val MIGRATION_21_22 = object : Migration(21, 22) {
+    override fun migrate(connection: SQLiteConnection) {
+        val v21Columns = listOf(
+            "id", "caseRecordId", "predictedCondition", "confidenceScore", "differentials",
+            "reasoningSummary", "evidenceFor", "evidenceAgainst", "modelVersion", "icdCode",
+            "deviceId", "softwareVersion", "dataQualityScore", "uncertaintyScore", "riskCategory",
+            "urgencyLevel", "inferenceStartedAt", "inferenceEndedAt", "requiredHumanVerification",
+            "inferenceSource", "failureCode", "syncState", "serverVersion", "syncErrorCode",
+            "syncErrorMessage", "syncAttemptCount", "lastSyncAttemptAt", "localModifiedAt",
+        ).joinToString(", ") { "`$it`" }
+
+        connection.execSQL(
+            "CREATE TABLE IF NOT EXISTS `kernel_reports_new` (`id` TEXT NOT NULL, " +
+                "`caseRecordId` TEXT NOT NULL, `predictedCondition` TEXT NOT NULL, " +
+                "`confidenceScore` REAL NOT NULL, `differentials` TEXT NOT NULL, " +
+                "`reasoningSummary` TEXT NOT NULL, `evidenceFor` TEXT NOT NULL, " +
+                "`evidenceAgainst` TEXT NOT NULL, `modelVersion` TEXT, `icdCode` TEXT, " +
+                "`deviceId` TEXT NOT NULL, `softwareVersion` TEXT NOT NULL, " +
+                "`dataQualityScore` REAL, `uncertaintyScore` REAL, `riskCategory` TEXT NOT NULL, " +
+                "`urgencyLevel` TEXT NOT NULL, `inferenceStartedAt` INTEGER NOT NULL, " +
+                "`inferenceEndedAt` INTEGER NOT NULL, `requiredHumanVerification` INTEGER NOT NULL, " +
+                "`inferenceSource` TEXT NOT NULL, `failureCode` TEXT, `syncState` TEXT NOT NULL, " +
+                "`serverVersion` INTEGER, `syncErrorCode` TEXT, `syncErrorMessage` TEXT, " +
+                "`syncAttemptCount` INTEGER NOT NULL, `lastSyncAttemptAt` INTEGER, " +
+                "`localModifiedAt` INTEGER NOT NULL, `requestId` TEXT, `modelCalibrated` INTEGER, " +
+                "`derivationRuleVersion` TEXT, PRIMARY KEY(`id`))",
+        )
+        connection.execSQL(
+            "INSERT INTO `kernel_reports_new` ($v21Columns) SELECT $v21Columns FROM `kernel_reports`",
+        )
+        connection.execSQL("DROP TABLE `kernel_reports`")
+        connection.execSQL("ALTER TABLE `kernel_reports_new` RENAME TO `kernel_reports`")
+        connection.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS `index_kernel_reports_caseRecordId` ON `kernel_reports` (`caseRecordId`)",
+        )
+    }
+}

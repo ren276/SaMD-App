@@ -22,6 +22,14 @@ object KernelTriageRules {
      *  and its probability of 1.0 is a literal, so it must be recognised by name, never by score. */
     const val CRITICAL_VITALS_FLAG = "critical_vitals_flag"
 
+    /** Identifies the rule set below. Stored on every kernel report this device derives, so a reader
+     *  can tell which rules produced a stored urgency, risk and verification flag. Bump it with any
+     *  change to a token map, a threshold or the fail-closed defaults, in the same commit as the
+     *  backend's `DERIVATION_RULE_VERSION` (`kernel_derivation.py`). Neither side hand-keeps parity:
+     *  both suites assert their constant equals `derivation_rule_version` in the shared
+     *  `classifier-fixtures/expectations.json`. */
+    const val DERIVATION_RULE_VERSION = "HAN-07/08-v2"
+
     const val HUMAN_VERIFICATION_CONFIDENCE_THRESHOLD = 0.90
 
     private val URGENCY_BY_TOKEN = mapOf(

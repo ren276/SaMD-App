@@ -10,7 +10,9 @@ import com.example.samdapp.domain.kernel.RemoteKernelSource
 import com.example.samdapp.domain.model.KernelPayload
 import com.google.gson.Gson
 import kotlinx.coroutines.CancellationException
+import okhttp3.Headers
 import java.io.IOException
+import java.util.Locale
 import javax.inject.Inject
 
 /**
@@ -39,6 +41,14 @@ class RetrofitKernelSource @Inject constructor(
 ) : RemoteKernelSource {
 
     private val gson = Gson()
+
+    /** The response's `X-Request-ID` as the stored, lowercased UUID4, and whether it was usable.
+     *  Matched case-insensitively and stored lowercased; anything else, or no header, is
+     *  `null to true`. The raw value is never kept, so a malformed header cannot reach storage. */
+    private fun readRequestId(headers: Headers): Pair<String?, Boolean> {
+        val canonical = headers[REQUEST_ID_HEADER]?.lowercase(Locale.ROOT)
+        return if (canonical != null && REQUEST_ID_REGEX.matches(canonical)) canonical to false else null to true
+    }
 
     override suspend fun assess(
         payload: KernelPayload,
@@ -91,6 +101,8 @@ class RetrofitKernelSource @Inject constructor(
             )
         }
 
+        val (requestId, requestIdUnrecognised) = readRequestId(response.headers())
+
         if (!response.isSuccessful) {
             // The house block, third instance. Identical to RetrofitAuthService.call and
             // RetrofitAbhaSource.call: read the error body once, try to read it as a problem
@@ -103,6 +115,8 @@ class RetrofitKernelSource @Inject constructor(
                 code = problem?.code,
                 httpStatus = response.code(),
                 message = problem?.detail ?: "Request failed (HTTP ${response.code()}).",
+                requestId = requestId,
+                requestIdUnrecognised = requestIdUnrecognised,
             )
         }
 
@@ -139,7 +153,17 @@ class RetrofitKernelSource @Inject constructor(
                 differentials = differentials.drop(1).map { it.conditionTier },
                 recommendedInvestigations = assessment.recommendedInvestigations,
                 modelVersion = assessment.modelMetadata?.modelVersion,
+                modelCalibrated = assessment.modelMetadata?.calibrated,
+                requestId = requestId,
+                requestIdUnrecognised = requestIdUnrecognised,
             ),
         )
+    }
+
+    private companion object {
+        const val REQUEST_ID_HEADER = "X-Request-ID"
+
+        /** UUID4, lowercase: the same closed format the backend enforces on `request_id`. */
+        val REQUEST_ID_REGEX = Regex("^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
     }
 }

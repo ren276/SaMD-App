@@ -187,7 +187,7 @@ data class KernelReportSyncPayloadDto(
     @SerializedName("reasoning_summary") val reasoningSummary: String,
     @SerializedName("evidence_for") val evidenceFor: List<String>,
     @SerializedName("evidence_against") val evidenceAgainst: List<String>,
-    @SerializedName("model_version") val modelVersion: String,
+    @SerializedName("model_version") val modelVersion: String?,
     @SerializedName("icd_code") val icdCode: String?,
     @SerializedName("device_id") val deviceId: String,
     @SerializedName("software_version") val softwareVersion: String,
@@ -199,6 +199,9 @@ data class KernelReportSyncPayloadDto(
     @SerializedName("inference_ended_at") val inferenceEndedAt: Instant,
     @SerializedName("required_human_verification") val requiredHumanVerification: Boolean,
     @SerializedName("inference_source") val inferenceSource: String,
+    @SerializedName("model_calibrated") val modelCalibrated: Boolean? = null,
+    @SerializedName("request_id") val requestId: String? = null,
+    @SerializedName("derivation_rule_version") val derivationRuleVersion: String? = null,
 ) : SyncPayload
 
 /** [payloadJson] travels as a JSON *string* (matches the Kotlin entity's own `String` column):

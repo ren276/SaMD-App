@@ -6,8 +6,10 @@ must not depend on the real XGBoost server being reachable.
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -460,6 +462,146 @@ async def test_a_kernel_response_with_a_wrong_typed_field_stores_null_not_a_defa
     assert rows[0].inference_time_ms is None
     # The unparseable values are still there in the raw body, exactly as sent.
     assert rows[0].raw_response["safety_screen_passed"] == "yes"
+
+
+# The recaptured classifier response (classifier 5e1ca00): the real shape, not a hand-written body.
+_REAL_FIXTURE = json.loads(
+    (
+        Path(__file__).parent / "fixtures" / "classifier" / "assess_normal_model_branch.json"
+    ).read_text()
+)["response"]
+
+
+def _with_metadata(**metadata: Any) -> dict[str, Any]:
+    body = json.loads(json.dumps(_REAL_FIXTURE))
+    body["case_token"] = ASSESS_KERNEL_RESPONSE["case_token"]
+    body["model_metadata"] = metadata
+    return body
+
+
+@pytest.mark.usefixtures("kernel_overrides")
+async def test_assess_lifts_model_sha256_and_calibrated_from_the_real_classifier_response(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    session: AsyncSession,
+    scripted_kernel: ScriptedKernel,
+) -> None:
+    await _seed(client, auth_headers, session)
+    real = _REAL_FIXTURE["model_metadata"]
+    scripted_kernel.push_response(200, {**ASSESS_KERNEL_RESPONSE, "model_metadata": dict(real)})
+
+    assert (
+        await client.post("/api/v1/assess", json=ASSESS_BODY, headers=auth_headers)
+    ).status_code == 200
+
+    (assessment,) = await _assessment_rows(session)
+    (log,) = await _kernel_call_log_rows(session)
+    assert assessment.model_version == real["model_version"]
+    assert assessment.model_sha256 == real["model_sha256"]
+    assert assessment.model_calibrated is False
+    assert log.model_sha256 == real["model_sha256"]
+    assert log.model_version == real["model_version"]
+
+
+@pytest.mark.usefixtures("kernel_overrides")
+@pytest.mark.parametrize(
+    ("calibrated", "expected"),
+    [(True, True), (False, False), ("yes", None), (1, None), (None, None)],
+)
+async def test_calibrated_is_copied_only_when_it_is_a_boolean(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    session: AsyncSession,
+    scripted_kernel: ScriptedKernel,
+    calibrated: Any,
+    expected: bool | None,
+) -> None:
+    """NULL means the response did not say. It is never defaulted to False."""
+    await _seed(client, auth_headers, session)
+    metadata = {"model_version": "m-1", "calibrated": calibrated}
+    scripted_kernel.push_response(200, {**ASSESS_KERNEL_RESPONSE, "model_metadata": metadata})
+
+    assert (
+        await client.post("/api/v1/assess", json=ASSESS_BODY, headers=auth_headers)
+    ).status_code == 200
+
+    (assessment,) = await _assessment_rows(session)
+    assert assessment.model_calibrated is expected
+
+
+class _LogSpy:
+    def __init__(self) -> None:
+        self.warnings: list[tuple[str, dict[str, Any]]] = []
+
+    def warning(self, event: str, **fields: Any) -> None:
+        self.warnings.append((event, fields))
+
+
+@pytest.mark.usefixtures("kernel_overrides")
+@pytest.mark.parametrize("bad", ["abc", "A" * 64, "g" * 64, "0" * 63, 12345, None])
+async def test_a_malformed_model_sha256_is_stored_as_null_and_the_call_is_still_logged(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    session: AsyncSession,
+    scripted_kernel: ScriptedKernel,
+    monkeypatch: pytest.MonkeyPatch,
+    bad: Any,
+) -> None:
+    """The CHECK constraint would reject the whole out-of-band write for a value that is not a
+    lowercase sha256, and a call that happened would then leave no log row and no assessment row.
+    The proxy stores NULL instead, keeps the raw value in raw_response, and logs a warning that
+    names the field and never the value."""
+    spy = _LogSpy()
+    monkeypatch.setattr(kernel_service, "logger", spy)
+    await _seed(client, auth_headers, session)
+    body = {
+        **ASSESS_KERNEL_RESPONSE,
+        "model_metadata": {"model_version": "m-1", "model_sha256": bad},
+    }
+    scripted_kernel.push_response(200, body)
+
+    assert (
+        await client.post("/api/v1/assess", json=ASSESS_BODY, headers=auth_headers)
+    ).status_code == 200
+
+    (assessment,) = await _assessment_rows(session)
+    (log,) = await _kernel_call_log_rows(session)
+    assert assessment.model_sha256 is None
+    assert log.model_sha256 is None
+    assert assessment.raw_response["model_metadata"]["model_sha256"] == bad
+
+    if bad is None:
+        assert spy.warnings == []  # an absent value is not a malformed one
+    else:
+        assert spy.warnings == [
+            (
+                "kernel model_sha256 malformed, stored as null",
+                {"field": "model_sha256", "request_id": log.request_id},
+            )
+        ]
+        assert str(bad) not in repr(spy.warnings)  # the field name only, never the value
+
+
+@pytest.mark.usefixtures("kernel_overrides")
+async def test_evaluate_lifts_no_identity_columns(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    session: AsyncSession,
+    scripted_kernel: ScriptedKernel,
+) -> None:
+    """/evaluate identity is a separate change (memo PR 5): nothing is lifted for it here."""
+    await _seed(client, auth_headers, session)
+    scripted_kernel.push_response(
+        200, {**EVALUATE_KERNEL_RESPONSE, "model_metadata": {"model_sha256": "a" * 64}}
+    )
+
+    assert (
+        await client.post("/api/v1/evaluate", json=EVALUATE_BODY, headers=auth_headers)
+    ).status_code == 200
+
+    (assessment,) = await _assessment_rows(session)
+    assert assessment.model_sha256 is None
+    assert assessment.model_calibrated is None
 
 
 @pytest.mark.usefixtures("kernel_overrides")

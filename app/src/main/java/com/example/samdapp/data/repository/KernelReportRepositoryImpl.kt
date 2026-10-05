@@ -66,6 +66,9 @@ private fun KernelReportOutput.toEntity(id: String, serverVersion: Int?) = Kerne
     failureCode = failureCode,
     localModifiedAt = Instant.now(),
     serverVersion = serverVersion,
+    requestId = requestId,
+    modelCalibrated = modelCalibrated,
+    derivationRuleVersion = derivationRuleVersion,
 )
 
 private fun KernelReportEntity.toDomain() = KernelReportOutput(
@@ -90,4 +93,7 @@ private fun KernelReportEntity.toDomain() = KernelReportOutput(
     requiredHumanVerification = requiredHumanVerification,
     inferenceSource = inferenceSource,
     failureCode = failureCode,
+    requestId = requestId,
+    modelCalibrated = modelCalibrated,
+    derivationRuleVersion = derivationRuleVersion,
 )

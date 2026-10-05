@@ -32,8 +32,18 @@ sealed interface KernelApiResult<out T> {
     /** `backend/core` was reached and answered non-2xx. [code] is the problem document's `code`,
      *  or null when the body was absent or not a problem document. [message] is kept for logs
      *  only; the screen renders curated copy chosen from [KernelFailure], never the backend's
-     *  `detail`, matching `AbhaEnrolResult`'s rule. */
-    data class Failure(val code: String?, val httpStatus: Int, val message: String) : KernelApiResult<Nothing>
+     *  `detail`, matching `AbhaEnrolResult`'s rule.
+     *
+     *  [requestId] and [requestIdUnrecognised] carry the response's `X-Request-ID` exactly as
+     *  [KernelAssessmentResult] does: an error response is still a response, and the backend may
+     *  hold a stored assessment for it. */
+    data class Failure(
+        val code: String?,
+        val httpStatus: Int,
+        val message: String,
+        val requestId: String? = null,
+        val requestIdUnrecognised: Boolean = false,
+    ) : KernelApiResult<Nothing>
 
     /** `backend/core` was reached, answered 2xx, and the body could not be turned into a
      *  [KernelAssessmentResult]. Named as in [com.example.samdapp.domain.abha.AbhaApiResult] and

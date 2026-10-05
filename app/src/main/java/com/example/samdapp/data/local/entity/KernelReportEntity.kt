@@ -24,7 +24,7 @@ data class KernelReportEntity(
     val reasoningSummary: String,
     val evidenceFor: List<String>,
     val evidenceAgainst: List<String>,
-    val modelVersion: String,
+    val modelVersion: String?,
     val icdCode: String?,
     val deviceId: String,
     val softwareVersion: String,
@@ -71,4 +71,10 @@ data class KernelReportEntity(
      *  "replacing it wholesale on retry" this KDoc used to claim never happened. The unique index
      *  above is the enforcement; `getIdForCase` is the write-side fix. */
     val localModifiedAt: Instant,
+    /** MIGRATION_21_22. See [com.example.samdapp.domain.model.KernelReportOutput.requestId]. */
+    val requestId: String? = null,
+    /** MIGRATION_21_22. `model_metadata.calibrated`; null when not a real inference. */
+    val modelCalibrated: Boolean? = null,
+    /** MIGRATION_21_22. Stamped on REAL_INFERENCE rows only. */
+    val derivationRuleVersion: String? = null,
 )

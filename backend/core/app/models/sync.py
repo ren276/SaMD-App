@@ -15,8 +15,10 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
+    ARRAY,
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Identity,
@@ -31,7 +33,12 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
-from app.models.enums import KernelCallOutcome, KernelEndpoint
+from app.domain.kernel_identity import (
+    MISMATCH_FIELD_NAMES,
+    MODEL_SHA256_PATTERN,
+    REQUEST_ID_PATTERN,
+)
+from app.models.enums import KernelCallOutcome, KernelEndpoint, RederiveStatus
 from app.models.mixins import CLIENT_ID_LENGTH, FACILITY_ID_LENGTH, enum_check
 
 
@@ -124,6 +131,10 @@ class KernelCallLog(Base):
     __table_args__ = (
         enum_check("endpoint", KernelEndpoint, "ck_kernel_call_log_endpoint"),
         enum_check("outcome", KernelCallOutcome, "ck_kernel_call_log_outcome"),
+        CheckConstraint(
+            f"model_sha256 IS NULL OR model_sha256 ~ '{MODEL_SHA256_PATTERN}'",
+            name="model_sha256_format",
+        ),
         Index("ix_kernel_call_log_facility_started", "facility_id", "started_at"),
         Index("ix_kernel_call_log_case_record_id", "case_record_id"),
         Index("ix_kernel_call_log_case_token", "case_token"),
@@ -150,6 +161,9 @@ class KernelCallLog(Base):
     input_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     output_sha256: Mapped[str | None] = mapped_column(String(64))
     model_version: Mapped[str | None] = mapped_column(String(80))
+    # Hash of the model artifact the classifier reports having served (model_metadata.model_sha256).
+    # Copied, not computed: the proxy cannot verify it, only record what was claimed.
+    model_sha256: Mapped[str | None] = mapped_column(String(64))
     http_status: Mapped[int | None] = mapped_column(Integer)
     outcome: Mapped[str] = mapped_column(String(20), nullable=False)
     error_code: Mapped[str | None] = mapped_column(String(20))
@@ -194,6 +208,10 @@ class KernelAssessment(Base):
     __tablename__ = "kernel_assessments"
     __table_args__ = (
         enum_check("endpoint", KernelEndpoint, "ck_kernel_assessments_endpoint"),
+        CheckConstraint(
+            f"model_sha256 IS NULL OR model_sha256 ~ '{MODEL_SHA256_PATTERN}'",
+            name="model_sha256_format",
+        ),
         Index("ix_kernel_assessments_request_id", "request_id"),
         Index("ix_kernel_assessments_case_record_id", "case_record_id"),
         Index("ix_kernel_assessments_facility_id", "facility_id"),
@@ -219,6 +237,9 @@ class KernelAssessment(Base):
     raw_response: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     # Lifted out of model_metadata for queryability. Still raw: copied, not computed.
     model_version: Mapped[str | None] = mapped_column(String(80))
+    model_sha256: Mapped[str | None] = mapped_column(String(64))
+    # NULL when the response did not say. Never defaulted to False.
+    model_calibrated: Mapped[bool | None] = mapped_column(Boolean)
     inference_time_ms: Mapped[int | None] = mapped_column(Integer)
     # /assess only. /evaluate carries neither.
     safety_screen_passed: Mapped[bool | None] = mapped_column(Boolean)
@@ -229,6 +250,90 @@ class KernelAssessment(Base):
     # The same value written to kernel_call_log.output_sha256, so the two rows are provably about
     # the same bytes without re-hashing a jsonb column whose key order Postgres may have changed.
     response_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+_MISMATCH_VOCAB_SQL = ", ".join(f"'{name}'" for name in MISMATCH_FIELD_NAMES)
+
+
+class KernelDerivationCheck(Base):
+    """The result of re-deriving one synced kernel report from the stored model output.
+
+    Server-owned and insert-only. kernel_reports stays device-owned (D-9, D-10): the server never
+    writes a re-derived value into it, so what the worker saw and what the device stored are never
+    silently replaced. A disagreement is recorded HERE, as a flag, beside the unchanged report.
+
+    One row per accepted write of a kernel_reports record, so a re-sync appends a second row and
+    the DOCTOR view reads the latest. A report with nothing to check still gets a row saying why
+    (NOT_CHECKED_NO_LINK, NOT_APPLICABLE): a missing check is never silent.
+
+    mismatch_fields holds field NAMES only, from a closed vocabulary the CHECK constraint enforces.
+    The values are patient-linked clinical classifications and are not copied into this table: the
+    device's value is on the report, and the derived value is reproducible from
+    kernel_assessments.raw_response under rule_version_used.
+
+    Insert-only is enforced by triggers (alembic 0010), the same mechanism as audit_events.
+    Consequence recorded in PROGRESS.md: the RESTRICT foreign keys plus the no-delete trigger make
+    a checked kernel_reports row undeletable, so erasure and retention purges need a designed path.
+    """
+
+    __tablename__ = "kernel_derivation_checks"
+    __table_args__ = (
+        enum_check("rederive_status", RederiveStatus, "rederive_status"),
+        CheckConstraint(
+            f"mismatch_fields <@ ARRAY[{_MISMATCH_VOCAB_SQL}]::text[]",
+            name="mismatch_vocab",
+        ),
+        # A MISMATCH must name a field, and nothing else may.
+        CheckConstraint(
+            "(rederive_status = 'MISMATCH') = (cardinality(mismatch_fields) > 0)",
+            name="mismatch_consistent",
+        ),
+        # A verdict (MATCH or MISMATCH) needs the assessment it was derived from. The reverse does
+        # not hold: NOT_APPLICABLE may record the assessment that exists, as evidence that the proxy
+        # succeeded while the device recorded no result.
+        CheckConstraint(
+            "rederive_status NOT IN ('MATCH', 'MISMATCH') OR kernel_assessment_id IS NOT NULL",
+            name="link_consistent",
+        ),
+        CheckConstraint(
+            f"request_id IS NULL OR request_id ~ '{REQUEST_ID_PATTERN}'",
+            name="request_id_format",
+        ),
+        Index("ix_kernel_derivation_checks_report_created", "kernel_report_id", "created_at", "id"),
+        Index("ix_kernel_derivation_checks_facility_status", "facility_id", "rederive_status"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=False), primary_key=True)
+    kernel_report_id: Mapped[str] = mapped_column(
+        String(CLIENT_ID_LENGTH),
+        ForeignKey("kernel_reports.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    facility_id: Mapped[str] = mapped_column(
+        String(FACILITY_ID_LENGTH), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False
+    )
+    # Exactly as stored on the report. NULL means the report carried none.
+    request_id: Mapped[str | None] = mapped_column(String(36))
+    kernel_assessment_id: Mapped[str | None] = mapped_column(
+        String(CLIENT_ID_LENGTH),
+        ForeignKey("kernel_assessments.id", ondelete="RESTRICT"),
+    )
+    rederive_status: Mapped[str] = mapped_column(String(30), nullable=False)
+    # The backend's DERIVATION_RULE_VERSION when the check ran. Written on every row, so a reader
+    # always knows which rules were in force, including for the NOT_CHECKED and NOT_APPLICABLE rows.
+    rule_version_used: Mapped[str] = mapped_column(String(40), nullable=False)
+    # Snapshot of the report's derivation_rule_version at check time. The report is device-owned
+    # and can be re-synced, so the snapshot keeps each check interpretable on its own.
+    device_rule_version: Mapped[str | None] = mapped_column(String(40))
+    # The report's server_version when the check ran: ties the verdict to one revision of the
+    # report, so a later write whose own check failed to record cannot inherit this MATCH.
+    report_server_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    mismatch_fields: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), nullable=False, server_default=text("'{}'::text[]")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

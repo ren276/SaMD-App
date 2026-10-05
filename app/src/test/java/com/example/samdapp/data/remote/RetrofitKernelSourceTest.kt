@@ -5,27 +5,37 @@ import com.example.samdapp.data.remote.dto.ApiEnvelopeDto
 import com.example.samdapp.data.remote.dto.DifferentialDto
 import com.example.samdapp.data.remote.dto.KernelAssessmentRequestDto
 import com.example.samdapp.data.remote.dto.KernelAssessmentResponseDto
+import com.example.samdapp.data.remote.dto.ModelMetadataDto
 import com.example.samdapp.domain.model.KernelPayload
 import com.example.samdapp.domain.model.VitalsReading
 import com.example.samdapp.domain.kernel.KernelApiResult
+import com.example.samdapp.domain.kernel.KernelAssessmentResult
 import kotlinx.coroutines.test.runTest
+import okhttp3.Headers
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Protocol
+import okhttp3.Request
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import retrofit2.Response
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Test
 
 /** Stub [KernelApiService] returning a fixed response envelope, so [RetrofitKernelSource] can be
  *  exercised directly against a chosen `differential_diagnosis` shape without a real Retrofit
  *  client. */
-private class FixedKernelApiService(private val response: KernelAssessmentResponseDto) : KernelApiService {
+private class FixedKernelApiService(
+    private val response: KernelAssessmentResponseDto,
+    private val requestIdHeader: String? = null,
+) : KernelApiService {
     override suspend fun assess(
         request: KernelAssessmentRequestDto,
-    ): Response<ApiEnvelopeDto<KernelAssessmentResponseDto>> =
-        Response.success(ApiEnvelopeDto(success = true, data = response, meta = null))
+    ): Response<ApiEnvelopeDto<KernelAssessmentResponseDto>> = Response.success(
+        ApiEnvelopeDto(success = true, data = response, meta = null),
+        Headers.Builder().apply { requestIdHeader?.let { add("X-Request-ID", it) } }.build(),
+    )
 }
 
 /**
@@ -48,13 +58,16 @@ class RetrofitKernelSourceTest {
         attachments = emptyList(),
     )
 
-    private fun response(differentialDiagnosis: List<DifferentialDto>?) = KernelAssessmentResponseDto(
+    private fun response(
+        differentialDiagnosis: List<DifferentialDto>?,
+        modelMetadata: ModelMetadataDto? = null,
+    ) = KernelAssessmentResponseDto(
         caseToken = "case-1",
         safetyScreenPassed = true,
         triageUrgency = "ROUTINE",
         differentialDiagnosis = differentialDiagnosis,
         recommendedInvestigations = emptyList(),
-        modelMetadata = null,
+        modelMetadata = modelMetadata,
     )
 
     @Test
@@ -94,6 +107,94 @@ class RetrofitKernelSourceTest {
         val data = (result as KernelApiResult.Success).data
         assertEquals("Viral fever", data.predictedCondition)
         assertEquals(0.82, data.confidenceScore, 0.0)
+    }
+
+    // ── Model identity: X-Request-ID and model_metadata.calibrated ───────────────
+
+    private val validId = "3f2b8c1e-9a4d-4e6f-8b7a-1c2d3e4f5a6b"
+
+    private suspend fun assessWithHeader(header: String?): KernelAssessmentResult {
+        val diff = DifferentialDto("Viral fever", 0.82, listOf("fever reported"), emptyList())
+        val source = RetrofitKernelSource(
+            FixedKernelApiService(response(listOf(diff)), requestIdHeader = header),
+        )
+        return (source.assess(payload(), patientAge = 30, patientSex = "U") as KernelApiResult.Success).data
+    }
+
+    @Test
+    fun `a valid X-Request-ID is stored as it came`() = runTest {
+        val data = assessWithHeader(validId)
+        assertEquals(validId, data.requestId)
+        assertFalse(data.requestIdUnrecognised)
+    }
+
+    @Test
+    fun `an uppercase X-Request-ID is canonicalized to lowercase`() = runTest {
+        val data = assessWithHeader(validId.uppercase())
+        assertEquals(validId, data.requestId)
+        assertFalse(data.requestIdUnrecognised)
+    }
+
+    @Test
+    fun `a malformed X-Request-ID gives null and is flagged, never stored raw`() = runTest {
+        for (bad in listOf("not-a-uuid", "3f2b8c1e-9a4d-1e6f-8b7a-1c2d3e4f5a6b", "$validId-x", "")) {
+            val data = assessWithHeader(bad)
+            assertNull("header '$bad'", data.requestId)
+            assertTrue("header '$bad'", data.requestIdUnrecognised)
+        }
+    }
+
+    @Test
+    fun `a missing X-Request-ID gives null and is flagged`() = runTest {
+        val data = assessWithHeader(null)
+        assertNull(data.requestId)
+        assertTrue(data.requestIdUnrecognised)
+    }
+
+    @Test
+    fun `an error response carries its X-Request-ID too`() = runTest {
+        val raw = okhttp3.Response.Builder()
+            .code(502).message("Bad Gateway").protocol(Protocol.HTTP_1_1)
+            .request(Request.Builder().url("http://localhost/").build())
+            .header("X-Request-ID", validId.uppercase())
+            .build()
+        val service = object : KernelApiService {
+            override suspend fun assess(
+                request: KernelAssessmentRequestDto,
+            ): Response<ApiEnvelopeDto<KernelAssessmentResponseDto>> =
+                Response.error("".toResponseBody("application/problem+json".toMediaType()), raw)
+        }
+
+        val failure = RetrofitKernelSource(service).assess(payload(), patientAge = 30, patientSex = "U")
+
+        failure as KernelApiResult.Failure
+        assertEquals(validId, failure.requestId)
+        assertFalse(failure.requestIdUnrecognised)
+    }
+
+    @Test
+    fun `calibrated is read from model_metadata`() = runTest {
+        for (calibrated in listOf(true, false, null)) {
+            val diff = DifferentialDto("Viral fever", 0.82, listOf("fever reported"), emptyList())
+            val metadata = ModelMetadataDto("toy-v0.6", null, calibrated)
+            val source = RetrofitKernelSource(
+                FixedKernelApiService(response(listOf(diff), metadata), requestIdHeader = validId),
+            )
+            val data = (source.assess(payload(), 30, "U") as KernelApiResult.Success).data
+            assertEquals(calibrated, data.modelCalibrated)
+        }
+    }
+
+    // Regression guard, not red proof: master already reads model_version, so this is green there.
+    @Test
+    fun `a body with only version in model_metadata gives a null modelVersion`() = runTest {
+        val diff = DifferentialDto("Viral fever", 0.82, listOf("fever reported"), emptyList())
+        val onlyVersion = ModelMetadataDto(modelVersion = null, inferenceTimeMs = null)
+        val source = RetrofitKernelSource(
+            FixedKernelApiService(response(listOf(diff), onlyVersion), requestIdHeader = validId),
+        )
+        val data = (source.assess(payload(), 30, "U") as KernelApiResult.Success).data
+        assertNull(data.modelVersion)
     }
 
     // ── The problem document, third instance of the house block ──────────────

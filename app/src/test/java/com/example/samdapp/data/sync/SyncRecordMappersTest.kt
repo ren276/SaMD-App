@@ -2,11 +2,15 @@ package com.example.samdapp.data.sync
 
 import com.example.samdapp.data.local.entity.AilmentEntity
 import com.example.samdapp.data.local.entity.AttachmentEntity
+import com.example.samdapp.data.local.entity.KernelReportEntity
 import com.example.samdapp.data.local.entity.ObservationEntity
 import com.example.samdapp.data.remote.SyncGson
 import com.example.samdapp.data.remote.dto.AilmentSyncPayloadDto
 import com.example.samdapp.data.remote.dto.AttachmentSyncPayloadDto
 import com.example.samdapp.domain.model.AttachmentType
+import com.example.samdapp.domain.model.InferenceSource
+import com.example.samdapp.domain.model.RiskCategory
+import com.example.samdapp.domain.model.UrgencyLevel
 import com.example.samdapp.domain.model.MeasurementType
 import com.example.samdapp.domain.model.ObservationSource
 import com.example.samdapp.domain.model.ObservationType
@@ -116,5 +120,51 @@ class SyncRecordMappersTest {
         assertEquals(7, record.baseVersion)
         assertEquals("upsert", record.op)
         assertEquals("attachments", record.table)
+    }
+
+    private fun kernelReport(
+        modelVersion: String?,
+        requestId: String? = null,
+        modelCalibrated: Boolean? = null,
+        derivationRuleVersion: String? = null,
+    ) = KernelReportEntity(
+        id = "kr1", caseRecordId = "c1", predictedCondition = "Viral fever", confidenceScore = 0.8,
+        differentials = emptyList(), reasoningSummary = "r", evidenceFor = emptyList(),
+        evidenceAgainst = emptyList(), modelVersion = modelVersion, icdCode = null, deviceId = "d",
+        softwareVersion = "1.0", dataQualityScore = null, uncertaintyScore = null,
+        riskCategory = RiskCategory.MODERATE, urgencyLevel = UrgencyLevel.ROUTINE,
+        inferenceStartedAt = Instant.EPOCH, inferenceEndedAt = Instant.EPOCH,
+        requiredHumanVerification = false, inferenceSource = InferenceSource.REAL_INFERENCE,
+        localModifiedAt = Instant.EPOCH, requestId = requestId, modelCalibrated = modelCalibrated,
+        derivationRuleVersion = derivationRuleVersion,
+    )
+
+    @Test
+    fun `kernel report payload carries the three identity keys`() {
+        val json = JsonParser.parseString(
+            gson.toJson(
+                kernelReport(
+                    modelVersion = "toy-v0.6", requestId = "3f2b8c1e-9a4d-4e6f-8b7a-1c2d3e4f5a6b",
+                    modelCalibrated = false, derivationRuleVersion = "HAN-07/08-v2",
+                ).toSyncRecord().data,
+            ),
+        ).asJsonObject
+
+        assertEquals("3f2b8c1e-9a4d-4e6f-8b7a-1c2d3e4f5a6b", json.get("request_id").asString)
+        assertEquals(false, json.get("model_calibrated").asBoolean)
+        assertEquals("HAN-07/08-v2", json.get("derivation_rule_version").asString)
+        assertEquals("toy-v0.6", json.get("model_version").asString)
+    }
+
+    @Test
+    fun `kernel report payload omits a null model_version and the null identity keys`() {
+        val json = JsonParser.parseString(
+            gson.toJson(kernelReport(modelVersion = null).toSyncRecord().data),
+        ).asJsonObject
+
+        assertFalse("a null model_version is omitted, never sent as a sentinel", json.has("model_version"))
+        assertFalse(json.has("request_id"))
+        assertFalse(json.has("model_calibrated"))
+        assertFalse(json.has("derivation_rule_version"))
     }
 }

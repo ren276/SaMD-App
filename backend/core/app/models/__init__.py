@@ -58,7 +58,13 @@ from app.models.patient import Patient
 from app.models.prescription import MedicationLine, Prescription
 from app.models.referral import Referral
 from app.models.slm import SlmCallLog
-from app.models.sync import KernelAssessment, KernelCallLog, SyncBatch, SyncLogEntry
+from app.models.sync import (
+    KernelAssessment,
+    KernelCallLog,
+    KernelDerivationCheck,
+    SyncBatch,
+    SyncLogEntry,
+)
 from app.models.user import WORKER_ID_LENGTH, Device, RefreshToken, UserAccount
 
 __all__ = [
@@ -94,6 +100,7 @@ __all__ = [
     "KernelCallLog",
     "KernelCallOutcome",
     "KernelDecision",
+    "KernelDerivationCheck",
     "KernelEndpoint",
     "KernelReport",
     "MeasurementType",

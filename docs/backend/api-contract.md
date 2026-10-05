@@ -673,6 +673,43 @@ address are not in a list response.
 `ailments[]`, `case_record`, `kernel_report`, `evaluate_report`, `diagnosis_feedback`,
 `prescription`. Absent children are `null` or `[]`, never omitted keys.
 
+> **PROPOSED, pending operator sign-off (IEC 62304).** Four fields are added to the `kernel_report`
+> object, so the DOCTOR view can tell a derivation that was checked from one that was not. The
+> `kernel_report: null` case is unchanged, and no existing field changes.
+>
+> ```json
+> "kernel_report": {
+>   "...existing fields...": "...",
+>   "derivation_rule_version": "HAN-07/08-v2",
+>   "derivation_rule_status": "CURRENT",
+>   "derivation_check": {
+>     "status": "MATCH",
+>     "rule_version_used": "HAN-07/08-v2",
+>     "mismatch_fields": [],
+>     "checked_at": "2026-10-05T11:22:43.033Z"
+>   },
+>   "derivation_ok": true
+> }
+> ```
+>
+> - `derivation_rule_version` (string or null): the value the device stored, as synced.
+> - `derivation_rule_status` (string, never null): `CURRENT` when equal to the backend's current
+>   `DERIVATION_RULE_VERSION`; `SUPERSEDED` when it is a member of the backend's
+>   `SUPERSEDED_DERIVATION_RULE_VERSIONS` (today `HAN-07/08-v1`); `UNKNOWN` for NULL or any value in
+>   neither set, such as a device ahead of the backend. **Null is never `CURRENT`.**
+> - `derivation_check` (object or null): the latest `kernel_derivation_checks` row for this report,
+>   ordered `created_at DESC, id DESC`. `null` means no check exists (a row synced before
+>   alembic 0010) and is never read as a match. `status` is one of `MATCH`, `MISMATCH`,
+>   `NOT_CHECKED_NO_LINK`, `NOT_CHECKED_ERROR`, `NOT_APPLICABLE`. `mismatch_fields` names fields
+>   only, never values. `checked_at` is a UTC timestamp with milliseconds and a `Z`, like every
+>   other timestamp in this contract.
+> - `derivation_ok` (boolean, never null), fail closed: `true` only when `derivation_rule_status`
+>   is `CURRENT`, a check exists, its `status` is `MATCH` and it was made against the report's
+>   current `server_version`. Every other combination is `false`, including `UNKNOWN`, a missing
+>   check, a `MATCH` for an earlier revision of the report (a later write whose check did not
+>   record), `NOT_APPLICABLE` and every `NOT_CHECKED_*` status. A
+>   client that wants one signal reads this field.
+
 **Error Responses:**
 - 401: `SAMD-AUTH-1002`, `SAMD-AUTH-1003`
 - 403: `SAMD-AUTH-1005`
@@ -858,6 +895,37 @@ value stored beside `model_version` would attribute backend arithmetic to a name
 which breaks IEC 62304 traceability. See D-9 and D-10 in `backend-prd.md` section 9.
 
 Retention for `kernel_assessments` follows `kernel_call_log`: 24 months, decision D-5.
+
+> **PROPOSED, pending operator sign-off (IEC 62304).** A new table, `kernel_derivation_checks`,
+> records whether a synced report agrees with the model output stored for it. It has no HTTP
+> endpoint of its own; its latest row per report is surfaced on `GET /api/v1/encounters/{id}`
+> (section 4.2).
+>
+> - **When a row is written.** Once per **applied** `kernel_reports` write, in the same
+>   transaction: an insert, or an update that the sync rules in section 6.1 apply (rule 4, or
+>   rule 5 with a later `client_updated_at`). A `stale` replay or a `conflict` writes none, so a
+>   re-sync on a matching `base_version` appends a second row and an exact replay appends none.
+> - **What it holds.** `kernel_report_id`, `facility_id`, `request_id` (exactly as stored on the
+>   report), `kernel_assessment_id` (the same-facility, same-case `ASSESS` row with that
+>   `request_id`, or null), `rederive_status`, `rule_version_used` (the backend's rule version when
+>   the check ran), `device_rule_version` (the report's value at check time), `report_server_version` (the report's
+>   `server_version` the check was made against), `mismatch_fields`
+>   and `created_at`.
+> - **`rederive_status`.** `MATCH` and `MISMATCH` compare `derive_assess(raw_response)` with the
+>   report's `urgency_level`, `risk_category` and `required_human_verification`. `NOT_APPLICABLE`
+>   is any report whose `inference_source` is not `REAL_INFERENCE`. `NOT_CHECKED_NO_LINK` is a real
+>   report with no `request_id`, or one that joins no assessment. `NOT_CHECKED_ERROR` is a
+>   derivation or comparison that raised. A report with nothing to check still gets a row saying
+>   why, so a missing check is never silent.
+> - **Names, never values.** `mismatch_fields` is drawn from `urgency_level`, `risk_category`,
+>   `required_human_verification` and nothing else. The values are patient-linked clinical
+>   classifications and are not copied into this table.
+> - **The check never changes the report.** `kernel_reports` is device-owned and is never written
+>   by the check. The check runs in its own savepoint, and if it cannot be recorded the report
+>   stays accepted and a structured warning is logged.
+> - **Insert-only.** UPDATE and DELETE are refused by database triggers, the same mechanism as
+>   `audit_events`. The `RESTRICT` foreign keys plus the no-delete trigger make a checked
+>   `kernel_reports` row undeletable, so erasure and retention purges need a designed path.
 
 **Error Responses:**
 - 401: `SAMD-AUTH-1002`, `SAMD-AUTH-1003`
@@ -1050,6 +1118,23 @@ Room schema has none:
 `18 referrals` → `19 abha_profiles` → `20 audit_log`
 
 Any other value is `422` / `SAMD-SYNC-6002`.
+
+> **PROPOSED, pending operator sign-off (IEC 62304).** `kernel_reports` records carry model
+> identity. This adds to the payload and relaxes one field; it changes no D-9 or D-10 text, and
+> the backend still never rewrites a device-owned value.
+>
+> | Field | Type | Rule |
+> |---|---|---|
+> | `model_version` | string, **optional** | Was required. Absent or `null` means the device had no version to report; the device no longer sends a placeholder. When present it must match `^[A-Za-z0-9._:+-]{1,80}$`. |
+> | `model_calibrated` | boolean, optional | `model_metadata.calibrated` from the classifier, when it said. |
+> | `request_id` | string, optional | The `X-Request-ID` of the response that produced the report, lowercase UUID4 (`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`). Present on any `inference_source` that had a response to read it from. It is the link to `kernel_assessments.request_id`. |
+> | `derivation_rule_version` | string, optional | The device's rule version when it derived urgency, risk and verification from a real response: `^HAN-07/08-v[0-9]{1,3}$`. Sent on `REAL_INFERENCE` rows only. |
+>
+> A value outside its format is rejected for that record, `TERMINAL`, `SAMD-SYNC-6003` with the
+> message `<field>: malformed.`. The value is not echoed and is not normalised: an uppercase
+> `request_id` is rejected, because the device always lowercases. `request_id` and
+> `derivation_rule_version` are also enforced by database CHECK constraints; `model_version` is
+> enforced at ingest only, because rows written before this change are not guaranteed to comply.
 
 **Fields rejected on this boundary, always.** Presence of any of these is `422` /
 `SAMD-SYNC-6006` for that record, and the record is not applied:

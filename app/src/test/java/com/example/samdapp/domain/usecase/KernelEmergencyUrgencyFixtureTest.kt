@@ -57,7 +57,12 @@ class KernelEmergencyUrgencyFixtureTest(private val name: String, private val ca
         override suspend fun assess(
             request: KernelAssessmentRequestDto,
         ): Response<ApiEnvelopeDto<KernelAssessmentResponseDto>> =
-            Response.success(ApiEnvelopeDto(success = true, data = body, meta = null))
+            // A real response always carries the backend's X-Request-ID; without it the use case
+            // would (rightly) record a request_id breadcrumb and drown out the ones under test.
+            Response.success(
+                ApiEnvelopeDto(success = true, data = body, meta = null),
+                okhttp3.Headers.headersOf("X-Request-ID", "3f2b8c1e-9a4d-4e6f-8b7a-1c2d3e4f5a6b"),
+            )
     }
 
     private fun fixtureBody(): KernelAssessmentResponseDto {

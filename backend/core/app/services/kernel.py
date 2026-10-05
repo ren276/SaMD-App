@@ -65,7 +65,9 @@ from app.config import Settings
 from app.db.base import utcnow
 from app.db.session import write_out_of_band
 from app.deps import CurrentWorker
+from app.domain.kernel_identity import MODEL_SHA256_RE
 from app.errors import ErrorCode, SamdError
+from app.logging import get_logger
 from app.models.clinical import CaseRecord
 from app.models.enums import (
     AuditAction,
@@ -76,6 +78,8 @@ from app.models.enums import (
 from app.models.kernel import EvaluateReport
 from app.models.sync import KernelAssessment, KernelCallLog
 from app.services import audit as audit_service
+
+logger = get_logger(__name__)
 
 
 def sha256_hex(payload: dict[str, Any]) -> str:
@@ -333,6 +337,20 @@ async def _record_success(
     # contract does not define.
     is_assess = endpoint is KernelEndpoint.ASSESS
     model_version = _as_str(model_metadata.get("model_version")) if is_assess else None
+    # Copied, not computed: the proxy cannot verify a hash, only record what the classifier claimed
+    # to have served. A value that is not a lowercase sha256 is stored as NULL rather than copied,
+    # because the CHECK constraint would otherwise reject the whole out-of-band write and a call
+    # that happened would leave no log row. NULL calibrated means the response did not say.
+    claimed_sha256 = model_metadata.get("model_sha256") if is_assess else None
+    model_sha256 = _as_sha256(claimed_sha256)
+    if claimed_sha256 is not None and model_sha256 is None:
+        # Field name and request id only, never the value: the raw value stays in raw_response.
+        logger.warning(
+            "kernel model_sha256 malformed, stored as null",
+            field="model_sha256",
+            request_id=request_id,
+        )
+    model_calibrated = _as_bool(model_metadata.get("calibrated")) if is_assess else None
 
     async def _write(session: AsyncSession) -> None:
         session.add(
@@ -349,6 +367,7 @@ async def _record_success(
                 http_status=http_status,
                 output_sha256=output_hash,
                 model_version=model_version,
+                model_sha256=model_sha256,
                 started_at=started_at,
                 completed_at=completed_at,
                 duration_ms=_duration_ms(started_at, completed_at),
@@ -364,6 +383,8 @@ async def _record_success(
                 endpoint=endpoint.value,
                 raw_response=response_body,
                 model_version=model_version,
+                model_sha256=model_sha256,
+                model_calibrated=model_calibrated,
                 inference_time_ms=(
                     _as_int(model_metadata.get("inference_time_ms")) if is_assess else None
                 ),
@@ -412,6 +433,10 @@ def _as_int(value: Any) -> int | None:
 
 def _as_bool(value: Any) -> bool | None:
     return value if isinstance(value, bool) else None
+
+
+def _as_sha256(value: Any) -> str | None:
+    return value if isinstance(value, str) and MODEL_SHA256_RE.fullmatch(value) else None
 
 
 def _safe_upstream_detail(response: httpx.Response) -> str:

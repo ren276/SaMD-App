@@ -45,4 +45,6 @@ data class DifferentialDto(
 data class ModelMetadataDto(
     @SerializedName("model_version") val modelVersion: String?,
     @SerializedName("inference_time_ms") val inferenceTimeMs: Long?,
+    /** Whether the classifier's probabilities are calibrated. Null when the response did not say. */
+    @SerializedName("calibrated") val calibrated: Boolean? = null,
 )
