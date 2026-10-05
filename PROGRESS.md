@@ -5238,3 +5238,15 @@ configures `openHelperFactory` and `addMigrations` and nothing else: there is no
 `IllegalStateException`, and v22 has no downgrade fallback, so a field rollback means wiping the
 app's data and losing every record not yet synced. A bad v22 release is fixed by shipping v23,
 not by reinstalling an earlier build. The backend (Alembic 0010) deploys first.
+
+**Sync-failure-visibility scope note (found 2026-10-05, uncommitted):** while offline, the
+assessment screen shows an indefinite spinner. The assessment job waits on
+`NetworkType.CONNECTED` (`WorkManagerAssessmentScheduler.kt:35`) and the UI never says it is
+waiting for a network. No timeout fires and no UNAVAILABLE row is saved, because the request is
+never sent. File under the device sync-failure-visibility PR.
+
+**Filed item, dev-only switch to exercise the honest UNAVAILABLE path live:** a
+`local.properties` flag (e.g. `samd.dev.kernelFallback=none`) makes the dev flavor bind the
+always-null fallback used by staging and prod. Today the UNAVAILABLE card and Retry have zero live
+coverage: dev substitutes the mock, and staging points at a placeholder HTTPS URL. Queue before
+sync-failure-visibility.
