@@ -118,6 +118,13 @@ android {
             buildConfigField("String", "PI_GATEWAY_BASE_URL", "\"${localProperties.getProperty("PI_GATEWAY_BASE_URL", "http://kernel-hub.local:8090/")}\"")
             // FLAG_SECURE off in dev so investor/demo screen recordings work; staging/prod enforce it.
             buildConfigField("boolean", "SCREEN_SECURITY_ENABLED", "false")
+            // samd.dev.kernelFallback=none binds the always-null kernel fallback staging and prod
+            // use, so the honest UNAVAILABLE card and Retry can be exercised live on a dev build.
+            // Absent keeps the mock scenario source. Validated in DevKernelFallbackMode.kt, which
+            // rejects any other value at startup rather than silently keeping the mock.
+            val devKernelFallback = localProperties.getProperty("samd.dev.kernelFallback", "").trim()
+            if (devKernelFallback.isNotEmpty()) logger.lifecycle("dev kernel fallback: $devKernelFallback (from local.properties)")
+            buildConfigField("String", "DEV_KERNEL_FALLBACK", "\"$devKernelFallback\"")
         }
         create("staging") {
             dimension = "environment"
