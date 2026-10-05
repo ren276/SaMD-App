@@ -5156,17 +5156,75 @@ becomes 0010 (file, `revision`, `down_revision`, `test_alembic_0009.py`, text re
 `_EXPECTED_REJECT_SITES` becomes 19, the parked stash's PROGRESS text says 0010, and the two
 Alembic test harnesses are unified into one.
 
-## PR 4 working notes: model identity consumers - 2026-10-05
+## PR 4: model identity consumers - 2026-10-05
 
-Branch `feat/pr4-model-identity-consumers`, rebased onto master `6ea86e0` after #69. Commits 1 to 6
-are made (shared rule version, fixtures at classifier `5e1ca00`, Alembic 0010 and models, sync
-ingest, proxy lift, derivation cross-check). A check row is written only when the
-`kernel_reports` write is APPLIED under #69's comparator: a stale replay or a conflict writes none,
-and a re-sync on a matching `base_version` appends a second row. Commit 7 (the DOCTOR view) is next.
+Branch `feat/pr4-model-identity-consumers`, rebased onto master `6ea86e0` after #69, not merged.
+Nine behaviour commits plus this entry and a separate PROPOSED `api-contract.md` commit. Design:
+`scratchpad/pr4-design-addendum.md`.
 
-**Known hazard: the backend suite shares one `samd_test` database across branches.** The fixture
-builds the schema with `create_all` and tears it down with `drop_all`, so a table that exists on
-one branch and not on another breaks the other branch's run. After running this branch, the
+**What it does.** A kernel report now says which model produced it and can be checked against the
+model output the backend stored for it.
+- **Device.** The two model-version placeholders (`"remote-kernel"`, `"unavailable"`) are gone:
+  a missing or malformed version is stored as null and records `KERNEL_UNRECOGNISED_OUTPUT` naming
+  the field only. The response's `X-Request-ID` is kept (lowercase UUID4) on every inference source
+  that had a response to read it from, real, mock fallback and unavailable alike (open question
+  Q3, resolved); a missing or malformed header stores null with a `request_id` event and no raw
+  value. `model_metadata.calibrated` and the device's `derivationRuleVersion` (REAL rows only) are
+  stored and synced. Room 21 to 22 rebuilds `kernel_reports` (`MIGRATION_21_22`).
+- **Backend.** Alembic 0010 adds the identity columns with closed formats (database CHECKs plus
+  ingest checks that reject, never normalise) and the insert-only `kernel_derivation_checks` table.
+  Sync writes one check row per APPLIED `kernel_reports` write (an insert, or an update under
+  #69's rules 4 and 5): an exact replay or a conflict writes none, a re-sync appends a second row.
+  The DOCTOR view gets `derivation_rule_version`, `derivation_rule_status` (CURRENT, SUPERSEDED or
+  UNKNOWN, never null), `derivation_check` and a fail-closed `derivation_ok`.
+
+**Commits.**
+1. `9b9c986` shared derivation rule version (R1)
+2. `7d19c0e` classifier fixtures recaptured at `5e1ca00`
+3. `2f4ec8c` Alembic 0010 and models (renumbered from 0009 after #69; one shared scratch-schema
+   harness, `tests/alembic_scratch.py`, now serves both Alembic test files)
+4. `88577e1` sync ingest of `model_calibrated`, `request_id`, `derivation_rule_version`; nullable
+   `model_version` (`_EXPECTED_REJECT_SITES` is 19)
+5. `fd1f135` proxy lifts `model_sha256` and `model_calibrated`
+6. `00e68b5` derivation cross-check
+7. `3dc9b10` DOCTOR view fields
+8. `e9da3e5` device reads `calibrated` and `X-Request-ID`
+9. `2bfc334` sentinels nulled, identity persisted, Room 22
+
+**Evidence.**
+- Backend full suite green at every one of the five rebased hashes (425, 430, 458, 472, 485), then
+  507 at commit 6 and 519 at commit 7. The three no-check-row tests (replay, both conflict
+  shapes) fail against a hook without the applied-only guard.
+- Device JVM: dev 761, staging 728, prod 728, all green. The four sentinel tests fail with the old
+  sentinels put back.
+- Instrumented, by install plus `am instrument` (never a Gradle connected task): emulator 72/72 for
+  `data.local`; iQOO I2302 (arm64-v8a, SQLCipher) `MigrationTest21To22` 2/2 and the 1-to-22 chain
+  6/6. The v21 `kernel_reports` schema matched the 28 columns the design assumed.
+- Live, local dev stack on this branch: alembic 0010; one real assessment synced as
+  `REAL_INFERENCE` with a lowercase UUID4 `request_id` equal to the stored ASSESS row's,
+  `model_calibrated` false, `derivation_rule_version` `HAN-07/08-v2` and a real `model_version`;
+  one check row, `MATCH`; the DOCTOR view over HTTP returned CURRENT, `derivation_ok` true; 0
+  error or `unhandled_exception` log lines.
+
+**Deploy order (R6).** The backend (Alembic 0010 and commits 3 to 7) is deployed first and
+`alembic current` verified as `0010` before any APK carrying commits 8 and 9 is distributed.
+
+**Known and accepted.**
+- Rows written before this change keep what they have: their `request_id`, `model_calibrated` and
+  `derivation_rule_version` are null, so they have no check and `derivation_ok` is false. Existing
+  device rows that hold a sentinel keep it verbatim; the migration rewrites nothing. The pre-pilot
+  data reset (D3) clears both.
+- A checked `kernel_reports` row is undeletable (RESTRICT foreign keys plus the insert-only
+  triggers), so erasure and retention purges need a designed path.
+- The existing `KERNEL_UNRECOGNISED_OUTPUT` event still logs the classifier's raw
+  `triage_urgency` and `condition_tier` tokens (open question Q4); this PR adds only field names.
+- The minimum-app-version gate (D1c) is recorded and not built.
+- Live coverage of the honest UNAVAILABLE card and Retry is still zero (filed on
+  `docs/progress-filed-items`: a dev-only switch to bind the always-null fallback).
+
+**Hazard: the backend suite shares one `samd_test` database across branches.** The fixture builds
+the schema with `create_all` and tears it down with `drop_all`, so a table that exists on one
+branch and not on another breaks the other branch's run. After running this branch, the
 `kernel_derivation_checks` table is left in `samd_test`; `drop_all` on master (whose metadata does
 not know it) then fails with `cannot drop table kernel_assessments because other objects depend on
 it`. Before running a pre-0010 branch against the same database, drop that table (test database
