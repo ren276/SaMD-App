@@ -120,9 +120,14 @@ android {
             buildConfigField("boolean", "SCREEN_SECURITY_ENABLED", "false")
             // samd.dev.kernelFallback=none binds the always-null kernel fallback staging and prod
             // use, so the honest UNAVAILABLE card and Retry can be exercised live on a dev build.
-            // Absent keeps the mock scenario source. Validated in DevKernelFallbackMode.kt, which
-            // rejects any other value at startup rather than silently keeping the mock.
+            // Absent keeps the mock scenario source. Any other value fails the build here, at
+            // configuration time: the binding itself is only provisioned when the assessment worker
+            // first needs it, so a typo caught only at runtime would surface late and in the
+            // background. DevKernelFallbackMode.kt applies the same rule as the runtime guard.
             val devKernelFallback = localProperties.getProperty("samd.dev.kernelFallback", "").trim()
+            if (devKernelFallback.lowercase() !in setOf("", "mock", "none")) {
+                throw GradleException("samd.dev.kernelFallback must be 'mock' or 'none' (or absent), got '$devKernelFallback'")
+            }
             if (devKernelFallback.isNotEmpty()) logger.lifecycle("dev kernel fallback: $devKernelFallback (from local.properties)")
             buildConfigField("String", "DEV_KERNEL_FALLBACK", "\"$devKernelFallback\"")
         }
