@@ -81,6 +81,12 @@ class GenerateKernelReportUseCase @Inject constructor(
 
         private val logger = Logger.getLogger("KernelUseCase")
 
+        private const val FIELD_REQUEST_ID = "request_id"
+        private const val FIELD_MODEL_VERSION = "model_version"
+
+        /** The same closed format the backend enforces on `model_version` at sync ingest. */
+        private val MODEL_VERSION_REGEX = Regex("^[A-Za-z0-9._:+-]{1,80}$")
+
         /** Optional [KernelPayload] signals considered for [dataQualityScore] — the whitelisted
          *  fields that may or may not be present, not the always-required ones (chiefComplaint,
          *  vitals, caseToken). */
@@ -113,12 +119,17 @@ class GenerateKernelReportUseCase @Inject constructor(
 
         val attempt = tryRealApi(caseRecordId, payload, patientAge, patientSex, inferenceStartedAt)
         val output = attempt.output
+            // A fallback or unavailable row still keeps the request id of the response that
+            // preceded it: the backend stored that assessment (or its failure) under the id
+            // whichever way the device then labelled the report.
             ?: kernelFallbackSource.fallback(caseRecordId, payload, inferenceStartedAt, dataQualityScore(payload))
+                ?.copy(requestId = attempt.requestId)
             ?: buildUnavailableOutput(
                 caseRecordId,
                 dataQualityScore(payload),
                 inferenceStartedAt,
                 failure = attempt.failure,
+                requestId = attempt.requestId,
             )
 
         return kernelReportRepository.save(output).map { output }
@@ -190,12 +201,15 @@ class GenerateKernelReportUseCase @Inject constructor(
             logger.warning(
                 "Kernel API failed, case $caseRecordId, failure=$failure, advice=${failure.advice}",
             )
-            return RealApiAttempt(output = null, failure = failure)
+            val failed = apiResult as? KernelApiResult.Failure
+            if (failed?.requestIdUnrecognised == true) recordUnrecognisedField(caseRecordId, FIELD_REQUEST_ID)
+            return RealApiAttempt(output = null, failure = failure, requestId = failed?.requestId)
         }
 
         return try {
             val result = apiResult.data
             logger.info("Kernel API success — case $caseRecordId, triage=${result.triageUrgency}")
+            if (result.requestIdUnrecognised) recordUnrecognisedField(caseRecordId, FIELD_REQUEST_ID)
 
             if (result.predictedCondition == null) {
                 // 200 with an empty differential_diagnosis: the model produced no usable
@@ -247,6 +261,7 @@ class GenerateKernelReportUseCase @Inject constructor(
                         dataQualityScore(payload),
                         inferenceStartedAt,
                         failure = null,
+                        requestId = result.requestId,
                     ),
                     failure = null,
                 )
@@ -263,6 +278,11 @@ class GenerateKernelReportUseCase @Inject constructor(
             if (triage.unrecognised.isNotEmpty()) recordUnrecognisedOutput(caseRecordId, result, triage)
             val urgency = triage.urgency
             val risk = triage.risk
+
+            // Stored only when it is a real, well-formed version string. A missing or malformed
+            // one is null, never a placeholder, and the event names the field and not the value.
+            val modelVersion = result.modelVersion?.takeIf { MODEL_VERSION_REGEX.matches(it) }
+            if (modelVersion == null) recordUnrecognisedField(caseRecordId, FIELD_MODEL_VERSION)
 
             val reasoningSummary = buildString {
                 append("ML risk model triage: ${result.triageUrgency}. ")
@@ -290,7 +310,7 @@ class GenerateKernelReportUseCase @Inject constructor(
                 reasoningSummary = reasoningSummary,
                 evidenceFor = result.evidenceFor,
                 evidenceAgainst = result.evidenceAgainst,
-                modelVersion = result.modelVersion ?: "remote-kernel",
+                modelVersion = modelVersion,
                 icdCode = null, // Real endpoint doesn't return ICD codes in this contract shape
                 deviceId = deviceInfoProvider.deviceId(),
                 softwareVersion = deviceInfoProvider.softwareVersion(),
@@ -304,6 +324,11 @@ class GenerateKernelReportUseCase @Inject constructor(
                 inferenceSource = InferenceSource.REAL_INFERENCE,
                 // A real assessment exists, so there is nothing to explain away.
                 failureCode = null,
+                requestId = result.requestId,
+                modelCalibrated = result.modelCalibrated,
+                // Stamped here and nowhere else: only a REAL_INFERENCE row was derived by the
+                // rules in force on this device (R1).
+                derivationRuleVersion = KernelTriageRules.DERIVATION_RULE_VERSION,
             ).let { RealApiAttempt(output = it, failure = null) }
         } catch (e: CancellationException) {
             throw e
@@ -326,7 +351,12 @@ class GenerateKernelReportUseCase @Inject constructor(
      * path, which produces an output AND no failure, and a sealed either-or would have to invent
      * a third case for it.
      */
-    private data class RealApiAttempt(val output: KernelReportOutput?, val failure: KernelFailure?)
+    private data class RealApiAttempt(
+        val output: KernelReportOutput?,
+        val failure: KernelFailure?,
+        /** The `X-Request-ID` of a failed call's response, when it had a valid one. */
+        val requestId: String? = null,
+    )
 
     // ── Honest unavailable state ───────────────────────────────────────────────
 
@@ -343,6 +373,7 @@ class GenerateKernelReportUseCase @Inject constructor(
         dataQualityScore: Double,
         inferenceStartedAt: Instant,
         failure: KernelFailure?,
+        requestId: String? = null,
     ): KernelReportOutput = KernelReportOutput(
         id = UUID.randomUUID().toString(),
         caseRecordId = caseRecordId,
@@ -356,7 +387,7 @@ class GenerateKernelReportUseCase @Inject constructor(
         reasoningSummary = UNAVAILABLE_REASONING_SUMMARY,
         evidenceFor = emptyList(),
         evidenceAgainst = emptyList(),
-        modelVersion = "unavailable",
+        modelVersion = null,
         icdCode = null,
         deviceId = deviceInfoProvider.deviceId(),
         softwareVersion = deviceInfoProvider.softwareVersion(),
@@ -375,7 +406,26 @@ class GenerateKernelReportUseCase @Inject constructor(
         // thing the worker can act on. Same split the evaluate leg already makes with
         // EvaluateReportEntity.failureCode.
         failureCode = failure,
+        requestId = requestId,
     )
+
+    /** A device-supplied identity field that was missing or malformed, so it was stored as null.
+     *  Carries the field NAME only, never the raw value. Guarded like the other breadcrumbs: a
+     *  failed audit write must not turn a real assessment into a fallback. */
+    private suspend fun recordUnrecognisedField(caseRecordId: String, field: String) {
+        logger.warning("Kernel $field missing or malformed, case $caseRecordId")
+        try {
+            auditLogger.log(
+                action = AuditAction.KERNEL_UNRECOGNISED_OUTPUT,
+                caseRecordId = caseRecordId,
+                payload = auditPayload("field" to field),
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.warning("Could not record kernel unrecognised-field audit event: ${e.message}")
+        }
+    }
 
     /** A classifier token this build does not know. The report is still written, failed closed by
      *  [KernelTriageRules], and this breadcrumb records which field and what value, so a

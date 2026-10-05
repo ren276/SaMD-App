@@ -23,7 +23,10 @@ data class KernelReportOutput(
     val reasoningSummary: String,
     val evidenceFor: List<String>,
     val evidenceAgainst: List<String>,
-    val modelVersion: String,
+    /** The classifier's own version string, or null when the response carried none. Null is the
+     *  only honest value there: the earlier "remote-kernel" and "unavailable" placeholders looked
+     *  like versions and were not. */
+    val modelVersion: String?,
     /** Mock kernel's structured ICD-10 suggestion — null when the complaint didn't match a
      *  well-characterized scenario (the default/unmatched fallback deliberately doesn't code
      *  one; the doctor's own diagnosis, not this app, is the source of a real ICD code). */
@@ -54,4 +57,14 @@ data class KernelReportOutput(
      *  `EvaluateReportEntity.failureCode`, which the backend also never receives: this is a
      *  remedy for the worker holding the phone, not a clinical fact about the patient. */
     val failureCode: KernelFailure?,
+    /** The backend's `X-Request-ID` for the call that produced this report (lowercase UUID4), the
+     *  link to the stored model output. Stored on every [inferenceSource] when the response
+     *  carried a valid one, because the backend holds the output whichever way the device then
+     *  labelled it. Null when there was no response, or the header was missing or malformed. */
+    val requestId: String? = null,
+    /** `model_metadata.calibrated`, when the classifier said. Null on every non-REAL row. */
+    val modelCalibrated: Boolean? = null,
+    /** [com.example.samdapp.domain.kernel.KernelTriageRules.DERIVATION_RULE_VERSION] when the
+     *  device derived urgency, risk and verification from a real response; null otherwise. */
+    val derivationRuleVersion: String? = null,
 )

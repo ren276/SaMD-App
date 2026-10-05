@@ -181,7 +181,8 @@ fun KernelReportEntity.toSyncRecord() = SyncRecordDto(
         uncertaintyScore = uncertaintyScore, riskCategory = riskCategory.name,
         urgencyLevel = urgencyLevel.name, inferenceStartedAt = inferenceStartedAt,
         inferenceEndedAt = inferenceEndedAt, requiredHumanVerification = requiredHumanVerification,
-        inferenceSource = inferenceSource.name,
+        inferenceSource = inferenceSource.name, modelCalibrated = modelCalibrated,
+        requestId = requestId, derivationRuleVersion = derivationRuleVersion,
     ),
 )
 
