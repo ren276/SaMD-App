@@ -12,6 +12,7 @@ import com.example.samdapp.domain.model.UrgencyLevel
 import java.time.Instant
 import java.util.UUID
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.runTest
@@ -79,6 +80,7 @@ class FakeKernelReportDao : KernelReportDao {
         }
     }
 
+    override suspend fun getSyncStateCounts() = observeSyncStateCounts().first()
     override fun observeSyncStateCounts(): Flow<List<com.example.samdapp.data.local.dao.SyncStateCount>> =
         store.map { rows ->
             rows.filter { it.syncState != com.example.samdapp.domain.model.SyncState.SYNCED }

@@ -11,11 +11,13 @@ import com.example.samdapp.domain.sync.SyncState
 import com.example.samdapp.domain.sync.SyncStatus
 import com.example.samdapp.domain.usecase.GetTodaysPatientsUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -29,6 +31,12 @@ data class ResumableEncounter(
     val caseRecordId: String,
     val patientName: String?,
 )
+
+/** One-shot events for Home. */
+sealed interface HomeEffect {
+    /** Shown once as a snackbar after "Sync now" finishes. */
+    data class ShowSyncNowResult(val message: SyncNowMessage) : HomeEffect
+}
 
 data class HomeUiState(
     val todaysPatients: List<Patient> = emptyList(),
@@ -57,6 +65,9 @@ class HomeViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
+
+    private val _effects = Channel<HomeEffect>(Channel.BUFFERED)
+    val effects = _effects.receiveAsFlow()
 
     init {
         // Day-scoped roster only — the repository never exposes the full patient table.
@@ -93,8 +104,14 @@ class HomeViewModel @Inject constructor(
         }
     }
 
+    /** The Result is shown, not discarded. The message is chosen from a direct read taken after
+     *  the sync returns ([SyncStatus.stateNow]), never from the Flow-backed state, so it reflects
+     *  what the drain committed even if an emission has not caught up yet. */
     fun onSyncNow() {
-        viewModelScope.launch { syncStatus.syncNow() }
+        viewModelScope.launch {
+            val result = syncStatus.syncNow()
+            _effects.send(HomeEffect.ShowSyncNowResult(syncNowMessage(result, syncStatus.stateNow())))
+        }
     }
 
     fun onOpenFailedRecords() {

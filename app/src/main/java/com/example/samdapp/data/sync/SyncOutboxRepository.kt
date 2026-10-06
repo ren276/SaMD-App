@@ -66,6 +66,9 @@ interface SyncOutboxRepository {
      *  (the same twenty observers the old FAILED-only counter used). See [OutboxCounts]. */
     fun observeOutboxCounts(): Flow<OutboxCounts>
 
+    /** The same counts as [observeOutboxCounts], read once by one-shot suspend DAO queries. */
+    suspend fun readOutboxCounts(): OutboxCounts
+
     /** The rows behind [OutboxCounts.needsReview], newest first, classified for the worker-facing
      *  review list (S-3). Suspend rather than a Flow: the count is already observed from app
      *  start and the list is not, so this runs only when a worker opens it. */

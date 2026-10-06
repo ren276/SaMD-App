@@ -227,6 +227,22 @@ class RoomSyncOutboxRepository @Inject constructor(
      * patient in front of them, on the SQLCipher pool the perf audit found already contended
      * (F2A-01).
      */
+    override suspend fun readOutboxCounts(): OutboxCounts = outboxCountsOf(
+        clinical = listOf(
+            patientDao.getSyncStateCounts(), encounterDao.getSyncStateCounts(),
+            consultationDao.getSyncStateCounts(), attachmentDao.getSyncStateCounts(),
+            observationDao.getSyncStateCounts(), ailmentDao.getSyncStateCounts(),
+            medicalHistoryItemDao.getSyncStateCounts(), allergyDao.getSyncStateCounts(),
+            familyHistoryEntryDao.getSyncStateCounts(), socialHistoryDao.getSyncStateCounts(),
+            medicationEntryDao.getSyncStateCounts(), caseRecordDao.getSyncStateCounts(),
+            kernelReportDao.getSyncStateCounts(), evaluateReportDao.getSyncStateCounts(),
+            diagnosisFeedbackDao.getSyncStateCounts(), prescriptionDao.getPrescriptionSyncStateCounts(),
+            prescriptionDao.getMedicationLineSyncStateCounts(), referralDao.getSyncStateCounts(),
+            abhaProfileDao.getSyncStateCounts(),
+        ).flatten(),
+        audit = auditLogDao.getSyncStateCounts(),
+    )
+
     override suspend fun failedRecords(): List<FailedSyncRecord> {
         val rows: List<FailedSyncRow> = buildList {
             addAll(patientDao.getFailedForReview())

@@ -53,6 +53,7 @@ import com.example.samdapp.domain.repository.ReferralRepository
 import com.example.samdapp.domain.sync.SyncState
 import com.example.samdapp.domain.sync.SyncStatus
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flow
@@ -605,15 +606,25 @@ class FakeSyncStatus : SyncStatus {
         _state.value = _state.value.copy(failedCount = records.size)
     }
 
+    /** What the next [syncNow] returns, and the state it leaves behind (null keeps the old
+     *  "everything settled" state), so a test can drive each Sync now message. */
+    var nextSyncResult: Result<Unit> = Result.success(Unit)
+    var stateAfterSync: SyncState? = null
+
+    /** What [stateNow], the direct read, returns; null means the same as [state]. Set apart from
+     *  [stateAfterSync] to model the Flow lagging the database. */
+    var directState: SyncState? = null
+    override suspend fun stateNow(): SyncState = directState ?: _state.value
+
     override suspend fun syncNow(): Result<Unit> {
         syncCalls++
-        _state.value = SyncState(
+        _state.value = stateAfterSync ?: SyncState(
             lastSyncedAt = Instant.EPOCH,
             pendingCount = 0,
             isSyncing = false,
             failedCount = failed.size,
         )
-        return Result.success(Unit)
+        return nextSyncResult
     }
 
     override suspend fun failedRecords(): List<com.example.samdapp.domain.sync.FailedSyncRecord> {
@@ -768,6 +779,7 @@ class FakeAuditLogDao : AuditLogDao {
         }
     }
 
+    override suspend fun getSyncStateCounts() = observeSyncStateCounts().first()
     override fun observeSyncStateCounts(): Flow<List<com.example.samdapp.data.local.dao.SyncStateCount>> =
         _failedSyncCount.map { n -> if (n == 0) emptyList() else listOf(com.example.samdapp.data.local.dao.SyncStateCount(com.example.samdapp.domain.model.SyncState.FAILED, n)) }
     override suspend fun getFailedForReview(): List<com.example.samdapp.data.local.dao.FailedSyncRow> = emptyList()

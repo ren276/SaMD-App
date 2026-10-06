@@ -76,6 +76,16 @@ class OutboxCountQueryTest {
     }
 
     @Test
+    fun oneShotCounter_matchesTheObservedCounter() = runBlocking {
+        seed()
+
+        assertEquals(
+            db.patientDao().observeSyncStateCounts().first().toSet(),
+            db.patientDao().getSyncStateCounts().toSet(),
+        )
+    }
+
+    @Test
     fun repository_foldsClinicalAndAuditCountsForHome() = runBlocking {
         seed()
         db.auditLogDao().insert(
@@ -100,6 +110,11 @@ class OutboxCountQueryTest {
         assertEquals(
             OutboxCounts(pendingClinical = 3, pendingAudit = 1, needsReview = 3),
             repository.observeOutboxCounts().first(),
+        )
+        assertEquals(
+            "the one-shot read the Sync now message uses must agree with the Flow",
+            OutboxCounts(pendingClinical = 3, pendingAudit = 1, needsReview = 3),
+            repository.readOutboxCounts(),
         )
     }
 }

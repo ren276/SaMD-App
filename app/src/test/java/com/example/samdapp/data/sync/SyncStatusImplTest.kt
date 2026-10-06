@@ -36,6 +36,21 @@ class SyncStatusImplTest {
     ) = SyncStatusImpl(caseRecordRepository, ConnectivityController(networkMonitor), outboxScheduler, outboxRepository, drainOutcome)
 
     @Test
+    fun `stateNow reads the outbox counts directly, not through the Flow`() = runTest {
+        val outbox = FakeSyncOutboxRepository().apply {
+            outboxCounts.value = OutboxCounts()
+            directOutboxCounts = OutboxCounts(pendingClinical = 1, needsReview = 2)
+        }
+        val drainOutcome = DrainOutcomeStore().apply { record(com.example.samdapp.domain.sync.DrainFailure.SIGN_IN) }
+
+        val state = sync(outboxRepository = outbox, drainOutcome = drainOutcome).stateNow()
+
+        assertEquals(2, state.failedCount)
+        assertEquals(1, state.outboxPending)
+        assertEquals(com.example.samdapp.domain.sync.DrainFailure.SIGN_IN, state.lastDrainFailure)
+    }
+
+    @Test
     fun `outbox counts and the last drain failure reach Home's sync state`() = runTest {
         val outbox = FakeSyncOutboxRepository()
         val drainOutcome = DrainOutcomeStore()

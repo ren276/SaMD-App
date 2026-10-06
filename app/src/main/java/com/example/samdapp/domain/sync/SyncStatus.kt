@@ -40,6 +40,12 @@ interface SyncStatus {
     val state: Flow<SyncState>
     suspend fun syncNow(): Result<Unit>
 
+    /** The same state as [state], read once and directly: the outbox counts from one-shot suspend
+     *  DAO reads, not from a Flow. For a decision made right after [syncNow] returns, such as the
+     *  "Sync now" message, which must reflect the drain's committed writes and not an emission
+     *  that has not caught up yet. */
+    suspend fun stateNow(): SyncState
+
     /** The rows behind [SyncState.failedCount], newest first, each already classified into the
      *  one cause and one action a worker is shown.
      *

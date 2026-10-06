@@ -116,6 +116,11 @@ class FakeSyncOutboxRepository(
 
     override fun observeOutboxCounts() = outboxCounts.asStateFlow()
 
+    /** What a one-shot read returns; defaults to the Flow's current value. A test sets it apart
+     *  from [outboxCounts] to model a Flow that has not caught up with the database. */
+    var directOutboxCounts: com.example.samdapp.data.sync.OutboxCounts? = null
+    override suspend fun readOutboxCounts() = directOutboxCounts ?: outboxCounts.value
+
     /** Mirrors the real repository closely enough for a ViewModel test: FAILED rows only, never
      *  a RETRYABLE one, classified by the same
      *  [com.example.samdapp.domain.model.syncFailureReasonFor] the real one calls. */

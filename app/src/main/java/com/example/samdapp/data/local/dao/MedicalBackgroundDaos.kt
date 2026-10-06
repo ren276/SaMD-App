@@ -57,6 +57,10 @@ interface MedicalHistoryItemDao {
     @Query("SELECT syncState AS syncState, COUNT(*) AS rowCount FROM medical_history_items WHERE syncState != 'SYNCED' GROUP BY syncState")
     fun observeSyncStateCounts(): Flow<List<SyncStateCount>>
 
+    /** The same counts, read once (for a decision made right after a drain). */
+    @Query("SELECT syncState AS syncState, COUNT(*) AS rowCount FROM medical_history_items WHERE syncState != 'SYNCED' GROUP BY syncState")
+    suspend fun getSyncStateCounts(): List<SyncStateCount>
+
     /** The FAILED and CONFLICT rows of this table, projected for the worker-facing review list.
      *  Selects exactly the FAILED and CONFLICT groups of observeSyncStateCounts, so the number on the Home
      *  card and the length of the list can never disagree. Suspend rather than a Flow:
@@ -113,6 +117,10 @@ interface MedicationEntryDao {
 
     @Query("SELECT syncState AS syncState, COUNT(*) AS rowCount FROM medication_entries WHERE syncState != 'SYNCED' GROUP BY syncState")
     fun observeSyncStateCounts(): Flow<List<SyncStateCount>>
+
+    /** The same counts, read once (for a decision made right after a drain). */
+    @Query("SELECT syncState AS syncState, COUNT(*) AS rowCount FROM medication_entries WHERE syncState != 'SYNCED' GROUP BY syncState")
+    suspend fun getSyncStateCounts(): List<SyncStateCount>
 
     /** The FAILED and CONFLICT rows of this table, projected for the worker-facing review list.
      *  Selects exactly the FAILED and CONFLICT groups of observeSyncStateCounts, so the number on the Home
@@ -171,6 +179,10 @@ interface AllergyDao {
     @Query("SELECT syncState AS syncState, COUNT(*) AS rowCount FROM allergies WHERE syncState != 'SYNCED' GROUP BY syncState")
     fun observeSyncStateCounts(): Flow<List<SyncStateCount>>
 
+    /** The same counts, read once (for a decision made right after a drain). */
+    @Query("SELECT syncState AS syncState, COUNT(*) AS rowCount FROM allergies WHERE syncState != 'SYNCED' GROUP BY syncState")
+    suspend fun getSyncStateCounts(): List<SyncStateCount>
+
     /** The FAILED and CONFLICT rows of this table, projected for the worker-facing review list.
      *  Selects exactly the FAILED and CONFLICT groups of observeSyncStateCounts, so the number on the Home
      *  card and the length of the list can never disagree. Suspend rather than a Flow:
@@ -227,6 +239,10 @@ interface FamilyHistoryEntryDao {
 
     @Query("SELECT syncState AS syncState, COUNT(*) AS rowCount FROM family_history_entries WHERE syncState != 'SYNCED' GROUP BY syncState")
     fun observeSyncStateCounts(): Flow<List<SyncStateCount>>
+
+    /** The same counts, read once (for a decision made right after a drain). */
+    @Query("SELECT syncState AS syncState, COUNT(*) AS rowCount FROM family_history_entries WHERE syncState != 'SYNCED' GROUP BY syncState")
+    suspend fun getSyncStateCounts(): List<SyncStateCount>
 
     /** The FAILED and CONFLICT rows of this table, projected for the worker-facing review list.
      *  Selects exactly the FAILED and CONFLICT groups of observeSyncStateCounts, so the number on the Home
@@ -292,6 +308,10 @@ interface SocialHistoryDao {
 
     @Query("SELECT syncState AS syncState, COUNT(*) AS rowCount FROM social_histories WHERE syncState != 'SYNCED' GROUP BY syncState")
     fun observeSyncStateCounts(): Flow<List<SyncStateCount>>
+
+    /** The same counts, read once (for a decision made right after a drain). */
+    @Query("SELECT syncState AS syncState, COUNT(*) AS rowCount FROM social_histories WHERE syncState != 'SYNCED' GROUP BY syncState")
+    suspend fun getSyncStateCounts(): List<SyncStateCount>
 
     /** The FAILED and CONFLICT rows of this table, projected for the worker-facing review list.
      *  Selects exactly the FAILED and CONFLICT groups of observeSyncStateCounts, so the number on the Home

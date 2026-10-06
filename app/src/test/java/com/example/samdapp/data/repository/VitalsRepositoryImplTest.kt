@@ -59,6 +59,7 @@ class FakeObservationDao : ObservationDao {
         }
     }
 
+    override suspend fun getSyncStateCounts() = observeSyncStateCounts().first()
     override fun observeSyncStateCounts(): Flow<List<com.example.samdapp.data.local.dao.SyncStateCount>> =
         store.map { rows ->
             rows.filter { it.syncState != com.example.samdapp.domain.model.SyncState.SYNCED }

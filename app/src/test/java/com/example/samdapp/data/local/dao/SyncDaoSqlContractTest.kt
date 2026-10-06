@@ -278,7 +278,7 @@ class SyncDaoSqlContractTest {
     }
 
     @Test
-    fun `every drained table has one grouped state counter that excludes only SYNCED`() {
+    fun `every drained table has grouped state counters that exclude only SYNCED`() {
         // One grouped query per table feeds Home every number it shows: pending (PENDING plus
         // RETRYABLE), and the card's FAILED plus CONFLICT, which must match the review list. A
         // counter that dropped a state, or a second per-table counter, would break one of those or
@@ -287,7 +287,9 @@ class SyncDaoSqlContractTest {
             val flat = s.replace(Regex("\"\\s*\\+\\s*\""), "")
             Regex("SELECT [^\"]*COUNT\\(\\*\\)[^\"]*FROM \\w+ WHERE syncState[^\"]*").findAll(flat).map { it.value }.toList()
         }
-        assertEquals("expected one state counter per drained table", 20, counters.size)
+        // Two per table: the Flow that feeds Home's caption and the one-shot read the "Sync now"
+        // message uses. Both must be this exact statement, or the two can disagree.
+        assertEquals("expected two state counters (observe and one-shot) per drained table", 40, counters.size)
         counters.forEach { sql ->
             assertTrue(
                 "a counter is not the grouped, SYNCED-excluding shape: $sql",

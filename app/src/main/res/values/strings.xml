@@ -90,6 +90,64 @@
     <string name="failed_sync_card_body">They are safe on this phone, but they are not on the server. Open this to see what each one needs.</string>
     <string name="failed_sync_card_action">Review</string>
 
+    <!--
+      Home's sync caption (presentation/home/SyncCaption.kt, truth table in
+      scratchpad/sync-failure-visibility-memo.md section 4.2). Full sentences, never fragments
+      joined in code, so each can be translated whole. Where two counts share a sentence, the
+      counts are labelled rather than inflected, so no plural has to agree with two numbers.
+      "Up to date" is said in exactly one case: nothing pending, failed, conflicted or blocked.
+    -->
+    <string name="sync_caption_sending">Sending…</string>
+    <plurals name="sync_caption_offline_records">
+        <item quantity="one">Offline. 1 record is saved on this phone, not sent yet.</item>
+        <item quantity="other">Offline. %1$d records are saved on this phone, not sent yet.</item>
+    </plurals>
+    <plurals name="sync_caption_offline_doctor_cases">
+        <item quantity="one">Offline. 1 case for a doctor is saved on this phone, not sent yet.</item>
+        <item quantity="other">Offline. %1$d cases for a doctor are saved on this phone, not sent yet.</item>
+    </plurals>
+    <string name="sync_caption_offline_records_and_doctor_cases">Offline. Saved on this phone, not sent yet: records %1$d, cases for a doctor %2$d.</string>
+    <string name="sync_caption_offline_activity_log">Offline. The activity log is saved on this phone, not sent yet.</string>
+    <string name="sync_caption_offline_nothing_else">Offline. Nothing else is waiting to send.</string>
+    <string name="sync_caption_offline_all_sent">Offline. Everything on this phone has been sent.</string>
+    <string name="sync_caption_could_not_send_no_connection">Could not send: could not reach the server. %1$d waiting.</string>
+    <string name="sync_caption_could_not_send_sign_in">Could not send: sign in again to send. %1$d waiting.</string>
+    <string name="sync_caption_could_not_send_server_refused">Could not send: the server is not accepting records right now. %1$d waiting.</string>
+    <string name="sync_caption_could_not_send_local_store">Could not send: this phone could not prepare records to send. %1$d waiting.</string>
+    <plurals name="sync_caption_waiting_records">
+        <item quantity="one">1 record waiting to send.</item>
+        <item quantity="other">%1$d records waiting to send.</item>
+    </plurals>
+    <string name="sync_caption_waiting_records_and_doctor_cases">Waiting to send: records %1$d, cases for a doctor %2$d.</string>
+    <plurals name="sync_caption_doctor_cases">
+        <item quantity="one">1 case waiting to go to a doctor. Press Sync now.</item>
+        <item quantity="other">%1$d cases waiting to go to a doctor. Press Sync now.</item>
+    </plurals>
+    <string name="sync_caption_activity_log">The activity log is waiting to send.</string>
+    <plurals name="sync_caption_needs_review">
+        <item quantity="one">Everything else is sent. 1 record needs review.</item>
+        <item quantity="other">Everything else is sent. %1$d records need review.</item>
+    </plurals>
+    <string name="sync_caption_up_to_date">Up to date</string>
+
+    <!-- The one message shown after "Sync now" (memo section 4.3). A finished sync is never on
+         its own "everything is sent": the server can still refuse individual records. -->
+    <string name="sync_now_offline">This phone is offline. Nothing was sent.</string>
+    <string name="sync_now_still_trying">Still trying to send. This can take a while on a slow connection.</string>
+    <string name="sync_now_failed_no_connection">Could not send: could not reach the server.</string>
+    <string name="sync_now_failed_sign_in">Could not send: sign in again to send.</string>
+    <string name="sync_now_failed_server_refused">Could not send: the server is not accepting records right now.</string>
+    <string name="sync_now_failed_local_store">Could not send: this phone could not prepare records to send.</string>
+    <plurals name="sync_now_sent_needs_review">
+        <item quantity="one">Sent what could be sent. 1 record needs review.</item>
+        <item quantity="other">Sent what could be sent. %1$d records need review.</item>
+    </plurals>
+    <plurals name="sync_now_sent_retry_later">
+        <item quantity="one">Sent. 1 record will be tried again later.</item>
+        <item quantity="other">Sent. %1$d records will be tried again later.</item>
+    </plurals>
+    <string name="sync_now_all_sent">Everything is sent.</string>
+
     <!-- The list. -->
     <string name="failed_sync_list_title">Records that did not reach the server</string>
     <string name="failed_sync_list_close">Close</string>

@@ -288,6 +288,7 @@ class AssessmentRunnerTest {
     private object FailingSyncStatus : com.example.samdapp.domain.sync.SyncStatus {
         override val state = kotlinx.coroutines.flow.flowOf(com.example.samdapp.domain.sync.SyncState())
         override suspend fun syncNow(): Result<Unit> = Result.failure(IllegalStateException("offline"))
+        override suspend fun stateNow() = com.example.samdapp.domain.sync.SyncState()
         override suspend fun failedRecords(): List<com.example.samdapp.domain.sync.FailedSyncRecord> = emptyList()
         override suspend fun sendFailedRecordAgain(record: com.example.samdapp.domain.sync.FailedSyncRecord) = Unit
     }

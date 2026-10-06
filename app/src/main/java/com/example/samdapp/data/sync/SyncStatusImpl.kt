@@ -3,6 +3,7 @@ package com.example.samdapp.data.sync
 import com.example.samdapp.domain.connectivity.ConnectivityController
 import com.example.samdapp.domain.repository.CaseRecordRepository
 import com.example.samdapp.domain.sync.FailedSyncRecord
+import com.example.samdapp.domain.sync.SyncOfflineException
 import com.example.samdapp.domain.sync.SyncState
 import com.example.samdapp.domain.sync.SyncStatus
 import kotlinx.coroutines.CoroutineScope
@@ -98,9 +99,22 @@ class SyncStatusImpl @Inject constructor(
         syncOutboxRepository.requeueFailed(record.table, record.recordId)
     }
 
+    override suspend fun stateNow(): SyncState {
+        val outbox = syncOutboxRepository.readOutboxCounts()
+        return SyncState(
+            lastSyncedAt = lastSyncedAt.value,
+            pendingCount = caseRecordRepository.observePendingSyncCount().first(),
+            isSyncing = isSyncing.value,
+            failedCount = outbox.needsReview,
+            outboxPending = outbox.pendingClinical,
+            auditPending = outbox.pendingAudit,
+            lastDrainFailure = drainOutcomeStore.lastFailure.value,
+        )
+    }
+
     override suspend fun syncNow(): Result<Unit> {
         if (!connectivityController.isOnline.first()) {
-            return Result.failure(IllegalStateException("No network available — can't sync while offline"))
+            return Result.failure(SyncOfflineException())
         }
         isSyncing.value = true
         return try {

@@ -78,6 +78,10 @@ interface EvaluateReportDao {
     @Query("SELECT syncState AS syncState, COUNT(*) AS rowCount FROM evaluate_reports WHERE syncState != 'SYNCED' GROUP BY syncState")
     fun observeSyncStateCounts(): Flow<List<SyncStateCount>>
 
+    /** The same counts, read once (for a decision made right after a drain). */
+    @Query("SELECT syncState AS syncState, COUNT(*) AS rowCount FROM evaluate_reports WHERE syncState != 'SYNCED' GROUP BY syncState")
+    suspend fun getSyncStateCounts(): List<SyncStateCount>
+
     /** The FAILED and CONFLICT rows of this table, projected for the worker-facing review list.
      *  Selects exactly the FAILED and CONFLICT groups of observeSyncStateCounts, so the number on the Home
      *  card and the length of the list can never disagree. Suspend rather than a Flow:
