@@ -67,7 +67,14 @@ fun KernelAssessmentScreen(
 internal fun KernelAssessmentContent(uiState: KernelAssessmentUiState, actions: KernelAssessmentActions) {
     Scaffold(topBar = { TopAppBar(title = { Text("AI Assessment") }) }) { padding: PaddingValues ->
         if (uiState.isLoading) {
-            SamdLoadingIndicator(modifier = Modifier.padding(padding).padding(32.dp))
+            if (uiState.waitingForNetwork) {
+                WaitingForNetworkCard(modifier = Modifier.padding(padding).padding(16.dp))
+            } else {
+                Column(modifier = Modifier.padding(padding).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    SamdLoadingIndicator()
+                    Text(stringResource(R.string.assessment_checking), modifier = Modifier.padding(top = 12.dp))
+                }
+            }
             return@Scaffold
         }
         val display = uiState.display
@@ -132,6 +139,18 @@ internal fun KernelAssessmentContent(uiState: KernelAssessmentUiState, actions: 
                 enabled = uiState.canContinue,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
             ) { Text("Continue", style = MaterialTheme.typography.titleMedium) }
+        }
+    }
+}
+
+/** The job is queued and the phone has no network: it runs on its own once connected, which is
+ *  true here (WorkManager holds it on NetworkType.CONNECTED), so no button. */
+@Composable
+private fun WaitingForNetworkCard(modifier: Modifier = Modifier) {
+    Card(modifier = modifier) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(stringResource(R.string.assessment_waiting_for_network_title), style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.assessment_waiting_for_network_body), style = MaterialTheme.typography.bodyMedium)
         }
     }
 }

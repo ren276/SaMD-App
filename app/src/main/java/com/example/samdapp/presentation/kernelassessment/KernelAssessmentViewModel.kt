@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import com.example.samdapp.domain.auth.AuthSession
+import com.example.samdapp.domain.connectivity.NetworkMonitor
 import com.example.samdapp.domain.auth.CadreTier
 import com.example.samdapp.domain.auth.toCadreTier
 import kotlinx.coroutines.flow.combine
@@ -172,6 +173,10 @@ data class KernelAssessmentUiState(
     val display: AssessmentDisplay? = null,
     val liabilityAcknowledged: Boolean = false,
     val isRetrying: Boolean = false,
+    /** No report yet, the job is queued, and the phone has no network. The job waits on the OS
+     *  network (NetworkType.CONNECTED), so this is shown as "Waiting for a connection" instead of
+     *  a spinner with nothing said. The job then runs on its own, which is true. */
+    val waitingForNetwork: Boolean = false,
     /** Resolved once from this consultation's AUDIO attachment row, not carried in the route.
      *  A uri that survived three screens is not evidence the attachment was persisted; the row
      *  is. Null means no audio leg, which sends the case straight to Acknowledgement. */
@@ -213,6 +218,9 @@ class KernelAssessmentViewModel @AssistedInject constructor(
     private val assessmentQueueScheduler: AssessmentQueueScheduler,
     private val auditLogger: AuditLogger,
     private val authSession: AuthSession,
+    /** The OS network, not the manual offline toggle: it is what WorkManager waits on before the
+     *  queued job runs (honouring the toggle is filed separately, operator ruling H2). */
+    private val networkMonitor: NetworkMonitor,
 ) : ViewModel(), KernelAssessmentActions {
 
     @AssistedFactory
@@ -270,9 +278,8 @@ class KernelAssessmentViewModel @AssistedInject constructor(
                 evaluateReportRepository.observeForCase(caseRecordId),
                 kernelReportRepository.observeForCase(caseRecordId),
                 assessmentQueueScheduler.observeWorkState(caseRecordId),
-            ) { evaluateOutput, kernelOutput, workState ->
-                Triple(evaluateOutput, kernelOutput, workState)
-            }.collect { (evaluateOutput, kernelOutput, workState) ->
+                networkMonitor.isNetworkAvailable,
+            ) { evaluateOutput, kernelOutput, workState, networkAvailable ->
                 val reportDisplay = evaluateOutput?.toDisplay() ?: kernelOutput?.toDisplay()
                 _uiState.update {
                     when {
@@ -280,12 +287,17 @@ class KernelAssessmentViewModel @AssistedInject constructor(
                             isLoading = false,
                             display = reportDisplay,
                             isRetrying = workState != AssessmentWorkState.NONE,
+                            waitingForNetwork = false,
                         )
-                        workState != AssessmentWorkState.NONE -> it.copy(isLoading = true, display = null)
-                        else -> it.copy(isLoading = false, display = stalledDisplay(), isRetrying = false)
+                        workState != AssessmentWorkState.NONE -> it.copy(
+                            isLoading = true,
+                            display = null,
+                            waitingForNetwork = workState == AssessmentWorkState.QUEUED && !networkAvailable,
+                        )
+                        else -> it.copy(isLoading = false, display = stalledDisplay(), isRetrying = false, waitingForNetwork = false)
                     }
                 }
-            }
+            }.collect {}
         }
     }
 

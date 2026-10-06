@@ -436,6 +436,10 @@
     <!-- Verification notices other than the low-score pair below. The no-result and mock notices
          never mention a score, certainty, confidence or calibration: there is no model result for
          them to describe (presentation/kernelassessment/AssessmentCopy.kt). -->
+    <!-- While the assessment job has not produced a result (memo section 3.1, A1 and A2). -->
+    <string name="assessment_waiting_for_network_title">Waiting for a connection</string>
+    <string name="assessment_waiting_for_network_body">This visit will be checked by itself as soon as this phone is connected.</string>
+    <string name="assessment_checking">Checking this visit</string>
     <string name="assessment_notice_critical_vitals">⚠ Emergency: critical vitals. Refer now; physician verification is required.</string>
     <string name="assessment_notice_emergency">⚠ Emergency referral. Refer now; physician verification is required.</string>
     <string name="assessment_notice_no_result">⚠ Physician review is required: no AI assessment was generated for this visit.</string>
