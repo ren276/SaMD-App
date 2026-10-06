@@ -674,7 +674,7 @@ review query, `data/local/dao/*Dao.kt` `getFailedForReview`).
 
 For an ancestor that is itself a child (encounter, case, consultation, prescription), "held"
 means FAILED-and-absent itself, or its own patient (or encounter) FAILED-and-absent.
-`ponytail:` follow-up chains are checked one level deep. A visit following a still-unsent
+Follow-up chains are checked one level deep. A visit following a still-unsent
 follow-up of a refused visit keeps today's behaviour (counted as waiting, burns retries). The fix
 is a recursive CTE, if such chains are ever seen.
 
@@ -870,3 +870,13 @@ The PROGRESS commit also carries the two items the operator added for Step 5:
    Default: file.
 7. **Q7. Check 4 worktree.** The hard rule forbids me opening `local.properties`. Will the operator
    create the worktree's copy with the one added line? Default: operator.
+
+### 12.9 Operator rulings on section 12 (2026-10-06, final, recorded verbatim)
+
+Q1. Yes. REQ-TRS-03 is amended per 12.8. The edits to docs/requirements/software-requirements.md, docs/requirements/traceability-matrix.md and docs/end-to-end-run-guide.md go in a SEPARATE commit marked PROPOSED, pending operator sign-off. Commit 14 changes code and strings only.
+Q2. Yes. A CONFLICT ancestor does not hold descendants. Gate rule 4 is aligned: a CONFLICT patient or encounter gives CASE_NOT_SENT_YET (retry), not A6.
+Q3. Yes. Retry CASE_NOT_SENT_YET whatever the network state; the network only chooses A1 or A2b.
+Q4. Yes, cap 6. Also verify and report whether back-navigation can leave the assessment screen while the work keeps running.
+Q5. No cascade requeue.
+Q6. File both. For PatientSummaryViewModel.kt:44-50 ("This case will be added to the training dataset"), report exactly what the action does and whether any consented training pipeline exists. File it as a PRIVACY item (DPDP purpose and consent), not as copy.
+Q7. No operator step: a worktree whose local.properties contains ONLY samd.dev.kernelFallback=none (the PR 0 method). If that build cannot reach the backend, STOP and ask.
