@@ -103,27 +103,32 @@ class RoomSyncOutboxRepository @Inject constructor(
             return
         }
         val attemptAt = Instant.now()
+        // A CONFLICT row keeps the base it was written on. Adopting the ack's server_version
+        // would let any later resend carry a matching base_version, pass rule 4 of
+        // _resolve_write and overwrite the newer server data the conflict protects. The backend's
+        // conflict result carries no server_version today; this does not rely on that.
+        val serverVersion = if (syncState == SyncState.CONFLICT) null else result.serverVersion
         when (result.table) {
-            "patients" -> patientDao.applySyncResult(result.id, syncState, result.serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
-            "encounters" -> encounterDao.applySyncResult(result.id, syncState, result.serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
-            "consultations" -> consultationDao.applySyncResult(result.id, syncState, result.serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
-            "attachments" -> attachmentDao.applySyncResult(result.id, syncState, result.serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
-            "observations" -> observationDao.applySyncResult(result.id, syncState, result.serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
-            "ailments" -> ailmentDao.applySyncResult(result.id, syncState, result.serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
-            "medical_history_items" -> medicalHistoryItemDao.applySyncResult(result.id, syncState, result.serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
-            "allergies" -> allergyDao.applySyncResult(result.id, syncState, result.serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
-            "family_history_entries" -> familyHistoryEntryDao.applySyncResult(result.id, syncState, result.serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
-            "social_histories" -> socialHistoryDao.applySyncResult(result.id, syncState, result.serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
-            "medication_entries" -> medicationEntryDao.applySyncResult(result.id, syncState, result.serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
-            "case_records" -> caseRecordDao.applySyncResult(result.id, syncState, result.serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
-            "kernel_reports" -> kernelReportDao.applySyncResult(result.id, syncState, result.serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
-            "evaluate_reports" -> evaluateReportDao.applySyncResult(result.id, syncState, result.serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
-            "diagnosis_feedback" -> diagnosisFeedbackDao.applySyncResult(result.id, syncState, result.serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
-            "prescriptions" -> prescriptionDao.applyPrescriptionSyncResult(result.id, syncState, result.serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
-            "medication_lines" -> prescriptionDao.applyMedicationLineSyncResult(result.id, syncState, result.serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
-            "referrals" -> referralDao.applySyncResult(result.id, syncState, result.serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
-            "abha_profiles" -> abhaProfileDao.applySyncResult(result.id, syncState, result.serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
-            "audit_log" -> auditLogDao.applySyncResult(result.id, syncState, result.serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
+            "patients" -> patientDao.applySyncResult(result.id, syncState, serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
+            "encounters" -> encounterDao.applySyncResult(result.id, syncState, serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
+            "consultations" -> consultationDao.applySyncResult(result.id, syncState, serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
+            "attachments" -> attachmentDao.applySyncResult(result.id, syncState, serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
+            "observations" -> observationDao.applySyncResult(result.id, syncState, serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
+            "ailments" -> ailmentDao.applySyncResult(result.id, syncState, serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
+            "medical_history_items" -> medicalHistoryItemDao.applySyncResult(result.id, syncState, serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
+            "allergies" -> allergyDao.applySyncResult(result.id, syncState, serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
+            "family_history_entries" -> familyHistoryEntryDao.applySyncResult(result.id, syncState, serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
+            "social_histories" -> socialHistoryDao.applySyncResult(result.id, syncState, serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
+            "medication_entries" -> medicationEntryDao.applySyncResult(result.id, syncState, serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
+            "case_records" -> caseRecordDao.applySyncResult(result.id, syncState, serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
+            "kernel_reports" -> kernelReportDao.applySyncResult(result.id, syncState, serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
+            "evaluate_reports" -> evaluateReportDao.applySyncResult(result.id, syncState, serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
+            "diagnosis_feedback" -> diagnosisFeedbackDao.applySyncResult(result.id, syncState, serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
+            "prescriptions" -> prescriptionDao.applyPrescriptionSyncResult(result.id, syncState, serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
+            "medication_lines" -> prescriptionDao.applyMedicationLineSyncResult(result.id, syncState, serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
+            "referrals" -> referralDao.applySyncResult(result.id, syncState, serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
+            "abha_profiles" -> abhaProfileDao.applySyncResult(result.id, syncState, serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
+            "audit_log" -> auditLogDao.applySyncResult(result.id, syncState, serverVersion, result.code, result.message, attemptAt, sentLocalModifiedAt, MAX_SYNC_ATTEMPTS, RETRY_EXHAUSTED_CODE)
             // Recorded and skipped, not thrown. A backend that acks a table this build's `when`
             // does not cover is a mirror break, and throwing here made it a drain-wide outage:
             // the exception escaped applyAck, so every ack AFTER it in the same batch was never
