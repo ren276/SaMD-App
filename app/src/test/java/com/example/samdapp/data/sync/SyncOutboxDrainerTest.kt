@@ -434,3 +434,73 @@ class SyncOutboxRetryBehaviourTest {
         assertEquals("SAMD-SYNC-RECORD-TOO-LARGE", repository.failedCodes.values.single())
     }
 }
+
+/**
+ * Every drain records why it failed, or clears the record when it succeeds, in
+ * [DrainOutcomeStore]: the one fact Home needs to say "Could not send" instead of "waiting to
+ * send" while the outbox cannot drain. The kind comes from the push's problem `code`, which used
+ * to be flattened into an exception message and lost.
+ */
+class DrainOutcomeRecordingTest {
+
+    private fun record(id: String) = SyncRecordDto(
+        table = "allergies", op = "upsert", id = id,
+        clientUpdatedAt = Instant.EPOCH, baseVersion = null,
+        data = AllergySyncPayloadDto(patientId = "p1", category = "ENVIRONMENTAL", allergen = "pollen", reactionType = null, createdAt = Instant.EPOCH),
+    )
+
+    private fun failingPush(code: String?) = object : com.example.samdapp.data.remote.SyncPushService {
+        override suspend fun push(request: com.example.samdapp.data.remote.dto.SyncPushRequestDto) =
+            com.example.samdapp.data.remote.SyncPushResult.Failure(code = code, message = "push failed")
+    }
+
+    private suspend fun drainWith(
+        push: com.example.samdapp.data.remote.SyncPushService,
+        outcome: DrainOutcomeStore,
+        batchStore: InMemoryInFlightBatchStore = InMemoryInFlightBatchStore(),
+    ): Result<Unit> = SyncOutboxDrainer(
+        FakeSyncOutboxRepository(listOf(record("a-1"))),
+        SyncBatchPacker(com.example.samdapp.data.remote.SyncGson.create()),
+        push, batchStore, FakeAuthTokenStore(), outcome,
+    ).drain()
+
+    @Test
+    fun `a push that never reached the server records NO_CONNECTION`() = runTest {
+        val outcome = DrainOutcomeStore()
+        drainWith(failingPush(code = null), outcome)
+        assertEquals(com.example.samdapp.domain.sync.DrainFailure.NO_CONNECTION, outcome.lastFailure.value)
+    }
+
+    @Test
+    fun `an auth refusal records SIGN_IN`() = runTest {
+        val outcome = DrainOutcomeStore()
+        drainWith(failingPush(code = "SAMD-AUTH-1003"), outcome)
+        assertEquals(com.example.samdapp.domain.sync.DrainFailure.SIGN_IN, outcome.lastFailure.value)
+    }
+
+    @Test
+    fun `any other refused batch records SERVER_REFUSED`() = runTest {
+        val outcome = DrainOutcomeStore()
+        drainWith(failingPush(code = "SAMD-SYS-9004"), outcome)
+        assertEquals(com.example.samdapp.domain.sync.DrainFailure.SERVER_REFUSED, outcome.lastFailure.value)
+    }
+
+    @Test
+    fun `an unreadable in-flight batch store records LOCAL_STORE`() = runTest {
+        val outcome = DrainOutcomeStore()
+        val batchStore = InMemoryInFlightBatchStore().apply { loadFailure = IllegalStateException("corrupt") }
+        drainWith(FakeSyncPushService(), outcome, batchStore)
+        assertEquals(com.example.samdapp.domain.sync.DrainFailure.LOCAL_STORE, outcome.lastFailure.value)
+    }
+
+    @Test
+    fun `a later successful drain clears the failure`() = runTest {
+        val outcome = DrainOutcomeStore()
+        drainWith(failingPush(code = null), outcome)
+        assertNotNull(outcome.lastFailure.value)
+
+        drainWith(FakeSyncPushService(), outcome)
+
+        assertNull(outcome.lastFailure.value)
+    }
+}

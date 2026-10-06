@@ -32,7 +32,24 @@ class SyncStatusImplTest {
         networkMonitor: FakeNetworkMonitor = FakeNetworkMonitor(),
         outboxScheduler: FakeSyncOutboxScheduler = FakeSyncOutboxScheduler(),
         outboxRepository: FakeSyncOutboxRepository = FakeSyncOutboxRepository(),
-    ) = SyncStatusImpl(caseRecordRepository, ConnectivityController(networkMonitor), outboxScheduler, outboxRepository)
+        drainOutcome: DrainOutcomeStore = DrainOutcomeStore(),
+    ) = SyncStatusImpl(caseRecordRepository, ConnectivityController(networkMonitor), outboxScheduler, outboxRepository, drainOutcome)
+
+    @Test
+    fun `outbox counts and the last drain failure reach Home's sync state`() = runTest {
+        val outbox = FakeSyncOutboxRepository()
+        val drainOutcome = DrainOutcomeStore()
+        val syncStatus = sync(outboxRepository = outbox, drainOutcome = drainOutcome)
+
+        outbox.outboxCounts.value = OutboxCounts(pendingClinical = 3, pendingAudit = 5, needsReview = 2)
+        drainOutcome.record(com.example.samdapp.domain.sync.DrainFailure.SERVER_REFUSED)
+
+        val state = syncStatus.state.first()
+        assertEquals(3, state.outboxPending)
+        assertEquals(5, state.auditPending)
+        assertEquals(2, state.failedCount)
+        assertEquals(com.example.samdapp.domain.sync.DrainFailure.SERVER_REFUSED, state.lastDrainFailure)
+    }
 
     @Test
     fun `initial state is not synced`() = runTest {

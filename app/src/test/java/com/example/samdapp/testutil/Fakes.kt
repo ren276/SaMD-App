@@ -57,6 +57,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import java.time.Instant
 
 class FakeBrandLookupSource(
@@ -767,7 +768,8 @@ class FakeAuditLogDao : AuditLogDao {
         }
     }
 
-    override fun observeFailedSyncCount(): Flow<Int> = _failedSyncCount.asStateFlow()
+    override fun observeSyncStateCounts(): Flow<List<com.example.samdapp.data.local.dao.SyncStateCount>> =
+        _failedSyncCount.map { n -> if (n == 0) emptyList() else listOf(com.example.samdapp.data.local.dao.SyncStateCount(com.example.samdapp.domain.model.SyncState.FAILED, n)) }
     override suspend fun getFailedForReview(): List<com.example.samdapp.data.local.dao.FailedSyncRow> = emptyList()
 }
 

@@ -20,6 +20,13 @@ data class SyncState(
      *  needs a person arrives in this count on its own, the same working day, carrying
      *  [com.example.samdapp.domain.model.RETRY_EXHAUSTED_CODE]. */
     val failedCount: Int = 0,
+    /** Clinical rows the outbox still owes the server and is still working on (PENDING plus
+     *  RETRYABLE, nineteen tables). Not [pendingCount], which is the doctor-assignment queue. */
+    val outboxPending: Int = 0,
+    /** The same for `audit_log`, kept apart so an audit-only backlog is not shown as records. */
+    val auditPending: Int = 0,
+    /** Why the last drain failed, or null if it succeeded or none has failed since app start. */
+    val lastDrainFailure: DrainFailure? = null,
 )
 
 /**

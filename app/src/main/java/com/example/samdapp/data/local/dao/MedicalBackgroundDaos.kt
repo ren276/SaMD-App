@@ -54,11 +54,11 @@ interface MedicalHistoryItemDao {
     )
     suspend fun requeueFailed(id: String)
 
-    @Query("SELECT COUNT(*) FROM medical_history_items WHERE syncState IN ('FAILED', 'CONFLICT')")
-    fun observeFailedSyncCount(): Flow<Int>
+    @Query("SELECT syncState AS syncState, COUNT(*) AS rowCount FROM medical_history_items WHERE syncState != 'SYNCED' GROUP BY syncState")
+    fun observeSyncStateCounts(): Flow<List<SyncStateCount>>
 
     /** The FAILED and CONFLICT rows of this table, projected for the worker-facing review list.
-     *  Selects exactly the rows this table's failed counter counts, so the number on the Home
+     *  Selects exactly the FAILED and CONFLICT groups of observeSyncStateCounts, so the number on the Home
      *  card and the length of the list can never disagree. Suspend rather than a Flow:
      *  the list is fetched when a worker opens it, so it costs nothing at launch.
      *  See [FailedSyncRow]. */
@@ -111,11 +111,11 @@ interface MedicationEntryDao {
     )
     suspend fun requeueFailed(id: String)
 
-    @Query("SELECT COUNT(*) FROM medication_entries WHERE syncState IN ('FAILED', 'CONFLICT')")
-    fun observeFailedSyncCount(): Flow<Int>
+    @Query("SELECT syncState AS syncState, COUNT(*) AS rowCount FROM medication_entries WHERE syncState != 'SYNCED' GROUP BY syncState")
+    fun observeSyncStateCounts(): Flow<List<SyncStateCount>>
 
     /** The FAILED and CONFLICT rows of this table, projected for the worker-facing review list.
-     *  Selects exactly the rows this table's failed counter counts, so the number on the Home
+     *  Selects exactly the FAILED and CONFLICT groups of observeSyncStateCounts, so the number on the Home
      *  card and the length of the list can never disagree. Suspend rather than a Flow:
      *  the list is fetched when a worker opens it, so it costs nothing at launch.
      *  See [FailedSyncRow]. */
@@ -168,11 +168,11 @@ interface AllergyDao {
     )
     suspend fun requeueFailed(id: String)
 
-    @Query("SELECT COUNT(*) FROM allergies WHERE syncState IN ('FAILED', 'CONFLICT')")
-    fun observeFailedSyncCount(): Flow<Int>
+    @Query("SELECT syncState AS syncState, COUNT(*) AS rowCount FROM allergies WHERE syncState != 'SYNCED' GROUP BY syncState")
+    fun observeSyncStateCounts(): Flow<List<SyncStateCount>>
 
     /** The FAILED and CONFLICT rows of this table, projected for the worker-facing review list.
-     *  Selects exactly the rows this table's failed counter counts, so the number on the Home
+     *  Selects exactly the FAILED and CONFLICT groups of observeSyncStateCounts, so the number on the Home
      *  card and the length of the list can never disagree. Suspend rather than a Flow:
      *  the list is fetched when a worker opens it, so it costs nothing at launch.
      *  See [FailedSyncRow]. */
@@ -225,11 +225,11 @@ interface FamilyHistoryEntryDao {
     )
     suspend fun requeueFailed(id: String)
 
-    @Query("SELECT COUNT(*) FROM family_history_entries WHERE syncState IN ('FAILED', 'CONFLICT')")
-    fun observeFailedSyncCount(): Flow<Int>
+    @Query("SELECT syncState AS syncState, COUNT(*) AS rowCount FROM family_history_entries WHERE syncState != 'SYNCED' GROUP BY syncState")
+    fun observeSyncStateCounts(): Flow<List<SyncStateCount>>
 
     /** The FAILED and CONFLICT rows of this table, projected for the worker-facing review list.
-     *  Selects exactly the rows this table's failed counter counts, so the number on the Home
+     *  Selects exactly the FAILED and CONFLICT groups of observeSyncStateCounts, so the number on the Home
      *  card and the length of the list can never disagree. Suspend rather than a Flow:
      *  the list is fetched when a worker opens it, so it costs nothing at launch.
      *  See [FailedSyncRow]. */
@@ -290,11 +290,11 @@ interface SocialHistoryDao {
     )
     suspend fun requeueFailed(patientId: String)
 
-    @Query("SELECT COUNT(*) FROM social_histories WHERE syncState IN ('FAILED', 'CONFLICT')")
-    fun observeFailedSyncCount(): Flow<Int>
+    @Query("SELECT syncState AS syncState, COUNT(*) AS rowCount FROM social_histories WHERE syncState != 'SYNCED' GROUP BY syncState")
+    fun observeSyncStateCounts(): Flow<List<SyncStateCount>>
 
     /** The FAILED and CONFLICT rows of this table, projected for the worker-facing review list.
-     *  Selects exactly the rows this table's failed counter counts, so the number on the Home
+     *  Selects exactly the FAILED and CONFLICT groups of observeSyncStateCounts, so the number on the Home
      *  card and the length of the list can never disagree. Suspend rather than a Flow:
      *  the list is fetched when a worker opens it, so it costs nothing at launch.
      *  See [FailedSyncRow]. */

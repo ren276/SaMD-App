@@ -278,16 +278,21 @@ class SyncDaoSqlContractTest {
     }
 
     @Test
-    fun `every failed counter counts exactly what its review query lists`() {
-        // The Home card shows the count; the list it opens shows the review rows. A counter that
-        // still read FAILED only would put a number on the card that the list contradicts.
+    fun `every drained table has one grouped state counter that excludes only SYNCED`() {
+        // One grouped query per table feeds Home every number it shows: pending (PENDING plus
+        // RETRYABLE), and the card's FAILED plus CONFLICT, which must match the review list. A
+        // counter that dropped a state, or a second per-table counter, would break one of those or
+        // double the observers on the launch path (perf audit F2A-01).
         val counters = sources().values.flatMap { s ->
             val flat = s.replace(Regex("\"\\s*\\+\\s*\""), "")
-            Regex("SELECT COUNT\\(\\*\\) FROM \\w+ WHERE syncState[^\"]*").findAll(flat).map { it.value }.toList()
+            Regex("SELECT [^\"]*COUNT\\(\\*\\)[^\"]*FROM \\w+ WHERE syncState[^\"]*").findAll(flat).map { it.value }.toList()
         }
-        assertEquals("expected one failed counter per drained table", 20, counters.size)
+        assertEquals("expected one state counter per drained table", 20, counters.size)
         counters.forEach { sql ->
-            assertTrue("a counter does not count FAILED and CONFLICT: $sql", sql.endsWith("syncState IN ('FAILED', 'CONFLICT')"))
+            assertTrue(
+                "a counter is not the grouped, SYNCED-excluding shape: $sql",
+                Regex("^SELECT syncState AS syncState, COUNT\\(\\*\\) AS rowCount FROM \\w+ WHERE syncState != 'SYNCED' GROUP BY syncState$").matches(sql),
+            )
         }
     }
 

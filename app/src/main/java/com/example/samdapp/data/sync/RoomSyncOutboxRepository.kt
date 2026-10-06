@@ -191,20 +191,25 @@ class RoomSyncOutboxRepository @Inject constructor(
      *  volume. */
     val skippedAcks: MutableList<SkippedAck> get() = _skippedAcks
 
-    override fun observeFailedCount(): Flow<Int> = combine(
-        listOf(
-            patientDao.observeFailedSyncCount(), encounterDao.observeFailedSyncCount(),
-            consultationDao.observeFailedSyncCount(), attachmentDao.observeFailedSyncCount(),
-            observationDao.observeFailedSyncCount(), ailmentDao.observeFailedSyncCount(),
-            medicalHistoryItemDao.observeFailedSyncCount(), allergyDao.observeFailedSyncCount(),
-            familyHistoryEntryDao.observeFailedSyncCount(), socialHistoryDao.observeFailedSyncCount(),
-            medicationEntryDao.observeFailedSyncCount(), caseRecordDao.observeFailedSyncCount(),
-            kernelReportDao.observeFailedSyncCount(), evaluateReportDao.observeFailedSyncCount(),
-            diagnosisFeedbackDao.observeFailedSyncCount(), prescriptionDao.observePrescriptionFailedSyncCount(),
-            prescriptionDao.observeMedicationLineFailedSyncCount(), referralDao.observeFailedSyncCount(),
-            abhaProfileDao.observeFailedSyncCount(), auditLogDao.observeFailedSyncCount(),
-        ),
-    ) { counts -> counts.sum() }
+    override fun observeOutboxCounts(): Flow<OutboxCounts> = combine(
+        combine(
+            listOf(
+                patientDao.observeSyncStateCounts(), encounterDao.observeSyncStateCounts(),
+                consultationDao.observeSyncStateCounts(), attachmentDao.observeSyncStateCounts(),
+                observationDao.observeSyncStateCounts(), ailmentDao.observeSyncStateCounts(),
+                medicalHistoryItemDao.observeSyncStateCounts(), allergyDao.observeSyncStateCounts(),
+                familyHistoryEntryDao.observeSyncStateCounts(), socialHistoryDao.observeSyncStateCounts(),
+                medicationEntryDao.observeSyncStateCounts(), caseRecordDao.observeSyncStateCounts(),
+                kernelReportDao.observeSyncStateCounts(), evaluateReportDao.observeSyncStateCounts(),
+                diagnosisFeedbackDao.observeSyncStateCounts(), prescriptionDao.observePrescriptionSyncStateCounts(),
+                prescriptionDao.observeMedicationLineSyncStateCounts(), referralDao.observeSyncStateCounts(),
+                abhaProfileDao.observeSyncStateCounts(),
+            ),
+        ) { perTable -> perTable.flatMap { it } },
+        // audit_log apart: an audit-only backlog is a different sentence on Home (ruling H4).
+        auditLogDao.observeSyncStateCounts(),
+        ::outboxCountsOf,
+    )
 
     /**
      * Every FAILED and CONFLICT row in the outbox, newest first, with its patient's name resolved and its
@@ -214,7 +219,7 @@ class RoomSyncOutboxRepository @Inject constructor(
      * considered and rejected was a single twenty-branch `UNION ALL` in a new DAO: one artifact
      * instead of twenty is nicer to count, but this environment has no Robolectric and no
      * device, so neither shape can be EXECUTED by a runnable test. Given that, twenty statements
-     * that each mirror the `observeFailedSyncCount` sitting directly above them are readable by
+     * that each mirror the `observeSyncStateCounts` sitting directly above them are readable by
      * a reviewer one at a time, and a seventy-line UNION with correlated sub-selects is not.
      * `SyncDaoSqlContractTest` pins the count at twenty either way.
      *

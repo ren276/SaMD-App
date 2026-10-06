@@ -32,9 +32,10 @@ import javax.inject.Singleton
  *   [FakeSyncOutboxScheduler]/[FakeSyncOutboxRepository] standing in for the two new dependencies
  *   below so those six cases stay plain-JVM-testable.
  * - [syncOutboxScheduler]'s generic outbox drain: the twenty MIGRATION_12_13 tables' `PENDING`
- *   rows, pushed to `POST /sync/push` via [SyncPushWorker]. [SyncState.failedCount] surfaces
- *   [syncOutboxRepository]'s FAILED-row count (Phase 7's admin view is out of scope; this only
- *   makes the count queryable).
+ *   rows, pushed to `POST /sync/push` via [SyncPushWorker]. [syncOutboxRepository]'s
+ *   [OutboxCounts] become [SyncState.outboxPending], [SyncState.auditPending] and
+ *   [SyncState.failedCount] (FAILED plus CONFLICT), and [drainOutcomeStore] supplies
+ *   [SyncState.lastDrainFailure], so Home can tell "waiting to send" from "could not send".
  *
  * These two never corrupt each other: draining `case_records`' transport `syncState` (via
  * [SyncOutboxRepository.applyAck] -> `CaseRecordDao.applySyncResult`) touches only the
@@ -49,6 +50,7 @@ class SyncStatusImpl @Inject constructor(
     private val connectivityController: ConnectivityController,
     private val syncOutboxScheduler: SyncOutboxScheduler,
     private val syncOutboxRepository: SyncOutboxRepository,
+    private val drainOutcomeStore: DrainOutcomeStore,
 ) : SyncStatus {
 
     private val isSyncing = MutableStateFlow(false)
@@ -73,9 +75,18 @@ class SyncStatusImpl @Inject constructor(
         caseRecordRepository.observePendingSyncCount(),
         isSyncing,
         lastSyncedAt,
-        syncOutboxRepository.observeFailedCount(),
-    ) { pendingCount, syncing, lastSynced, failedCount ->
-        SyncState(lastSyncedAt = lastSynced, pendingCount = pendingCount, isSyncing = syncing, failedCount = failedCount)
+        syncOutboxRepository.observeOutboxCounts(),
+        drainOutcomeStore.lastFailure,
+    ) { pendingCount, syncing, lastSynced, outbox, lastDrainFailure ->
+        SyncState(
+            lastSyncedAt = lastSynced,
+            pendingCount = pendingCount,
+            isSyncing = syncing,
+            failedCount = outbox.needsReview,
+            outboxPending = outbox.pendingClinical,
+            auditPending = outbox.pendingAudit,
+            lastDrainFailure = lastDrainFailure,
+        )
     }
 
     /** Straight delegation. The classification and the patient-name lookup live in

@@ -42,7 +42,8 @@ class FakeSyncOutboxRepository(
     initial: List<SyncRecordDto> = emptyList(),
 ) : SyncOutboxRepository {
     private val pending = initial.toMutableList()
-    private val failedCount = MutableStateFlow(0)
+    /** Settable by a test; [needsReview] also tracks [failedIds] as acks and requeues move rows. */
+    val outboxCounts = MutableStateFlow(com.example.samdapp.data.sync.OutboxCounts())
     val syncedIds = mutableListOf<Pair<String, String>>()
     val conflictedIds = mutableListOf<Pair<String, String>>()
     val failedIds = mutableListOf<Pair<String, String>>()
@@ -89,7 +90,7 @@ class FakeSyncOutboxRepository(
         if (exhausted) {
             failedIds += key
             failedCodes[key] = com.example.samdapp.domain.model.RETRY_EXHAUSTED_CODE
-            failedCount.value = failedIds.size
+            outboxCounts.value = outboxCounts.value.copy(needsReview = failedIds.size)
             return
         }
         when (localState) {
@@ -99,7 +100,7 @@ class FakeSyncOutboxRepository(
                 failedIds += key
                 failedCodes[key] = result.code
                 failedMessages[key] = result.message
-                failedCount.value = failedIds.size
+                outboxCounts.value = outboxCounts.value.copy(needsReview = failedIds.size)
             }
             com.example.samdapp.domain.model.SyncState.RETRYABLE -> retryableIds += key
             com.example.samdapp.domain.model.SyncState.PENDING -> Unit
@@ -110,10 +111,10 @@ class FakeSyncOutboxRepository(
         requeuedIds += table to id
         attemptCounts[table to id] = 0
         failedIds.removeAll { it == (table to id) }
-        failedCount.value = failedIds.size
+        outboxCounts.value = outboxCounts.value.copy(needsReview = failedIds.size)
     }
 
-    override fun observeFailedCount() = failedCount.asStateFlow()
+    override fun observeOutboxCounts() = outboxCounts.asStateFlow()
 
     /** Mirrors the real repository closely enough for a ViewModel test: FAILED rows only, never
      *  a RETRYABLE one, classified by the same

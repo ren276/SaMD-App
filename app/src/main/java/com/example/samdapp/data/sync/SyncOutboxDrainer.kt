@@ -38,6 +38,9 @@ class SyncOutboxDrainer @Inject constructor(
     private val pushService: SyncPushService,
     private val inFlightBatchStore: InFlightBatchStore,
     private val authTokenStore: AuthTokenStore,
+    /** Defaulted so the many drainer tests that do not care about it stay unchanged; Hilt
+     *  injects the singleton. */
+    private val drainOutcomeStore: DrainOutcomeStore = DrainOutcomeStore(),
 ) {
     // Process-wide: the periodic (sync_push_periodic) and one-time (sync_push_now) WorkManager
     // requests are different unique-work names, so their SyncPushWorker instances can run
@@ -46,7 +49,10 @@ class SyncOutboxDrainer @Inject constructor(
     // Mutex field) is what guarantees both worker instances share the same Mutex object.
     private val drainMutex = Mutex()
 
+    /** Records the outcome in [drainOutcomeStore] either way, so Home can say "Could not send"
+     *  while the outbox cannot drain and stop saying it the moment a drain succeeds. */
     suspend fun drain(): Result<Unit> = drainMutex.withLock { drainLocked() }
+        .also { result -> drainOutcomeStore.record(result.exceptionOrNull()?.let(::drainFailureFor)) }
 
     /**
      * **Termination, stated exhaustively, because this is a `while (true)` over a table the loop
@@ -200,7 +206,7 @@ class SyncOutboxDrainer @Inject constructor(
                 // failure means "never reached the backend" or "backend applied it but the
                 // response never arrived", resending under this same batch_id on the next run is
                 // safe either way (see this class's KDoc).
-                Result.failure(IllegalStateException(result.message))
+                Result.failure(SyncPushFailedException(result.code, result.message))
             }
         }
     }

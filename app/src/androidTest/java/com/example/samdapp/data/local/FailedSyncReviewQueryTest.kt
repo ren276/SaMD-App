@@ -218,10 +218,12 @@ class FailedSyncReviewQueryTest {
 
         val listed = db.patientDao().getFailedForReview() + db.kernelReportDao().getFailedForReview() +
             db.abhaProfileDao().getFailedForReview() + db.socialHistoryDao().getFailedForReview()
-        val counted = db.patientDao().observeFailedSyncCount().first() +
-            db.kernelReportDao().observeFailedSyncCount().first() +
-            db.abhaProfileDao().observeFailedSyncCount().first() +
-            db.socialHistoryDao().observeFailedSyncCount().first()
+        val counted = (
+            db.patientDao().observeSyncStateCounts().first() +
+                db.kernelReportDao().observeSyncStateCounts().first() +
+                db.abhaProfileDao().observeSyncStateCounts().first() +
+                db.socialHistoryDao().observeSyncStateCounts().first()
+            ).filter { it.syncState == SyncState.FAILED || it.syncState == SyncState.CONFLICT }.sumOf { it.rowCount }
 
         assertEquals(
             listOf("patients", "kernel_reports", "abha_profiles", "social_histories"),
