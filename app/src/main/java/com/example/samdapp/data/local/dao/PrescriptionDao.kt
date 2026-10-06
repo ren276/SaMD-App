@@ -57,18 +57,18 @@ interface PrescriptionDao {
     )
     suspend fun requeueFailedPrescription(id: String)
 
-    @Query("SELECT COUNT(*) FROM prescriptions WHERE syncState = 'FAILED'")
+    @Query("SELECT COUNT(*) FROM prescriptions WHERE syncState IN ('FAILED', 'CONFLICT')")
     fun observePrescriptionFailedSyncCount(): Flow<Int>
 
-    /** The FAILED rows of this table, projected for the worker-facing review list (S-3).
-     *  Selects exactly the rows this table's FAILED counter counts, so the number on the Home
+    /** The FAILED and CONFLICT rows of this table, projected for the worker-facing review list.
+     *  Selects exactly the rows this table's failed counter counts, so the number on the Home
      *  card and the length of the list can never disagree. Suspend rather than a Flow:
      *  the list is fetched when a worker opens it, so it costs nothing at launch.
      *  See [FailedSyncRow]. */
     @Query(
-        "SELECT 'prescriptions' AS tableName, id AS recordId, patientId AS patientId, localModifiedAt AS " +
+        "SELECT 'prescriptions' AS tableName, syncState AS syncState, id AS recordId, patientId AS patientId, localModifiedAt AS " +
         "recordedAt, syncErrorCode AS syncErrorCode, syncErrorMessage AS syncErrorMessage FROM " +
-        "prescriptions WHERE syncState = 'FAILED'",
+        "prescriptions WHERE syncState IN ('FAILED', 'CONFLICT')",
     )
     suspend fun getFailedPrescriptionsForReview(): List<FailedSyncRow>
 
@@ -104,19 +104,19 @@ interface PrescriptionDao {
     )
     suspend fun requeueFailedMedicationLine(id: String)
 
-    @Query("SELECT COUNT(*) FROM medication_lines WHERE syncState = 'FAILED'")
+    @Query("SELECT COUNT(*) FROM medication_lines WHERE syncState IN ('FAILED', 'CONFLICT')")
     fun observeMedicationLineFailedSyncCount(): Flow<Int>
 
-    /** The FAILED rows of this table, projected for the worker-facing review list (S-3).
-     *  Selects exactly the rows this table's FAILED counter counts, so the number on the Home
+    /** The FAILED and CONFLICT rows of this table, projected for the worker-facing review list.
+     *  Selects exactly the rows this table's failed counter counts, so the number on the Home
      *  card and the length of the list can never disagree. Suspend rather than a Flow:
      *  the list is fetched when a worker opens it, so it costs nothing at launch.
      *  See [FailedSyncRow]. */
     @Query(
-        "SELECT 'medication_lines' AS tableName, ml.id AS recordId, p.patientId AS patientId, " +
+        "SELECT 'medication_lines' AS tableName, ml.syncState AS syncState, ml.id AS recordId, p.patientId AS patientId, " +
         "ml.localModifiedAt AS recordedAt, ml.syncErrorCode AS syncErrorCode, ml.syncErrorMessage AS " +
         "syncErrorMessage FROM medication_lines ml LEFT JOIN prescriptions p ON p.id = ml.prescriptionId " +
-        "WHERE ml.syncState = 'FAILED'",
+        "WHERE ml.syncState IN ('FAILED', 'CONFLICT')",
     )
     suspend fun getFailedMedicationLinesForReview(): List<FailedSyncRow>
 }

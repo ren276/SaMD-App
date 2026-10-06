@@ -1,9 +1,10 @@
 package com.example.samdapp.data.local.dao
 
+import com.example.samdapp.domain.model.SyncState
 import java.time.Instant
 
 /**
- * One `FAILED` outbox row, projected down to what a worker-facing list needs: which record it is,
+ * One `FAILED` or `CONFLICT` outbox row, projected down to what a worker-facing list needs: which record it is,
  * whose it is, when it was written, and the two columns S-2 persisted and nothing read.
  *
  * Every syncable table's `getFailedForReview()` returns this same shape, so
@@ -20,9 +21,16 @@ import java.time.Instant
  *
  * **[recordedAt] is `localModifiedAt`, not `lastSyncAttemptAt`.** A worker recognises the day the
  * visit happened. The day the phone last tried to send it means nothing to them.
+ *
+ * **[syncState] is projected so the cause is classified on it first.** A CONFLICT row carries no
+ * error code (a conflict ack has none), and classifying it by code alone would read it as
+ * unrecognised and offer a "Send again" that the FAILED-only requeue guard turns into a no-op.
+ * Non-null on purpose: a projection alias mismatch on a non-null field fails the build, where a
+ * nullable one only warns.
  */
 data class FailedSyncRow(
     val tableName: String,
+    val syncState: SyncState,
     val recordId: String,
     val patientId: String?,
     val recordedAt: Instant,

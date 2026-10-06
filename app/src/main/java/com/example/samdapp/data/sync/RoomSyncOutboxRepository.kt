@@ -207,7 +207,7 @@ class RoomSyncOutboxRepository @Inject constructor(
     ) { counts -> counts.sum() }
 
     /**
-     * Every FAILED row in the outbox, newest first, with its patient's name resolved and its
+     * Every FAILED and CONFLICT row in the outbox, newest first, with its patient's name resolved and its
      * cause classified.
      *
      * Twenty queries plus one name lookup, run on demand rather than observed. The alternative
@@ -258,7 +258,7 @@ class RoomSyncOutboxRepository @Inject constructor(
                     recordId = row.recordId,
                     patientName = row.patientId?.let { names[it] },
                     recordedAt = row.recordedAt,
-                    reason = syncFailureReasonFor(row.syncErrorCode, row.syncErrorMessage),
+                    reason = syncFailureReasonFor(row.syncState, row.syncErrorCode, row.syncErrorMessage),
                 )
             }
     }

@@ -4,6 +4,7 @@ import com.example.samdapp.domain.model.RETRY_EXHAUSTED_CODE
 import com.example.samdapp.domain.model.SYNC_RECORD_INVALID_CODE
 import com.example.samdapp.domain.model.SyncFailureAction
 import com.example.samdapp.domain.model.SyncFailureReason
+import com.example.samdapp.domain.model.SyncState
 import com.example.samdapp.domain.model.syncFailureReasonFor
 import com.example.samdapp.domain.sync.FailedSyncRecord
 import com.example.samdapp.domain.usecase.GetTodaysPatientsUseCase
@@ -56,7 +57,7 @@ class HomeFailedRecordsTest {
         recordId = id,
         patientName = patientName,
         recordedAt = Instant.EPOCH,
-        reason = syncFailureReasonFor(code, message),
+        reason = syncFailureReasonFor(SyncState.FAILED, code, message),
     )
 
     @Test

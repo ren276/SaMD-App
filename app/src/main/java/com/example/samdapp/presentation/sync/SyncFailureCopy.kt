@@ -25,6 +25,7 @@ val SyncFailureReason.titleRes: Int
         SyncFailureReason.RETRIES_EXHAUSTED -> R.string.failed_sync_retries_exhausted_title
         SyncFailureReason.RECORD_TOO_LARGE -> R.string.failed_sync_too_large_title
         SyncFailureReason.UNRECOGNISED -> R.string.failed_sync_unrecognised_title
+        SyncFailureReason.CONFLICT_ON_SERVER -> R.string.failed_sync_conflict_title
     }
 
 @get:StringRes
@@ -35,6 +36,7 @@ val SyncFailureReason.bodyRes: Int
         SyncFailureReason.RETRIES_EXHAUSTED -> R.string.failed_sync_retries_exhausted_body
         SyncFailureReason.RECORD_TOO_LARGE -> R.string.failed_sync_too_large_body
         SyncFailureReason.UNRECOGNISED -> R.string.failed_sync_unrecognised_body
+        SyncFailureReason.CONFLICT_ON_SERVER -> R.string.failed_sync_conflict_body
     }
 
 /**

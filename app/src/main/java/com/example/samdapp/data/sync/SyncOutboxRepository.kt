@@ -26,8 +26,8 @@ import java.time.Instant
  * - `conflict` -> `CONFLICT`. Not re-packed by [collectPendingRecords] on the next run, so a
  *   conflicted row is never blindly resent with its stale `base_version` (api-contract.md §6.1:
  *   a conflict is a real `base_version` or timestamp mismatch, not something worth silently
- *   retrying). It is NOT surfaced for review: [observeFailedCount] and [failedRecords] read
- *   `FAILED` only, so today a CONFLICT row is a silent dead end.
+ *   retrying). [applyAck] never adopts the ack's `server_version` for it. It is surfaced:
+ *   [observeFailedCount] and [failedRecords] read `FAILED` and `CONFLICT`.
  * - `rejected` with `retry_class = TERMINAL` or `CONFLICT` -> `FAILED`, `syncErrorCode` and
  *   `syncErrorMessage` set from the ack. Excluded from the next [collectPendingRecords] call,
  *   which is what "stop retrying" means here.

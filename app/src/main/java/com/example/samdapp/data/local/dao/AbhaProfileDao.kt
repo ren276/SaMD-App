@@ -50,18 +50,18 @@ interface AbhaProfileDao {
     )
     suspend fun requeueFailed(abhaId: String)
 
-    @Query("SELECT COUNT(*) FROM abha_profiles WHERE syncState = 'FAILED'")
+    @Query("SELECT COUNT(*) FROM abha_profiles WHERE syncState IN ('FAILED', 'CONFLICT')")
     fun observeFailedSyncCount(): Flow<Int>
 
-    /** The FAILED rows of this table, projected for the worker-facing review list (S-3).
-     *  Selects exactly the rows this table's FAILED counter counts, so the number on the Home
+    /** The FAILED and CONFLICT rows of this table, projected for the worker-facing review list.
+     *  Selects exactly the rows this table's failed counter counts, so the number on the Home
      *  card and the length of the list can never disagree. Suspend rather than a Flow:
      *  the list is fetched when a worker opens it, so it costs nothing at launch.
      *  See [FailedSyncRow]. */
     @Query(
-        "SELECT 'abha_profiles' AS tableName, abhaId AS recordId, CAST(NULL AS TEXT) AS patientId, " +
+        "SELECT 'abha_profiles' AS tableName, syncState AS syncState, abhaId AS recordId, CAST(NULL AS TEXT) AS patientId, " +
         "localModifiedAt AS recordedAt, syncErrorCode AS syncErrorCode, syncErrorMessage AS " +
-        "syncErrorMessage FROM abha_profiles WHERE syncState = 'FAILED'",
+        "syncErrorMessage FROM abha_profiles WHERE syncState IN ('FAILED', 'CONFLICT')",
     )
     suspend fun getFailedForReview(): List<FailedSyncRow>
 }

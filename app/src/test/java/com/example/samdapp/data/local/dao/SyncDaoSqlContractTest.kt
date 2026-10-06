@@ -239,13 +239,13 @@ class SyncDaoSqlContractTest {
     }
 
     @Test
-    fun `every review query selects the same six columns under the same names`() {
+    fun `every review query selects the same seven columns under the same names`() {
         // Room maps a projection onto FailedSyncRow by column name. A typo in one alias is not a
         // compile error in the DAO source; it is a runtime failure on a device, in a screen that
         // only appears when something has already gone wrong. Checked here instead.
         val statements = reviewStatements()
         assertEquals("expected one review statement per drained table", 20, statements.size)
-        listOf("AS tableName", "AS recordId", "AS patientId", "AS recordedAt", "AS syncErrorCode", "AS syncErrorMessage")
+        listOf("AS tableName", "AS syncState", "AS recordId", "AS patientId", "AS recordedAt", "AS syncErrorCode", "AS syncErrorMessage")
             .forEach { alias ->
                 assertEquals(
                     "all twenty review queries must project $alias",
@@ -256,20 +256,38 @@ class SyncDaoSqlContractTest {
     }
 
     @Test
-    fun `no review query widens beyond FAILED`() {
-        // RETRYABLE rows are deliberately absent from both the count and the list: the device is
-        // still working on them and a worker has no action for one. The counters already say
-        // FAILED only; these must agree, or the list shows rows the count does not.
+    fun `every review query selects exactly FAILED and CONFLICT, never RETRYABLE`() {
+        // CONFLICT is surfaced next to FAILED: neither is ever resent on its own, so both need a
+        // person. RETRYABLE rows are deliberately absent from both the count and the list: the
+        // device is still working on them and a worker has no action for one. The counters say
+        // the same, below; these must agree, or the list shows rows the count does not.
         val statements = reviewStatements()
         assertEquals("expected one review statement per drained table", 20, statements.size)
         statements.forEach { sql ->
-            assertTrue("a review query does not restrict to FAILED: $sql", sql.contains("syncState = 'FAILED'"))
+            assertTrue(
+                "a review query does not restrict to FAILED and CONFLICT: $sql",
+                sql.contains("syncState IN ('FAILED', 'CONFLICT')"),
+            )
             assertTrue(
                 "a review query mentions RETRYABLE. Those rows are still being retried by the " +
                     "device and putting one in front of a worker asks them to act on something " +
                     "that needs nothing from them: $sql",
                 !sql.contains("RETRYABLE"),
             )
+        }
+    }
+
+    @Test
+    fun `every failed counter counts exactly what its review query lists`() {
+        // The Home card shows the count; the list it opens shows the review rows. A counter that
+        // still read FAILED only would put a number on the card that the list contradicts.
+        val counters = sources().values.flatMap { s ->
+            val flat = s.replace(Regex("\"\\s*\\+\\s*\""), "")
+            Regex("SELECT COUNT\\(\\*\\) FROM \\w+ WHERE syncState[^\"]*").findAll(flat).map { it.value }.toList()
+        }
+        assertEquals("expected one failed counter per drained table", 20, counters.size)
+        counters.forEach { sql ->
+            assertTrue("a counter does not count FAILED and CONFLICT: $sql", sql.endsWith("syncState IN ('FAILED', 'CONFLICT')"))
         }
     }
 

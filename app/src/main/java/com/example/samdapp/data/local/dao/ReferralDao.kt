@@ -47,18 +47,18 @@ interface ReferralDao {
     )
     suspend fun requeueFailed(id: String)
 
-    @Query("SELECT COUNT(*) FROM referrals WHERE syncState = 'FAILED'")
+    @Query("SELECT COUNT(*) FROM referrals WHERE syncState IN ('FAILED', 'CONFLICT')")
     fun observeFailedSyncCount(): Flow<Int>
 
-    /** The FAILED rows of this table, projected for the worker-facing review list (S-3).
-     *  Selects exactly the rows this table's FAILED counter counts, so the number on the Home
+    /** The FAILED and CONFLICT rows of this table, projected for the worker-facing review list.
+     *  Selects exactly the rows this table's failed counter counts, so the number on the Home
      *  card and the length of the list can never disagree. Suspend rather than a Flow:
      *  the list is fetched when a worker opens it, so it costs nothing at launch.
      *  See [FailedSyncRow]. */
     @Query(
-        "SELECT 'referrals' AS tableName, id AS recordId, patientUid AS patientId, localModifiedAt AS " +
+        "SELECT 'referrals' AS tableName, syncState AS syncState, id AS recordId, patientUid AS patientId, localModifiedAt AS " +
         "recordedAt, syncErrorCode AS syncErrorCode, syncErrorMessage AS syncErrorMessage FROM referrals " +
-        "WHERE syncState = 'FAILED'",
+        "WHERE syncState IN ('FAILED', 'CONFLICT')",
     )
     suspend fun getFailedForReview(): List<FailedSyncRow>
 

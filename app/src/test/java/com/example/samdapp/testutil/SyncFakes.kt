@@ -126,7 +126,7 @@ class FakeSyncOutboxRepository(
                 patientName = patientNames[table to id],
                 recordedAt = java.time.Instant.EPOCH,
                 reason = com.example.samdapp.domain.model.syncFailureReasonFor(
-                    failedCodes[table to id],
+                    com.example.samdapp.domain.model.SyncState.FAILED, failedCodes[table to id],
                     failedMessages[table to id],
                 ),
             )

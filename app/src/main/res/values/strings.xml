@@ -149,6 +149,13 @@
     <string name="failed_sync_unrecognised_body">The server turned it down and this app does not know why. Send it again once. If it fails again, write down the patient\'s name and tell your supervisor.</string>
 
     <!--
+      CONFLICT_ON_SERVER. Record state CONFLICT: the server kept its own, newer version. Never
+      resent on its own and nothing on this phone can settle it yet, so no button.
+    -->
+    <string name="failed_sync_conflict_title">The server has a different version of this record</string>
+    <string name="failed_sync_conflict_body">This record was changed somewhere else after this phone last sent it, so the server kept its own version. Your copy is safe on this phone but is not on the server. This cannot be settled on this phone yet. Write down the patient\'s name and tell your supervisor today.</string>
+
+    <!--
       ================================================================================
       PR-7: the plain-language read-back surface.
 

@@ -9,7 +9,8 @@ data class SyncState(
     val isSyncing: Boolean = false,
     /** Records the outbox has stopped trying to send: the backend refused them on their merits
      *  (`rejected` with `retry_class` TERMINAL or CONFLICT), or S-2's attempt cap ran out, or
-     *  they were too large to send at all. S-3 renders this on Home as the count on a card that
+     *  they were too large to send at all, or the server acked `conflict` (record state CONFLICT,
+     *  never resent on its own). S-3 renders this on Home as the count on a card that
      *  opens [SyncStatus.failedRecords]; before S-3 it was queryable and nothing read it.
      *
      *  Deliberately does NOT include `RETRYABLE` rows. Those are rows the device is still

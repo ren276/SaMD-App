@@ -15,9 +15,10 @@ enum class SyncState {
 
     /** Server acknowledged `conflict` (`base_version` mismatch). Never collected for resend
      *  (`SyncSql.PENDING_ELIGIBILITY_FRAGMENT` excludes it), so a stale `base_version` is never
-     *  sent blindly. NOT yet surfaced anywhere: the failed-record count and review list read
-     *  `FAILED` only, so a CONFLICT row is invisible to the worker. Leaves only by a local clinical
-     *  edit, which resets it to [PENDING]. */
+     *  sent blindly. Surfaced next to [FAILED]: counted on the Home card and listed for review as
+     *  `SyncFailureReason.CONFLICT_ON_SERVER`, with no "Send again" (the requeue is guarded on
+     *  FAILED). Never adopts the ack's `server_version`. Leaves only by a local clinical edit,
+     *  which resets it to [PENDING] for one resend. */
     CONFLICT,
 
     /** Server acknowledged `rejected` with `retry_class = RETRYABLE` (api-contract.md section
