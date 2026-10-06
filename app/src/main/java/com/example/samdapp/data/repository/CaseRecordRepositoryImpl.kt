@@ -1,5 +1,6 @@
 package com.example.samdapp.data.repository
 
+import com.example.samdapp.data.sync.SyncStamp
 import com.example.samdapp.data.local.dao.CaseRecordDao
 import com.example.samdapp.data.local.dao.DoctorTrackerRow
 import com.example.samdapp.data.local.entity.CaseRecordEntity
@@ -24,7 +25,7 @@ class CaseRecordRepositoryImpl @Inject constructor(
 
     override suspend fun createDraft(patientId: String, encounterId: String): Result<CaseRecord> = asDataResult {
         val now = Instant.now()
-        caseRecordDao.abandonDraftsForPatient(patientId, now)
+        caseRecordDao.abandonDraftsForPatient(patientId, SyncStamp.now())
         val caseRecord = CaseRecord(
             id = UUID.randomUUID().toString(),
             patientId = patientId,
@@ -39,22 +40,22 @@ class CaseRecordRepositoryImpl @Inject constructor(
     }
 
     override suspend fun markSavedLocally(caseRecordId: String): Result<Unit> = asDataResult {
-        caseRecordDao.updateStatus(caseRecordId, CaseStatus.SAVED_LOCALLY, Instant.now())
+        caseRecordDao.updateStatus(caseRecordId, CaseStatus.SAVED_LOCALLY, SyncStamp.now())
     }
 
     override suspend fun assignDoctor(caseRecordId: String, doctorId: String, isOnline: Boolean): Result<Unit> = asDataResult {
         val status = if (isOnline) CaseStatus.SENT_TO_DOCTOR else CaseStatus.PENDING_SYNC
-        caseRecordDao.assignDoctor(caseRecordId, doctorId, status, Instant.now())
+        caseRecordDao.assignDoctor(caseRecordId, doctorId, status, SyncStamp.now())
     }
 
     override suspend fun sendAllPendingCases(): Result<Unit> = asDataResult {
-        caseRecordDao.sendAllPendingSync(Instant.now())
+        caseRecordDao.sendAllPendingSync(SyncStamp.now())
     }
 
     override fun observePendingSyncCount(): Flow<Int> = caseRecordDao.observePendingSyncCount()
 
     override suspend fun markPrescriptionReceived(caseRecordId: String): Result<Unit> = asDataResult {
-        caseRecordDao.updateStatus(caseRecordId, CaseStatus.PRESCRIPTION_RECEIVED, Instant.now())
+        caseRecordDao.updateStatus(caseRecordId, CaseStatus.PRESCRIPTION_RECEIVED, SyncStamp.now())
     }
 
     override fun observeCaseRecord(caseRecordId: String): Flow<CaseRecord?> =
@@ -111,7 +112,7 @@ private fun DoctorTrackerRow.toDomain() = DoctorTrackerEntry(
 private fun CaseRecord.toEntity() = CaseRecordEntity(
     id = id, patientId = patientId, encounterId = encounterId, status = status,
     assignedDoctorId = assignedDoctorId, createdAt = createdAt, updatedAt = updatedAt,
-    localModifiedAt = updatedAt,
+    localModifiedAt = SyncStamp.now(),
 )
 
 private fun CaseRecordEntity.toDomain() = CaseRecord(

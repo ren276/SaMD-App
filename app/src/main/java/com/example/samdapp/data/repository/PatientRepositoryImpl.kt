@@ -1,5 +1,6 @@
 package com.example.samdapp.data.repository
 
+import com.example.samdapp.data.sync.SyncStamp
 import com.example.samdapp.data.local.dao.PatientDao
 import com.example.samdapp.data.local.dao.PatientDirectoryRow
 import com.example.samdapp.data.local.entity.PatientEntity
@@ -66,7 +67,7 @@ private fun Patient.toEntity() = PatientEntity(
     referringPhysicianName = referringPhysicianName,
     createdAt = createdAt,
     updatedAt = updatedAt,
-    localModifiedAt = updatedAt,
+    localModifiedAt = SyncStamp.now(),
 )
 
 private fun PatientEntity.toDomain() = Patient(

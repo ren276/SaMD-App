@@ -199,4 +199,23 @@ class KernelReportRepositoryImplTest {
 
         assertNull(dao.rowsForCase("case-new").single().serverVersion)
     }
+
+    @Test
+    fun twoSavesOfTheSameCaseInOneMillisecond_getStrictlyIncreasingStamps() = runTest {
+        // A re-assessment re-saves the same row (the id is resolved by case). Under a frozen wall
+        // clock the two writes used to carry one localModifiedAt; the ack guard cannot tell them
+        // apart, so an ack for the first could stamp SYNCED content the server never received.
+        com.example.samdapp.data.sync.SyncStamp.wallMillis = { 42_000L }
+        try {
+            repository.save(report(id = "attempt-1", inferenceSource = InferenceSource.UNAVAILABLE))
+            val first = dao.rowsForCase("case-1").single().localModifiedAt
+            repository.save(report(id = "attempt-2"))
+            val second = dao.rowsForCase("case-1").single().localModifiedAt
+
+            org.junit.Assert.assertTrue("$second must be after $first", second > first)
+        } finally {
+            com.example.samdapp.data.sync.SyncStamp.resetForTest()
+        }
+    }
+
 }

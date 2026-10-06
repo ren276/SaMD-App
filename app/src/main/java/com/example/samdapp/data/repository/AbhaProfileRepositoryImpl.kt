@@ -1,10 +1,10 @@
 package com.example.samdapp.data.repository
 
+import com.example.samdapp.data.sync.SyncStamp
 import com.example.samdapp.data.local.dao.AbhaProfileDao
 import com.example.samdapp.data.local.entity.AbhaProfileEntity
 import com.example.samdapp.domain.model.AbhaProfile
 import com.example.samdapp.domain.repository.AbhaProfileRepository
-import java.time.Instant
 import javax.inject.Inject
 
 class AbhaProfileRepositoryImpl @Inject constructor(
@@ -39,7 +39,7 @@ private fun AbhaProfile.toEntity(serverVersion: Int?) = AbhaProfileEntity(
     photoUrlMock = photoUrlMock,
     kycVerified = kycVerified,
     createdAt = createdAt,
-    localModifiedAt = Instant.now(),
+    localModifiedAt = SyncStamp.now(),
     serverVersion = serverVersion,
 )
 

@@ -1,5 +1,6 @@
 package com.example.samdapp.data.repository
 
+import com.example.samdapp.data.sync.SyncStamp
 import com.example.samdapp.data.local.dao.EvaluateReportDao
 import com.example.samdapp.data.local.entity.EvaluateReportEntity
 import com.example.samdapp.domain.model.EvaluateBrandMapping
@@ -58,7 +59,7 @@ class EvaluateReportRepositoryImpl @Inject constructor(
                 payloadJson = gson.toJson(payload),
                 inferenceStartedAt = report.inferenceStartedAt,
                 inferenceEndedAt = report.inferenceEndedAt,
-                localModifiedAt = Instant.now(),
+                localModifiedAt = SyncStamp.now(),
                 serverVersion = existingServerVersion,
                 failureCode = null,
             ),
@@ -79,7 +80,7 @@ class EvaluateReportRepositoryImpl @Inject constructor(
                 payloadJson = "{}",
                 inferenceStartedAt = now,
                 inferenceEndedAt = now,
-                localModifiedAt = now,
+                localModifiedAt = SyncStamp.now(),
                 serverVersion = existingServerVersion,
                 failureCode = failureCode,
             ),

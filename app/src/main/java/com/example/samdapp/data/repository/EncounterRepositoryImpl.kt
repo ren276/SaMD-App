@@ -1,5 +1,6 @@
 package com.example.samdapp.data.repository
 
+import com.example.samdapp.data.sync.SyncStamp
 import com.example.samdapp.domain.model.isServerPresent
 import com.example.samdapp.data.local.dao.EncounterDao
 import com.example.samdapp.data.local.dao.EncounterHistoryRow
@@ -57,7 +58,7 @@ private fun Encounter.toEntity() = EncounterEntity(
     createdAt = createdAt,
     updatedAt = updatedAt,
     followUpOfEncounterId = followUpOfEncounterId,
-    localModifiedAt = updatedAt,
+    localModifiedAt = SyncStamp.now(),
 )
 
 private fun EncounterEntity.toDomain() = Encounter(

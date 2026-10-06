@@ -1,5 +1,6 @@
 package com.example.samdapp.data.repository
 
+import com.example.samdapp.data.sync.SyncStamp
 import com.example.samdapp.data.local.dao.KernelReportDao
 import com.example.samdapp.data.local.entity.KernelReportEntity
 import com.example.samdapp.domain.model.KernelReportOutput
@@ -7,7 +8,6 @@ import com.example.samdapp.domain.repository.KernelReportRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
-import java.time.Instant
 import javax.inject.Inject
 
 class KernelReportRepositoryImpl @Inject constructor(
@@ -64,7 +64,7 @@ private fun KernelReportOutput.toEntity(id: String, serverVersion: Int?) = Kerne
     requiredHumanVerification = requiredHumanVerification,
     inferenceSource = inferenceSource,
     failureCode = failureCode,
-    localModifiedAt = Instant.now(),
+    localModifiedAt = SyncStamp.now(),
     serverVersion = serverVersion,
     requestId = requestId,
     modelCalibrated = modelCalibrated,
