@@ -603,6 +603,8 @@ class FakeSyncStatus : SyncStatus {
     private val _state = MutableStateFlow(SyncState())
     override val state: Flow<SyncState> = _state.asStateFlow()
     var syncCalls = 0
+    var syncInProcessCalls = 0
+        private set
 
     /** The failed rows this fake hands back, and the count it reports, kept in step by
      *  [setFailedRecords] so a test cannot set up a card that says 2 over a list of 3. */
@@ -634,6 +636,11 @@ class FakeSyncStatus : SyncStatus {
             isSyncing = false,
             failedCount = failed.size,
         )
+        return nextSyncResult
+    }
+
+    override suspend fun syncNowInProcess(): Result<Unit> {
+        syncInProcessCalls++
         return nextSyncResult
     }
 

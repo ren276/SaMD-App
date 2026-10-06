@@ -254,7 +254,7 @@ class AssessmentRunnerTest {
                 patientAge: Int,
                 patientSex: String,
             ): KernelApiResult<KernelAssessmentResult> {
-                syncCallsSeenByKernel = syncStatus.syncCalls
+                syncCallsSeenByKernel = syncStatus.syncInProcessCalls
                 return AlwaysSucceedsKernelSource.assess(payload, patientAge, patientSex)
             }
         }
@@ -263,6 +263,20 @@ class AssessmentRunnerTest {
         fixture.runner.run("case-1")
 
         assertEquals(1, syncCallsSeenByKernel)
+    }
+
+    /** The runner drains in this process. Going through the WorkManager request answered "did not
+     *  succeed" for a drain that was only in its retry backoff, which is how a case that was
+     *  seconds from the server read as not sent (live check 2, 2026-10-06). */
+    @Test
+    fun `the pre-assessment push is the in-process one, never the WorkManager one`() = runTest {
+        val syncStatus = com.example.samdapp.testutil.FakeSyncStatus()
+        val fixture = Fixture(syncStatus = syncStatus)
+
+        fixture.runner.run("case-1")
+
+        assertEquals(1, syncStatus.syncInProcessCalls)
+        assertEquals(0, syncStatus.syncCalls)
     }
 
     /** A push that fails (offline, backend down) must not abort the assessment. The kernel call
@@ -287,12 +301,13 @@ class AssessmentRunnerTest {
         fixture.runner.run("case-1")
 
         assertEquals(InferenceSource.UNAVAILABLE, fixture.kernelReportRepository.saved["case-1"]?.inferenceSource)
-        assertEquals(0, syncStatus.syncCalls)
+        assertEquals(0, syncStatus.syncInProcessCalls)
     }
 
     private object FailingSyncStatus : com.example.samdapp.domain.sync.SyncStatus {
         override val state = kotlinx.coroutines.flow.flowOf(com.example.samdapp.domain.sync.SyncState())
         override suspend fun syncNow(): Result<Unit> = Result.failure(IllegalStateException("offline"))
+        override suspend fun syncNowInProcess(): Result<Unit> = Result.failure(IllegalStateException("offline"))
         override suspend fun stateNow() = com.example.samdapp.domain.sync.SyncState()
         override suspend fun failedRecords(): List<com.example.samdapp.domain.sync.FailedSyncRecord> = emptyList()
         override suspend fun sendFailedRecordAgain(record: com.example.samdapp.domain.sync.FailedSyncRecord) = Unit

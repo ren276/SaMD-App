@@ -52,6 +52,7 @@ class SyncStatusImpl @Inject constructor(
     private val syncOutboxScheduler: SyncOutboxScheduler,
     private val syncOutboxRepository: SyncOutboxRepository,
     private val drainOutcomeStore: DrainOutcomeStore,
+    private val drainer: SyncOutboxDrainer,
 ) : SyncStatus {
 
     private val isSyncing = MutableStateFlow(false)
@@ -112,14 +113,20 @@ class SyncStatusImpl @Inject constructor(
         )
     }
 
-    override suspend fun syncNow(): Result<Unit> {
+    override suspend fun syncNow(): Result<Unit> = sync { syncOutboxScheduler.runNowAndAwait() }
+
+    /** The drainer holds the process-wide lock, so this and a [SyncPushWorker] drain never send
+     *  the same rows twice. */
+    override suspend fun syncNowInProcess(): Result<Unit> = sync { drainer.drain() }
+
+    private suspend fun sync(pushOutbox: suspend () -> Result<Unit>): Result<Unit> {
         if (!connectivityController.isOnline.first()) {
             return Result.failure(SyncOfflineException())
         }
         isSyncing.value = true
         return try {
             val caseResult = caseRecordRepository.sendAllPendingCases()
-            val outboxResult = syncOutboxScheduler.runNowAndAwait()
+            val outboxResult = pushOutbox()
             val result = caseResult.fold(onSuccess = { outboxResult }, onFailure = { Result.failure(it) })
             if (result.isSuccess) lastSyncedAt.value = Instant.now()
             result

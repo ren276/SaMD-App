@@ -3,10 +3,16 @@ package com.example.samdapp.data.sync
 import com.example.samdapp.domain.connectivity.ConnectivityController
 import com.example.samdapp.domain.model.CaseRecord
 import com.example.samdapp.domain.model.CaseStatus
+import com.example.samdapp.domain.sync.SyncOfflineException
+import com.example.samdapp.data.remote.dto.AllergySyncPayloadDto
+import com.example.samdapp.data.remote.dto.SyncRecordDto
+import com.example.samdapp.testutil.FakeAuthTokenStore
 import com.example.samdapp.testutil.FakeCaseRecordRepository
 import com.example.samdapp.testutil.FakeNetworkMonitor
 import com.example.samdapp.testutil.FakeSyncOutboxRepository
 import com.example.samdapp.testutil.FakeSyncOutboxScheduler
+import com.example.samdapp.testutil.FakeSyncPushService
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -33,7 +39,107 @@ class SyncStatusImplTest {
         outboxScheduler: FakeSyncOutboxScheduler = FakeSyncOutboxScheduler(),
         outboxRepository: FakeSyncOutboxRepository = FakeSyncOutboxRepository(),
         drainOutcome: DrainOutcomeStore = DrainOutcomeStore(),
-    ) = SyncStatusImpl(caseRecordRepository, ConnectivityController(networkMonitor), outboxScheduler, outboxRepository, drainOutcome)
+        drainer: SyncOutboxDrainer = drainerOver(outboxRepository, FakeSyncPushService(), drainOutcome),
+    ) = SyncStatusImpl(caseRecordRepository, ConnectivityController(networkMonitor), outboxScheduler, outboxRepository, drainOutcome, drainer)
+
+    private class InMemoryStore : InFlightBatchStore {
+        var stored: InFlightBatch? = null
+        override suspend fun load(): Result<InFlightBatch?> = Result.success(stored)
+        override suspend fun save(batch: InFlightBatch) { stored = batch }
+        override suspend fun clear() { stored = null }
+    }
+
+    private fun drainerOver(
+        outboxRepository: FakeSyncOutboxRepository,
+        pushService: FakeSyncPushService,
+        drainOutcome: DrainOutcomeStore = DrainOutcomeStore(),
+    ) = SyncOutboxDrainer(
+        outboxRepository,
+        SyncBatchPacker(com.example.samdapp.data.remote.SyncGson.create()),
+        pushService,
+        InMemoryStore(),
+        FakeAuthTokenStore(),
+        drainOutcome,
+    )
+
+    private fun record(id: String) = SyncRecordDto(
+        table = "allergies", op = "upsert", id = id,
+        clientUpdatedAt = Instant.EPOCH, baseVersion = null,
+        data = AllergySyncPayloadDto(patientId = "p1", category = "ENVIRONMENTAL", allergen = "pollen", reactionType = null, createdAt = Instant.EPOCH),
+    )
+
+    private fun queuedCase() = CaseRecord(
+        id = "case-1", patientId = "p1", encounterId = "enc-1", status = CaseStatus.PENDING_SYNC,
+        assignedDoctorId = "doc-1", createdAt = Instant.EPOCH, updatedAt = Instant.EPOCH,
+    )
+
+    @Test
+    fun `syncNowInProcess sends the queued cases and drains in process, never through the scheduler`() = runTest {
+        val cases = FakeCaseRecordRepository(initial = listOf(queuedCase()))
+        val scheduler = FakeSyncOutboxScheduler()
+        val outbox = FakeSyncOutboxRepository(listOf(record("r1")))
+        val push = FakeSyncPushService()
+
+        val result = sync(
+            caseRecordRepository = cases, outboxScheduler = scheduler, outboxRepository = outbox,
+            drainer = drainerOver(outbox, push),
+        ).syncNowInProcess()
+
+        assertTrue(result.isSuccess)
+        assertEquals(
+            "operator ruling H3: the queued PENDING_SYNC case still goes to the doctor queue",
+            CaseStatus.SENT_TO_DOCTOR, cases.observeCaseRecord("case-1").first()?.status,
+        )
+        assertEquals(0, scheduler.runNowAndAwaitCallCount)
+        assertEquals(listOf("allergies" to "r1"), outbox.syncedIds)
+    }
+
+    @Test
+    fun `syncNowInProcess is refused offline and sends nothing`() = runTest {
+        val cases = FakeCaseRecordRepository(initial = listOf(queuedCase()))
+        val outbox = FakeSyncOutboxRepository(listOf(record("r1")))
+
+        val result = sync(
+            caseRecordRepository = cases, networkMonitor = FakeNetworkMonitor(initial = false),
+            outboxRepository = outbox,
+        ).syncNowInProcess()
+
+        assertTrue(result.exceptionOrNull() is SyncOfflineException)
+        assertEquals(CaseStatus.PENDING_SYNC, cases.observeCaseRecord("case-1").first()?.status)
+        assertTrue(outbox.syncedIds.isEmpty())
+    }
+
+    @Test
+    fun `a failed in-process drain fails the result, records why, and leaves isSyncing false`() = runTest {
+        val outbox = FakeSyncOutboxRepository(listOf(record("r1")))
+        val drainOutcome = DrainOutcomeStore()
+        val syncStatus = sync(
+            outboxRepository = outbox, drainOutcome = drainOutcome,
+            drainer = drainerOver(outbox, FakeSyncPushService().apply { unreachable = true }, drainOutcome),
+        )
+
+        val result = syncStatus.syncNowInProcess()
+
+        assertTrue(result.isFailure)
+        assertEquals(com.example.samdapp.domain.sync.DrainFailure.NO_CONNECTION, drainOutcome.lastFailure.value)
+        assertFalse(syncStatus.state.first().isSyncing)
+        assertNull(syncStatus.state.first().lastSyncedAt)
+    }
+
+    @Test
+    fun `an in-process drain and a worker drain at once send every row exactly once`() = runTest {
+        val outbox = FakeSyncOutboxRepository((1..50).map { record("r$it") })
+        val drainer = drainerOver(outbox, FakeSyncPushService())
+        val syncStatus = sync(outboxRepository = outbox, drainer = drainer)
+
+        val inProcess = async { syncStatus.syncNowInProcess() }
+        val worker = async { drainer.drain() }
+        assertTrue(inProcess.await().isSuccess)
+        assertTrue(worker.await().isSuccess)
+
+        assertEquals(50, outbox.syncedIds.size)
+        assertEquals(50, outbox.syncedIds.toSet().size)
+    }
 
     @Test
     fun `stateNow reads the outbox counts directly, not through the Flow`() = runTest {

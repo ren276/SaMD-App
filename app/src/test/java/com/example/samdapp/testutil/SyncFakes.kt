@@ -169,8 +169,13 @@ class FakeSyncPushService(
      *  advance (it's minted fresh by [SyncBatchPacker] inside the drain call). */
     var crashOnNextPush: Boolean = false
 
+    /** When true every call comes back as the failure an unreachable server produces (no problem
+     *  code), after recording the call. */
+    var unreachable: Boolean = false
+
     override suspend fun push(request: SyncPushRequestDto): SyncPushResult<SyncPushResponseDto> {
         calls += request
+        if (unreachable) return SyncPushResult.Failure(code = null, message = "unreachable")
         storedResponses[request.batchId]?.let { return SyncPushResult.Success(it) }
 
         val response = buildResponse(request)

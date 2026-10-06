@@ -75,11 +75,12 @@ class AssessmentRunner @Inject constructor(
         }
 
         // Push. Every clinical row is device-minted and reaches the server only through the
-        // outbox, and /api/v1/assess resolves the case record server side. Best effort and NOT
-        // consulted: a 200 batch can still reject this patient or encounter individually, so the
-        // Result says nothing about this case. syncNow() also sends every queued PENDING_SYNC case,
-        // the same as Sync now (operator ruling H3).
-        syncStatus.syncNow().onFailure { e ->
+        // outbox, and /api/v1/assess resolves the case record server side. Drained in this
+        // process: a WorkManager request would answer "did not succeed" for a drain that is only
+        // in its retry backoff. Best effort and NOT consulted: a 200 batch can still reject this
+        // patient or encounter individually, so the Result says nothing about this case. It also
+        // sends every queued PENDING_SYNC case, the same as Sync now (operator ruling H3).
+        syncStatus.syncNowInProcess().onFailure { e ->
             logger.warning("Pre-assessment sync failed for case $caseRecordId: ${e.message}")
         }
 

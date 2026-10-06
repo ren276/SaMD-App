@@ -40,6 +40,13 @@ interface SyncStatus {
     val state: Flow<SyncState>
     suspend fun syncNow(): Result<Unit>
 
+    /** [syncNow] with the outbox drained in this process, under the drainer's own lock, instead of
+     *  through a WorkManager request. For a caller that is already a background worker and needs
+     *  the push to have finished, or failed, when this returns: it cannot be left waiting on a
+     *  second queue, and a WorkManager retry backoff reads as a failure to it. Sends every queued
+     *  case to the doctor queue exactly as [syncNow] does. */
+    suspend fun syncNowInProcess(): Result<Unit>
+
     /** The same state as [state], read once and directly: the outbox counts from one-shot suspend
      *  DAO reads, not from a Flow. For a decision made right after [syncNow] returns, such as the
      *  "Sync now" message, which must reflect the drain's committed writes and not an emission
