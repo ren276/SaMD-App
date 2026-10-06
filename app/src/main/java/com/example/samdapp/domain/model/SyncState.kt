@@ -13,8 +13,11 @@ enum class SyncState {
     /** Server acknowledged `applied`, `stale`, or `duplicate` (api-contract.md §6.1). */
     SYNCED,
 
-    /** Server acknowledged `conflict` (`base_version` mismatch). Stays queued, surfaced for
-     *  review rather than retried blindly. */
+    /** Server acknowledged `conflict` (`base_version` mismatch). Never collected for resend
+     *  (`SyncSql.PENDING_ELIGIBILITY_FRAGMENT` excludes it), so a stale `base_version` is never
+     *  sent blindly. NOT yet surfaced anywhere: the failed-record count and review list read
+     *  `FAILED` only, so a CONFLICT row is invisible to the worker. Leaves only by a local clinical
+     *  edit, which resets it to [PENDING]. */
     CONFLICT,
 
     /** Server acknowledged `rejected` with `retry_class = RETRYABLE` (api-contract.md section
