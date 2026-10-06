@@ -9,14 +9,14 @@
         on the server", never "Assessment unavailable", when the patient is what went wrong.
       - Name the ACTION. "Retry" is only used where pressing again can actually work.
       - No SAMD-* codes. A worker cannot act on one and it makes the screen look broken.
-      - Do not mention the AI when the AI is working correctly. kernel_failure_case_not_on_server
+      - Do not mention the AI when the AI is working correctly. kernel_failure_patient_duplicate
         is the test of this: the assessment is fine, the patient was never saved.
       - Short sentences, common words, a patient is waiting.
     -->
 
-    <!-- OFFLINE. No press would help; the queued work runs itself. -->
-    <string name="kernel_failure_offline_title">This phone is not connected</string>
-    <string name="kernel_failure_offline_body">The assessment will run on its own once this phone is back on Wi-Fi or mobile data. You can carry on with the patient.</string>
+    <!-- OFFLINE. The connection dropped during the call. Nothing re-runs it, so Try again. -->
+    <string name="kernel_failure_offline_title">The connection dropped</string>
+    <string name="kernel_failure_offline_body">This phone lost its connection while checking this visit. Press Try again when it is connected. You can carry on with the patient.</string>
 
     <!-- TIMEOUT. The one class where pressing again now is genuinely reasonable. -->
     <string name="kernel_failure_timeout_title">The server did not answer in time</string>
@@ -31,23 +31,20 @@
     <string name="kernel_failure_not_authorized_body">Your sign-in has ended. Sign in again, then open this case.</string>
 
     <!--
-      CASE_NOT_ON_SERVER. The reason this whole change exists.
-      Says nothing about the AI, because nothing is wrong with the AI. Names the patient record
-      and the action. Mentions the ABHA number as a thing to CHECK if sending keeps failing,
-      rather than asserting a duplicate: a 404 proves the case is not on the server, it does not
-      prove why, and telling a worker a cause we have not established is how they stop believing
-      the screen.
+      CASE_NOT_ON_SERVER. A 404 after the assess gate passed: this phone holds a server version
+      for the case, yet the server could not find it for this clinic. Pre-call causes (not sent
+      yet, duplicate patient, blocked in sync) have their own values and copy below.
     -->
-    <string name="kernel_failure_case_not_on_server_title">This patient is not saved on the server</string>
-    <string name="kernel_failure_case_not_on_server_body">This patient has not reached the server yet, so this visit could not be checked. Open the patient\'s record and send it again. If sending keeps failing, check that the ABHA number is not already used by another patient. This will finish on its own once the patient is saved.</string>
+    <string name="kernel_failure_case_not_on_server_title">The server could not find this visit</string>
+    <string name="kernel_failure_case_not_on_server_body">This phone sent this visit, but the server could not find it for this clinic. Trying again will not help. Tell your supervisor today.</string>
 
     <!-- PAYLOAD_REJECTED. 5003, and 5005 which is the H-10 identity guard: a real defect signal. -->
     <string name="kernel_failure_payload_rejected_title">The server would not accept this visit</string>
     <string name="kernel_failure_payload_rejected_body">Something in this visit could not be sent. Sending it again unchanged will not work. Write down the patient\'s name and tell your supervisor today.</string>
 
-    <!-- KERNEL_UNAVAILABLE. 502/503/504 family. Nothing to press. -->
+    <!-- KERNEL_UNAVAILABLE. 502/503/504 family. Nothing re-runs it, so Try again later. -->
     <string name="kernel_failure_kernel_unavailable_title">The assessment service is down</string>
-    <string name="kernel_failure_kernel_unavailable_body">The service that reads this visit is not working right now. It will run on its own when the service is back. You can carry on with the patient.</string>
+    <string name="kernel_failure_kernel_unavailable_body">The service that checks visits is not working right now. Try again in a few minutes. You can carry on with the patient.</string>
 
     <!-- MALFORMED_RESPONSE. Reached, unintelligible. Pressing again re-fetches the same bad body. -->
     <string name="kernel_failure_malformed_response_title">The server sent something this app cannot read</string>
@@ -436,6 +433,18 @@
     -->
     <string name="assessment_model_score">Model score %1$d%% (uncalibrated)</string>
     <string name="assessment_differential_with_score">%1$s (model score %2$d%%, uncalibrated)</string>
+    <!-- Verification notices other than the low-score pair below. The no-result and mock notices
+         never mention a score, certainty, confidence or calibration: there is no model result for
+         them to describe (presentation/kernelassessment/AssessmentCopy.kt). -->
+    <string name="assessment_notice_critical_vitals">⚠ Emergency: critical vitals. Refer now; physician verification is required.</string>
+    <string name="assessment_notice_emergency">⚠ Emergency referral. Refer now; physician verification is required.</string>
+    <string name="assessment_notice_no_result">⚠ Physician review is required: no AI assessment was generated for this visit.</string>
+    <string name="assessment_notice_mock">⚠ Physician review is required: this is a mock result, not an AI assessment.</string>
+    <string name="assessment_notice_flagged">⚠ This result was flagged for physician verification before any diagnosis is finalized.</string>
+    <string name="assessment_source_mock">Mock result, dev build only: the real assessment service was not reached</string>
+    <string name="assessment_mock_notice">This is a mock result from a dev build. The real assessment service was not reached, so this is not an AI assessment.</string>
+    <string name="assessment_liability_unavailable">I understand that no AI assessment was generated and physician review is required.</string>
+    <string name="assessment_liability_ai">I understand this is an AI-generated assessment, not a diagnosis, and requires physician verification.</string>
     <string name="assessment_notice_low_score_physician">⚠ Model score below 0.90 (uncalibrated): physician verification required.</string>
     <string name="assessment_notice_low_certainty_worker">⚠ Physician verification required: the model is not certain about this result.</string>
 </resources>

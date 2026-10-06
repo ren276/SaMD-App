@@ -2,6 +2,7 @@
 
 package com.example.samdapp.presentation.kernelassessment
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -12,7 +13,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import android.content.Context
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
@@ -29,13 +29,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.example.samdapp.R
-import com.example.samdapp.domain.kernel.KernelFailure
-import com.example.samdapp.domain.kernel.KernelRetryAdvice
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -82,38 +79,43 @@ internal fun KernelAssessmentContent(uiState: KernelAssessmentUiState, actions: 
             )
             return@Scaffold
         }
+        // Every fixed string below is chosen by assessmentCopy, so the no-score rule for anything
+        // but a real result is tested in one place.
+        val copy = assessmentCopy(display, uiState.showModelScore)
         Column(
             modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(padding).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            if (display.isUnavailable) {
+            val failureCopy = copy.failure
+            if (failureCopy != null) {
                 UnavailableCard(
-                    failure = display.failure,
+                    copy = failureCopy,
+                    offerRetry = copy.offerRetry,
                     isRetrying = uiState.isRetrying,
                     onRetry = actions::onRetry,
                 )
             } else {
-                ConfidenceGauge(display, uiState.showModelScore)
+                ConfidenceGauge(display, copy.showModelScore, copy.mockSourceLabel)
                 // A worker on /evaluate has nothing to show here (the classifier's scored explanation
                 // is physician-only), and an empty Card still draws as a blank box.
-                if (hasExplainabilityContent(display, uiState.showModelScore)) {
-                    ExplainabilityCard(display, uiState.showModelScore)
+                if (hasExplainabilityContent(display, copy.showModelScore)) {
+                    ExplainabilityCard(display, copy.showModelScore)
                 }
             }
-            if (display.isMockFallback) {
+            copy.mockNotice?.let { notice ->
                 Card(colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)) {
                     Text(
-                        "This assessment used the offline fallback (mock kernel) — the live AI server was unavailable.",
+                        stringResource(notice),
                         color = MaterialTheme.colorScheme.onTertiaryContainer,
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(12.dp),
                     )
                 }
             }
-            if (display.requiresHumanVerification) {
+            copy.verificationNotice?.let { notice ->
                 Card(colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
                     Text(
-                        verificationNotice(LocalContext.current, display, uiState.showModelScore),
+                        stringResource(notice),
                         color = MaterialTheme.colorScheme.onErrorContainer,
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(12.dp),
@@ -123,7 +125,7 @@ internal fun KernelAssessmentContent(uiState: KernelAssessmentUiState, actions: 
             LiabilityRow(
                 checked = uiState.liabilityAcknowledged,
                 onCheckedChange = actions::onLiabilityAcknowledgedChange,
-                assessmentUnavailable = display.isUnavailable,
+                text = copy.liability,
             )
             Button(
                 onClick = actions::onContinue,
@@ -134,7 +136,7 @@ internal fun KernelAssessmentContent(uiState: KernelAssessmentUiState, actions: 
     }
 }
 
-/** Honest failure state — kernel-mock production safety fix. Shown instead of the confidence
+/** Honest failure state, from the kernel-mock production safety fix. Shown instead of the confidence
  *  gauge/explainability cards when [AssessmentDisplay.isUnavailable] is true: no fabricated
  *  diagnosis, just what went wrong and what to do about it.
  *
@@ -143,13 +145,12 @@ internal fun KernelAssessmentContent(uiState: KernelAssessmentUiState, actions: 
  *  sentences for all ten failure classes, which told a worker whose patient had never reached
  *  the server that the AI had failed, and to press Retry forever.
  *
- *  The button follows [com.example.samdapp.domain.kernel.KernelRetryAdvice] and is ABSENT for
- *  two of the three cases. A button that cannot work is worse than no button: it teaches a
- *  worker that pressing is the remedy, and the remedy here is on another screen or with a
- *  supervisor. */
+ *  The button follows [com.example.samdapp.domain.kernel.KernelRetryAdvice] (via
+ *  [AssessmentCopy.offerRetry]) and is ABSENT where a person must act first. A button that cannot
+ *  work is worse than no button: it teaches a worker that pressing is the remedy, and the remedy
+ *  here is on another screen or with a supervisor. */
 @Composable
-private fun UnavailableCard(failure: KernelFailure?, isRetrying: Boolean, onRetry: () -> Unit) {
-    val copy = kernelFailureCopy(failure)
+private fun UnavailableCard(copy: KernelFailureCopy, offerRetry: Boolean, isRetrying: Boolean, onRetry: () -> Unit) {
     Card(colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
@@ -162,9 +163,6 @@ private fun UnavailableCard(failure: KernelFailure?, isRetrying: Boolean, onRetr
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onErrorContainer,
             )
-            // A null failure is a reached-but-empty kernel or a stalled case with no row: the
-            // pre-existing retryable state, which keeps its button.
-            val offerRetry = failure == null || failure.advice == KernelRetryAdvice.RETRY_NOW
             if (offerRetry) {
                 Button(onClick = onRetry, enabled = !isRetrying) {
                     Text(
@@ -178,22 +176,6 @@ private fun UnavailableCard(failure: KernelFailure?, isRetrying: Boolean, onRetr
     }
 }
 
-/** Why verification is required, stated truthfully: an emergency or an unrecognised result is
- *  not "model score below 0.90", and saying so under a 100% figure contradicted itself.
- *  A worker is told the reason in plain words with no number; only a physician is shown the
- *  score threshold. Emergency wording is the same for both. */
-internal fun verificationNotice(context: Context, display: AssessmentDisplay, showModelScore: Boolean): String = when {
-    display.isCriticalVitalsFlag ->
-        "⚠ Emergency: critical vitals. Refer now; physician verification is required."
-    display.isEmergency ->
-        "⚠ Emergency referral. Refer now; physician verification is required."
-    display.confidencePercent < 90 -> context.getString(
-        if (showModelScore) R.string.assessment_notice_low_score_physician
-        else R.string.assessment_notice_low_certainty_worker,
-    )
-    else ->
-        "⚠ This result was flagged for physician verification before any diagnosis is finalized."
-}
 
 /** A worker sees the candidate only. A physician sees its score, labelled uncalibrated, and the
  *  classifier's own explanation. */
@@ -205,7 +187,11 @@ private fun differentialText(line: DifferentialLine, showModelScore: Boolean): S
 }
 
 @Composable
-internal fun ConfidenceGauge(display: AssessmentDisplay, showModelScore: Boolean) {
+internal fun ConfidenceGauge(
+    display: AssessmentDisplay,
+    showModelScore: Boolean,
+    @StringRes mockSourceLabel: Int? = null,
+) {
     Card {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
             Text(
@@ -213,7 +199,7 @@ internal fun ConfidenceGauge(display: AssessmentDisplay, showModelScore: Boolean
                 style = MaterialTheme.typography.titleMedium,
             )
             Text(
-                display.sourceLabel,
+                mockSourceLabel?.let { stringResource(it) } ?: display.sourceLabel,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -300,17 +286,12 @@ private fun ExplainabilityCard(display: AssessmentDisplay, showModelScore: Boole
 private fun LiabilityRow(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
-    assessmentUnavailable: Boolean,
+    @StringRes text: Int,
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Checkbox(checked = checked, onCheckedChange = onCheckedChange)
         Text(
-            if (assessmentUnavailable) {
-                "I understand that no AI assessment was generated and physician review is required."
-            } else {
-                "I understand this is an AI-generated assessment — not a diagnosis — and requires " +
-                    "physician verification."
-            },
+            stringResource(text),
             style = MaterialTheme.typography.bodyMedium,
         )
     }

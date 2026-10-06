@@ -2,21 +2,16 @@ package com.example.samdapp.domain.kernel
 
 /**
  * What a PHC worker can do about a [KernelFailure], and the only thing the assessment screen
- * branches on. Three-way rather than the two-way `retryable` boolean
- * [com.example.samdapp.domain.abha.AbhaEnrolResult] uses, because the kernel path has a case that
- * flow does not: a failure where the request will succeed later, on its own, with no press and no
- * action. Offering "Retry" there teaches a worker to press a button that was going to happen
- * anyway, and offering it on [NEEDS_ACTION] teaches them to press a button that can never work.
+ * branches on: press again, or a person must act first. There used to be a third value promising
+ * the assessment "runs on its own once connectivity returns". Nothing re-runs it (the worker always
+ * finishes after writing the row, and only the send and Try again enqueue it), so that promise was
+ * false and hid the only button that could help. Offering a button on [NEEDS_ACTION] still teaches
+ * a worker to press something that can never work, so that case keeps none.
  */
 enum class KernelRetryAdvice {
     /** Press again now. The request reached the server and one hop was slow; the next press may
      *  well land. The screen shows a live retry button. */
     RETRY_NOW,
-
-    /** Nothing to press. The assessment is queued and runs on its own once connectivity or the
-     *  service returns. The screen says so and does NOT offer a button, because there is nothing
-     *  a press would change. */
-    RETRY_WHEN_CONNECTED,
 
     /** A person must do something first: fix a record, sign in again, or escalate. Pressing again
      *  unchanged fails identically and forever. The screen offers no retry button at all. */
@@ -55,7 +50,7 @@ enum class KernelRetryAdvice {
 enum class KernelFailure(val advice: KernelRetryAdvice) {
     /** No route to the backend at all: `UnknownHostException`, `ConnectException`. The request
      *  never left the phone, so nothing server-side happened and nothing needs undoing. */
-    OFFLINE(KernelRetryAdvice.RETRY_WHEN_CONNECTED),
+    OFFLINE(KernelRetryAdvice.RETRY_NOW),
 
     /** `SocketTimeoutException`. The connection was made and the answer did not arrive in time.
      *  The one class where an immediate second press is genuinely reasonable. */
@@ -70,14 +65,11 @@ enum class KernelFailure(val advice: KernelRetryAdvice) {
      *  again is a person's action, and it fixes the 401 case. */
     NOT_AUTHORIZED(KernelRetryAdvice.NEEDS_ACTION),
 
-    /** HTTP 404 `SAMD-ENC-4002`: the backend has no case record with this id.
-     *
-     *  **The reason this enum exists.** The assessment did not fail. The case never arrived, so
-     *  there was nothing to assess. This is the terminus of the duplicate-ABHA chain: a patient
-     *  rejected by the server's unique ABHA index goes FAILED, its dependent case record fails
-     *  its foreign key and goes FAILED too, and the assessment that follows 404s. Every hop
-     *  before this one is correct behaviour. Retrying the assessment fails identically forever,
-     *  because the fix is on the registration screen, not here. */
+    /** HTTP 404 `SAMD-ENC-4002`: the backend has no case record with this id, AFTER the assess
+     *  gate saw a server version for it (a facility mismatch, or a server that lost the row). The
+     *  pre-call causes, a case not sent yet, a duplicate patient, a chain blocked in sync, are
+     *  decided by the gate and have their own values below, so this one no longer stands in for
+     *  them. Retrying fails identically. */
     CASE_NOT_ON_SERVER(KernelRetryAdvice.NEEDS_ACTION),
 
     /** HTTP 422 `SAMD-KERN-5003` (the kernel rejected the payload) or `SAMD-KERN-5005` (the H-10
@@ -89,7 +81,7 @@ enum class KernelFailure(val advice: KernelRetryAdvice) {
     /** HTTP 502/503/504, `SAMD-KERN-5001/5002/5004/5006/5007`. The backend was reached and the
      *  kernel behind it was not usable: unreachable, timed out, circuit open, erroring, or
      *  answering unparseably. One value by design, see this enum's own KDoc. */
-    KERNEL_UNAVAILABLE(KernelRetryAdvice.RETRY_WHEN_CONNECTED),
+    KERNEL_UNAVAILABLE(KernelRetryAdvice.RETRY_NOW),
 
     /** The backend answered and this app could not read the body. Contract drift on a live
      *  server. Kept distinct from [OFFLINE] for exactly the reason

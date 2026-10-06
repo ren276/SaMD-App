@@ -75,9 +75,9 @@ class KernelEmergencyBannerTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         // The emergency wording is the same for both roles.
         for (showScore in listOf(true, false)) {
-            val redFlagNotice = verificationNotice(context, redFlag, showScore)
+            val redFlagNotice = context.getString(verificationNoticeRes(redFlag, showScore))
             assertTrue(redFlagNotice, redFlagNotice.contains("critical vitals") && !redFlagNotice.contains("0.90"))
-            val emergencyNotice = verificationNotice(context, urgencyOnlyEmergency, showScore)
+            val emergencyNotice = context.getString(verificationNoticeRes(urgencyOnlyEmergency, showScore))
             assertTrue(emergencyNotice, emergencyNotice.contains("Emergency referral") && !emergencyNotice.contains("critical vitals"))
         }
     }

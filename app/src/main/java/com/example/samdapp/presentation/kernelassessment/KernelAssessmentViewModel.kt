@@ -124,7 +124,7 @@ private const val UNAVAILABLE_SOURCE_LABEL = "Assessment unavailable: no AI resu
  *  predictedCondition/reasoningLines text with [GenerateKernelReportUseCase]'s own written
  *  UNAVAILABLE row (that class's `UNAVAILABLE_PREDICTED_CONDITION`/`UNAVAILABLE_REASONING_SUMMARY`
  *  constants), not a second copy of the same wording. */
-private fun stalledDisplay(): AssessmentDisplay = AssessmentDisplay(
+internal fun stalledDisplay(): AssessmentDisplay = AssessmentDisplay(
     predictedCondition = GenerateKernelReportUseCase.UNAVAILABLE_PREDICTED_CONDITION,
     icdCode = null,
     confidencePercent = 0,
@@ -140,7 +140,7 @@ private fun stalledDisplay(): AssessmentDisplay = AssessmentDisplay(
     evidenceAgainst = emptyList(),
 )
 
-private fun KernelReportOutput.toDisplay(): AssessmentDisplay = AssessmentDisplay(
+internal fun KernelReportOutput.toDisplay(): AssessmentDisplay = AssessmentDisplay(
     predictedCondition = predictedCondition,
     icdCode = icdCode,
     confidencePercent = (confidenceScore * 100).toInt(),
@@ -154,7 +154,9 @@ private fun KernelReportOutput.toDisplay(): AssessmentDisplay = AssessmentDispla
         KernelTriageRules.isCriticalVitalsFlag(predictedCondition),
     sourceLabel = when (inferenceSource) {
         InferenceSource.REAL_INFERENCE -> "Real-time AI inference (/v1/assess)"
-        InferenceSource.MOCK_FALLBACK -> "Offline fallback (mock) — ML server unavailable"
+        // Rendered from strings.xml (AssessmentCopy); this string is what the acknowledgement
+        // audit entry records, and must not claim an outage the device did not observe.
+        InferenceSource.MOCK_FALLBACK -> "Mock result (dev build only): the real assessment service was not reached"
         // Reach-neutral: UNAVAILABLE covers both an unreachable kernel and one that answered
         // with an empty differential. Naming a cause here would be wrong half the time.
         InferenceSource.UNAVAILABLE -> UNAVAILABLE_SOURCE_LABEL
