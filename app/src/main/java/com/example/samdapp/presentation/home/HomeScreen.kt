@@ -399,6 +399,13 @@ private fun FailedRecordRow(record: FailedSyncRecord, onSendAgain: () -> Unit) {
             fontWeight = FontWeight.Bold,
         )
         Text(text = stringResource(record.reason.bodyRes), style = MaterialTheme.typography.bodySmall)
+        if (record.heldRecordCount > 0) {
+            Text(
+                text = pluralStringResource(R.plurals.failed_sync_held_records, record.heldRecordCount, record.heldRecordCount),
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
         // No button at all for a cause nothing this worker can press will change. S-4's rule:
         // naming an action that cannot work teaches a worker to distrust every action.
         if (record.reason.action == SyncFailureAction.SEND_AGAIN) {

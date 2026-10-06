@@ -28,6 +28,7 @@ import com.example.samdapp.domain.model.RETRY_MIN_INTERVAL
 import com.example.samdapp.domain.model.SyncState
 import com.example.samdapp.domain.model.syncFailureReasonFor
 import com.example.samdapp.domain.sync.FailedSyncRecord
+import com.example.samdapp.domain.sync.foldUnderNotAcceptedPatients
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import java.time.Instant
@@ -271,16 +272,19 @@ class RoomSyncOutboxRepository @Inject constructor(
         val names = patientDao.getNamesByIds(rows.mapNotNull { it.patientId }.distinct())
             .associate { it.id to it.fullName }
 
-        return rows
-            .sortedByDescending { it.recordedAt }
-            .map { row ->
-                FailedSyncRecord(
-                    table = row.tableName,
-                    recordId = row.recordId,
-                    patientName = row.patientId?.let { names[it] },
-                    recordedAt = row.recordedAt,
-                    reason = syncFailureReasonFor(row.syncState, row.syncErrorCode, row.syncErrorMessage),
-                )
-            }
+        return foldUnderNotAcceptedPatients(
+            rows
+                .sortedByDescending { it.recordedAt }
+                .map { row ->
+                    FailedSyncRecord(
+                        table = row.tableName,
+                        recordId = row.recordId,
+                        patientName = row.patientId?.let { names[it] },
+                        recordedAt = row.recordedAt,
+                        reason = syncFailureReasonFor(row.syncState, row.syncErrorCode, row.syncErrorMessage),
+                        patientId = row.patientId,
+                    )
+                },
+        )
     }
 }

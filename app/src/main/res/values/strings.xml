@@ -210,6 +210,12 @@
       CONFLICT_ON_SERVER. Record state CONFLICT: the server kept its own, newer version. Never
       resent on its own and nothing on this phone can settle it yet, so no button.
     -->
+    <!-- Under a patient the server will not accept: its other records, folded under it because
+         none of them can reach the server until the patient does. No promise that they will. -->
+    <plurals name="failed_sync_held_records">
+        <item quantity="one">1 other record for this patient is held on this phone with it.</item>
+        <item quantity="other">%1$d other records for this patient are held on this phone with it.</item>
+    </plurals>
     <string name="failed_sync_conflict_title">The server has a different version of this record</string>
     <string name="failed_sync_conflict_body">This record was changed somewhere else after this phone last sent it, so the server kept its own version. Your copy is safe on this phone but is not on the server. This cannot be settled on this phone yet. Write down the patient\'s name and tell your supervisor today.</string>
 
