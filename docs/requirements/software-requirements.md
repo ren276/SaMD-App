@@ -215,11 +215,15 @@ Conventions: `REQ-<AREA>-NN`. Status: **DONE** (implemented + manually verified)
   distinctly, then `EmergencyOverrideScreen` (full-screen, high-contrast, Hindi + English) is a
   terminal state — "Acknowledged" clears the back stack to Home. No path from there into
   Consultation/Sending; store-and-forward is disallowed for acute emergencies by design.
-- **REQ-TRS-03** (DONE) Expectation-management message added to the existing Acknowledgement
-  screen (non-emergency path only, by construction — emergency short-circuits before this screen
-  is ever reached). `SyncWindowProvider`/`AndroidSyncWindowProvider` reads `R.integer.
-  sync_window_hours` (`res/values/integers.xml`, default 24) — override per PHC deployment via a
-  resource overlay, never hardcoded in the composable.
+- **REQ-TRS-03** (DONE, AMENDED, PROPOSED pending operator sign-off) Expectation-management
+  message on the existing Acknowledgement screen (non-emergency path only, by construction:
+  emergency short-circuits before this screen is ever reached). The message states where the visit
+  is, on the phone or on the server, from the same server-presence rule the assess gate uses, and
+  makes no promise about when a doctor will review it. A review-time promise returns only when a
+  review-time control exists (a deployment setting, a doctor-side escalation, and an audit of
+  misses); until then no screen may quote one. Memo section 12.5 and operator ruling Q1
+  (`scratchpad/sync-failure-visibility-memo.md`). Supersedes the earlier text, which quoted a
+  24-hour window from `R.integer.sync_window_hours`; that provider and resource are removed.
 - **REQ-TRS-04** (PARTIAL) Guided structured non-measurable capture: flat severity/duration/onset/
   qualifiers fields shipped in Phase 2's `NewAilmentCard` (`AilmentEntry.severity/duration/
   qualifiers/onset`). Still PLANNED: dynamically expanding the field set based on the selected
