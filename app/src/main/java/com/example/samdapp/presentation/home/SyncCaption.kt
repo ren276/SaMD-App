@@ -19,6 +19,10 @@ sealed interface SyncCaption {
     data class DoctorCases(val count: Int) : SyncCaption
     data object ActivityLogWaiting : SyncCaption
     data class NeedsReview(val count: Int) : SyncCaption
+
+    /** Nothing is waiting, [review] records need a person, and [held] more are kept on this phone
+     *  behind them because the server refused their parent and nothing can send them. */
+    data class NeedsReviewWithHeld(val review: Int, val held: Int) : SyncCaption
     data object UpToDate : SyncCaption
 }
 
@@ -30,6 +34,9 @@ sealed interface SyncCaption {
  * only the doctor-assignment queue ([SyncState.pendingCount]) and said "Up to date" over a blocked
  * or failing outbox. The Home card for records needing review shows independently of the caption.
  *
+ * [SyncState.outboxPending] never includes a row held behind a parent the server refused: nothing
+ * can send it, so it is not "waiting". Those are counted apart as [SyncState.heldCount].
+ *
  * A [SyncState.lastDrainFailure] left over with nothing queued is ignored: nothing can be blocked
  * when nothing is waiting.
  */
@@ -38,6 +45,7 @@ fun syncCaption(state: SyncState, isOnline: Boolean): SyncCaption {
     val doctorCases = state.pendingCount
     val audit = state.auditPending
     val review = state.failedCount
+    val held = state.heldCount
     val failure = state.lastDrainFailure
     return when {
         state.isSyncing -> SyncCaption.Sending
@@ -49,6 +57,7 @@ fun syncCaption(state: SyncState, isOnline: Boolean): SyncCaption {
         records > 0 -> SyncCaption.Waiting(records, doctorCases)
         doctorCases > 0 -> SyncCaption.DoctorCases(doctorCases)
         audit > 0 -> SyncCaption.ActivityLogWaiting
+        review > 0 && held > 0 -> SyncCaption.NeedsReviewWithHeld(review, held)
         review > 0 -> SyncCaption.NeedsReview(review)
         else -> SyncCaption.UpToDate
     }

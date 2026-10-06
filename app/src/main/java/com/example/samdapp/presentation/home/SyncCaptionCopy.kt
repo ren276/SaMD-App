@@ -35,6 +35,11 @@ fun SyncCaption.text(resources: Resources): String = when (this) {
     is SyncCaption.DoctorCases -> resources.getQuantityString(R.plurals.sync_caption_doctor_cases, count, count)
     SyncCaption.ActivityLogWaiting -> resources.getString(R.string.sync_caption_activity_log)
     is SyncCaption.NeedsReview -> resources.getQuantityString(R.plurals.sync_caption_needs_review, count, count)
+    is SyncCaption.NeedsReviewWithHeld -> resources.getString(
+        R.string.sync_caption_needs_review_with_held,
+        resources.getQuantityString(R.plurals.sync_caption_needs_review_count, review, review),
+        resources.getQuantityString(R.plurals.sync_caption_held_count, held, held),
+    )
     SyncCaption.UpToDate -> resources.getString(R.string.sync_caption_up_to_date)
 }
 

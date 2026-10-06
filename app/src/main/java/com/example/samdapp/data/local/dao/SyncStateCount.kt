@@ -11,5 +11,9 @@ import com.example.samdapp.domain.model.SyncState
  */
 data class SyncStateCount(
     val syncState: SyncState,
+    /** True for rows held by an ancestor the server will never accept (see `SyncSql.HELD_*`). Always
+     *  false for the three root tables. Non-null on purpose: a projection alias mismatch on a
+     *  non-null field fails the build, where a nullable one only warns. */
+    val held: Boolean,
     val rowCount: Int,
 )

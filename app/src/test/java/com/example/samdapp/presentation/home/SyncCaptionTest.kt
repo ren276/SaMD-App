@@ -58,6 +58,26 @@ class SyncCaptionTest {
     @Test fun `row 10 online, only records needing review, never Up to date`() =
         assertEquals(SyncCaption.NeedsReview(2), syncCaption(idle.copy(failedCount = 2), isOnline = true))
 
+    @Test fun `row 10a online, nothing waiting, records need review and others are held behind them`() =
+        assertEquals(
+            SyncCaption.NeedsReviewWithHeld(review = 1, held = 17),
+            syncCaption(idle.copy(failedCount = 1, heldCount = 17), isOnline = true),
+        )
+
+    @Test fun `row 10b keeps the plain wording when nothing is held`() =
+        assertEquals(SyncCaption.NeedsReview(2), syncCaption(idle.copy(failedCount = 2), isOnline = true))
+
+    @Test fun `held rows alone never read as waiting, and never as Up to date`() {
+        val caption = syncCaption(idle.copy(failedCount = 1, heldCount = 3), isOnline = true)
+        assertEquals(SyncCaption.NeedsReviewWithHeld(1, 3), caption)
+    }
+
+    @Test fun `a leftover drain failure with only held rows queued is ignored, as with any empty queue`() =
+        assertEquals(
+            SyncCaption.NeedsReviewWithHeld(1, 3),
+            syncCaption(idle.copy(failedCount = 1, heldCount = 3, lastDrainFailure = DrainFailure.NO_CONNECTION), isOnline = true),
+        )
+
     @Test fun `row 11 Up to date only when nothing is pending, failed, conflicted or blocked`() =
         assertEquals(SyncCaption.UpToDate, syncCaption(idle, isOnline = true))
 

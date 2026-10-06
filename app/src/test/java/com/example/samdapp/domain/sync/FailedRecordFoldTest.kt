@@ -15,15 +15,23 @@ import java.time.Instant
  */
 class FailedRecordFoldTest {
 
-    private fun record(table: String, id: String, patientId: String?, reason: SyncFailureReason) =
-        FailedSyncRecord(
-            table = table, recordId = id, patientId = patientId, patientName = "Asha Devi",
-            recordedAt = Instant.EPOCH, reason = reason,
-        )
+    private fun record(
+        table: String,
+        id: String,
+        patientId: String?,
+        reason: SyncFailureReason,
+        ancestors: List<Pair<String, String>> = listOfNotNull(patientId?.let { "patients" to it }),
+        holdsDescendants: Boolean = false,
+        held: Boolean = false,
+    ) = FailedSyncRecord(
+        table = table, recordId = id, patientId = patientId, patientName = "Asha Devi",
+        recordedAt = Instant.EPOCH, reason = reason,
+        ancestors = ancestors, holdsDescendants = holdsDescendants, held = held,
+    )
 
     @Test
     fun `children of a duplicate patient fold under it and offer no button`() {
-        val folded = foldUnderNotAcceptedPatients(
+        val folded = foldHeldRecords(
             listOf(
                 record("patients", "pat-1", "pat-1", SyncFailureReason.DUPLICATE_RECORD),
                 record("encounters", "enc-1", "pat-1", SyncFailureReason.RETRIES_EXHAUSTED),
@@ -42,7 +50,7 @@ class FailedRecordFoldTest {
 
     @Test
     fun `a conflicted patient folds its children too`() {
-        val folded = foldUnderNotAcceptedPatients(
+        val folded = foldHeldRecords(
             listOf(
                 record("patients", "pat-1", "pat-1", SyncFailureReason.CONFLICT_ON_SERVER),
                 record("encounters", "enc-1", "pat-1", SyncFailureReason.RETRIES_EXHAUSTED),
@@ -59,7 +67,7 @@ class FailedRecordFoldTest {
             record("abha_profiles", "abha-1", null, SyncFailureReason.UNRECOGNISED),
         )
 
-        val folded = foldUnderNotAcceptedPatients(input)
+        val folded = foldHeldRecords(input)
 
         assertEquals(input.map { it.recordId }, folded.map { it.recordId })
         assertEquals(0, folded.first().heldRecordCount)
@@ -73,6 +81,73 @@ class FailedRecordFoldTest {
             record("patients", "pat-1", "pat-1", SyncFailureReason.RETRIES_EXHAUSTED),
             record("encounters", "enc-1", "pat-1", SyncFailureReason.RETRIES_EXHAUSTED),
         )
-        assertEquals(input, foldUnderNotAcceptedPatients(input))
+        assertEquals(input, foldHeldRecords(input))
+    }
+
+    @Test
+    fun `rows held behind a failed patient fold under it whatever its cause, and are counted once`() {
+        val folded = foldHeldRecords(
+            listOf(
+                record("patients", "pat-1", "pat-1", SyncFailureReason.RETRIES_EXHAUSTED, holdsDescendants = true),
+                record("encounters", "enc-1", "pat-1", SyncFailureReason.UNRECOGNISED, held = true),
+                record("observations", "obs-1", "pat-1", SyncFailureReason.UNRECOGNISED, held = true),
+                record("case_records", "case-1", "pat-1", SyncFailureReason.UNRECOGNISED, held = true),
+            ),
+        )
+
+        assertEquals(listOf("patients" to "pat-1"), folded.map { it.table to it.recordId })
+        assertEquals(3, folded.single().heldRecordCount)
+    }
+
+    @Test
+    fun `a failed encounter holds its own rows, and the patient wins when both hold`() {
+        val encounterOnly = foldHeldRecords(
+            listOf(
+                record("encounters", "enc-1", "pat-1", SyncFailureReason.RETRIES_EXHAUSTED, holdsDescendants = true),
+                record(
+                    "observations", "obs-1", "pat-1", SyncFailureReason.UNRECOGNISED, held = true,
+                    ancestors = listOf("patients" to "pat-1", "encounters" to "enc-1"),
+                ),
+            ),
+        )
+        assertEquals(listOf("encounters" to "enc-1"), encounterOnly.map { it.table to it.recordId })
+        assertEquals(1, encounterOnly.single().heldRecordCount)
+
+        val both = foldHeldRecords(
+            listOf(
+                record("patients", "pat-1", "pat-1", SyncFailureReason.RETRIES_EXHAUSTED, holdsDescendants = true),
+                record(
+                    "encounters", "enc-1", "pat-1", SyncFailureReason.RETRIES_EXHAUSTED, holdsDescendants = true,
+                    ancestors = listOf("patients" to "pat-1"),
+                ),
+                record(
+                    "observations", "obs-1", "pat-1", SyncFailureReason.UNRECOGNISED, held = true,
+                    ancestors = listOf("patients" to "pat-1", "encounters" to "enc-1"),
+                ),
+            ),
+        )
+        // The encounter is FAILED, not held, and its patient's cause is retryable: it keeps its row.
+        assertEquals(listOf("patients" to "pat-1", "encounters" to "enc-1"), both.map { it.table to it.recordId })
+        assertEquals(1, both.first().heldRecordCount)
+        assertEquals(0, both.last().heldRecordCount)
+    }
+
+    @Test
+    fun `a held row with no holder in the list is dropped, not shown`() {
+        val folded = foldHeldRecords(
+            listOf(record("observations", "obs-1", "pat-1", SyncFailureReason.UNRECOGNISED, held = true)),
+        )
+        assertTrue(folded.isEmpty())
+    }
+
+    @Test
+    fun `a conflicted ancestor that is not a holder folds nothing`() {
+        val input = listOf(
+            record("patients", "pat-1", "pat-1", SyncFailureReason.CONFLICT_ON_SERVER),
+            record("encounters", "enc-1", "pat-1", SyncFailureReason.UNRECOGNISED, held = true),
+        )
+        // The patient is a holder only through the existing TELL_SUPERVISOR rule; a held row under
+        // it folds, which is why the SQL never marks a row held behind a CONFLICT ancestor at all.
+        assertEquals(listOf("patients" to "pat-1"), foldHeldRecords(input).map { it.table to it.recordId })
     }
 }

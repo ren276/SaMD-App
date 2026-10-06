@@ -798,7 +798,7 @@ class FakeAuditLogDao : AuditLogDao {
 
     override suspend fun getSyncStateCounts() = observeSyncStateCounts().first()
     override fun observeSyncStateCounts(): Flow<List<com.example.samdapp.data.local.dao.SyncStateCount>> =
-        _failedSyncCount.map { n -> if (n == 0) emptyList() else listOf(com.example.samdapp.data.local.dao.SyncStateCount(com.example.samdapp.domain.model.SyncState.FAILED, n)) }
+        _failedSyncCount.map { n -> if (n == 0) emptyList() else listOf(com.example.samdapp.data.local.dao.SyncStateCount(com.example.samdapp.domain.model.SyncState.FAILED, held = false, rowCount = n)) }
     override suspend fun getFailedForReview(): List<com.example.samdapp.data.local.dao.FailedSyncRow> = emptyList()
 }
 

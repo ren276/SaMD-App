@@ -16,7 +16,7 @@ interface AilmentDao {
     /** Phase 6b outbox — see PatientDao.getPendingForSync's KDoc. `audioLocalUri` is excluded
      *  from the wire payload (SyncRecordMappers.kt / SAMD-SYNC-6006), not from this query: a
      *  soft-deleted row still syncs its `deletedAt`. */
-    @Query("SELECT * FROM ailments WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " "
+    @Query("SELECT * FROM ailments WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " AND NOT " + SyncSql.HELD_AILMENTS + " "
             + "ORDER BY localModifiedAt ASC")
     suspend fun getPendingForSync(retryEligibleBefore: Instant): List<AilmentEntity>
 
@@ -48,11 +48,11 @@ interface AilmentDao {
     )
     suspend fun requeueFailed(id: String)
 
-    @Query("SELECT syncState AS syncState, COUNT(*) AS rowCount FROM ailments WHERE syncState != 'SYNCED' GROUP BY syncState")
+    @Query("SELECT syncState AS syncState, " + SyncSql.HELD_AILMENTS + " AS held, COUNT(*) AS rowCount FROM ailments WHERE syncState != 'SYNCED' GROUP BY syncState, held")
     fun observeSyncStateCounts(): Flow<List<SyncStateCount>>
 
     /** The same counts, read once (for a decision made right after a drain). */
-    @Query("SELECT syncState AS syncState, COUNT(*) AS rowCount FROM ailments WHERE syncState != 'SYNCED' GROUP BY syncState")
+    @Query("SELECT syncState AS syncState, " + SyncSql.HELD_AILMENTS + " AS held, COUNT(*) AS rowCount FROM ailments WHERE syncState != 'SYNCED' GROUP BY syncState, held")
     suspend fun getSyncStateCounts(): List<SyncStateCount>
 
     /** The FAILED and CONFLICT rows of this table, projected for the worker-facing review list.
@@ -61,9 +61,14 @@ interface AilmentDao {
      *  the list is fetched when a worker opens it, so it costs nothing at launch.
      *  See [FailedSyncRow]. */
     @Query(
-        "SELECT 'ailments' AS tableName, syncState AS syncState, id AS recordId, patientId AS patientId, localModifiedAt AS " +
-        "recordedAt, syncErrorCode AS syncErrorCode, syncErrorMessage AS syncErrorMessage FROM ailments " +
-        "WHERE syncState IN ('FAILED', 'CONFLICT')",
+        "SELECT 'ailments' AS tableName, ailments.syncState AS syncState, ailments.id AS recordId, " +
+        "ailments.patientId AS patientId, ailments.localModifiedAt AS recordedAt, ailments.syncErrorCode " +
+        "AS syncErrorCode, ailments.syncErrorMessage AS syncErrorMessage, ailments.serverVersion AS " +
+        "serverVersion, ailments.encounterId AS encounterId, CAST(NULL AS TEXT) AS caseRecordId, " +
+        "CAST(NULL AS TEXT) AS parentId FROM ailments WHERE ailments.syncState IN ('FAILED', 'CONFLICT') " +
+        "OR (ailments.syncState IN " +
+        SyncSql.UNSENT_STATES + " AND " +
+        SyncSql.HELD_AILMENTS + ")",
     )
     suspend fun getFailedForReview(): List<FailedSyncRow>
 

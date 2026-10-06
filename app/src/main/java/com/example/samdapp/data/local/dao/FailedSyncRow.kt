@@ -36,6 +36,15 @@ data class FailedSyncRow(
     val recordedAt: Instant,
     val syncErrorCode: String?,
     val syncErrorMessage: String?,
+    /** What [com.example.samdapp.data.sync.RoomSyncOutboxRepository] needs to fold a record under
+     *  the ancestor that holds it: whether the server has ever held this row, and its ancestors'
+     *  ids (null where the table has no such ancestor). The ancestor columns are nullable, so a
+     *  misspelt alias only warns; `FailedSyncReviewQueryTest` pins them. */
+    val serverVersion: Int?,
+    val encounterId: String?,
+    val caseRecordId: String?,
+    /** The consultation an attachment belongs to, or the prescription a medication line belongs to. */
+    val parentId: String?,
 )
 
 /**

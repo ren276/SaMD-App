@@ -18,11 +18,11 @@ class OutboxCountsTest {
     fun `pending is PENDING plus RETRYABLE, review is FAILED plus CONFLICT, audit kept apart`() {
         val counts = outboxCountsOf(
             clinical = listOf(
-                SyncStateCount(SyncState.PENDING, 2), SyncStateCount(SyncState.RETRYABLE, 1),
-                SyncStateCount(SyncState.FAILED, 4), SyncStateCount(SyncState.CONFLICT, 3),
-                SyncStateCount(SyncState.PENDING, 5),
+                SyncStateCount(SyncState.PENDING, held = false, rowCount = 2), SyncStateCount(SyncState.RETRYABLE, held = false, rowCount = 1),
+                SyncStateCount(SyncState.FAILED, held = false, rowCount = 4), SyncStateCount(SyncState.CONFLICT, held = false, rowCount = 3),
+                SyncStateCount(SyncState.PENDING, held = false, rowCount = 5),
             ),
-            audit = listOf(SyncStateCount(SyncState.PENDING, 7), SyncStateCount(SyncState.FAILED, 1)),
+            audit = listOf(SyncStateCount(SyncState.PENDING, held = false, rowCount = 7), SyncStateCount(SyncState.FAILED, held = false, rowCount = 1)),
         )
 
         assertEquals(OutboxCounts(pendingClinical = 8, pendingAudit = 7, needsReview = 8), counts)
@@ -37,7 +37,22 @@ class OutboxCountsTest {
     fun `a SYNCED group, if one ever arrived, counts as nothing`() {
         assertEquals(
             OutboxCounts(),
-            outboxCountsOf(clinical = listOf(SyncStateCount(SyncState.SYNCED, 9)), audit = emptyList()),
+            outboxCountsOf(clinical = listOf(SyncStateCount(SyncState.SYNCED, held = false, rowCount = 9)), audit = emptyList()),
         )
+    }
+
+    @Test
+    fun `held rows are counted apart and never as pending`() {
+        val counts = outboxCountsOf(
+            clinical = listOf(
+                SyncStateCount(SyncState.PENDING, held = false, rowCount = 2),
+                SyncStateCount(SyncState.PENDING, held = true, rowCount = 14),
+                SyncStateCount(SyncState.RETRYABLE, held = true, rowCount = 3),
+                SyncStateCount(SyncState.FAILED, held = false, rowCount = 1),
+            ),
+            audit = listOf(SyncStateCount(SyncState.PENDING, held = false, rowCount = 4)),
+        )
+
+        assertEquals(OutboxCounts(pendingClinical = 2, heldClinical = 17, pendingAudit = 4, needsReview = 1), counts)
     }
 }

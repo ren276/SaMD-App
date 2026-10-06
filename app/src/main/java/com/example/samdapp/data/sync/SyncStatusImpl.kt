@@ -86,6 +86,7 @@ class SyncStatusImpl @Inject constructor(
             isSyncing = syncing,
             failedCount = outbox.needsReview,
             outboxPending = outbox.pendingClinical,
+            heldCount = outbox.heldClinical,
             auditPending = outbox.pendingAudit,
             lastDrainFailure = lastDrainFailure,
         )
@@ -108,6 +109,7 @@ class SyncStatusImpl @Inject constructor(
             isSyncing = isSyncing.value,
             failedCount = outbox.needsReview,
             outboxPending = outbox.pendingClinical,
+            heldCount = outbox.heldClinical,
             auditPending = outbox.pendingAudit,
             lastDrainFailure = drainOutcomeStore.lastFailure.value,
         )

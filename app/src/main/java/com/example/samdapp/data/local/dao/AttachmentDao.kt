@@ -17,7 +17,7 @@ interface AttachmentDao {
     fun observeForConsultation(consultationId: String): Flow<List<AttachmentEntity>>
 
     /** Phase 6b outbox — see PatientDao.getPendingForSync's KDoc. */
-    @Query("SELECT * FROM attachments WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " "
+    @Query("SELECT * FROM attachments WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " AND NOT " + SyncSql.HELD_ATTACHMENTS + " "
             + "ORDER BY localModifiedAt ASC")
     suspend fun getPendingForSync(retryEligibleBefore: Instant): List<AttachmentEntity>
 
@@ -49,11 +49,11 @@ interface AttachmentDao {
     )
     suspend fun requeueFailed(id: String)
 
-    @Query("SELECT syncState AS syncState, COUNT(*) AS rowCount FROM attachments WHERE syncState != 'SYNCED' GROUP BY syncState")
+    @Query("SELECT syncState AS syncState, " + SyncSql.HELD_ATTACHMENTS + " AS held, COUNT(*) AS rowCount FROM attachments WHERE syncState != 'SYNCED' GROUP BY syncState, held")
     fun observeSyncStateCounts(): Flow<List<SyncStateCount>>
 
     /** The same counts, read once (for a decision made right after a drain). */
-    @Query("SELECT syncState AS syncState, COUNT(*) AS rowCount FROM attachments WHERE syncState != 'SYNCED' GROUP BY syncState")
+    @Query("SELECT syncState AS syncState, " + SyncSql.HELD_ATTACHMENTS + " AS held, COUNT(*) AS rowCount FROM attachments WHERE syncState != 'SYNCED' GROUP BY syncState, held")
     suspend fun getSyncStateCounts(): List<SyncStateCount>
 
     /** The FAILED and CONFLICT rows of this table, projected for the worker-facing review list.
@@ -62,9 +62,15 @@ interface AttachmentDao {
      *  the list is fetched when a worker opens it, so it costs nothing at launch.
      *  See [FailedSyncRow]. */
     @Query(
-        "SELECT 'attachments' AS tableName, a.syncState AS syncState, a.id AS recordId, c.patientId AS patientId, a.localModifiedAt " +
-        "AS recordedAt, a.syncErrorCode AS syncErrorCode, a.syncErrorMessage AS syncErrorMessage FROM " +
-        "attachments a LEFT JOIN consultations c ON c.id = a.consultationId WHERE a.syncState IN ('FAILED', 'CONFLICT')",
+        "SELECT 'attachments' AS tableName, attachments.syncState AS syncState, attachments.id AS " +
+        "recordId, consultations.patientId AS patientId, attachments.localModifiedAt AS recordedAt, " +
+        "attachments.syncErrorCode AS syncErrorCode, attachments.syncErrorMessage AS syncErrorMessage, " +
+        "attachments.serverVersion AS serverVersion, consultations.encounterId AS encounterId, CAST(NULL " +
+        "AS TEXT) AS caseRecordId, attachments.consultationId AS parentId FROM attachments LEFT JOIN " +
+        "consultations ON consultations.id = attachments.consultationId WHERE attachments.syncState IN " +
+        "('FAILED', 'CONFLICT') OR (attachments.syncState IN " +
+        SyncSql.UNSENT_STATES + " AND " +
+        SyncSql.HELD_ATTACHMENTS + ")",
     )
     suspend fun getFailedForReview(): List<FailedSyncRow>
 }

@@ -25,7 +25,7 @@ interface PrescriptionDao {
 
     /** Phase 6b outbox — see PatientDao.getPendingForSync's KDoc. Two tables, one DAO, matching
      *  this file's existing convention. */
-    @Query("SELECT * FROM prescriptions WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " "
+    @Query("SELECT * FROM prescriptions WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " AND NOT " + SyncSql.HELD_PRESCRIPTIONS + " "
             + "ORDER BY localModifiedAt ASC")
     suspend fun getPendingPrescriptionsForSync(retryEligibleBefore: Instant): List<PrescriptionEntity>
 
@@ -57,11 +57,11 @@ interface PrescriptionDao {
     )
     suspend fun requeueFailedPrescription(id: String)
 
-    @Query("SELECT syncState AS syncState, COUNT(*) AS rowCount FROM prescriptions WHERE syncState != 'SYNCED' GROUP BY syncState")
+    @Query("SELECT syncState AS syncState, " + SyncSql.HELD_PRESCRIPTIONS + " AS held, COUNT(*) AS rowCount FROM prescriptions WHERE syncState != 'SYNCED' GROUP BY syncState, held")
     fun observePrescriptionSyncStateCounts(): Flow<List<SyncStateCount>>
 
     /** The same counts, read once (for a decision made right after a drain). */
-    @Query("SELECT syncState AS syncState, COUNT(*) AS rowCount FROM prescriptions WHERE syncState != 'SYNCED' GROUP BY syncState")
+    @Query("SELECT syncState AS syncState, " + SyncSql.HELD_PRESCRIPTIONS + " AS held, COUNT(*) AS rowCount FROM prescriptions WHERE syncState != 'SYNCED' GROUP BY syncState, held")
     suspend fun getPrescriptionSyncStateCounts(): List<SyncStateCount>
 
     /** The FAILED and CONFLICT rows of this table, projected for the worker-facing review list.
@@ -70,13 +70,19 @@ interface PrescriptionDao {
      *  the list is fetched when a worker opens it, so it costs nothing at launch.
      *  See [FailedSyncRow]. */
     @Query(
-        "SELECT 'prescriptions' AS tableName, syncState AS syncState, id AS recordId, patientId AS patientId, localModifiedAt AS " +
-        "recordedAt, syncErrorCode AS syncErrorCode, syncErrorMessage AS syncErrorMessage FROM " +
-        "prescriptions WHERE syncState IN ('FAILED', 'CONFLICT')",
+        "SELECT 'prescriptions' AS tableName, prescriptions.syncState AS syncState, prescriptions.id AS " +
+        "recordId, prescriptions.patientId AS patientId, prescriptions.localModifiedAt AS recordedAt, " +
+        "prescriptions.syncErrorCode AS syncErrorCode, prescriptions.syncErrorMessage AS " +
+        "syncErrorMessage, prescriptions.serverVersion AS serverVersion, prescriptions.encounterId AS " +
+        "encounterId, prescriptions.caseRecordId AS caseRecordId, CAST(NULL AS TEXT) AS parentId FROM " +
+        "prescriptions WHERE prescriptions.syncState IN ('FAILED', 'CONFLICT') OR " +
+        "(prescriptions.syncState IN " +
+        SyncSql.UNSENT_STATES + " AND " +
+        SyncSql.HELD_PRESCRIPTIONS + ")",
     )
     suspend fun getFailedPrescriptionsForReview(): List<FailedSyncRow>
 
-    @Query("SELECT * FROM medication_lines WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " "
+    @Query("SELECT * FROM medication_lines WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " AND NOT " + SyncSql.HELD_MEDICATION_LINES + " "
             + "ORDER BY localModifiedAt ASC")
     suspend fun getPendingMedicationLinesForSync(retryEligibleBefore: Instant): List<MedicationLineEntity>
 
@@ -108,11 +114,11 @@ interface PrescriptionDao {
     )
     suspend fun requeueFailedMedicationLine(id: String)
 
-    @Query("SELECT syncState AS syncState, COUNT(*) AS rowCount FROM medication_lines WHERE syncState != 'SYNCED' GROUP BY syncState")
+    @Query("SELECT syncState AS syncState, " + SyncSql.HELD_MEDICATION_LINES + " AS held, COUNT(*) AS rowCount FROM medication_lines WHERE syncState != 'SYNCED' GROUP BY syncState, held")
     fun observeMedicationLineSyncStateCounts(): Flow<List<SyncStateCount>>
 
     /** The same counts, read once (for a decision made right after a drain). */
-    @Query("SELECT syncState AS syncState, COUNT(*) AS rowCount FROM medication_lines WHERE syncState != 'SYNCED' GROUP BY syncState")
+    @Query("SELECT syncState AS syncState, " + SyncSql.HELD_MEDICATION_LINES + " AS held, COUNT(*) AS rowCount FROM medication_lines WHERE syncState != 'SYNCED' GROUP BY syncState, held")
     suspend fun getMedicationLineSyncStateCounts(): List<SyncStateCount>
 
     /** The FAILED and CONFLICT rows of this table, projected for the worker-facing review list.
@@ -121,10 +127,16 @@ interface PrescriptionDao {
      *  the list is fetched when a worker opens it, so it costs nothing at launch.
      *  See [FailedSyncRow]. */
     @Query(
-        "SELECT 'medication_lines' AS tableName, ml.syncState AS syncState, ml.id AS recordId, p.patientId AS patientId, " +
-        "ml.localModifiedAt AS recordedAt, ml.syncErrorCode AS syncErrorCode, ml.syncErrorMessage AS " +
-        "syncErrorMessage FROM medication_lines ml LEFT JOIN prescriptions p ON p.id = ml.prescriptionId " +
-        "WHERE ml.syncState IN ('FAILED', 'CONFLICT')",
+        "SELECT 'medication_lines' AS tableName, medication_lines.syncState AS syncState, " +
+        "medication_lines.id AS recordId, prescriptions.patientId AS patientId, " +
+        "medication_lines.localModifiedAt AS recordedAt, medication_lines.syncErrorCode AS syncErrorCode, " +
+        "medication_lines.syncErrorMessage AS syncErrorMessage, medication_lines.serverVersion AS " +
+        "serverVersion, prescriptions.encounterId AS encounterId, prescriptions.caseRecordId AS " +
+        "caseRecordId, medication_lines.prescriptionId AS parentId FROM medication_lines LEFT JOIN " +
+        "prescriptions ON prescriptions.id = medication_lines.prescriptionId WHERE " +
+        "medication_lines.syncState IN ('FAILED', 'CONFLICT') OR (medication_lines.syncState IN " +
+        SyncSql.UNSENT_STATES + " AND " +
+        SyncSql.HELD_MEDICATION_LINES + ")",
     )
     suspend fun getFailedMedicationLinesForReview(): List<FailedSyncRow>
 }

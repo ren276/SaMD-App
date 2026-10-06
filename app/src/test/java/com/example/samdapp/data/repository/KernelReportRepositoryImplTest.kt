@@ -85,7 +85,7 @@ class FakeKernelReportDao : KernelReportDao {
         store.map { rows ->
             rows.filter { it.syncState != com.example.samdapp.domain.model.SyncState.SYNCED }
                 .groupingBy { it.syncState }.eachCount()
-                .map { (state, n) -> com.example.samdapp.data.local.dao.SyncStateCount(state, n) }
+                .map { (state, n) -> com.example.samdapp.data.local.dao.SyncStateCount(state, held = false, rowCount = n) }
         }
     override suspend fun getFailedForReview(): List<com.example.samdapp.data.local.dao.FailedSyncRow> = emptyList()
 

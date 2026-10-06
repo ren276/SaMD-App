@@ -28,7 +28,7 @@ import com.example.samdapp.domain.model.RETRY_MIN_INTERVAL
 import com.example.samdapp.domain.model.SyncState
 import com.example.samdapp.domain.model.syncFailureReasonFor
 import com.example.samdapp.domain.sync.FailedSyncRecord
-import com.example.samdapp.domain.sync.foldUnderNotAcceptedPatients
+import com.example.samdapp.domain.sync.foldHeldRecords
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import java.time.Instant
@@ -272,19 +272,32 @@ class RoomSyncOutboxRepository @Inject constructor(
         val names = patientDao.getNamesByIds(rows.mapNotNull { it.patientId }.distinct())
             .associate { it.id to it.fullName }
 
-        return foldUnderNotAcceptedPatients(
+        return foldHeldRecords(
             rows
                 .sortedByDescending { it.recordedAt }
-                .map { row ->
-                    FailedSyncRecord(
-                        table = row.tableName,
-                        recordId = row.recordId,
-                        patientName = row.patientId?.let { names[it] },
-                        recordedAt = row.recordedAt,
-                        reason = syncFailureReasonFor(row.syncState, row.syncErrorCode, row.syncErrorMessage),
-                        patientId = row.patientId,
-                    )
-                },
+                .map { row -> row.toRecord(names) },
         )
     }
 }
+
+/** The tables whose FAILED, never-held rows hold their descendants (see `SyncSql.HELD_*`). */
+private val HOLDER_TABLES = setOf("patients", "encounters", "consultations", "case_records", "prescriptions")
+
+internal fun FailedSyncRow.toRecord(patientNames: Map<String, String>) = FailedSyncRecord(
+    table = tableName,
+    recordId = recordId,
+    patientName = patientId?.let { patientNames[it] },
+    recordedAt = recordedAt,
+    reason = syncFailureReasonFor(syncState, syncErrorCode, syncErrorMessage),
+    patientId = patientId,
+    // Nearest to the patient first, so a patient that holds a record wins over an encounter that
+    // is itself held by that patient.
+    ancestors = listOfNotNull(
+        patientId?.let { "patients" to it },
+        encounterId?.let { "encounters" to it },
+        caseRecordId?.let { "case_records" to it },
+        parentId?.let { (if (tableName == "attachments") "consultations" else "prescriptions") to it },
+    ),
+    holdsDescendants = syncState == SyncState.FAILED && serverVersion == null && tableName in HOLDER_TABLES,
+    held = syncState == SyncState.PENDING || syncState == SyncState.RETRYABLE,
+)

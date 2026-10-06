@@ -54,11 +54,11 @@ interface AuditLogDao {
     )
     suspend fun requeueFailed(id: String)
 
-    @Query("SELECT syncState AS syncState, COUNT(*) AS rowCount FROM audit_log WHERE syncState != 'SYNCED' GROUP BY syncState")
+    @Query("SELECT syncState AS syncState, 0 AS held, COUNT(*) AS rowCount FROM audit_log WHERE syncState != 'SYNCED' GROUP BY syncState, held")
     fun observeSyncStateCounts(): Flow<List<SyncStateCount>>
 
     /** The same counts, read once (for a decision made right after a drain). */
-    @Query("SELECT syncState AS syncState, COUNT(*) AS rowCount FROM audit_log WHERE syncState != 'SYNCED' GROUP BY syncState")
+    @Query("SELECT syncState AS syncState, 0 AS held, COUNT(*) AS rowCount FROM audit_log WHERE syncState != 'SYNCED' GROUP BY syncState, held")
     suspend fun getSyncStateCounts(): List<SyncStateCount>
 
     /** The FAILED and CONFLICT rows of this table, projected for the worker-facing review list.
@@ -67,9 +67,12 @@ interface AuditLogDao {
      *  the list is fetched when a worker opens it, so it costs nothing at launch.
      *  See [FailedSyncRow]. */
     @Query(
-        "SELECT 'audit_log' AS tableName, syncState AS syncState, id AS recordId, patientId AS patientId, localModifiedAt AS " +
-        "recordedAt, syncErrorCode AS syncErrorCode, syncErrorMessage AS syncErrorMessage FROM audit_log " +
-        "WHERE syncState IN ('FAILED', 'CONFLICT')",
+        "SELECT 'audit_log' AS tableName, audit_log.syncState AS syncState, audit_log.id AS recordId, " +
+        "audit_log.patientId AS patientId, audit_log.localModifiedAt AS recordedAt, " +
+        "audit_log.syncErrorCode AS syncErrorCode, audit_log.syncErrorMessage AS syncErrorMessage, " +
+        "audit_log.serverVersion AS serverVersion, CAST(NULL AS TEXT) AS encounterId, CAST(NULL AS TEXT) " +
+        "AS caseRecordId, CAST(NULL AS TEXT) AS parentId FROM audit_log WHERE audit_log.syncState IN " +
+        "('FAILED', 'CONFLICT')",
     )
     suspend fun getFailedForReview(): List<FailedSyncRow>
 

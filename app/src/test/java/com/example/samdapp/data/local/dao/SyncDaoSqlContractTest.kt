@@ -117,6 +117,46 @@ class SyncDaoSqlContractTest {
         assertTrue("$unwiredDao must not use the shared fragment", !unwired.contains("SyncSql."))
     }
 
+    /** The seventeen tables with an ancestor chain. Pinned, not derived: adding a table that can
+     *  be held must be a deliberate act that edits this list. `patients`, `abha_profiles` and
+     *  `audit_log` are roots and use no held fragment. */
+    private val heldTables = listOf(
+        "encounters", "consultations", "attachments", "observations", "ailments", "medical_history_items",
+        "allergies", "family_history_entries", "social_histories", "medication_entries", "case_records",
+        "kernel_reports", "evaluate_reports", "diagnosis_feedback", "prescriptions", "medication_lines", "referrals",
+    )
+
+    @Test
+    fun `each held table uses its own held fragment in exactly its four statements, and the roots use none`() {
+        assertEquals(17, heldTables.size)
+        heldTables.forEach { table ->
+            val constant = "SyncSql.HELD_" + table.uppercase()
+            assertEquals(
+                "$table: the drain, both counts and the review query must each use $constant",
+                4,
+                countAcross(constant),
+            )
+        }
+        assertEquals(68, countAcross("SyncSql.HELD_"))
+        // The three roots count with a literal 0 and never read the held fragment.
+        listOf("PatientDao.kt", "AbhaProfileDao.kt", "AuditLogDao.kt").forEach { file ->
+            val source = sources().getValue(file)
+            assertTrue("$file must not use a held fragment", !source.contains("SyncSql.HELD_"))
+            assertEquals("$file: both count queries select a constant held flag", 2, Regex("0 AS held").findAll(source).count())
+        }
+    }
+
+    @Test
+    fun `each held fragment names its own table and holds only behind a FAILED ancestor the server never had`() {
+        heldTables.forEach { table ->
+            val fragment = SyncSql::class.java.getDeclaredField("HELD_" + table.uppercase()).also { it.isAccessible = true }.get(null) as String
+            assertTrue("$table: the fragment must read its own columns", fragment.contains("$table."))
+            assertTrue("$table: an ancestor holds only when FAILED", fragment.contains("syncState = 'FAILED'"))
+            assertTrue("$table: and only when the server never had it", fragment.contains("serverVersion IS NULL"))
+            assertTrue("$table: a CONFLICT ancestor holds nothing (operator ruling Q2)", !fragment.contains("CONFLICT"))
+        }
+    }
+
     @Test
     fun `the shared fragment lets PENDING bypass the cutoff and makes RETRYABLE honour it`() {
         val fragment = SyncSql.PENDING_ELIGIBILITY_FRAGMENT
@@ -284,7 +324,8 @@ class SyncDaoSqlContractTest {
         // counter that dropped a state, or a second per-table counter, would break one of those or
         // double the observers on the launch path (perf audit F2A-01).
         val counters = sources().values.flatMap { s ->
-            val flat = s.replace(Regex("\"\\s*\\+\\s*\""), "")
+            val flat = s.replace(Regex("\"\\s*\\+\\s*SyncSql\\.HELD_\\w+\\s*\\+\\s*\""), "<HELD>")
+                .replace(Regex("\"\\s*\\+\\s*\""), "")
             Regex("SELECT [^\"]*COUNT\\(\\*\\)[^\"]*FROM \\w+ WHERE syncState[^\"]*").findAll(flat).map { it.value }.toList()
         }
         // Two per table: the Flow that feeds Home's caption and the one-shot read the "Sync now"
@@ -293,7 +334,7 @@ class SyncDaoSqlContractTest {
         counters.forEach { sql ->
             assertTrue(
                 "a counter is not the grouped, SYNCED-excluding shape: $sql",
-                Regex("^SELECT syncState AS syncState, COUNT\\(\\*\\) AS rowCount FROM \\w+ WHERE syncState != 'SYNCED' GROUP BY syncState$").matches(sql),
+                Regex("^SELECT syncState AS syncState, (<HELD>|0) AS held, COUNT\\(\\*\\) AS rowCount FROM \\w+ WHERE syncState != 'SYNCED' GROUP BY syncState, held$").matches(sql),
             )
         }
     }

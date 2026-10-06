@@ -41,7 +41,7 @@ interface EvaluateReportDao {
      *  H-14 safety property: a persisted evaluate-failure marker must never be pushable to the
      *  backend as a real report, enforced here rather than relying on every caller to check. */
     @Query(
-        "SELECT * FROM evaluate_reports WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " " +
+        "SELECT * FROM evaluate_reports WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " AND NOT " + SyncSql.HELD_EVALUATE_REPORTS + " " +
         "AND failureCode IS NULL " +
         "ORDER BY localModifiedAt ASC",
     )
@@ -75,11 +75,11 @@ interface EvaluateReportDao {
     )
     suspend fun requeueFailed(id: String)
 
-    @Query("SELECT syncState AS syncState, COUNT(*) AS rowCount FROM evaluate_reports WHERE syncState != 'SYNCED' GROUP BY syncState")
+    @Query("SELECT syncState AS syncState, " + SyncSql.HELD_EVALUATE_REPORTS + " AS held, COUNT(*) AS rowCount FROM evaluate_reports WHERE syncState != 'SYNCED' GROUP BY syncState, held")
     fun observeSyncStateCounts(): Flow<List<SyncStateCount>>
 
     /** The same counts, read once (for a decision made right after a drain). */
-    @Query("SELECT syncState AS syncState, COUNT(*) AS rowCount FROM evaluate_reports WHERE syncState != 'SYNCED' GROUP BY syncState")
+    @Query("SELECT syncState AS syncState, " + SyncSql.HELD_EVALUATE_REPORTS + " AS held, COUNT(*) AS rowCount FROM evaluate_reports WHERE syncState != 'SYNCED' GROUP BY syncState, held")
     suspend fun getSyncStateCounts(): List<SyncStateCount>
 
     /** The FAILED and CONFLICT rows of this table, projected for the worker-facing review list.
@@ -88,10 +88,16 @@ interface EvaluateReportDao {
      *  the list is fetched when a worker opens it, so it costs nothing at launch.
      *  See [FailedSyncRow]. */
     @Query(
-        "SELECT 'evaluate_reports' AS tableName, er.syncState AS syncState, er.id AS recordId, cr.patientId AS patientId, " +
-        "er.localModifiedAt AS recordedAt, er.syncErrorCode AS syncErrorCode, er.syncErrorMessage AS " +
-        "syncErrorMessage FROM evaluate_reports er LEFT JOIN case_records cr ON cr.id = er.caseRecordId " +
-        "WHERE er.syncState IN ('FAILED', 'CONFLICT')",
+        "SELECT 'evaluate_reports' AS tableName, evaluate_reports.syncState AS syncState, " +
+        "evaluate_reports.id AS recordId, case_records.patientId AS patientId, " +
+        "evaluate_reports.localModifiedAt AS recordedAt, evaluate_reports.syncErrorCode AS syncErrorCode, " +
+        "evaluate_reports.syncErrorMessage AS syncErrorMessage, evaluate_reports.serverVersion AS " +
+        "serverVersion, case_records.encounterId AS encounterId, evaluate_reports.caseRecordId AS " +
+        "caseRecordId, CAST(NULL AS TEXT) AS parentId FROM evaluate_reports LEFT JOIN case_records ON " +
+        "case_records.id = evaluate_reports.caseRecordId WHERE evaluate_reports.syncState IN ('FAILED', " +
+        "'CONFLICT') OR (evaluate_reports.syncState IN " +
+        SyncSql.UNSENT_STATES + " AND " +
+        SyncSql.HELD_EVALUATE_REPORTS + ")",
     )
     suspend fun getFailedForReview(): List<FailedSyncRow>
 }

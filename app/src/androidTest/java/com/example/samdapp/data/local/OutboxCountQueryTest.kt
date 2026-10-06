@@ -66,10 +66,10 @@ class OutboxCountQueryTest {
 
         assertEquals(
             setOf(
-                SyncStateCount(SyncState.PENDING, 2),
-                SyncStateCount(SyncState.RETRYABLE, 1),
-                SyncStateCount(SyncState.FAILED, 1),
-                SyncStateCount(SyncState.CONFLICT, 2),
+                SyncStateCount(SyncState.PENDING, held = false, rowCount = 2),
+                SyncStateCount(SyncState.RETRYABLE, held = false, rowCount = 1),
+                SyncStateCount(SyncState.FAILED, held = false, rowCount = 1),
+                SyncStateCount(SyncState.CONFLICT, held = false, rowCount = 2),
             ),
             counts,
         )

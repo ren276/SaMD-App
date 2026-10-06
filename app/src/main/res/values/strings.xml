@@ -161,6 +161,16 @@
         <item quantity="one">Everything else is sent. 1 record needs review.</item>
         <item quantity="other">Everything else is sent. %1$d records need review.</item>
     </plurals>
+    <!-- Memo section 12.4, row 10a: nothing waiting, records need review, and records are held behind them. -->
+    <string name="sync_caption_needs_review_with_held">Nothing is waiting to send. %1$s %2$s</string>
+    <plurals name="sync_caption_needs_review_count">
+        <item quantity="one">1 record needs review.</item>
+        <item quantity="other">%1$d records need review.</item>
+    </plurals>
+    <plurals name="sync_caption_held_count">
+        <item quantity="one">1 more is held on this phone with it.</item>
+        <item quantity="other">%1$d more are held on this phone with them.</item>
+    </plurals>
     <string name="sync_caption_up_to_date">Up to date</string>
 
     <!-- The one message shown after "Sync now" (memo section 4.3). A finished sync is never on

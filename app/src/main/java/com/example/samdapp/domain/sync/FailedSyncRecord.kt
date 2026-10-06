@@ -31,29 +31,50 @@ data class FailedSyncRecord(
     /** On a patient's own row: how many of its records are folded under it, see
      *  [foldUnderNotAcceptedPatients]. Zero everywhere else. */
     val heldRecordCount: Int = 0,
+    /** This row's ancestors as (table, id), nearest-to-the-patient first: patient, encounter,
+     *  case record, then the consultation or prescription. What [foldHeldRecords] looks a holder up by. */
+    val ancestors: List<Pair<String, String>> = emptyList(),
+    /** FAILED and never held by the server: the row that holds its descendants. */
+    val holdsDescendants: Boolean = false,
+    /** A PENDING or RETRYABLE row held behind such an ancestor. Never shown on its own. */
+    val held: Boolean = false,
 )
 
 /**
- * Folds the records of a patient the server will not accept under that patient's own row.
+ * Folds each record under the ancestor that holds it, so the review list shows the cause once.
  *
- * "Will not accept" is a patient row whose cause needs a person ([SyncFailureAction.TELL_SUPERVISOR]):
- * a duplicate ABHA, a conflict, a refused or oversize record. Such a patient never lands, so its
- * children fail their foreign key, exhaust their retries and, listed one by one, each offered a
- * "Send again" that cannot work. They are removed from the list and counted on the patient's row
- * instead. A patient whose own cause is retryable keeps its children's rows: a press may still
- * land them once the patient lands.
+ * A holder is a FAILED row the server has never held ([FailedSyncRecord.holdsDescendants]: a patient,
+ * encounter, case record, consultation or prescription), or a patient whose own cause needs a person
+ * ([SyncFailureAction.TELL_SUPERVISOR]: a duplicate ABHA, a conflict, a refused or oversize record).
+ * A record folds under its first ancestor that is a holder (patient before encounter before case)
+ * when it is held (PENDING or RETRYABLE behind that ancestor, so it can never send), or when the
+ * holder's cause needs a person (a child that already exhausted its retries against it, whose
+ * "Send again" cannot work). A FAILED child of a holder whose cause is retryable keeps its row: a
+ * press may still land it once the holder lands.
+ *
+ * A held row with no holder in the list is dropped, not shown: it has nothing to say on its own.
+ * Folded rows are counted on the holder as [FailedSyncRecord.heldRecordCount], once each.
  */
-fun foldUnderNotAcceptedPatients(records: List<FailedSyncRecord>): List<FailedSyncRecord> {
-    val notAccepted = records
-        .filter { it.table == PATIENTS_TABLE && it.reason.action == SyncFailureAction.TELL_SUPERVISOR }
-        .map { it.recordId }
-        .toSet()
-    if (notAccepted.isEmpty()) return records
-    val (held, kept) = records.partition { it.table != PATIENTS_TABLE && it.patientId in notAccepted }
-    val heldPerPatient = held.groupingBy { it.patientId }.eachCount()
-    return kept.map { record ->
-        if (record.table == PATIENTS_TABLE) record.copy(heldRecordCount = heldPerPatient[record.recordId] ?: 0) else record
+fun foldHeldRecords(records: List<FailedSyncRecord>): List<FailedSyncRecord> {
+    val holders = records
+        .filter { it.holdsDescendants || (it.table == PATIENTS_TABLE && it.reason.action == SyncFailureAction.TELL_SUPERVISOR) }
+        .associateBy { it.table to it.recordId }
+    fun holderOf(record: FailedSyncRecord): FailedSyncRecord? {
+        val holder = record.ancestors.firstNotNullOfOrNull { holders[it] } ?: return null
+        val folds = record.held || holder.reason.action == SyncFailureAction.TELL_SUPERVISOR
+        return holder.takeIf { folds && it !== record }
     }
+    val heldPerHolder = mutableMapOf<Pair<String, String>, Int>()
+    val kept = mutableListOf<FailedSyncRecord>()
+    for (record in records) {
+        val holder = holderOf(record)
+        when {
+            holder != null -> heldPerHolder.merge(holder.table to holder.recordId, 1, Int::plus)
+            record.held -> Unit
+            else -> kept += record
+        }
+    }
+    return kept.map { it.copy(heldRecordCount = heldPerHolder[it.table to it.recordId] ?: 0) }
 }
 
 private const val PATIENTS_TABLE = "patients"
