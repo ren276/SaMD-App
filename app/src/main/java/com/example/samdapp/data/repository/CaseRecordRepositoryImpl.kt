@@ -3,6 +3,7 @@ package com.example.samdapp.data.repository
 import com.example.samdapp.data.local.dao.CaseRecordDao
 import com.example.samdapp.data.local.dao.DoctorTrackerRow
 import com.example.samdapp.data.local.entity.CaseRecordEntity
+import com.example.samdapp.domain.model.AssessGateSnapshot
 import com.example.samdapp.domain.model.CaseRecord
 import com.example.samdapp.domain.model.CaseStatus
 import com.example.samdapp.domain.model.DoctorTrackerEntry
@@ -89,6 +90,9 @@ class CaseRecordRepositoryImpl @Inject constructor(
 
     override fun observeDoctorTrackerRows(): Flow<List<DoctorTrackerEntry>> =
         caseRecordDao.observeDoctorTrackerRows().map { rows -> rows.map { it.toDomain() } }
+
+    override suspend fun assessGateSnapshot(caseRecordId: String): AssessGateSnapshot? =
+        caseRecordDao.getAssessGateRow(caseRecordId)?.toSnapshot()
 }
 
 private fun DoctorTrackerRow.toDomain() = DoctorTrackerEntry(

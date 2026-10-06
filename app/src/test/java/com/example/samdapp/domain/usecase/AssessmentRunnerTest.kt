@@ -107,6 +107,11 @@ class AssessmentRunnerTest {
         override fun observeResumableDraftForUser(userId: String): Flow<CaseRecord?> = error("not used")
         override fun observeOpenCaseCount(doctorId: String): Flow<Int> = error("not used")
         override fun observeDoctorTrackerRows(): Flow<List<DoctorTrackerEntry>> = error("not used")
+        // Server-present, so the gate passes and resolve is still what throws.
+        override suspend fun assessGateSnapshot(caseRecordId: String) = com.example.samdapp.domain.model.AssessGateSnapshot(
+            caseRecord = com.example.samdapp.domain.model.SyncChainRow(com.example.samdapp.domain.model.SyncState.SYNCED, 1, null, null),
+            encounter = null, patient = null,
+        )
     }
 
     private fun defaultCaseRecord() = CaseRecord(
@@ -292,4 +297,75 @@ class AssessmentRunnerTest {
         override suspend fun failedRecords(): List<com.example.samdapp.domain.sync.FailedSyncRecord> = emptyList()
         override suspend fun sendFailedRecordAgain(record: com.example.samdapp.domain.sync.FailedSyncRecord) = Unit
     }
+
+    // ── Gate on this case's own server presence (memo section 3.2) ──────────────
+
+    private class CountingKernelSource : RemoteKernelSource {
+        var calls = 0
+        override suspend fun assess(payload: KernelPayload, patientAge: Int, patientSex: String) =
+            AlwaysSucceedsKernelSource.assess(payload, patientAge, patientSex).also { calls++ }
+    }
+
+    private fun chain(state: com.example.samdapp.domain.model.SyncState, serverVersion: Int? = null, code: String? = null, message: String? = null) =
+        com.example.samdapp.domain.model.SyncChainRow(state, serverVersion, code, message)
+
+    @Test
+    fun `a duplicate-ABHA patient stops the assessment before any call, whatever syncNow returned`() = runTest {
+        // syncNow() succeeds (a 200 batch can still reject the patient), so a gate on the global
+        // Result would proceed into a 404. The gate reads this case's own chain instead.
+        val caseRecords = FakeCaseRecordRepository(initial = listOf(defaultCaseRecord())).apply {
+            gateSnapshots["case-1"] = com.example.samdapp.domain.model.AssessGateSnapshot(
+                caseRecord = chain(com.example.samdapp.domain.model.SyncState.RETRYABLE),
+                encounter = chain(com.example.samdapp.domain.model.SyncState.RETRYABLE),
+                patient = chain(
+                    com.example.samdapp.domain.model.SyncState.FAILED,
+                    code = com.example.samdapp.domain.model.SYNC_RECORD_INVALID_CODE,
+                    message = com.example.samdapp.domain.model.BackendConstraintMessages.UNIQUE_VIOLATION,
+                ),
+            )
+        }
+        val kernel = CountingKernelSource()
+        val fixture = Fixture(caseRecordRepository = caseRecords, kernelSource = kernel)
+
+        fixture.runner.run("case-1")
+
+        assertEquals("no /assess call for a case the server cannot hold", 0, kernel.calls)
+        val saved = fixture.kernelReportRepository.saved["case-1"]
+        assertEquals(InferenceSource.UNAVAILABLE, saved?.inferenceSource)
+        assertEquals(com.example.samdapp.domain.kernel.KernelFailure.PATIENT_DUPLICATE, saved?.failureCode)
+        assertEquals("PATIENT_DUPLICATE", fixture.evaluateReportRepository.failures["case-1"])
+        val audit = fixture.auditLogger.logged.single { it.action == AuditAction.KERNEL_RESPONSE_RECEIVED.value }
+        assertTrue(audit.payload, audit.payload.contains("PATIENT_DUPLICATE") && audit.payload.contains("UNAVAILABLE"))
+    }
+
+    @Test
+    fun `a case the server holds is assessed even after a local edit reset it to PENDING`() = runTest {
+        val caseRecords = FakeCaseRecordRepository(initial = listOf(defaultCaseRecord())).apply {
+            gateSnapshots["case-1"] = com.example.samdapp.domain.model.AssessGateSnapshot(
+                caseRecord = chain(com.example.samdapp.domain.model.SyncState.PENDING, serverVersion = 4),
+                encounter = chain(com.example.samdapp.domain.model.SyncState.PENDING, serverVersion = 2),
+                patient = chain(com.example.samdapp.domain.model.SyncState.SYNCED, serverVersion = 1),
+            )
+        }
+        val kernel = CountingKernelSource()
+        val fixture = Fixture(caseRecordRepository = caseRecords, kernelSource = kernel)
+
+        fixture.runner.run("case-1")
+
+        assertEquals(1, kernel.calls)
+        assertEquals(InferenceSource.REAL_INFERENCE, fixture.kernelReportRepository.saved["case-1"]?.inferenceSource)
+    }
+
+    @Test
+    fun `missing local data is recorded as RECORD_INCOMPLETE and audited`() = runTest {
+        val fixture = Fixture(vitalsRepository = FakeVitalsRepository())
+
+        fixture.runner.run("case-1")
+
+        val saved = fixture.kernelReportRepository.saved["case-1"]
+        assertEquals(com.example.samdapp.domain.kernel.KernelFailure.RECORD_INCOMPLETE, saved?.failureCode)
+        val audit = fixture.auditLogger.logged.single { it.action == AuditAction.KERNEL_RESPONSE_RECEIVED.value }
+        assertTrue(audit.payload, audit.payload.contains("RECORD_INCOMPLETE"))
+    }
+
 }

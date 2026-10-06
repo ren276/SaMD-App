@@ -3,6 +3,10 @@ package com.example.samdapp.domain.usecase
 import com.example.samdapp.domain.audit.AuditAction
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
+import com.example.samdapp.domain.kernel.AssessGate
+import com.example.samdapp.domain.kernel.KernelFailure
+import com.example.samdapp.domain.kernel.assessGateDecision
+import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.domain.model.KernelPayload
 import com.example.samdapp.domain.model.toVitalsReading
 import com.example.samdapp.domain.repository.CaseRecordRepository
@@ -51,36 +55,46 @@ class AssessmentRunner @Inject constructor(
     )
 
     suspend fun run(caseRecordId: String) {
-        // The one catch in this class: it wraps resolution and payload build only (stage 1/2),
-        // and converts both their strict null returns and any unexpected exception into the same
-        // branch. Stage 3 (kernel) never throws and already falls through to its own unavailable
-        // state internally; stage 4 (evaluate) already writes its own failure marker and must be
-        // audited, not swallowed. Neither is wrapped here.
+        // Local resolution first (stage 1/2): nothing to assess means nothing worth pushing for,
+        // so an unresolvable case is recorded without a network round trip. The one catch around
+        // resolution and payload build: a strict null return is missing local data, an exception
+        // is a defect on this phone. Stage 3 (kernel) never throws and falls through to its own
+        // unavailable state; stage 4 (evaluate) writes its own failure marker and must be audited,
+        // not swallowed. Neither is wrapped here.
         val resolved = try {
-            resolve(caseRecordId)
+            resolve(caseRecordId) ?: run {
+                recordUnavailableAudited(caseRecordId, KernelFailure.RECORD_INCOMPLETE)
+                return
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             logger.warning("Assessment resolve/build failed for case $caseRecordId: ${e.message}")
-            null
-        }
-
-        if (resolved == null) {
-            generateKernelReportUseCase.recordUnavailable(caseRecordId)
+            recordUnavailableAudited(caseRecordId, KernelFailure.DEVICE_ERROR)
             return
         }
 
-        // Both kernel legs below are backend proxies that resolve the case record server-side
-        // (POST /api/v1/assess -> _resolve_case_record). A case created on device exists only
-        // locally until the outbox drains, so assessing before pushing gets SAMD-ENC-4002 "case
-        // record not found" and collapses to the fallback/unavailable path for a reason that has
-        // nothing to do with the kernel being unavailable. Push first, then assess.
-        //
-        // The result is deliberately not fatal. syncNow() refuses when offline, and a failed push
-        // means the kernel call below fails too and lands in the honest UNAVAILABLE state that
-        // already exists — which is the correct outcome, not something to special-case here.
+        // Push. Every clinical row is device-minted and reaches the server only through the
+        // outbox, and /api/v1/assess resolves the case record server side. Best effort and NOT
+        // consulted: a 200 batch can still reject this patient or encounter individually, so the
+        // Result says nothing about this case. syncNow() also sends every queued PENDING_SYNC case,
+        // the same as Sync now (operator ruling H3).
         syncStatus.syncNow().onFailure { e ->
             logger.warning("Pre-assessment sync failed for case $caseRecordId: ${e.message}")
+        }
+
+        // The gate reads this case's own chain after the push, never the Result above.
+        val gate = try {
+            assessGateDecision(caseRecordRepository.assessGateSnapshot(caseRecordId))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.warning("Assess gate could not read case $caseRecordId: ${e.message}")
+            AssessGate.Stop(KernelFailure.DEVICE_ERROR)
+        }
+        if (gate is AssessGate.Stop) {
+            recordUnavailableAudited(caseRecordId, gate.failure)
+            return
         }
 
         val kernelResult = generateKernelReportUseCase(
@@ -122,6 +136,28 @@ class AssessmentRunner @Inject constructor(
             payload = auditPayload(
                 "consultationId" to resolved.consultationId,
                 "inferenceSource" to kernelResult.getOrNull()?.inferenceSource?.name,
+            ),
+        )
+    }
+
+    /**
+     * The only way an early return may record an UNAVAILABLE result. A persisted clinical
+     * artifact (the kernel report row) must never exist without its audit entry, and both legs
+     * must say why: the kernel row carries [failure] for the screen, the evaluate leg records the
+     * same name as its failure marker (H-14: failed, not merely not run), and the audit entry is
+     * the same [AuditAction.KERNEL_RESPONSE_RECEIVED] the full path emits, with
+     * `inferenceSource = UNAVAILABLE` and the reason. (Salvaged from the archived
+     * fix/sync-before-assess, 76a4ac2.)
+     */
+    private suspend fun recordUnavailableAudited(caseRecordId: String, failure: KernelFailure) {
+        generateKernelReportUseCase.recordUnavailable(caseRecordId, failure)
+        generateEvaluateReportUseCase.recordFailure(caseRecordId, failure.name)
+        auditLogger.log(
+            action = AuditAction.KERNEL_RESPONSE_RECEIVED,
+            caseRecordId = caseRecordId,
+            payload = auditPayload(
+                "inferenceSource" to InferenceSource.UNAVAILABLE.name,
+                "reason" to failure.name,
             ),
         )
     }

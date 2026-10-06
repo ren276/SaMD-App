@@ -143,15 +143,15 @@ class GenerateKernelReportUseCase @Inject constructor(
      * reached-but-failed kernel call already produces, rather than a silent gap with no row and
      * no remedy. No payload exists here, so there is nothing to score for data quality.
      */
-    suspend fun recordUnavailable(caseRecordId: String) {
-        // failure = null deliberately: nothing was sent, so no KernelFailure describes this.
-        // The pre-flight "could not build a payload" case is its own class and is NOT one of the
-        // ten this enum covers; recorded as an open item rather than guessed at here.
+    suspend fun recordUnavailable(caseRecordId: String, failure: KernelFailure? = null) {
+        // [failure] is the cause decided on this phone before any call (the assess gate, or local
+        // data that could not be resolved), so the screen can name it. Null only for a caller
+        // with no cause to give.
         val output = buildUnavailableOutput(
             caseRecordId,
             dataQualityScore = 0.0,
             inferenceStartedAt = Instant.now(),
-            failure = null,
+            failure = failure,
         )
         kernelReportRepository.save(output)
     }

@@ -109,4 +109,25 @@ enum class KernelFailure(val advice: KernelRetryAdvice) {
      *  never a crash and never silence. Same reasoning as
      *  `AbhaEnrolResult`'s `messageForCode` fallback. */
     UNKNOWN(KernelRetryAdvice.NEEDS_ACTION),
+
+    // The four below are decided on this phone before any call, by the assess gate
+    // (AssessGate.kt) and the runner's local resolution. Nothing was sent, so they are not this
+    // hop's failures in the strict sense; they share the vocabulary because the screen renders
+    // every "no assessment" cause from one value.
+
+    /** No local case record, vitals or consultation to build a payload from. The AI was never
+     *  asked. Pressing again unchanged cannot supply the missing data. */
+    RECORD_INCOMPLETE(KernelRetryAdvice.NEEDS_ACTION),
+
+    /** The case is not on the server because its patient was refused as a duplicate (another
+     *  patient holds this ABHA number). Nothing on this phone can fix it. */
+    PATIENT_DUPLICATE(KernelRetryAdvice.NEEDS_ACTION),
+
+    /** The case is not on the server because a row in its chain (patient, encounter or case
+     *  record) is FAILED or CONFLICT. The Home review list says which and why. */
+    CASE_SYNC_BLOCKED(KernelRetryAdvice.NEEDS_ACTION),
+
+    /** The case is not on the server yet: its chain is still PENDING or RETRYABLE. Pressing again
+     *  after it has been sent can succeed. */
+    CASE_NOT_SENT_YET(KernelRetryAdvice.RETRY_NOW),
 }

@@ -1,5 +1,6 @@
 package com.example.samdapp.domain.repository
 
+import com.example.samdapp.domain.model.AssessGateSnapshot
 import com.example.samdapp.domain.model.CaseRecord
 import com.example.samdapp.domain.model.DoctorTrackerEntry
 import kotlinx.coroutines.flow.Flow
@@ -51,4 +52,8 @@ interface CaseRecordRepository {
      *  DoctorList tracker. Deliberately cross-patient; see the DAO KDoc for why this one is
      *  exempt from the day-scoping data-minimization rule the patient roster follows. */
     fun observeDoctorTrackerRows(): Flow<List<DoctorTrackerEntry>>
+
+    /** This case's own sync chain (case record, encounter, patient) for the assess gate, read in
+     *  one query. Null when the case record is not on this phone. */
+    suspend fun assessGateSnapshot(caseRecordId: String): AssessGateSnapshot?
 }

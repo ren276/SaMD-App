@@ -141,6 +141,7 @@ class CompounderContentKeyTest {
         override fun observeResumableDraftForUser(userId: String): Flow<CaseRecord?> = flowOf(null)
         override fun observeOpenCaseCount(doctorId: String): Flow<Int> = flowOf(0)
         override fun observeDoctorTrackerRows(): Flow<List<DoctorTrackerEntry>> = flowOf(emptyList())
+        override suspend fun assessGateSnapshot(caseRecordId: String): com.example.samdapp.domain.model.AssessGateSnapshot? = null
     }
 
     private object EmptyAilmentRepository : AilmentRepository {

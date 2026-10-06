@@ -278,6 +278,16 @@ class FakeCaseRecordRepository(
     val records = mutableMapOf<String, CaseRecord>().apply { initial.forEach { put(it.id, it) } }
     private val streams = mutableMapOf<String, MutableStateFlow<CaseRecord?>>()
 
+    /** What [assessGateSnapshot] returns per case. A case with no entry here but a record in
+     *  [records] reads as fully server-present, so a test that is not about the gate proceeds. */
+    val gateSnapshots = mutableMapOf<String, com.example.samdapp.domain.model.AssessGateSnapshot>()
+
+    override suspend fun assessGateSnapshot(caseRecordId: String): com.example.samdapp.domain.model.AssessGateSnapshot? =
+        gateSnapshots[caseRecordId] ?: records[caseRecordId]?.let {
+            val synced = com.example.samdapp.domain.model.SyncChainRow(com.example.samdapp.domain.model.SyncState.SYNCED, 1, null, null)
+            com.example.samdapp.domain.model.AssessGateSnapshot(caseRecord = synced, encounter = synced, patient = synced)
+        }
+
     private fun streamFor(id: String) = streams.getOrPut(id) { MutableStateFlow(records[id]) }
 
     override suspend fun createDraft(patientId: String, encounterId: String): Result<CaseRecord> {

@@ -86,4 +86,24 @@ fun kernelFailureCopy(failure: KernelFailure?): KernelFailureCopy = when (failur
         R.string.kernel_failure_unknown_title,
         R.string.kernel_failure_unknown_body,
     )
+
+    KernelFailure.RECORD_INCOMPLETE -> KernelFailureCopy(
+        R.string.kernel_failure_record_incomplete_title,
+        R.string.kernel_failure_record_incomplete_body,
+    )
+
+    KernelFailure.PATIENT_DUPLICATE -> KernelFailureCopy(
+        R.string.kernel_failure_patient_duplicate_title,
+        R.string.kernel_failure_patient_duplicate_body,
+    )
+
+    KernelFailure.CASE_SYNC_BLOCKED -> KernelFailureCopy(
+        R.string.kernel_failure_case_sync_blocked_title,
+        R.string.kernel_failure_case_sync_blocked_body,
+    )
+
+    KernelFailure.CASE_NOT_SENT_YET -> KernelFailureCopy(
+        R.string.kernel_failure_case_not_sent_yet_title,
+        R.string.kernel_failure_case_not_sent_yet_body,
+    )
 }

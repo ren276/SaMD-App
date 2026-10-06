@@ -192,4 +192,19 @@ interface CaseRecordDao {
         "ORDER BY cr.updatedAt DESC",
     )
     fun observeDoctorTrackerRows(): Flow<List<DoctorTrackerRow>>
+
+    /** One case's sync chain for the assess gate: the case record LEFT JOINed to its encounter and
+     *  patient, so a parent missing on this phone does not hide the case. Null when the case
+     *  record itself is not here. */
+    @Query(
+        "SELECT c.syncState AS caseSyncState, c.serverVersion AS caseServerVersion, " +
+            "c.syncErrorCode AS caseSyncErrorCode, c.syncErrorMessage AS caseSyncErrorMessage, " +
+            "e.syncState AS encounterSyncState, e.serverVersion AS encounterServerVersion, " +
+            "e.syncErrorCode AS encounterSyncErrorCode, e.syncErrorMessage AS encounterSyncErrorMessage, " +
+            "p.syncState AS patientSyncState, p.serverVersion AS patientServerVersion, " +
+            "p.syncErrorCode AS patientSyncErrorCode, p.syncErrorMessage AS patientSyncErrorMessage " +
+            "FROM case_records c LEFT JOIN encounters e ON e.id = c.encounterId " +
+            "LEFT JOIN patients p ON p.id = c.patientId WHERE c.id = :caseRecordId",
+    )
+    suspend fun getAssessGateRow(caseRecordId: String): AssessGateRow?
 }

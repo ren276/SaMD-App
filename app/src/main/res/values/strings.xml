@@ -65,6 +65,17 @@
       No KernelFailure: the kernel was reached and answered with nothing, or no payload could be
       built at all. Reach-neutral on purpose, and the only place the old wording survives.
     -->
+    <!-- Decided on this phone before any call, by the assess gate or local resolution
+         (memo section 3.1, A3, A5 to A7). Nothing was sent to the AI in any of these. -->
+    <string name="kernel_failure_record_incomplete_title">This visit is missing information</string>
+    <string name="kernel_failure_record_incomplete_body">The vitals or the consultation for this visit were not saved, so it could not be checked. Trying again will not help. Tell your supervisor.</string>
+    <string name="kernel_failure_patient_duplicate_title">This patient is not on the server</string>
+    <string name="kernel_failure_patient_duplicate_body">The server already has another patient with the same ABHA number, so this patient and this visit were not saved there and the visit could not be checked. This cannot be fixed on this phone. Write down the patient\'s name and tell your supervisor today.</string>
+    <string name="kernel_failure_case_sync_blocked_title">This visit could not be sent to the server</string>
+    <string name="kernel_failure_case_sync_blocked_body">Part of this visit was not accepted by the server, so it could not be checked. The card on the home screen for records that did not reach the server shows why.</string>
+    <string name="kernel_failure_case_not_sent_yet_title">This visit has not been sent yet</string>
+    <string name="kernel_failure_case_not_sent_yet_body">This phone has not finished sending this visit to the server. When the home screen shows nothing waiting to send, press Try again.</string>
+
     <string name="kernel_failure_none_title">Assessment unavailable</string>
     <string name="kernel_failure_none_body">The AI did not produce a result for this case. No diagnosis was generated.</string>
 
