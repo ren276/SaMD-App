@@ -1,5 +1,7 @@
 package com.example.samdapp.presentation.patientsummary
 
+import com.example.samdapp.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -48,7 +50,8 @@ import com.example.samdapp.domain.model.TRAINED_ICD_CANDIDATES
 import com.example.samdapp.presentation.common.DropdownField
 import com.example.samdapp.presentation.common.LowResourceWarningDialog
 import com.example.samdapp.presentation.common.deviceResourceWarnings
-import com.example.samdapp.presentation.common.historyLabel
+import com.example.samdapp.presentation.common.doctorReviewHeaderRes
+import com.example.samdapp.presentation.common.historyLabelRes
 import java.time.LocalDate
 import java.time.Period
 import java.time.ZoneId
@@ -201,11 +204,7 @@ fun PatientSummaryScreen(
             if (uiState.caseStatus == CaseStatus.SENT_TO_DOCTOR || uiState.caseStatus == CaseStatus.PRESCRIPTION_RECEIVED) {
                 Column(modifier = Modifier.fillMaxWidth().padding(top = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        text = if (uiState.caseStatus == CaseStatus.PRESCRIPTION_RECEIVED) {
-                            "Doctor's review received"
-                        } else {
-                            "Awaiting doctor's review"
-                        },
+                        text = stringResource(doctorReviewHeaderRes(uiState.caseStatus ?: CaseStatus.SENT_TO_DOCTOR, uiState.caseOnServer)),
                         style = MaterialTheme.typography.titleSmall,
                     )
                     if (uiState.caseStatus == CaseStatus.SENT_TO_DOCTOR) {
@@ -477,7 +476,7 @@ private fun ConsultationChainRow(
             }
             DoctorInLoopLine(latest.doctorName, latest.doctorSpecialty)
             Text(
-                text = latest.caseStatus?.historyLabel() ?: "No case record",
+                text = stringResource(latest.caseStatus?.historyLabelRes(latest.caseOnServer) ?: R.string.case_history_no_case_record),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

@@ -183,7 +183,8 @@ interface CaseRecordDao {
     @Query(
         "SELECT cr.id AS caseRecordId, cr.patientId AS patientId, cr.status AS status, " +
         "cr.updatedAt AS updatedAt, p.fullName AS patientFullName, c.chiefComplaint AS chiefComplaint, " +
-        "d.name AS doctorName, d.specialty AS doctorSpecialty " +
+        "d.name AS doctorName, d.specialty AS doctorSpecialty, " +
+        "cr.syncState AS caseSyncState, cr.serverVersion AS caseServerVersion " +
         "FROM case_records cr " +
         "JOIN patients p ON p.id = cr.patientId " +
         "LEFT JOIN consultations c ON c.encounterId = cr.encounterId " +

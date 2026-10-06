@@ -7,6 +7,7 @@ import com.example.samdapp.domain.model.AssessGateSnapshot
 import com.example.samdapp.domain.model.CaseRecord
 import com.example.samdapp.domain.model.CaseStatus
 import com.example.samdapp.domain.model.DoctorTrackerEntry
+import com.example.samdapp.domain.model.isServerPresent
 import com.example.samdapp.domain.repository.CaseRecordRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -104,6 +105,7 @@ private fun DoctorTrackerRow.toDomain() = DoctorTrackerEntry(
     updatedAt = updatedAt,
     doctorName = doctorName,
     doctorSpecialty = doctorSpecialty,
+    caseOnServer = isServerPresent(caseSyncState, caseServerVersion),
 )
 
 private fun CaseRecord.toEntity() = CaseRecordEntity(
@@ -115,4 +117,5 @@ private fun CaseRecord.toEntity() = CaseRecordEntity(
 private fun CaseRecordEntity.toDomain() = CaseRecord(
     id = id, patientId = patientId, encounterId = encounterId, status = status,
     assignedDoctorId = assignedDoctorId, createdAt = createdAt, updatedAt = updatedAt,
+    isOnServer = isServerPresent(syncState, serverVersion),
 )

@@ -3,8 +3,22 @@ package com.example.samdapp.domain.audit
 import java.time.Instant
 
 /** One plain-language line for the patient-facing "who has seen your file" view (DPDP
- *  right-to-access) — never the raw [AuditLogEntry.action]/payload/id. */
-data class PatientFacingAuditEntry(val timestamp: Instant, val description: String)
+ *  right-to-access), never the raw [AuditLogEntry.action]/payload/id. Exactly one of
+ *  [description] and [message] is set: [message] for a line whose words live in strings.xml,
+ *  resolved by the screen (this layer has no Android resources). */
+data class PatientFacingAuditEntry(
+    val timestamp: Instant,
+    val description: String?,
+    val message: PatientFacingMessage? = null,
+)
+
+/** Patient-facing lines whose copy lives in strings.xml. */
+enum class PatientFacingMessage {
+    /** CASE_SENT_TO_DOCTOR: logged when a doctor is assigned on this phone, a local status change
+     *  made before anything reaches the server or the doctor. "Queued", because that is what
+     *  happened; the event and its meaning are unchanged, only the words. */
+    QUEUED_FOR_DOCTOR_REVIEW,
+}
 
 /**
  * Maps the existing audit trail to plain language a patient can actually read — reuses data
@@ -13,7 +27,13 @@ data class PatientFacingAuditEntry(val timestamp: Instant, val description: Stri
  * sentence, and the fallback for an unmapped action is generic rather than surfacing [action] text.
  */
 fun List<AuditLogEntry>.toPatientFacingEntries(): List<PatientFacingAuditEntry> =
-    map { entry -> PatientFacingAuditEntry(timestamp = entry.timestamp, description = entry.action.toPatientFacingDescription()) }
+    map { entry ->
+        when (entry.action) {
+            AuditAction.CASE_SENT_TO_DOCTOR.value ->
+                PatientFacingAuditEntry(entry.timestamp, description = null, message = PatientFacingMessage.QUEUED_FOR_DOCTOR_REVIEW)
+            else -> PatientFacingAuditEntry(timestamp = entry.timestamp, description = entry.action.toPatientFacingDescription())
+        }
+    }
 
 private fun String.toPatientFacingDescription(): String = when (this) {
     AuditAction.PATIENT_REGISTERED.value -> "PHC worker created your patient record"
@@ -37,7 +57,6 @@ private fun String.toPatientFacingDescription(): String = when (this) {
     AuditAction.KERNEL_UNRECOGNISED_OUTPUT.value -> "Kernel AI returned a result that was flagged for physician review"
     AuditAction.TRANSCRIPTION_COMPLETED.value -> "Your audio note was transcribed"
     AuditAction.CONSULTATION_LOCKED.value -> "Your consultation was finalized and saved"
-    AuditAction.CASE_SENT_TO_DOCTOR.value -> "Sent for doctor review"
     AuditAction.REPORT_EXPORTED.value -> "Your report was generated"
     AuditAction.REFERRAL_CREATED.value -> "You were referred to another facility"
     else -> "PHC worker updated your record"

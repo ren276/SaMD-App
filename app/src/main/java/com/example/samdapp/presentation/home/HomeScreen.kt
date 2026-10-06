@@ -231,7 +231,7 @@ private fun HomeContent(
                 shape = MaterialTheme.shapes.large,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(top = 8.dp, bottom = 16.dp),
             ) {
-                Text(text = "Sent to doctor", style = MaterialTheme.typography.titleMedium)
+                Text(text = stringResource(R.string.cases_for_the_doctor), style = MaterialTheme.typography.titleMedium)
             }
         }
     }

@@ -62,6 +62,9 @@ data class PatientSummaryUiState(
     val caseRecordId: String? = null,
     val encounterId: String? = null,
     val caseStatus: CaseStatus? = null,
+    /** Whether the server holds the case record; a SENT_TO_DOCTOR case not on the server reads
+     *  "Queued for doctor, not yet on the server". */
+    val caseOnServer: Boolean = false,
     /** H-17 prescription visibility gate (Build 1): the signed-in worker's role, read so
      *  [canOpenDoctorReview] can require [UserRole.DOCTOR]. Self-asserted at login (H-06) — this
      *  is an accountability/intent gate on the decision surface, not access control. */
@@ -180,6 +183,7 @@ class PatientSummaryViewModel @AssistedInject constructor(
                             caseRecordId = caseRecord?.id,
                             encounterId = caseRecord?.encounterId,
                             caseStatus = caseRecord?.status,
+                            caseOnServer = caseRecord?.isOnServer ?: false,
                         )
                     }
                 }

@@ -74,7 +74,8 @@ interface EncounterDao {
     @Query(
         "SELECT e.id AS encounterId, e.startedAt AS startedAt, c.chiefComplaint AS chiefComplaint, " +
         "cr.id AS caseRecordId, cr.status AS status, e.followUpOfEncounterId AS followUpOfEncounterId, " +
-        "d.name AS doctorName, d.specialty AS doctorSpecialty " +
+        "d.name AS doctorName, d.specialty AS doctorSpecialty, " +
+        "cr.syncState AS caseSyncState, cr.serverVersion AS caseServerVersion " +
         "FROM encounters e " +
         "LEFT JOIN consultations c ON c.encounterId = e.id " +
         "LEFT JOIN case_records cr ON cr.encounterId = e.id " +

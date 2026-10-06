@@ -1,5 +1,6 @@
 package com.example.samdapp.data.repository
 
+import com.example.samdapp.domain.model.isServerPresent
 import com.example.samdapp.data.local.dao.EncounterDao
 import com.example.samdapp.data.local.dao.EncounterHistoryRow
 import com.example.samdapp.data.local.entity.EncounterEntity
@@ -46,6 +47,7 @@ private fun EncounterHistoryRow.toDomain() = ConsultationHistoryEntry(
     followUpOfEncounterId = followUpOfEncounterId,
     doctorName = doctorName,
     doctorSpecialty = doctorSpecialty,
+    caseOnServer = caseSyncState?.let { isServerPresent(it, caseServerVersion) } ?: false,
 )
 
 private fun Encounter.toEntity() = EncounterEntity(

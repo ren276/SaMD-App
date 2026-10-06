@@ -67,6 +67,31 @@
     -->
     <!-- Decided on this phone before any call, by the assess gate or local resolution
          (memo section 3.1, A3, A5 to A7). Nothing was sent to the AI in any of these. -->
+    <!--
+      Case status as the worker sees it (presentation/common/CaseStatusDisplay.kt). SENT_TO_DOCTOR
+      is a local status set on this phone with no network, so until the case is on the server it
+      reads "Queued for doctor, not yet on the server" (operator ruling H6).
+    -->
+    <string name="case_status_queued">Queued</string>
+    <string name="case_status_awaiting_review">Awaiting Review</string>
+    <string name="case_status_reviewed">Reviewed</string>
+    <string name="case_status_abandoned">Abandoned</string>
+    <string name="case_status_queued_for_doctor_not_on_server">Queued for doctor, not yet on the server</string>
+    <string name="case_history_in_progress">In progress</string>
+    <string name="case_history_saved_locally">Saved locally</string>
+    <string name="case_history_queued_will_send">Queued, will send when online</string>
+    <string name="case_history_awaiting_doctors_review">Awaiting doctor\'s review</string>
+    <string name="case_history_doctors_response_received">Doctor\'s response received</string>
+    <string name="case_history_abandoned_restarted">Abandoned, restarted as a new visit</string>
+    <string name="case_history_no_case_record">No case record</string>
+    <string name="case_review_header_received">Doctor\'s review received</string>
+    <!-- The Home button and the list it opens: true of every case in it, sent or not. -->
+    <string name="cases_for_the_doctor">Cases for the doctor</string>
+    <string name="cases_for_the_doctor_empty">No cases for the doctor yet.</string>
+    <!-- Patient-facing history line for CASE_SENT_TO_DOCTOR, which is logged when a doctor is
+         assigned on this phone, before anything reaches the server. -->
+    <string name="patient_audit_queued_for_doctor_review">Queued for doctor review</string>
+
     <string name="kernel_failure_record_incomplete_title">This visit is missing information</string>
     <string name="kernel_failure_record_incomplete_body">The vitals or the consultation for this visit were not saved, so it could not be checked. Trying again will not help. Tell your supervisor.</string>
     <string name="kernel_failure_patient_duplicate_title">This patient is not on the server</string>
