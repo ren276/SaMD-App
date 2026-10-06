@@ -27,8 +27,11 @@ sealed interface AssessGate {
  * 1. no local case record: [KernelFailure.RECORD_INCOMPLETE];
  * 2. the case record is on the server: [AssessGate.Proceed];
  * 3. the patient was refused as a duplicate: [KernelFailure.PATIENT_DUPLICATE];
- * 4. any row in the chain is FAILED or CONFLICT: [KernelFailure.CASE_SYNC_BLOCKED];
- * 5. otherwise the chain is still PENDING or RETRYABLE: [KernelFailure.CASE_NOT_SENT_YET].
+ * 4. any row in the chain is FAILED, or the case record itself is CONFLICT:
+ *    [KernelFailure.CASE_SYNC_BLOCKED];
+ * 5. otherwise the chain is still on its way: [KernelFailure.CASE_NOT_SENT_YET]. That includes a
+ *    CONFLICT patient or encounter: a conflict is only ever acked for a row the server already
+ *    holds, so it does not stop the case from reaching the server (operator ruling Q2).
  */
 fun assessGateDecision(snapshot: AssessGateSnapshot?): AssessGate {
     if (snapshot == null) return AssessGate.Stop(KernelFailure.RECORD_INCOMPLETE)
@@ -39,7 +42,7 @@ fun assessGateDecision(snapshot: AssessGateSnapshot?): AssessGate {
     ) {
         return AssessGate.Stop(KernelFailure.PATIENT_DUPLICATE)
     }
-    val blocked = listOfNotNull(snapshot.patient, snapshot.encounter, snapshot.caseRecord)
-        .any { it.syncState == SyncState.FAILED || it.syncState == SyncState.CONFLICT }
+    val blocked = snapshot.caseRecord.syncState == SyncState.CONFLICT ||
+        listOfNotNull(snapshot.patient, snapshot.encounter, snapshot.caseRecord).any { it.syncState == SyncState.FAILED }
     return AssessGate.Stop(if (blocked) KernelFailure.CASE_SYNC_BLOCKED else KernelFailure.CASE_NOT_SENT_YET)
 }

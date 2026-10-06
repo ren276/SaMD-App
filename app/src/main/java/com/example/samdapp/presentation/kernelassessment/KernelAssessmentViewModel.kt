@@ -177,6 +177,9 @@ data class KernelAssessmentUiState(
      *  network (NetworkType.CONNECTED), so this is shown as "Waiting for a connection" instead of
      *  a spinner with nothing said. The job then runs on its own, which is true. */
     val waitingForNetwork: Boolean = false,
+    /** No report yet, the phone has a network, and the assessment has already been tried again
+     *  because this visit had not reached the server. Shown as "Sending this visit first". */
+    val sendingFirst: Boolean = false,
     /** Resolved once from this consultation's AUDIO attachment row, not carried in the route.
      *  A uri that survived three screens is not evidence the attachment was persisted; the row
      *  is. Null means no audio leg, which sends the case straight to Acknowledgement. */
@@ -288,13 +291,16 @@ class KernelAssessmentViewModel @AssistedInject constructor(
                             display = reportDisplay,
                             isRetrying = workState != AssessmentWorkState.NONE,
                             waitingForNetwork = false,
+                            sendingFirst = false,
                         )
                         workState != AssessmentWorkState.NONE -> it.copy(
                             isLoading = true,
                             display = null,
-                            waitingForNetwork = workState == AssessmentWorkState.QUEUED && !networkAvailable,
+                            waitingForNetwork = !networkAvailable &&
+                                (workState == AssessmentWorkState.QUEUED || workState == AssessmentWorkState.RETRYING),
+                            sendingFirst = workState == AssessmentWorkState.RETRYING && networkAvailable,
                         )
-                        else -> it.copy(isLoading = false, display = stalledDisplay(), isRetrying = false, waitingForNetwork = false)
+                        else -> it.copy(isLoading = false, display = stalledDisplay(), isRetrying = false, waitingForNetwork = false, sendingFirst = false)
                     }
                 }
             }.collect {}

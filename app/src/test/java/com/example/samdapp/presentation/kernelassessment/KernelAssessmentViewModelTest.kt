@@ -319,4 +319,53 @@ class KernelAssessmentViewModelTest {
         assertFalse(viewModel.uiState.value.waitingForNetwork)
     }
 
+    @Test
+    fun `tried again with a network says the visit is being sent first, and without one it still says waiting`() = runTest(mainDispatcherRule.dispatcher) {
+        val scheduler = FakeAssessmentQueueScheduler().apply { setWorkState("case-1", AssessmentWorkState.RETRYING) }
+        val network = com.example.samdapp.testutil.FakeNetworkMonitor(initial = true)
+        val viewModel = viewModel("case-1", scheduler = scheduler, networkMonitor = network)
+        advanceUntilIdle()
+
+        assertTrue(viewModel.uiState.value.sendingFirst)
+        assertFalse(viewModel.uiState.value.waitingForNetwork)
+        assertTrue(viewModel.uiState.value.isLoading)
+
+        network.setAvailable(false)
+        advanceUntilIdle()
+
+        assertTrue(viewModel.uiState.value.waitingForNetwork)
+        assertFalse(viewModel.uiState.value.sendingFirst)
+    }
+
+    @Test
+    fun `a first attempt that is running is an ordinary check, not sending first`() = runTest(mainDispatcherRule.dispatcher) {
+        val scheduler = FakeAssessmentQueueScheduler().apply { setWorkState("case-1", AssessmentWorkState.RUNNING) }
+        val viewModel = viewModel("case-1", scheduler = scheduler)
+        advanceUntilIdle()
+
+        assertFalse(viewModel.uiState.value.sendingFirst)
+        assertFalse(viewModel.uiState.value.waitingForNetwork)
+    }
+
+    @Test
+    fun `no retry affordance shows while the retries run, and the not-sent-yet card only after the cap`() = runTest(mainDispatcherRule.dispatcher) {
+        val kernel = FakeKernelReportRepository()
+        val scheduler = FakeAssessmentQueueScheduler().apply { setWorkState("case-1", AssessmentWorkState.RETRYING) }
+        val viewModel = viewModel("case-1", kernelReportRepository = kernel, scheduler = scheduler)
+        advanceUntilIdle()
+        assertEquals("no row yet, so no card and no Try again", null, viewModel.uiState.value.display)
+
+        kernel.save(
+            com.example.samdapp.testutil.testKernelReportOutput("case-1", com.example.samdapp.domain.model.InferenceSource.UNAVAILABLE)
+                .copy(failureCode = com.example.samdapp.domain.kernel.KernelFailure.CASE_NOT_SENT_YET),
+        )
+        scheduler.setWorkState("case-1", AssessmentWorkState.NONE)
+        advanceUntilIdle()
+
+        val display = requireNotNull(viewModel.uiState.value.display)
+        assertTrue(display.isUnavailable)
+        assertFalse(viewModel.uiState.value.sendingFirst)
+        assertFalse(viewModel.uiState.value.isRetrying)
+    }
+
 }

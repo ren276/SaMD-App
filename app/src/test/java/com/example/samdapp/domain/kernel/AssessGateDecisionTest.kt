@@ -58,13 +58,26 @@ class AssessGateDecisionTest {
         )
 
     @Test
-    fun `any other FAILED or CONFLICT row in the chain blocks the visit`() {
+    fun `any other FAILED row in the chain, or a CONFLICT case record, blocks the visit`() {
         listOf(
             AssessGateSnapshot(caseRecord = pending, encounter = pending, patient = row(SyncState.FAILED, code = SYNC_RECORD_INVALID_CODE, message = BackendConstraintMessages.NOT_NULL_VIOLATION)),
-            AssessGateSnapshot(caseRecord = pending, encounter = row(SyncState.CONFLICT), patient = pending),
+            AssessGateSnapshot(caseRecord = pending, encounter = row(SyncState.FAILED, code = "SAMD-SYNC-RETRY-EXHAUSTED"), patient = pending),
             AssessGateSnapshot(caseRecord = row(SyncState.FAILED, code = "SAMD-SYNC-RETRY-EXHAUSTED"), encounter = pending, patient = pending),
+            AssessGateSnapshot(caseRecord = row(SyncState.CONFLICT), encounter = pending, patient = pending),
         ).forEach { snapshot ->
             assertEquals(snapshot.toString(), AssessGate.Stop(KernelFailure.CASE_SYNC_BLOCKED), assessGateDecision(snapshot))
+        }
+    }
+
+    /** Operator ruling Q2. A conflict is only ever acked for a row the server already holds, so a
+     *  CONFLICT patient or encounter does not stop the case from reaching it: retry, not A6. */
+    @Test
+    fun `a CONFLICT patient or encounter does not block the visit, it is not sent yet`() {
+        listOf(
+            AssessGateSnapshot(caseRecord = pending, encounter = row(SyncState.CONFLICT), patient = pending),
+            AssessGateSnapshot(caseRecord = pending, encounter = pending, patient = row(SyncState.CONFLICT)),
+        ).forEach { snapshot ->
+            assertEquals(snapshot.toString(), AssessGate.Stop(KernelFailure.CASE_NOT_SENT_YET), assessGateDecision(snapshot))
         }
     }
 

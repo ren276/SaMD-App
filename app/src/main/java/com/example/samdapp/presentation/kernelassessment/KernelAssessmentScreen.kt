@@ -69,6 +69,12 @@ internal fun KernelAssessmentContent(uiState: KernelAssessmentUiState, actions: 
         if (uiState.isLoading) {
             if (uiState.waitingForNetwork) {
                 WaitingForNetworkCard(modifier = Modifier.padding(padding).padding(16.dp))
+            } else if (uiState.sendingFirst) {
+                Column(modifier = Modifier.padding(padding).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    SamdLoadingIndicator()
+                    Text(stringResource(R.string.assessment_sending_first_title), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 12.dp))
+                    Text(stringResource(R.string.assessment_sending_first_body), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
+                }
             } else {
                 Column(modifier = Modifier.padding(padding).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     SamdLoadingIndicator()
@@ -143,8 +149,9 @@ internal fun KernelAssessmentContent(uiState: KernelAssessmentUiState, actions: 
     }
 }
 
-/** The job is queued and the phone has no network: it runs on its own once connected, which is
- *  true here (WorkManager holds it on NetworkType.CONNECTED), so no button. */
+/** The job is queued and the phone has no network. WorkManager holds it on NetworkType.CONNECTED
+ *  and runs it once connected, so no button; the copy promises only that the phone will try, and
+ *  that this screen says what to do if that does not work. */
 @Composable
 private fun WaitingForNetworkCard(modifier: Modifier = Modifier) {
     Card(modifier = modifier) {
