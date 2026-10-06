@@ -2,6 +2,8 @@
 
 package com.example.samdapp.presentation.profile
 
+import androidx.compose.ui.res.stringResource
+import com.example.samdapp.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -68,7 +70,7 @@ fun ProfileScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = if (isOnline) "Online" else "Offline — saved locally, syncs when back online",
+                        text = stringResource(if (isOnline) R.string.profile_status_online else R.string.profile_status_offline),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Switch(checked = isOnline, onCheckedChange = { onToggleOnline() })

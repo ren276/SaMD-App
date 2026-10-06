@@ -2,6 +2,8 @@
 
 package com.example.samdapp.presentation.doctorassignment
 
+import androidx.compose.ui.res.stringResource
+import com.example.samdapp.R
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -78,12 +80,11 @@ fun DoctorAssignmentConfirmScreen(
                 }
                 uiState.queuedOffline -> {
                     Text(
-                        text = "No network — case saved locally",
+                        text = stringResource(R.string.doctor_assignment_queued_title),
                         style = MaterialTheme.typography.titleMedium,
                     )
                     Text(
-                        text = "Dr. ${uiState.selectedDoctor!!.name} is assigned, but nothing has been sent yet. " +
-                            "It will go out automatically the next time you tap Sync Up on Home once you're back online.",
+                        text = stringResource(R.string.doctor_assignment_queued_body, uiState.selectedDoctor!!.name),
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(top = 8.dp),
                     )
@@ -97,7 +98,7 @@ fun DoctorAssignmentConfirmScreen(
                         text = if (uiState.isContinuity) {
                             "This visit is a follow-up. Continue with the same doctor who saw this patient last time?"
                         } else {
-                            "This case will be sent to the least-busy available doctor (mock auto-assignment):"
+                            stringResource(R.string.doctor_assignment_least_busy)
                         },
                         style = MaterialTheme.typography.bodyLarge,
                     )

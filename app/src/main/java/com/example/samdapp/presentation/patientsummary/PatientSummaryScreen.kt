@@ -181,16 +181,16 @@ fun PatientSummaryScreen(
                 }
             }
 
-            // Doctor assigned but no network at the time — queued locally, sent automatically the
-            // next time the worker taps Sync Up on Home while online (offline-first send path).
+            // Doctor assigned but no network at the time: queued on this phone until Sync now runs
+            // online (offline-first send path).
             if (uiState.caseStatus == CaseStatus.PENDING_SYNC) {
                 Column(modifier = Modifier.padding(top = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        text = "Case queued — will send when back online",
+                        text = stringResource(R.string.patient_summary_queued_title),
                         style = MaterialTheme.typography.titleSmall,
                     )
                     Text(
-                        text = "Tap Sync Up on Home once you have network.",
+                        text = stringResource(R.string.patient_summary_queued_body),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 4.dp),
@@ -348,7 +348,7 @@ private fun DoctorReviewCard(uiState: PatientSummaryUiState, actions: PatientSum
                     OutlinedTextField(
                         value = uiState.clinicalNoteText,
                         onValueChange = actions::onClinicalNoteChange,
-                        label = { Text("Clinical note (audit only, not used for retraining)") },
+                        label = { Text(stringResource(R.string.physician_clinical_note_label)) },
                         modifier = Modifier.fillMaxWidth(),
                     )
                     ManualPrescriptionFields(uiState, actions)
@@ -368,7 +368,7 @@ private fun DoctorReviewCard(uiState: PatientSummaryUiState, actions: PatientSum
             }
             uiState.selectedDecision?.let { decision ->
                 Text(
-                    decision.outcomeExplanation(),
+                    stringResource(decision.outcomeExplanationRes()),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary,
                 )

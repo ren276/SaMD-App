@@ -34,7 +34,7 @@ fun CaseStatus.doctorTrackerLabelRes(caseOnServer: Boolean): Int = when (this) {
 fun CaseStatus.historyLabelRes(caseOnServer: Boolean): Int = when (this) {
     CaseStatus.DRAFT -> R.string.case_history_in_progress
     CaseStatus.SAVED_LOCALLY -> R.string.case_history_saved_locally
-    CaseStatus.PENDING_SYNC -> R.string.case_history_queued_will_send
+    CaseStatus.PENDING_SYNC -> R.string.case_history_queued_on_phone
     CaseStatus.SENT_TO_DOCTOR ->
         if (caseOnServer) R.string.case_history_awaiting_doctors_review else R.string.case_status_queued_for_doctor_not_on_server
     CaseStatus.PRESCRIPTION_RECEIVED -> R.string.case_history_doctors_response_received

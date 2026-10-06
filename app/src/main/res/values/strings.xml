@@ -76,7 +76,7 @@
     <string name="case_status_queued_for_doctor_not_on_server">Queued for doctor, not yet on the server</string>
     <string name="case_history_in_progress">In progress</string>
     <string name="case_history_saved_locally">Saved locally</string>
-    <string name="case_history_queued_will_send">Queued, will send when online</string>
+    <string name="case_history_queued_on_phone">Queued on this phone, not sent yet</string>
     <string name="case_history_awaiting_doctors_review">Awaiting doctor\'s review</string>
     <string name="case_history_doctors_response_received">Doctor\'s response received</string>
     <string name="case_history_abandoned_restarted">Abandoned, restarted as a new visit</string>
@@ -463,4 +463,23 @@
     <string name="assessment_liability_ai">I understand this is an AI-generated assessment, not a diagnosis, and requires physician verification.</string>
     <string name="assessment_notice_low_score_physician">⚠ Model score below 0.90 (uncalibrated): physician verification required.</string>
     <string name="assessment_notice_low_certainty_worker">⚠ Physician verification required: the model is not certain about this result.</string>
+
+    <!-- Where a visit is, with no promise about when anyone will act on it (memo section 12.5).
+         The acknowledgement says it in the worker's language and Hindi, as the screen always has. -->
+    <string name="acknowledgement_title">Case saved locally</string>
+    <string name="acknowledgement_on_server">This visit is on the server.</string>
+    <string name="acknowledgement_not_on_server">This visit is saved on this phone. It is not on the server yet. The home screen shows what is still waiting to send.</string>
+    <string name="acknowledgement_on_server_hi">यह विज़िट सर्वर पर है।</string>
+    <string name="acknowledgement_not_on_server_hi">यह विज़िट इस फ़ोन में सहेजी गई है। यह अभी सर्वर पर नहीं है। होम स्क्रीन पर दिखता है कि अभी क्या भेजना बाकी है।</string>
+    <string name="doctor_assignment_queued_title">No network. Case saved locally.</string>
+    <string name="doctor_assignment_queued_body">Dr. %1$s is assigned, but nothing has been sent yet. Press Sync now on the home screen when this phone is online.</string>
+    <string name="doctor_assignment_least_busy">This case will be assigned to the least-busy available doctor (mock auto-assignment):</string>
+    <string name="patient_summary_queued_title">Case queued on this phone, not sent yet</string>
+    <string name="patient_summary_queued_body">Press Sync now on the home screen when this phone is online.</string>
+    <string name="profile_status_online">Online</string>
+    <string name="profile_status_offline">Offline. New records are saved on this phone and are not sent.</string>
+    <string name="physician_outcome_agree">Confirmed correct. This decision is saved with the case.</string>
+    <string name="physician_outcome_modify">Corrected treatment captured. It is saved with the case.</string>
+    <string name="physician_outcome_reject">Discarded. This decision is saved with the case.</string>
+    <string name="physician_clinical_note_label">Clinical note (saved with the case)</string>
 </resources>

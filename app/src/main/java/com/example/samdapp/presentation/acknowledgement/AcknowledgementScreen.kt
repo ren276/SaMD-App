@@ -17,6 +17,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.example.samdapp.R
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -54,19 +56,19 @@ fun AcknowledgementScreen(
                 SamdLoadingIndicator()
             } else {
                 Text(
-                    text = uiState.errorMessage ?: "Case saved locally",
+                    text = uiState.errorMessage ?: stringResource(R.string.acknowledgement_title),
                     style = MaterialTheme.typography.headlineSmall,
                 )
                 if (uiState.errorMessage == null) {
-                    // REQ-TRS-03: patient-facing, the worker can read this aloud. hoursUntilReview
-                    // comes from SyncWindowProvider — never hardcode this number in the composable.
+                    // REQ-TRS-03: patient-facing, the worker can read this aloud. Says where the visit
+                    // is, from the server-presence rule, and promises no review time.
                     Text(
-                        text = "Your file is secured. A doctor will review this within ${uiState.hoursUntilReview} hours.",
+                        text = stringResource(if (uiState.caseOnServer) R.string.acknowledgement_on_server else R.string.acknowledgement_not_on_server),
                         style = MaterialTheme.typography.bodyLarge,
                         modifier = Modifier.padding(top = 16.dp),
                     )
                     Text(
-                        text = "आपकी फ़ाइल सुरक्षित है। एक डॉक्टर ${uiState.hoursUntilReview} घंटों के भीतर इसकी समीक्षा करेंगे।",
+                        text = stringResource(if (uiState.caseOnServer) R.string.acknowledgement_on_server_hi else R.string.acknowledgement_not_on_server_hi),
                         style = MaterialTheme.typography.bodyLarge,
                         modifier = Modifier.padding(top = 4.dp),
                     )

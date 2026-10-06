@@ -1,13 +1,11 @@
 package com.example.samdapp.di
 
 import com.example.samdapp.data.config.AndroidDeviceInfoProvider
-import com.example.samdapp.data.config.AndroidSyncWindowProvider
 import com.example.samdapp.data.connectivity.AndroidNetworkMonitor
 import com.example.samdapp.data.doctor.MockDoctorPrescriptionInbox
 import com.example.samdapp.data.media.AndroidAilmentAudioRecorder
 import com.example.samdapp.data.transcription.SherpaOnnxTranscriptionService
 import com.example.samdapp.domain.config.DeviceInfoProvider
-import com.example.samdapp.domain.config.SyncWindowProvider
 import com.example.samdapp.domain.connectivity.NetworkMonitor
 import com.example.samdapp.domain.doctor.DoctorPrescriptionInbox
 import com.example.samdapp.domain.media.AilmentAudioRecorder
@@ -44,9 +42,6 @@ abstract class MockBoundaryModule {
 
     @Binds @Singleton
     abstract fun bindAilmentAudioRecorder(impl: AndroidAilmentAudioRecorder): AilmentAudioRecorder
-
-    @Binds @Singleton
-    abstract fun bindSyncWindowProvider(impl: AndroidSyncWindowProvider): SyncWindowProvider
 
     @Binds @Singleton
     abstract fun bindDeviceInfoProvider(impl: AndroidDeviceInfoProvider): DeviceInfoProvider

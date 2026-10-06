@@ -303,6 +303,13 @@ class FakeCaseRecordRepository(
 
     override suspend fun markSavedLocally(caseRecordId: String): Result<Unit> = updateStatus(caseRecordId, CaseStatus.SAVED_LOCALLY)
 
+    /** Moves the case on or off the server, as the sync outbox would, so the stream re-emits. */
+    fun setOnServer(caseRecordId: String, onServer: Boolean) {
+        val updated = records.getValue(caseRecordId).copy(isOnServer = onServer)
+        records[caseRecordId] = updated
+        streamFor(caseRecordId).value = updated
+    }
+
     override suspend fun assignDoctor(caseRecordId: String, doctorId: String, isOnline: Boolean): Result<Unit> {
         val status = if (isOnline) CaseStatus.SENT_TO_DOCTOR else CaseStatus.PENDING_SYNC
         val updated = records[caseRecordId]?.copy(status = status, assignedDoctorId = doctorId) ?: return Result.failure(NoSuchElementException())

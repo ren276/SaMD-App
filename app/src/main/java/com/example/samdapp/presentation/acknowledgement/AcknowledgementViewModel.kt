@@ -6,7 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.samdapp.domain.audit.AuditAction
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
-import com.example.samdapp.domain.config.SyncWindowProvider
+import com.example.samdapp.domain.repository.CaseRecordRepository
 import com.example.samdapp.domain.usecase.AcknowledgeCaseUseCase
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
@@ -17,17 +17,22 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-/** [hoursUntilReview] backs the expectation-management message (REQ-TRS-03) — this screen is only
- *  ever reached on the non-emergency path (an emergency short-circuits from Compounder straight to
- *  Home, see [com.example.samdapp.presentation.emergency.EmergencyOverrideScreen]), so no extra
- *  guard is needed here. */
+/** [caseOnServer] backs the expectation-management message (REQ-TRS-03): where the visit is, and
+ *  never when a doctor will look at it, because nothing here can promise that. It reads the same
+ *  server-presence rule the assess gate uses, and false until the phone knows otherwise. This
+ *  screen is only ever reached on the non-emergency path (an emergency short-circuits from
+ *  Compounder straight to Home, see
+ *  [com.example.samdapp.presentation.emergency.EmergencyOverrideScreen]), so no extra guard is
+ *  needed here. */
 data class AcknowledgementUiState(
     val isSaving: Boolean = true,
     val errorMessage: String? = null,
-    val hoursUntilReview: Int = 24,
+    val caseOnServer: Boolean = false,
 )
 
 /** Always routes to [com.example.samdapp.presentation.doctorassignment.DoctorAssignmentConfirmScreen]
@@ -49,7 +54,7 @@ interface AcknowledgementActions {
 class AcknowledgementViewModel @AssistedInject constructor(
     @Assisted val caseRecordId: String,
     private val acknowledgeCaseUseCase: AcknowledgeCaseUseCase,
-    private val syncWindowProvider: SyncWindowProvider,
+    private val caseRecordRepository: CaseRecordRepository,
     private val auditLogger: AuditLogger,
 ) : ViewModel(), AcknowledgementActions {
 
@@ -58,13 +63,19 @@ class AcknowledgementViewModel @AssistedInject constructor(
         fun create(caseRecordId: String): AcknowledgementViewModel
     }
 
-    private val _uiState = MutableStateFlow(AcknowledgementUiState(hoursUntilReview = syncWindowProvider.hoursUntilReview()))
+    private val _uiState = MutableStateFlow(AcknowledgementUiState())
     val uiState: StateFlow<AcknowledgementUiState> = _uiState.asStateFlow()
 
     private val _effects = Channel<AcknowledgementEffect>(Channel.BUFFERED)
     val effects = _effects.receiveAsFlow()
 
     init {
+        viewModelScope.launch {
+            caseRecordRepository.observeCaseRecord(caseRecordId)
+                .map { it?.isOnServer ?: false }
+                .distinctUntilChanged()
+                .collect { onServer -> _uiState.update { it.copy(caseOnServer = onServer) } }
+        }
         viewModelScope.launch {
             acknowledgeCaseUseCase(caseRecordId).fold(
                 onSuccess = {

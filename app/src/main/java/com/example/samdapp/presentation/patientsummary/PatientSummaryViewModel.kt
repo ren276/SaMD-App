@@ -37,18 +37,13 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-/** Investor-demo-facing explanation of what each decision means for the training pipeline — see
- *  `refine_diagnosis.py`'s `DiagnosisFeedback` schema docstring / [com.example.samdapp.domain.model.DiagnosisFeedback] KDoc. */
-fun PhysicianDecision.outcomeExplanation(): String = when (this) {
-    PhysicianDecision.AGREE ->
-        "Confirmed correct. This case will be added to the training dataset as a confirmed " +
-            "example — helps refine the model."
-    PhysicianDecision.MODIFY ->
-        "Corrected treatment captured. This becomes a NEW training example using the physician's " +
-            "own prescription, not the AI's original candidate."
-    PhysicianDecision.REJECT ->
-        "Discarded. This case will NOT be used for retraining — there is no reliable ground truth " +
-            "to trust once the AI's candidate is rejected outright."
+/** What each decision does, stated as what the phone does: the decision is saved with the case. It
+ *  says nothing about a training dataset, because no consented training pipeline exists. */
+@androidx.annotation.StringRes
+fun PhysicianDecision.outcomeExplanationRes(): Int = when (this) {
+    PhysicianDecision.AGREE -> com.example.samdapp.R.string.physician_outcome_agree
+    PhysicianDecision.MODIFY -> com.example.samdapp.R.string.physician_outcome_modify
+    PhysicianDecision.REJECT -> com.example.samdapp.R.string.physician_outcome_reject
 }
 
 /**
