@@ -38,7 +38,14 @@ class SyncOutboxDrainer @Inject constructor(
     private val pushService: SyncPushService,
     private val inFlightBatchStore: InFlightBatchStore,
     private val authTokenStore: AuthTokenStore,
+    /** Defaulted so the many drainer tests that do not care about it stay unchanged; Hilt
+     *  injects the singleton. */
+    private val drainOutcomeStore: DrainOutcomeStore = DrainOutcomeStore(),
+    /** Present only in a build that binds one (the dev source set). */
+    drainObserver: java.util.Optional<DrainObserver> = java.util.Optional.empty(),
 ) {
+    private val observer: DrainObserver? = drainObserver.orElse(null)
+
     // Process-wide: the periodic (sync_push_periodic) and one-time (sync_push_now) WorkManager
     // requests are different unique-work names, so their SyncPushWorker instances can run
     // concurrently. Without this, two overlapping drains could both pack the same PENDING rows
@@ -46,7 +53,10 @@ class SyncOutboxDrainer @Inject constructor(
     // Mutex field) is what guarantees both worker instances share the same Mutex object.
     private val drainMutex = Mutex()
 
+    /** Records the outcome in [drainOutcomeStore] either way, so Home can say "Could not send"
+     *  while the outbox cannot drain and stop saying it the moment a drain succeeds. */
     suspend fun drain(): Result<Unit> = drainMutex.withLock { drainLocked() }
+        .also { result -> drainOutcomeStore.record(result.exceptionOrNull()?.let(::drainFailureFor)) }
 
     /**
      * **Termination, stated exhaustively, because this is a `while (true)` over a table the loop
@@ -78,6 +88,7 @@ class SyncOutboxDrainer @Inject constructor(
      */
     private suspend fun drainLocked(): Result<Unit> {
         val attempted = mutableSetOf<Pair<String, String>>()
+        observer?.onDrainStart()
 
         // Seeded with the resumed batch's members BEFORE the loop, not left empty. A resumed
         // batch is an attempt like any other, and a row it acks as RETRYABLE is still collectable
@@ -91,8 +102,9 @@ class SyncOutboxDrainer @Inject constructor(
             if (resumed.result.isFailure) return resumed.result
         }
         while (true) {
-            val pending = repository.collectPendingRecords()
-                .filter { (it.table to it.id) !in attempted }
+            val collected = repository.collectPendingRecords()
+            observer?.onCollected(collected)
+            val pending = collected.filter { (it.table to it.id) !in attempted }
             if (pending.isEmpty()) return Result.success(Unit)
             attempted += pending.map { it.table to it.id }
             val packed = packer.pack(pending)
@@ -200,7 +212,7 @@ class SyncOutboxDrainer @Inject constructor(
                 // failure means "never reached the backend" or "backend applied it but the
                 // response never arrived", resending under this same batch_id on the next run is
                 // safe either way (see this class's KDoc).
-                Result.failure(IllegalStateException(result.message))
+                Result.failure(SyncPushFailedException(result.code, result.message))
             }
         }
     }

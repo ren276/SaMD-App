@@ -49,18 +49,24 @@ interface PatientDao {
     )
     suspend fun requeueFailed(id: String)
 
-    @Query("SELECT COUNT(*) FROM patients WHERE syncState = 'FAILED'")
-    fun observeFailedSyncCount(): Flow<Int>
+    @Query("SELECT syncState AS syncState, 0 AS held, COUNT(*) AS rowCount FROM patients WHERE syncState != 'SYNCED' GROUP BY syncState, held")
+    fun observeSyncStateCounts(): Flow<List<SyncStateCount>>
 
-    /** The FAILED rows of this table, projected for the worker-facing review list (S-3).
-     *  Selects exactly the rows this table's FAILED counter counts, so the number on the Home
+    /** The same counts, read once (for a decision made right after a drain). */
+    @Query("SELECT syncState AS syncState, 0 AS held, COUNT(*) AS rowCount FROM patients WHERE syncState != 'SYNCED' GROUP BY syncState, held")
+    suspend fun getSyncStateCounts(): List<SyncStateCount>
+
+    /** The FAILED and CONFLICT rows of this table, projected for the worker-facing review list.
+     *  Selects exactly the FAILED and CONFLICT groups of observeSyncStateCounts, so the number on the Home
      *  card and the length of the list can never disagree. Suspend rather than a Flow:
      *  the list is fetched when a worker opens it, so it costs nothing at launch.
      *  See [FailedSyncRow]. */
     @Query(
-        "SELECT 'patients' AS tableName, id AS recordId, id AS patientId, localModifiedAt AS recordedAt, " +
-        "syncErrorCode AS syncErrorCode, syncErrorMessage AS syncErrorMessage FROM patients WHERE " +
-        "syncState = 'FAILED'",
+        "SELECT 'patients' AS tableName, patients.syncState AS syncState, patients.id AS recordId, " +
+        "patients.id AS patientId, patients.localModifiedAt AS recordedAt, patients.syncErrorCode AS " +
+        "syncErrorCode, patients.syncErrorMessage AS syncErrorMessage, patients.serverVersion AS " +
+        "serverVersion, CAST(NULL AS TEXT) AS encounterId, CAST(NULL AS TEXT) AS caseRecordId, CAST(NULL " +
+        "AS TEXT) AS parentId FROM patients WHERE patients.syncState IN ('FAILED', 'CONFLICT')",
     )
     suspend fun getFailedForReview(): List<FailedSyncRow>
 

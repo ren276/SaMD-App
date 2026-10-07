@@ -3,6 +3,7 @@ package com.example.samdapp.data.sync
 import com.example.samdapp.domain.connectivity.ConnectivityController
 import com.example.samdapp.domain.repository.CaseRecordRepository
 import com.example.samdapp.domain.sync.FailedSyncRecord
+import com.example.samdapp.domain.sync.SyncOfflineException
 import com.example.samdapp.domain.sync.SyncState
 import com.example.samdapp.domain.sync.SyncStatus
 import kotlinx.coroutines.CoroutineScope
@@ -32,9 +33,10 @@ import javax.inject.Singleton
  *   [FakeSyncOutboxScheduler]/[FakeSyncOutboxRepository] standing in for the two new dependencies
  *   below so those six cases stay plain-JVM-testable.
  * - [syncOutboxScheduler]'s generic outbox drain: the twenty MIGRATION_12_13 tables' `PENDING`
- *   rows, pushed to `POST /sync/push` via [SyncPushWorker]. [SyncState.failedCount] surfaces
- *   [syncOutboxRepository]'s FAILED-row count (Phase 7's admin view is out of scope; this only
- *   makes the count queryable).
+ *   rows, pushed to `POST /sync/push` via [SyncPushWorker]. [syncOutboxRepository]'s
+ *   [OutboxCounts] become [SyncState.outboxPending], [SyncState.auditPending] and
+ *   [SyncState.failedCount] (FAILED plus CONFLICT), and [drainOutcomeStore] supplies
+ *   [SyncState.lastDrainFailure], so Home can tell "waiting to send" from "could not send".
  *
  * These two never corrupt each other: draining `case_records`' transport `syncState` (via
  * [SyncOutboxRepository.applyAck] -> `CaseRecordDao.applySyncResult`) touches only the
@@ -49,6 +51,8 @@ class SyncStatusImpl @Inject constructor(
     private val connectivityController: ConnectivityController,
     private val syncOutboxScheduler: SyncOutboxScheduler,
     private val syncOutboxRepository: SyncOutboxRepository,
+    private val drainOutcomeStore: DrainOutcomeStore,
+    private val drainer: SyncOutboxDrainer,
 ) : SyncStatus {
 
     private val isSyncing = MutableStateFlow(false)
@@ -73,9 +77,19 @@ class SyncStatusImpl @Inject constructor(
         caseRecordRepository.observePendingSyncCount(),
         isSyncing,
         lastSyncedAt,
-        syncOutboxRepository.observeFailedCount(),
-    ) { pendingCount, syncing, lastSynced, failedCount ->
-        SyncState(lastSyncedAt = lastSynced, pendingCount = pendingCount, isSyncing = syncing, failedCount = failedCount)
+        syncOutboxRepository.observeOutboxCounts(),
+        drainOutcomeStore.lastFailure,
+    ) { pendingCount, syncing, lastSynced, outbox, lastDrainFailure ->
+        SyncState(
+            lastSyncedAt = lastSynced,
+            pendingCount = pendingCount,
+            isSyncing = syncing,
+            failedCount = outbox.needsReview,
+            outboxPending = outbox.pendingClinical,
+            heldCount = outbox.heldClinical,
+            auditPending = outbox.pendingAudit,
+            lastDrainFailure = lastDrainFailure,
+        )
     }
 
     /** Straight delegation. The classification and the patient-name lookup live in
@@ -87,14 +101,34 @@ class SyncStatusImpl @Inject constructor(
         syncOutboxRepository.requeueFailed(record.table, record.recordId)
     }
 
-    override suspend fun syncNow(): Result<Unit> {
+    override suspend fun stateNow(): SyncState {
+        val outbox = syncOutboxRepository.readOutboxCounts()
+        return SyncState(
+            lastSyncedAt = lastSyncedAt.value,
+            pendingCount = caseRecordRepository.observePendingSyncCount().first(),
+            isSyncing = isSyncing.value,
+            failedCount = outbox.needsReview,
+            outboxPending = outbox.pendingClinical,
+            heldCount = outbox.heldClinical,
+            auditPending = outbox.pendingAudit,
+            lastDrainFailure = drainOutcomeStore.lastFailure.value,
+        )
+    }
+
+    override suspend fun syncNow(): Result<Unit> = sync { syncOutboxScheduler.runNowAndAwait() }
+
+    /** The drainer holds the process-wide lock, so this and a [SyncPushWorker] drain never send
+     *  the same rows twice. */
+    override suspend fun syncNowInProcess(): Result<Unit> = sync { drainer.drain() }
+
+    private suspend fun sync(pushOutbox: suspend () -> Result<Unit>): Result<Unit> {
         if (!connectivityController.isOnline.first()) {
-            return Result.failure(IllegalStateException("No network available — can't sync while offline"))
+            return Result.failure(SyncOfflineException())
         }
         isSyncing.value = true
         return try {
             val caseResult = caseRecordRepository.sendAllPendingCases()
-            val outboxResult = syncOutboxScheduler.runNowAndAwait()
+            val outboxResult = pushOutbox()
             val result = caseResult.fold(onSuccess = { outboxResult }, onFailure = { Result.failure(it) })
             if (result.isSuccess) lastSyncedAt.value = Instant.now()
             result

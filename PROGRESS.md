@@ -5282,3 +5282,96 @@ dev flavor, backend at 47b04e2).** Three items, recorded as observed. No fix is 
 `scratchpad/` paths, some to untracked files (dangling in any other checkout). Design memos
 (truthfulness memo, PR 4 addendum, sync fix memo) are design records and should be committed under
 a tracked path; other references should be inlined. Sweep pending.
+
+## PR 1: sync failure visibility - 2026-10-07
+
+Branch `feat/sync-failure-visibility`, device only, no backend change, no Room migration (schema
+stays at v22). Must merge before any pilot use. Design and operator rulings:
+`scratchpad/sync-failure-visibility-memo.md` (sections 11 and 12.9).
+
+**What it changes.**
+- The device stops saying "sent" or "Up to date" when records have not reached the server. Home
+  has a truth table for its caption, a CONFLICT-aware review list, the last drain failure, and a
+  "Sync now" result message (`1be4507`, `11d1703`, `7849113`, `0986845`).
+- A not-accepted (duplicate ABHA) patient and everything held behind it fold under one review row
+  (`d60405e`), and held rows are no longer collected for sending or counted as waiting (`f1a4e5a`).
+- The assess gate reads this case's own server presence and names the cause (`9b6db0c`,
+  `74ebe2b`); the case list says "Queued for doctor, not yet on the server" until it is there
+  (`84fae23`).
+- The pre-assessment push runs in process (`0995d8d`) and an assessment whose records are still on
+  their way is retried, six attempts with exponential backoff, before it records "not sent yet"
+  (`c1c7904`). A1 now says the phone will send and check the visit, not that it will do so "by
+  itself" (`c783efc`, `c1c7904`).
+- `localModifiedAt` is strictly increasing per row (`59a2b85`).
+- No user-facing promise of a review time or an unguaranteed outcome (`8345df8`), with a contract
+  test over `strings.xml` and the presentation literals. The REQ-TRS-03 amendment is a separate
+  PROPOSED commit (`78d5aaa`).
+- Evaluate failure markers are never counted as waiting or held (`cc7dfa2`), found by a dev-only
+  drain diagnostic and pinned by `CountDrainConsistencyTest` (`965db0a`).
+
+**Evidence.**
+- Mutation or red-on-master proofs per commit are in the PR body; the instrumented classes on the
+  iQOO (I2302, SQLCipher) at head are `HeldAncestorQueryTest` 17, `OutboxCountQueryTest` 3,
+  `FailedSyncReviewQueryTest` 6, `SyncPendingEligibilityTest` 4, `AssessGateSnapshotQueryTest` 3,
+  `ConflictAckServerVersionTest` 3, `CountDrainConsistencyTest` 9.
+- Dev JVM at head 873/873, staging 836/836, prod 836/836. The per-hash dev JVM run over every PR 1
+  commit is in the PR body.
+- Live checks on the iQOO, dev build: (1) duplicate-ABHA patient: A5 with no Try again, one folded
+  review row, never "Up to date"; (2) airplane mode: A1, then a real result about 10 s after
+  reconnect with no press; (3) backend stopped: "Could not send: could not reach the server" and
+  the same in the Sync now message; (4) with `samd.dev.kernelFallback=none`: A14 with Try again,
+  then a real result after the classifier restarted; (6) a duplicate-ABHA case reads "Queued for
+  doctor, not yet on the server". Check 5 (two-device conflict) is not reproducible without a pull
+  path, so the evidence is `ConflictAckServerVersionTest` (iQOO 3/3) plus #69's rule 3 backend
+  tests. After the markers fix Home read "Nothing is waiting to send. 16 records need review. 15
+  more are held on this phone with them." (row 10a).
+- Cold launch, iQOO, dev build, each build freshly installed with one warm-up, 5 timed launches
+  (`am start -W` TotalTime): origin/master 006d153 median 1303 ms (range 1264 to 1692), head
+  median 1409 ms (range 1380 to 1484), a difference of about 106 ms, inside the 200 ms gate. An
+  earlier pair (a stale local master, 1398 ms, against head, 1401 ms) agreed. Time to a visible
+  Home caption could not be resolved finer than the UI dump latency (about 4.5 s for both). The
+  count-query burst after one patient save is 19 queries, up from 2 (iQOO, SQLCipher on disk,
+  500 patients seeded: 107 to 116 ms to settle; emulator 5 to 10 ms, baseline 4 to 7 ms). The
+  SQLCipher pool emits no waitForConnection slices, so contention could not be measured directly.
+
+**Filed items, not built here.**
+1. `RemoteSlmEngineTest` (`app/src/test/java/com/example/samdapp/data/remote/RemoteSlmEngineTest.kt`)
+   times out under parallel load (flaky test).
+2. The audit action `CASE_SENT_TO_DOCTOR` is logged on a local-only queue step
+   (`DoctorAssignmentConfirmViewModel.kt:170`), so the raw audit log says "sent". Renaming it is a
+   synced `audit_log` contract change and needs its own memo.
+3. PRIVACY: the physician screen claimed decisions feed a "training dataset". No pipeline and no
+   consent purpose exist (the consent screen covers offline data collection only). The copy is
+   fixed in commit 14; a DPDP purpose and consent must exist before any feedback is used for
+   training.
+4. The doctor-correction learning loop (multimodal research track) needs purpose-specific
+   training consent before any feedback is used.
+5. "ABDM will send a one-time code" (`AbhaAadhaarEntryScreen.kt:75`) is false in stub mode. Low
+   priority.
+6. NEXT PR: H1, continue without an AI assessment (an explicit action, an audit entry, a
+   doctor-side "no assessment available" flag). It includes the "Queuing case for assessment..."
+   dead-end spinner (`SendingScreen.kt:62`) reached by back from A2b, a pre-existing screen that
+   commit 12 made more reachable. Any back-stack change must respect the saveable nav-stack
+   restore (H-26).
+7. H2: the WorkManager jobs and `AssessmentRunner` should honour `ConnectivityController` (the
+   manual offline toggle).
+8. HIGH: false permanent CONFLICT after a lost ack followed by a local edit. The T9 guard (the
+   `localModifiedAt = :sentLocalModifiedAt` clause of every `applySyncResult`, for example
+   `PatientDao.kt:32`) keeps `serverVersion` stale, so the edited row's resend fails rule 3.
+   Candidate fix: on an ack for a revision the row no longer holds, advance `serverVersion` and
+   keep the row PENDING. INFERRED; it needs an Opus addendum after PR 1.
+9. The unfinished-consultation dialog (`HomeScreen.kt:426`) reappears on every Home visit after
+   "Not now" (pre-existing).
+10. Evaluate failure markers are local-only rows in a sync table, PENDING forever. Move them to a
+    local-only column or table (cleanup, not urgent).
+11. The count-query burst is 19 per write after commit 13 (numbers above). A UNION ALL
+    consolidation of the 20 count flows is a candidate.
+12. Follow-up chains deeper than one level still count as waiting (H-32 residual).
+13. Hardcoded Kotlin user-facing strings: externalize all of them, and add a Hindi locale before
+    pilot (only the default `values/` locale exists).
+14. Doctor review must surface the derivation flags (`derivation_ok`, SUPERSEDED, MISMATCH). Today
+    the doctor's screen does not call `GET /encounters/{id}`; this needs a pull-path design memo.
+15. Test infrastructure: a `samd_test` advisory lock plus a clean-slate guard, and a SHA-256 pin
+    of merged Alembic migrations, so a merged migration can never be edited in place.
+16. Ops: move Docker Desktop's disk image to the SSD (the root disk filled up and holds the
+    Postgres volume).

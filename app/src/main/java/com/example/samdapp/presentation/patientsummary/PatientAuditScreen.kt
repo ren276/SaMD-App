@@ -2,6 +2,8 @@
 
 package com.example.samdapp.presentation.patientsummary
 
+import com.example.samdapp.presentation.common.textRes
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -73,7 +75,10 @@ private fun AuditEntryRow(entry: PatientFacingAuditEntry) {
     val formatter = remember { DateTimeFormatter.ofPattern("d MMM yyyy, hh:mm a").withZone(ZoneId.systemDefault()) }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(text = entry.description, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                text = entry.message?.let { stringResource(it.textRes) } ?: entry.description.orEmpty(),
+                style = MaterialTheme.typography.bodyLarge,
+            )
             Text(
                 text = formatter.format(entry.timestamp),
                 style = MaterialTheme.typography.labelSmall,

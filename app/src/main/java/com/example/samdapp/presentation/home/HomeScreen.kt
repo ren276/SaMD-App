@@ -22,8 +22,11 @@ import com.example.samdapp.presentation.common.SamdLoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -82,8 +85,18 @@ fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val resources = LocalContext.current.resources
+    LaunchedEffect(viewModel) {
+        viewModel.effects.collect { effect ->
+            when (effect) {
+                is HomeEffect.ShowSyncNowResult -> snackbarHostState.showSnackbar(effect.message.text(resources))
+            }
+        }
+    }
     HomeContent(
         uiState = uiState,
+        snackbarHostState = snackbarHostState,
         isOnline = isOnline,
         session = session,
         onSignOut = onSignOut,
@@ -103,6 +116,7 @@ fun HomeScreen(
 @Composable
 private fun HomeContent(
     uiState: HomeUiState,
+    snackbarHostState: SnackbarHostState,
     isOnline: Boolean,
     session: UserSession,
     onSignOut: () -> Unit,
@@ -159,7 +173,7 @@ private fun HomeContent(
         )
     }
 
-    Scaffold(bottomBar = bottomBar) { padding: PaddingValues ->
+    Scaffold(bottomBar = bottomBar, snackbarHost = { SnackbarHost(snackbarHostState) }) { padding: PaddingValues ->
         Column(
             modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -217,7 +231,7 @@ private fun HomeContent(
                 shape = MaterialTheme.shapes.large,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(top = 8.dp, bottom = 16.dp),
             ) {
-                Text(text = "Sent to doctor", style = MaterialTheme.typography.titleMedium)
+                Text(text = stringResource(R.string.cases_for_the_doctor), style = MaterialTheme.typography.titleMedium)
             }
         }
     }
@@ -267,15 +281,17 @@ private fun SyncStatusRow(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(text = statusText, style = MaterialTheme.typography.bodyMedium)
-                val caption = when {
-                    !isOnline -> "Offline — saved locally, syncs when back online"
-                    sync.pendingCount > 0 -> "${sync.pendingCount} pending"
-                    else -> "Up to date"
-                }
+                // The truth table lives in syncCaption (SyncCaption.kt); "Up to date" only when
+                // nothing is pending, failed, conflicted or blocked.
+                val caption = syncCaption(sync, isOnline)
                 Text(
-                    text = caption,
+                    text = caption.text(LocalContext.current.resources),
                     style = MaterialTheme.typography.labelMedium,
-                    color = if (isOnline) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+                    color = if (isOnline && caption !is SyncCaption.CouldNotSend) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
                 )
             }
             OutlinedButton(onClick = onSyncNow, enabled = isOnline && !sync.isSyncing) {
@@ -383,6 +399,13 @@ private fun FailedRecordRow(record: FailedSyncRecord, onSendAgain: () -> Unit) {
             fontWeight = FontWeight.Bold,
         )
         Text(text = stringResource(record.reason.bodyRes), style = MaterialTheme.typography.bodySmall)
+        if (record.heldRecordCount > 0) {
+            Text(
+                text = pluralStringResource(R.plurals.failed_sync_held_records, record.heldRecordCount, record.heldRecordCount),
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
         // No button at all for a cause nothing this worker can press will change. S-4's rule:
         // naming an action that cannot work teaches a worker to distrust every action.
         if (record.reason.action == SyncFailureAction.SEND_AGAIN) {

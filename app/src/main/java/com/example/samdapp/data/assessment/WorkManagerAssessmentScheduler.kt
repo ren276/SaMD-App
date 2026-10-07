@@ -46,10 +46,14 @@ class WorkManagerAssessmentScheduler @Inject constructor(
 
     override fun observeWorkState(caseRecordId: String): Flow<AssessmentWorkState> =
         workManager.getWorkInfosForUniqueWorkFlow(uniqueWorkName(caseRecordId)).map { infos ->
+            val live = infos.filter {
+                it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.BLOCKED
+            }
             when {
-                infos.any { it.state == WorkInfo.State.RUNNING } -> AssessmentWorkState.RUNNING
-                infos.any { it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.BLOCKED } -> AssessmentWorkState.QUEUED
-                else -> AssessmentWorkState.NONE
+                live.isEmpty() -> AssessmentWorkState.NONE
+                live.any { it.runAttemptCount >= 1 } -> AssessmentWorkState.RETRYING
+                live.any { it.state == WorkInfo.State.RUNNING } -> AssessmentWorkState.RUNNING
+                else -> AssessmentWorkState.QUEUED
             }
         }
 

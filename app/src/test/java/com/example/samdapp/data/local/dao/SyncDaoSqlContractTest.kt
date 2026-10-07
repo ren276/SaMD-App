@@ -117,6 +117,59 @@ class SyncDaoSqlContractTest {
         assertTrue("$unwiredDao must not use the shared fragment", !unwired.contains("SyncSql."))
     }
 
+    /** The seventeen tables with an ancestor chain. Pinned, not derived: adding a table that can
+     *  be held must be a deliberate act that edits this list. `patients`, `abha_profiles` and
+     *  `audit_log` are roots and use no held fragment. */
+    private val heldTables = listOf(
+        "encounters", "consultations", "attachments", "observations", "ailments", "medical_history_items",
+        "allergies", "family_history_entries", "social_histories", "medication_entries", "case_records",
+        "kernel_reports", "evaluate_reports", "diagnosis_feedback", "prescriptions", "medication_lines", "referrals",
+    )
+
+    @Test
+    fun `each held table uses its own held fragment in exactly its four statements, and the roots use none`() {
+        assertEquals(17, heldTables.size)
+        heldTables.forEach { table ->
+            val constant = "SyncSql.HELD_" + table.uppercase()
+            assertEquals(
+                "$table: the drain, both counts and the review query must each use $constant",
+                4,
+                countAcross(constant),
+            )
+        }
+        assertEquals(68, countAcross("SyncSql.HELD_"))
+        // The three roots count with a literal 0 and never read the held fragment.
+        listOf("PatientDao.kt", "AbhaProfileDao.kt", "AuditLogDao.kt").forEach { file ->
+            val source = sources().getValue(file)
+            assertTrue("$file must not use a held fragment", !source.contains("SyncSql.HELD_"))
+            assertEquals("$file: both count queries select a constant held flag", 2, Regex("0 AS held").findAll(source).count())
+        }
+    }
+
+    @Test
+    fun `all four evaluate_reports statements use the one syncable constant, and nothing else spells it`() {
+        val dao = sources().getValue("EvaluateReportDao.kt")
+        assertEquals(
+            "the drain, both counts and the review query must each use SyncSql.EVALUATE_SYNCABLE",
+            4,
+            Regex(Regex.escape("SyncSql.EVALUATE_SYNCABLE")).findAll(dao).count(),
+        )
+        assertEquals("the predicate must not be spelled out beside the constant", 0, Regex("failureCode IS NULL").findAll(dao).count())
+        assertEquals("no other DAO may carry the predicate", 0, sources().filterKeys { it != "SyncSql.kt" && it != "EvaluateReportDao.kt" }.values.sumOf { Regex("failureCode IS NULL").findAll(it).count() })
+        assertEquals("failureCode IS NULL", SyncSql.EVALUATE_SYNCABLE)
+    }
+
+    @Test
+    fun `each held fragment names its own table and holds only behind a FAILED ancestor the server never had`() {
+        heldTables.forEach { table ->
+            val fragment = SyncSql::class.java.getDeclaredField("HELD_" + table.uppercase()).also { it.isAccessible = true }.get(null) as String
+            assertTrue("$table: the fragment must read its own columns", fragment.contains("$table."))
+            assertTrue("$table: an ancestor holds only when FAILED", fragment.contains("syncState = 'FAILED'"))
+            assertTrue("$table: and only when the server never had it", fragment.contains("serverVersion IS NULL"))
+            assertTrue("$table: a CONFLICT ancestor holds nothing (operator ruling Q2)", !fragment.contains("CONFLICT"))
+        }
+    }
+
     @Test
     fun `the shared fragment lets PENDING bypass the cutoff and makes RETRYABLE honour it`() {
         val fragment = SyncSql.PENDING_ELIGIBILITY_FRAGMENT
@@ -239,13 +292,13 @@ class SyncDaoSqlContractTest {
     }
 
     @Test
-    fun `every review query selects the same six columns under the same names`() {
+    fun `every review query selects the same seven columns under the same names`() {
         // Room maps a projection onto FailedSyncRow by column name. A typo in one alias is not a
         // compile error in the DAO source; it is a runtime failure on a device, in a screen that
         // only appears when something has already gone wrong. Checked here instead.
         val statements = reviewStatements()
         assertEquals("expected one review statement per drained table", 20, statements.size)
-        listOf("AS tableName", "AS recordId", "AS patientId", "AS recordedAt", "AS syncErrorCode", "AS syncErrorMessage")
+        listOf("AS tableName", "AS syncState", "AS recordId", "AS patientId", "AS recordedAt", "AS syncErrorCode", "AS syncErrorMessage")
             .forEach { alias ->
                 assertEquals(
                     "all twenty review queries must project $alias",
@@ -256,19 +309,46 @@ class SyncDaoSqlContractTest {
     }
 
     @Test
-    fun `no review query widens beyond FAILED`() {
-        // RETRYABLE rows are deliberately absent from both the count and the list: the device is
-        // still working on them and a worker has no action for one. The counters already say
-        // FAILED only; these must agree, or the list shows rows the count does not.
+    fun `every review query selects exactly FAILED and CONFLICT, never RETRYABLE`() {
+        // CONFLICT is surfaced next to FAILED: neither is ever resent on its own, so both need a
+        // person. RETRYABLE rows are deliberately absent from both the count and the list: the
+        // device is still working on them and a worker has no action for one. The counters say
+        // the same, below; these must agree, or the list shows rows the count does not.
         val statements = reviewStatements()
         assertEquals("expected one review statement per drained table", 20, statements.size)
         statements.forEach { sql ->
-            assertTrue("a review query does not restrict to FAILED: $sql", sql.contains("syncState = 'FAILED'"))
+            assertTrue(
+                "a review query does not restrict to FAILED and CONFLICT: $sql",
+                sql.contains("syncState IN ('FAILED', 'CONFLICT')"),
+            )
             assertTrue(
                 "a review query mentions RETRYABLE. Those rows are still being retried by the " +
                     "device and putting one in front of a worker asks them to act on something " +
                     "that needs nothing from them: $sql",
                 !sql.contains("RETRYABLE"),
+            )
+        }
+    }
+
+    @Test
+    fun `every drained table has grouped state counters that exclude only SYNCED`() {
+        // One grouped query per table feeds Home every number it shows: pending (PENDING plus
+        // RETRYABLE), and the card's FAILED plus CONFLICT, which must match the review list. A
+        // counter that dropped a state, or a second per-table counter, would break one of those or
+        // double the observers on the launch path (perf audit F2A-01).
+        val counters = sources().values.flatMap { s ->
+            val flat = s.replace(Regex("\"\\s*\\+\\s*SyncSql\\.HELD_\\w+\\s*\\+\\s*\""), "<HELD>")
+                .replace(Regex("\"\\s*\\+\\s*SyncSql\\.EVALUATE_SYNCABLE\\s*\\+\\s*\""), "<SYNCABLE>")
+                .replace(Regex("\"\\s*\\+\\s*\""), "")
+            Regex("SELECT [^\"]*COUNT\\(\\*\\)[^\"]*FROM \\w+ WHERE syncState[^\"]*").findAll(flat).map { it.value }.toList()
+        }
+        // Two per table: the Flow that feeds Home's caption and the one-shot read the "Sync now"
+        // message uses. Both must be this exact statement, or the two can disagree.
+        assertEquals("expected two state counters (observe and one-shot) per drained table", 40, counters.size)
+        counters.forEach { sql ->
+            assertTrue(
+                "a counter is not the grouped, SYNCED-excluding shape: $sql",
+                Regex("^SELECT syncState AS syncState, (<HELD>|0) AS held, COUNT\\(\\*\\) AS rowCount FROM \\w+ WHERE syncState != 'SYNCED'( AND <SYNCABLE>)? GROUP BY syncState, held$").matches(sql),
             )
         }
     }

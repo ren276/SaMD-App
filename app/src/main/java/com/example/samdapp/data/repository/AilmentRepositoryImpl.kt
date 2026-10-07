@@ -1,12 +1,12 @@
 package com.example.samdapp.data.repository
 
+import com.example.samdapp.data.sync.SyncStamp
 import com.example.samdapp.data.local.dao.AilmentDao
 import com.example.samdapp.data.local.entity.AilmentEntity
 import com.example.samdapp.domain.model.AilmentEntry
 import com.example.samdapp.domain.repository.AilmentRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
-import java.time.Instant
 import javax.inject.Inject
 
 class AilmentRepositoryImpl @Inject constructor(
@@ -21,7 +21,7 @@ class AilmentRepositoryImpl @Inject constructor(
         ailmentDao.observeForEncounter(encounterId).map { rows -> rows.map { it.toDomain() } }
 
     override suspend fun markDeleted(id: String): Result<Unit> = asDataResult {
-        ailmentDao.markDeleted(id, Instant.now())
+        ailmentDao.markDeleted(id, SyncStamp.now())
     }
 }
 
@@ -43,7 +43,7 @@ private fun AilmentEntry.toEntity() = AilmentEntity(
     syncedToCloudAt = syncedToCloudAt,
     deletedAt = deletedAt,
     createdAt = createdAt,
-    localModifiedAt = createdAt,
+    localModifiedAt = SyncStamp.now(),
 )
 
 private fun AilmentEntity.toDomain() = AilmentEntry(

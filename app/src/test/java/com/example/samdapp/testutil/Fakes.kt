@@ -53,10 +53,12 @@ import com.example.samdapp.domain.repository.ReferralRepository
 import com.example.samdapp.domain.sync.SyncState
 import com.example.samdapp.domain.sync.SyncStatus
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import java.time.Instant
 
 class FakeBrandLookupSource(
@@ -276,6 +278,16 @@ class FakeCaseRecordRepository(
     val records = mutableMapOf<String, CaseRecord>().apply { initial.forEach { put(it.id, it) } }
     private val streams = mutableMapOf<String, MutableStateFlow<CaseRecord?>>()
 
+    /** What [assessGateSnapshot] returns per case. A case with no entry here but a record in
+     *  [records] reads as fully server-present, so a test that is not about the gate proceeds. */
+    val gateSnapshots = mutableMapOf<String, com.example.samdapp.domain.model.AssessGateSnapshot>()
+
+    override suspend fun assessGateSnapshot(caseRecordId: String): com.example.samdapp.domain.model.AssessGateSnapshot? =
+        gateSnapshots[caseRecordId] ?: records[caseRecordId]?.let {
+            val synced = com.example.samdapp.domain.model.SyncChainRow(com.example.samdapp.domain.model.SyncState.SYNCED, 1, null, null)
+            com.example.samdapp.domain.model.AssessGateSnapshot(caseRecord = synced, encounter = synced, patient = synced)
+        }
+
     private fun streamFor(id: String) = streams.getOrPut(id) { MutableStateFlow(records[id]) }
 
     override suspend fun createDraft(patientId: String, encounterId: String): Result<CaseRecord> {
@@ -290,6 +302,13 @@ class FakeCaseRecordRepository(
     }
 
     override suspend fun markSavedLocally(caseRecordId: String): Result<Unit> = updateStatus(caseRecordId, CaseStatus.SAVED_LOCALLY)
+
+    /** Moves the case on or off the server, as the sync outbox would, so the stream re-emits. */
+    fun setOnServer(caseRecordId: String, onServer: Boolean) {
+        val updated = records.getValue(caseRecordId).copy(isOnServer = onServer)
+        records[caseRecordId] = updated
+        streamFor(caseRecordId).value = updated
+    }
 
     override suspend fun assignDoctor(caseRecordId: String, doctorId: String, isOnline: Boolean): Result<Unit> {
         val status = if (isOnline) CaseStatus.SENT_TO_DOCTOR else CaseStatus.PENDING_SYNC
@@ -591,6 +610,8 @@ class FakeSyncStatus : SyncStatus {
     private val _state = MutableStateFlow(SyncState())
     override val state: Flow<SyncState> = _state.asStateFlow()
     var syncCalls = 0
+    var syncInProcessCalls = 0
+        private set
 
     /** The failed rows this fake hands back, and the count it reports, kept in step by
      *  [setFailedRecords] so a test cannot set up a card that says 2 over a list of 3. */
@@ -604,15 +625,30 @@ class FakeSyncStatus : SyncStatus {
         _state.value = _state.value.copy(failedCount = records.size)
     }
 
+    /** What the next [syncNow] returns, and the state it leaves behind (null keeps the old
+     *  "everything settled" state), so a test can drive each Sync now message. */
+    var nextSyncResult: Result<Unit> = Result.success(Unit)
+    var stateAfterSync: SyncState? = null
+
+    /** What [stateNow], the direct read, returns; null means the same as [state]. Set apart from
+     *  [stateAfterSync] to model the Flow lagging the database. */
+    var directState: SyncState? = null
+    override suspend fun stateNow(): SyncState = directState ?: _state.value
+
     override suspend fun syncNow(): Result<Unit> {
         syncCalls++
-        _state.value = SyncState(
+        _state.value = stateAfterSync ?: SyncState(
             lastSyncedAt = Instant.EPOCH,
             pendingCount = 0,
             isSyncing = false,
             failedCount = failed.size,
         )
-        return Result.success(Unit)
+        return nextSyncResult
+    }
+
+    override suspend fun syncNowInProcess(): Result<Unit> {
+        syncInProcessCalls++
+        return nextSyncResult
     }
 
     override suspend fun failedRecords(): List<com.example.samdapp.domain.sync.FailedSyncRecord> {
@@ -767,7 +803,9 @@ class FakeAuditLogDao : AuditLogDao {
         }
     }
 
-    override fun observeFailedSyncCount(): Flow<Int> = _failedSyncCount.asStateFlow()
+    override suspend fun getSyncStateCounts() = observeSyncStateCounts().first()
+    override fun observeSyncStateCounts(): Flow<List<com.example.samdapp.data.local.dao.SyncStateCount>> =
+        _failedSyncCount.map { n -> if (n == 0) emptyList() else listOf(com.example.samdapp.data.local.dao.SyncStateCount(com.example.samdapp.domain.model.SyncState.FAILED, held = false, rowCount = n)) }
     override suspend fun getFailedForReview(): List<com.example.samdapp.data.local.dao.FailedSyncRow> = emptyList()
 }
 

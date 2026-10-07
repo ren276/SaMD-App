@@ -3,6 +3,10 @@ package com.example.samdapp.domain.usecase
 import com.example.samdapp.domain.audit.AuditAction
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
+import com.example.samdapp.domain.kernel.AssessGate
+import com.example.samdapp.domain.kernel.KernelFailure
+import com.example.samdapp.domain.kernel.assessGateDecision
+import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.domain.model.KernelPayload
 import com.example.samdapp.domain.model.toVitalsReading
 import com.example.samdapp.domain.repository.CaseRecordRepository
@@ -50,37 +54,60 @@ class AssessmentRunner @Inject constructor(
         val patientSex: String?,
     )
 
-    suspend fun run(caseRecordId: String) {
-        // The one catch in this class: it wraps resolution and payload build only (stage 1/2),
-        // and converts both their strict null returns and any unexpected exception into the same
-        // branch. Stage 3 (kernel) never throws and already falls through to its own unavailable
-        // state internally; stage 4 (evaluate) already writes its own failure marker and must be
-        // audited, not swallowed. Neither is wrapped here.
+    /**
+     * [runAttemptCount] is the WorkManager attempt number of the caller, 0 for the first. Only the
+     * gate's "not sent yet" outcome (every row of the chain is still on its way) is ever retried,
+     * and only before the last of [MAX_ASSESS_ATTEMPTS] attempts. A retried attempt returns
+     * [AssessmentOutcome.RetryLater] having written nothing and called nothing: no kernel row, no
+     * evaluate marker, no audit entry, no kernel or evaluate request. Every other early stop
+     * records its cause at once, as before.
+     */
+    suspend fun run(caseRecordId: String, runAttemptCount: Int = 0): AssessmentOutcome {
+        // Local resolution first (stage 1/2): nothing to assess means nothing worth pushing for,
+        // so an unresolvable case is recorded without a network round trip. The one catch around
+        // resolution and payload build: a strict null return is missing local data, an exception
+        // is a defect on this phone. Stage 3 (kernel) never throws and falls through to its own
+        // unavailable state; stage 4 (evaluate) writes its own failure marker and must be audited,
+        // not swallowed. Neither is wrapped here.
         val resolved = try {
-            resolve(caseRecordId)
+            resolve(caseRecordId) ?: run {
+                recordUnavailableAudited(caseRecordId, KernelFailure.RECORD_INCOMPLETE)
+                return AssessmentOutcome.Done
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             logger.warning("Assessment resolve/build failed for case $caseRecordId: ${e.message}")
-            null
+            recordUnavailableAudited(caseRecordId, KernelFailure.DEVICE_ERROR)
+            return AssessmentOutcome.Done
         }
 
-        if (resolved == null) {
-            generateKernelReportUseCase.recordUnavailable(caseRecordId)
-            return
-        }
-
-        // Both kernel legs below are backend proxies that resolve the case record server-side
-        // (POST /api/v1/assess -> _resolve_case_record). A case created on device exists only
-        // locally until the outbox drains, so assessing before pushing gets SAMD-ENC-4002 "case
-        // record not found" and collapses to the fallback/unavailable path for a reason that has
-        // nothing to do with the kernel being unavailable. Push first, then assess.
-        //
-        // The result is deliberately not fatal. syncNow() refuses when offline, and a failed push
-        // means the kernel call below fails too and lands in the honest UNAVAILABLE state that
-        // already exists — which is the correct outcome, not something to special-case here.
-        syncStatus.syncNow().onFailure { e ->
+        // Push. Every clinical row is device-minted and reaches the server only through the
+        // outbox, and /api/v1/assess resolves the case record server side. Drained in this
+        // process: a WorkManager request would answer "did not succeed" for a drain that is only
+        // in its retry backoff. Best effort and NOT consulted: a 200 batch can still reject this
+        // patient or encounter individually, so the Result says nothing about this case. It also
+        // sends every queued PENDING_SYNC case, the same as Sync now (operator ruling H3).
+        syncStatus.syncNowInProcess().onFailure { e ->
             logger.warning("Pre-assessment sync failed for case $caseRecordId: ${e.message}")
+        }
+
+        // The gate reads this case's own chain after the push, never the Result above.
+        val gate = try {
+            assessGateDecision(caseRecordRepository.assessGateSnapshot(caseRecordId))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.warning("Assess gate could not read case $caseRecordId: ${e.message}")
+            AssessGate.Stop(KernelFailure.DEVICE_ERROR)
+        }
+        if (gate is AssessGate.Stop) {
+            if (gate.failure == KernelFailure.CASE_NOT_SENT_YET && runAttemptCount < MAX_ASSESS_ATTEMPTS - 1) {
+                logger.info("Case $caseRecordId is not on the server yet; attempt $runAttemptCount will be retried")
+                return AssessmentOutcome.RetryLater
+            }
+            recordUnavailableAudited(caseRecordId, gate.failure)
+            return AssessmentOutcome.Done
         }
 
         val kernelResult = generateKernelReportUseCase(
@@ -124,6 +151,29 @@ class AssessmentRunner @Inject constructor(
                 "inferenceSource" to kernelResult.getOrNull()?.inferenceSource?.name,
             ),
         )
+        return AssessmentOutcome.Done
+    }
+
+    /**
+     * The only way an early return may record an UNAVAILABLE result. A persisted clinical
+     * artifact (the kernel report row) must never exist without its audit entry, and both legs
+     * must say why: the kernel row carries [failure] for the screen, the evaluate leg records the
+     * same name as its failure marker (H-14: failed, not merely not run), and the audit entry is
+     * the same [AuditAction.KERNEL_RESPONSE_RECEIVED] the full path emits, with
+     * `inferenceSource = UNAVAILABLE` and the reason. (Salvaged from the archived
+     * fix/sync-before-assess, 76a4ac2.)
+     */
+    private suspend fun recordUnavailableAudited(caseRecordId: String, failure: KernelFailure) {
+        generateKernelReportUseCase.recordUnavailable(caseRecordId, failure)
+        generateEvaluateReportUseCase.recordFailure(caseRecordId, failure.name)
+        auditLogger.log(
+            action = AuditAction.KERNEL_RESPONSE_RECEIVED,
+            caseRecordId = caseRecordId,
+            payload = auditPayload(
+                "inferenceSource" to InferenceSource.UNAVAILABLE.name,
+                "reason" to failure.name,
+            ),
+        )
     }
 
     /** Null means the assessment cannot honestly run: no case record, no vitals, no consultation,
@@ -152,7 +202,17 @@ class AssessmentRunner @Inject constructor(
         )
     }
 
-    private companion object {
-        val logger = Logger.getLogger("AssessmentRunner")
+    companion object {
+        /** Attempts one case gets while its records are still on their way to the server. With the
+         *  exponential backoff the assessment work is enqueued with (10 s doubling), the first five
+         *  attempts wait about 310 s in all, just over [com.example.samdapp.domain.model.RETRY_MIN_INTERVAL],
+         *  so a record that went RETRYABLE gets one more eligible send before the last attempt
+         *  records "not sent yet". */
+        const val MAX_ASSESS_ATTEMPTS = 6
+
+        private val logger = Logger.getLogger("AssessmentRunner")
     }
 }
+
+/** What one [AssessmentRunner.run] attempt wants done next. */
+enum class AssessmentOutcome { Done, RetryLater }

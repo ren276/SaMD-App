@@ -8,7 +8,16 @@ import kotlinx.coroutines.flow.Flow
  *  .KernelReportRepository]/[com.example.samdapp.domain.repository.EvaluateReportRepository]).
  *  Display-only, like the day-ordinal receipt: never used to look a case up, never a substitute
  *  for [caseRecordId]. */
-enum class AssessmentWorkState { QUEUED, RUNNING, NONE }
+enum class AssessmentWorkState {
+    QUEUED,
+    RUNNING,
+
+    /** Live work (waiting in its backoff, or running) that has already asked once to be tried
+     *  again, because the case's records had not reached the server. Told apart from
+     *  [QUEUED] and [RUNNING] so the screen can say the visit is being sent first. */
+    RETRYING,
+    NONE,
+}
 
 /** Seam between [com.example.samdapp.presentation.sending.SendingViewModel] (and any retry
  *  affordance) and WorkManager, mirroring

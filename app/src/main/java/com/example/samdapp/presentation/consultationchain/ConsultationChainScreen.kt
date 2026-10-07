@@ -2,6 +2,8 @@
 
 package com.example.samdapp.presentation.consultationchain
 
+import com.example.samdapp.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -26,7 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.samdapp.domain.model.ConsultationHistoryEntry
-import com.example.samdapp.presentation.common.historyLabel
+import com.example.samdapp.presentation.common.historyLabelRes
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
@@ -104,7 +106,7 @@ private fun ChainVisitRow(
                 )
             }
             Text(
-                text = visit.caseStatus?.historyLabel() ?: "No case record",
+                text = stringResource(visit.caseStatus?.historyLabelRes(visit.caseOnServer) ?: R.string.case_history_no_case_record),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

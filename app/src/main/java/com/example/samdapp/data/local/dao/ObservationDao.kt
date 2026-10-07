@@ -14,7 +14,7 @@ interface ObservationDao {
     suspend fun insertAll(observations: List<ObservationEntity>)
 
     /** Phase 6b outbox — see PatientDao.getPendingForSync's KDoc. */
-    @Query("SELECT * FROM observations WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " "
+    @Query("SELECT * FROM observations WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " AND NOT " + SyncSql.HELD_OBSERVATIONS + " "
             + "ORDER BY localModifiedAt ASC")
     suspend fun getPendingForSync(retryEligibleBefore: Instant): List<ObservationEntity>
 
@@ -46,18 +46,27 @@ interface ObservationDao {
     )
     suspend fun requeueFailed(id: String)
 
-    @Query("SELECT COUNT(*) FROM observations WHERE syncState = 'FAILED'")
-    fun observeFailedSyncCount(): Flow<Int>
+    @Query("SELECT syncState AS syncState, " + SyncSql.HELD_OBSERVATIONS + " AS held, COUNT(*) AS rowCount FROM observations WHERE syncState != 'SYNCED' GROUP BY syncState, held")
+    fun observeSyncStateCounts(): Flow<List<SyncStateCount>>
 
-    /** The FAILED rows of this table, projected for the worker-facing review list (S-3).
-     *  Selects exactly the rows this table's FAILED counter counts, so the number on the Home
+    /** The same counts, read once (for a decision made right after a drain). */
+    @Query("SELECT syncState AS syncState, " + SyncSql.HELD_OBSERVATIONS + " AS held, COUNT(*) AS rowCount FROM observations WHERE syncState != 'SYNCED' GROUP BY syncState, held")
+    suspend fun getSyncStateCounts(): List<SyncStateCount>
+
+    /** The FAILED and CONFLICT rows of this table, projected for the worker-facing review list.
+     *  Selects exactly the FAILED and CONFLICT groups of observeSyncStateCounts, so the number on the Home
      *  card and the length of the list can never disagree. Suspend rather than a Flow:
      *  the list is fetched when a worker opens it, so it costs nothing at launch.
      *  See [FailedSyncRow]. */
     @Query(
-        "SELECT 'observations' AS tableName, id AS recordId, patientId AS patientId, localModifiedAt AS " +
-        "recordedAt, syncErrorCode AS syncErrorCode, syncErrorMessage AS syncErrorMessage FROM " +
-        "observations WHERE syncState = 'FAILED'",
+        "SELECT 'observations' AS tableName, observations.syncState AS syncState, observations.id AS " +
+        "recordId, observations.patientId AS patientId, observations.localModifiedAt AS recordedAt, " +
+        "observations.syncErrorCode AS syncErrorCode, observations.syncErrorMessage AS syncErrorMessage, " +
+        "observations.serverVersion AS serverVersion, observations.encounterId AS encounterId, CAST(NULL " +
+        "AS TEXT) AS caseRecordId, CAST(NULL AS TEXT) AS parentId FROM observations WHERE " +
+        "observations.syncState IN ('FAILED', 'CONFLICT') OR (observations.syncState IN " +
+        SyncSql.UNSENT_STATES + " AND " +
+        SyncSql.HELD_OBSERVATIONS + ")",
     )
     suspend fun getFailedForReview(): List<FailedSyncRow>
 

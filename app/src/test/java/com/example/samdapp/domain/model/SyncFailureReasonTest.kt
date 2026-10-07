@@ -13,20 +13,43 @@ import org.junit.Test
 class SyncFailureReasonTest {
 
     @Test
+    fun `a CONFLICT row is reported as a conflict whatever code it carries`() {
+        // A conflict ack carries no code, and a CONFLICT row written before CONFLICT was surfaced
+        // has a null code too. Classified by code alone that is UNRECOGNISED, whose action is
+        // SEND_AGAIN, and requeueFailed is guarded on FAILED: a button that silently does nothing.
+        // The record state is checked first so that cannot happen.
+        listOf(null, SYNC_RECORD_INVALID_CODE, RETRY_EXHAUSTED_CODE).forEach { code ->
+            val reason = syncFailureReasonFor(SyncState.CONFLICT, code, null)
+            assertEquals("code $code", SyncFailureReason.CONFLICT_ON_SERVER, reason)
+            assertEquals("code $code", SyncFailureAction.TELL_SUPERVISOR, reason.action)
+        }
+    }
+
+    @Test
+    fun `a FAILED row is still classified by its code and message`() {
+        assertEquals(
+            SyncFailureReason.DUPLICATE_RECORD,
+            syncFailureReasonFor(SyncState.FAILED, SYNC_RECORD_INVALID_CODE, BackendConstraintMessages.UNIQUE_VIOLATION),
+        )
+        assertEquals(SyncFailureReason.RETRIES_EXHAUSTED, syncFailureReasonFor(SyncState.FAILED, RETRY_EXHAUSTED_CODE, null))
+        assertEquals(SyncFailureReason.UNRECOGNISED, syncFailureReasonFor(SyncState.FAILED, null, null))
+    }
+
+    @Test
     fun `a duplicate ABHA is separable from every other validation reject`() {
         // Both arrive as SAMD-SYNC-6003. The message is the only discriminator the backend gives
         // us, which is why BackendConstraintMessages is mirrored and mirror-tested.
         assertEquals(
             SyncFailureReason.DUPLICATE_RECORD,
-            syncFailureReasonFor(SYNC_RECORD_INVALID_CODE, BackendConstraintMessages.UNIQUE_VIOLATION),
+            syncFailureReasonFor(SyncState.FAILED, SYNC_RECORD_INVALID_CODE, BackendConstraintMessages.UNIQUE_VIOLATION),
         )
         assertEquals(
             SyncFailureReason.RECORD_REJECTED,
-            syncFailureReasonFor(SYNC_RECORD_INVALID_CODE, BackendConstraintMessages.NOT_NULL_VIOLATION),
+            syncFailureReasonFor(SyncState.FAILED, SYNC_RECORD_INVALID_CODE, BackendConstraintMessages.NOT_NULL_VIOLATION),
         )
         assertEquals(
             SyncFailureReason.RECORD_REJECTED,
-            syncFailureReasonFor(SYNC_RECORD_INVALID_CODE, BackendConstraintMessages.CHECK_VIOLATION),
+            syncFailureReasonFor(SyncState.FAILED, SYNC_RECORD_INVALID_CODE, BackendConstraintMessages.CHECK_VIOLATION),
         )
     }
 
@@ -36,11 +59,11 @@ class SyncFailureReasonTest {
         // for a worker, so one value.
         assertEquals(
             SyncFailureReason.RECORD_REJECTED,
-            syncFailureReasonFor(SYNC_RECORD_INVALID_CODE, "client_updated_at: invalid timestamp."),
+            syncFailureReasonFor(SyncState.FAILED, SYNC_RECORD_INVALID_CODE, "client_updated_at: invalid timestamp."),
         )
         assertEquals(
             SyncFailureReason.RECORD_REJECTED,
-            syncFailureReasonFor(SYNC_FORBIDDEN_FIELD_CODE, "audio_local_uri: forbidden field."),
+            syncFailureReasonFor(SyncState.FAILED, SYNC_FORBIDDEN_FIELD_CODE, "audio_local_uri: forbidden field."),
         )
     }
 
@@ -48,35 +71,35 @@ class SyncFailureReasonTest {
     fun `giving up after the attempt cap is not reported as the server refusing the record`() {
         // The whole justification for allowing a cap at all (SyncRetryPolicy's KDoc): "we gave up
         // after five tries" and "the server says this record is wrong" need different words.
-        val gaveUp = syncFailureReasonFor(RETRY_EXHAUSTED_CODE, null)
+        val gaveUp = syncFailureReasonFor(SyncState.FAILED, RETRY_EXHAUSTED_CODE, null)
         assertEquals(SyncFailureReason.RETRIES_EXHAUSTED, gaveUp)
         assertEquals(SyncFailureAction.SEND_AGAIN, gaveUp.action)
         assertEquals(
             SyncFailureAction.TELL_SUPERVISOR,
-            syncFailureReasonFor(SYNC_RECORD_INVALID_CODE, BackendConstraintMessages.UNIQUE_VIOLATION).action,
+            syncFailureReasonFor(SyncState.FAILED, SYNC_RECORD_INVALID_CODE, BackendConstraintMessages.UNIQUE_VIOLATION).action,
         )
     }
 
     @Test
     fun `a locally oversized record is its own cause and offers no button`() {
-        val tooLarge = syncFailureReasonFor(RECORD_TOO_LARGE_CODE, null)
+        val tooLarge = syncFailureReasonFor(SyncState.FAILED, RECORD_TOO_LARGE_CODE, null)
         assertEquals(SyncFailureReason.RECORD_TOO_LARGE, tooLarge)
         assertEquals(SyncFailureAction.TELL_SUPERVISOR, tooLarge.action)
     }
 
     @Test
     fun `an unknown code, and no code at all, both fall back instead of crashing or blanking`() {
-        assertEquals(SyncFailureReason.UNRECOGNISED, syncFailureReasonFor("SAMD-SYNC-6099", "something new"))
-        assertEquals(SyncFailureReason.UNRECOGNISED, syncFailureReasonFor(null, null))
-        assertEquals(SyncFailureReason.UNRECOGNISED, syncFailureReasonFor(null, "a message with no code"))
-        assertEquals(SyncFailureReason.UNRECOGNISED, syncFailureReasonFor("", ""))
+        assertEquals(SyncFailureReason.UNRECOGNISED, syncFailureReasonFor(SyncState.FAILED, "SAMD-SYNC-6099", "something new"))
+        assertEquals(SyncFailureReason.UNRECOGNISED, syncFailureReasonFor(SyncState.FAILED, null, null))
+        assertEquals(SyncFailureReason.UNRECOGNISED, syncFailureReasonFor(SyncState.FAILED, null, "a message with no code"))
+        assertEquals(SyncFailureReason.UNRECOGNISED, syncFailureReasonFor(SyncState.FAILED, "", ""))
     }
 
     @Test
     fun `the classifier is total, and only the causes that can change offer a button`() {
         // Pinned rather than derived: a new reason must be a deliberate edit here, and the split
         // between "press this" and "tell someone" is the one decision a worker acts on.
-        assertEquals(5, SyncFailureReason.entries.size)
+        assertEquals(6, SyncFailureReason.entries.size)
         assertEquals(
             setOf(SyncFailureReason.RETRIES_EXHAUSTED, SyncFailureReason.UNRECOGNISED),
             SyncFailureReason.entries.filter { it.action == SyncFailureAction.SEND_AGAIN }.toSet(),

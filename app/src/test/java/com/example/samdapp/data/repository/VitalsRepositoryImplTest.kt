@@ -59,8 +59,13 @@ class FakeObservationDao : ObservationDao {
         }
     }
 
-    override fun observeFailedSyncCount(): Flow<Int> =
-        store.map { rows -> rows.count { it.syncState == com.example.samdapp.domain.model.SyncState.FAILED } }
+    override suspend fun getSyncStateCounts() = observeSyncStateCounts().first()
+    override fun observeSyncStateCounts(): Flow<List<com.example.samdapp.data.local.dao.SyncStateCount>> =
+        store.map { rows ->
+            rows.filter { it.syncState != com.example.samdapp.domain.model.SyncState.SYNCED }
+                .groupingBy { it.syncState }.eachCount()
+                .map { (state, n) -> com.example.samdapp.data.local.dao.SyncStateCount(state, held = false, rowCount = n) }
+        }
     override suspend fun getFailedForReview(): List<com.example.samdapp.data.local.dao.FailedSyncRow> = emptyList()
 }
 

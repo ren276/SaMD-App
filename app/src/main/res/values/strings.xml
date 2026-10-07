@@ -9,14 +9,14 @@
         on the server", never "Assessment unavailable", when the patient is what went wrong.
       - Name the ACTION. "Retry" is only used where pressing again can actually work.
       - No SAMD-* codes. A worker cannot act on one and it makes the screen look broken.
-      - Do not mention the AI when the AI is working correctly. kernel_failure_case_not_on_server
+      - Do not mention the AI when the AI is working correctly. kernel_failure_patient_duplicate
         is the test of this: the assessment is fine, the patient was never saved.
       - Short sentences, common words, a patient is waiting.
     -->
 
-    <!-- OFFLINE. No press would help; the queued work runs itself. -->
-    <string name="kernel_failure_offline_title">This phone is not connected</string>
-    <string name="kernel_failure_offline_body">The assessment will run on its own once this phone is back on Wi-Fi or mobile data. You can carry on with the patient.</string>
+    <!-- OFFLINE. The connection dropped during the call. Nothing re-runs it, so Try again. -->
+    <string name="kernel_failure_offline_title">The connection dropped</string>
+    <string name="kernel_failure_offline_body">This phone lost its connection while checking this visit. Press Try again when it is connected. You can carry on with the patient.</string>
 
     <!-- TIMEOUT. The one class where pressing again now is genuinely reasonable. -->
     <string name="kernel_failure_timeout_title">The server did not answer in time</string>
@@ -31,23 +31,20 @@
     <string name="kernel_failure_not_authorized_body">Your sign-in has ended. Sign in again, then open this case.</string>
 
     <!--
-      CASE_NOT_ON_SERVER. The reason this whole change exists.
-      Says nothing about the AI, because nothing is wrong with the AI. Names the patient record
-      and the action. Mentions the ABHA number as a thing to CHECK if sending keeps failing,
-      rather than asserting a duplicate: a 404 proves the case is not on the server, it does not
-      prove why, and telling a worker a cause we have not established is how they stop believing
-      the screen.
+      CASE_NOT_ON_SERVER. A 404 after the assess gate passed: this phone holds a server version
+      for the case, yet the server could not find it for this clinic. Pre-call causes (not sent
+      yet, duplicate patient, blocked in sync) have their own values and copy below.
     -->
-    <string name="kernel_failure_case_not_on_server_title">This patient is not saved on the server</string>
-    <string name="kernel_failure_case_not_on_server_body">This patient has not reached the server yet, so this visit could not be checked. Open the patient\'s record and send it again. If sending keeps failing, check that the ABHA number is not already used by another patient. This will finish on its own once the patient is saved.</string>
+    <string name="kernel_failure_case_not_on_server_title">The server could not find this visit</string>
+    <string name="kernel_failure_case_not_on_server_body">This phone sent this visit, but the server could not find it for this clinic. Trying again will not help. Tell your supervisor today.</string>
 
     <!-- PAYLOAD_REJECTED. 5003, and 5005 which is the H-10 identity guard: a real defect signal. -->
     <string name="kernel_failure_payload_rejected_title">The server would not accept this visit</string>
     <string name="kernel_failure_payload_rejected_body">Something in this visit could not be sent. Sending it again unchanged will not work. Write down the patient\'s name and tell your supervisor today.</string>
 
-    <!-- KERNEL_UNAVAILABLE. 502/503/504 family. Nothing to press. -->
+    <!-- KERNEL_UNAVAILABLE. 502/503/504 family. Nothing re-runs it, so Try again later. -->
     <string name="kernel_failure_kernel_unavailable_title">The assessment service is down</string>
-    <string name="kernel_failure_kernel_unavailable_body">The service that reads this visit is not working right now. It will run on its own when the service is back. You can carry on with the patient.</string>
+    <string name="kernel_failure_kernel_unavailable_body">The service that checks visits is not working right now. Try again in a few minutes. You can carry on with the patient.</string>
 
     <!-- MALFORMED_RESPONSE. Reached, unintelligible. Pressing again re-fetches the same bad body. -->
     <string name="kernel_failure_malformed_response_title">The server sent something this app cannot read</string>
@@ -65,6 +62,42 @@
       No KernelFailure: the kernel was reached and answered with nothing, or no payload could be
       built at all. Reach-neutral on purpose, and the only place the old wording survives.
     -->
+    <!-- Decided on this phone before any call, by the assess gate or local resolution
+         (memo section 3.1, A3, A5 to A7). Nothing was sent to the AI in any of these. -->
+    <!--
+      Case status as the worker sees it (presentation/common/CaseStatusDisplay.kt). SENT_TO_DOCTOR
+      is a local status set on this phone with no network, so until the case is on the server it
+      reads "Queued for doctor, not yet on the server" (operator ruling H6).
+    -->
+    <string name="case_status_queued">Queued</string>
+    <string name="case_status_awaiting_review">Awaiting Review</string>
+    <string name="case_status_reviewed">Reviewed</string>
+    <string name="case_status_abandoned">Abandoned</string>
+    <string name="case_status_queued_for_doctor_not_on_server">Queued for doctor, not yet on the server</string>
+    <string name="case_history_in_progress">In progress</string>
+    <string name="case_history_saved_locally">Saved locally</string>
+    <string name="case_history_queued_on_phone">Queued on this phone, not sent yet</string>
+    <string name="case_history_awaiting_doctors_review">Awaiting doctor\'s review</string>
+    <string name="case_history_doctors_response_received">Doctor\'s response received</string>
+    <string name="case_history_abandoned_restarted">Abandoned, restarted as a new visit</string>
+    <string name="case_history_no_case_record">No case record</string>
+    <string name="case_review_header_received">Doctor\'s review received</string>
+    <!-- The Home button and the list it opens: true of every case in it, sent or not. -->
+    <string name="cases_for_the_doctor">Cases for the doctor</string>
+    <string name="cases_for_the_doctor_empty">No cases for the doctor yet.</string>
+    <!-- Patient-facing history line for CASE_SENT_TO_DOCTOR, which is logged when a doctor is
+         assigned on this phone, before anything reaches the server. -->
+    <string name="patient_audit_queued_for_doctor_review">Queued for doctor review</string>
+
+    <string name="kernel_failure_record_incomplete_title">This visit is missing information</string>
+    <string name="kernel_failure_record_incomplete_body">The vitals or the consultation for this visit were not saved, so it could not be checked. Trying again will not help. Tell your supervisor.</string>
+    <string name="kernel_failure_patient_duplicate_title">This patient is not on the server</string>
+    <string name="kernel_failure_patient_duplicate_body">The server already has another patient with the same ABHA number, so this patient and this visit were not saved there and the visit could not be checked. This cannot be fixed on this phone. Write down the patient\'s name and tell your supervisor today.</string>
+    <string name="kernel_failure_case_sync_blocked_title">This visit could not be sent to the server</string>
+    <string name="kernel_failure_case_sync_blocked_body">Part of this visit was not accepted by the server, so it could not be checked. The card on the home screen for records that did not reach the server shows why.</string>
+    <string name="kernel_failure_case_not_sent_yet_title">This visit has not been sent yet</string>
+    <string name="kernel_failure_case_not_sent_yet_body">This phone has not finished sending this visit to the server. When the home screen shows nothing waiting to send, press Try again.</string>
+
     <string name="kernel_failure_none_title">Assessment unavailable</string>
     <string name="kernel_failure_none_body">The AI did not produce a result for this case. No diagnosis was generated.</string>
 
@@ -89,6 +122,74 @@
     </plurals>
     <string name="failed_sync_card_body">They are safe on this phone, but they are not on the server. Open this to see what each one needs.</string>
     <string name="failed_sync_card_action">Review</string>
+
+    <!--
+      Home's sync caption (presentation/home/SyncCaption.kt, truth table in
+      scratchpad/sync-failure-visibility-memo.md section 4.2). Full sentences, never fragments
+      joined in code, so each can be translated whole. Where two counts share a sentence, the
+      counts are labelled rather than inflected, so no plural has to agree with two numbers.
+      "Up to date" is said in exactly one case: nothing pending, failed, conflicted or blocked.
+    -->
+    <string name="sync_caption_sending">Sending…</string>
+    <plurals name="sync_caption_offline_records">
+        <item quantity="one">Offline. 1 record is saved on this phone, not sent yet.</item>
+        <item quantity="other">Offline. %1$d records are saved on this phone, not sent yet.</item>
+    </plurals>
+    <plurals name="sync_caption_offline_doctor_cases">
+        <item quantity="one">Offline. 1 case for a doctor is saved on this phone, not sent yet.</item>
+        <item quantity="other">Offline. %1$d cases for a doctor are saved on this phone, not sent yet.</item>
+    </plurals>
+    <string name="sync_caption_offline_records_and_doctor_cases">Offline. Saved on this phone, not sent yet: records %1$d, cases for a doctor %2$d.</string>
+    <string name="sync_caption_offline_activity_log">Offline. The activity log is saved on this phone, not sent yet.</string>
+    <string name="sync_caption_offline_nothing_else">Offline. Nothing else is waiting to send.</string>
+    <string name="sync_caption_offline_all_sent">Offline. Everything on this phone has been sent.</string>
+    <string name="sync_caption_could_not_send_no_connection">Could not send: could not reach the server. %1$d waiting.</string>
+    <string name="sync_caption_could_not_send_sign_in">Could not send: sign in again to send. %1$d waiting.</string>
+    <string name="sync_caption_could_not_send_server_refused">Could not send: the server is not accepting records right now. %1$d waiting.</string>
+    <string name="sync_caption_could_not_send_local_store">Could not send: this phone could not prepare records to send. %1$d waiting.</string>
+    <plurals name="sync_caption_waiting_records">
+        <item quantity="one">1 record waiting to send.</item>
+        <item quantity="other">%1$d records waiting to send.</item>
+    </plurals>
+    <string name="sync_caption_waiting_records_and_doctor_cases">Waiting to send: records %1$d, cases for a doctor %2$d.</string>
+    <plurals name="sync_caption_doctor_cases">
+        <item quantity="one">1 case waiting to go to a doctor. Press Sync now.</item>
+        <item quantity="other">%1$d cases waiting to go to a doctor. Press Sync now.</item>
+    </plurals>
+    <string name="sync_caption_activity_log">The activity log is waiting to send.</string>
+    <plurals name="sync_caption_needs_review">
+        <item quantity="one">Everything else is sent. 1 record needs review.</item>
+        <item quantity="other">Everything else is sent. %1$d records need review.</item>
+    </plurals>
+    <!-- Memo section 12.4, row 10a: nothing waiting, records need review, and records are held behind them. -->
+    <string name="sync_caption_needs_review_with_held">Nothing is waiting to send. %1$s %2$s</string>
+    <plurals name="sync_caption_needs_review_count">
+        <item quantity="one">1 record needs review.</item>
+        <item quantity="other">%1$d records need review.</item>
+    </plurals>
+    <plurals name="sync_caption_held_count">
+        <item quantity="one">1 more is held on this phone with it.</item>
+        <item quantity="other">%1$d more are held on this phone with them.</item>
+    </plurals>
+    <string name="sync_caption_up_to_date">Up to date</string>
+
+    <!-- The one message shown after "Sync now" (memo section 4.3). A finished sync is never on
+         its own "everything is sent": the server can still refuse individual records. -->
+    <string name="sync_now_offline">This phone is offline. Nothing was sent.</string>
+    <string name="sync_now_still_trying">Still trying to send. This can take a while on a slow connection.</string>
+    <string name="sync_now_failed_no_connection">Could not send: could not reach the server.</string>
+    <string name="sync_now_failed_sign_in">Could not send: sign in again to send.</string>
+    <string name="sync_now_failed_server_refused">Could not send: the server is not accepting records right now.</string>
+    <string name="sync_now_failed_local_store">Could not send: this phone could not prepare records to send.</string>
+    <plurals name="sync_now_sent_needs_review">
+        <item quantity="one">Sent what could be sent. 1 record needs review.</item>
+        <item quantity="other">Sent what could be sent. %1$d records need review.</item>
+    </plurals>
+    <plurals name="sync_now_sent_retry_later">
+        <item quantity="one">Sent. 1 record will be tried again later.</item>
+        <item quantity="other">Sent. %1$d records will be tried again later.</item>
+    </plurals>
+    <string name="sync_now_all_sent">Everything is sent.</string>
 
     <!-- The list. -->
     <string name="failed_sync_list_title">Records that did not reach the server</string>
@@ -147,6 +248,19 @@
     -->
     <string name="failed_sync_unrecognised_title">This record did not reach the server</string>
     <string name="failed_sync_unrecognised_body">The server turned it down and this app does not know why. Send it again once. If it fails again, write down the patient\'s name and tell your supervisor.</string>
+
+    <!--
+      CONFLICT_ON_SERVER. Record state CONFLICT: the server kept its own, newer version. Never
+      resent on its own and nothing on this phone can settle it yet, so no button.
+    -->
+    <!-- Under a patient the server will not accept: its other records, folded under it because
+         none of them can reach the server until the patient does. No promise that they will. -->
+    <plurals name="failed_sync_held_records">
+        <item quantity="one">1 other record for this patient is held on this phone with it.</item>
+        <item quantity="other">%1$d other records for this patient are held on this phone with it.</item>
+    </plurals>
+    <string name="failed_sync_conflict_title">The server has a different version of this record</string>
+    <string name="failed_sync_conflict_body">This record was changed somewhere else after this phone last sent it, so the server kept its own version. Your copy is safe on this phone but is not on the server. This cannot be settled on this phone yet. Write down the patient\'s name and tell your supervisor today.</string>
 
     <!--
       ================================================================================
@@ -329,6 +443,43 @@
     -->
     <string name="assessment_model_score">Model score %1$d%% (uncalibrated)</string>
     <string name="assessment_differential_with_score">%1$s (model score %2$d%%, uncalibrated)</string>
+    <!-- Verification notices other than the low-score pair below. The no-result and mock notices
+         never mention a score, certainty, confidence or calibration: there is no model result for
+         them to describe (presentation/kernelassessment/AssessmentCopy.kt). -->
+    <!-- While the assessment job has not produced a result (memo section 3.1, A1 and A2). -->
+    <string name="assessment_waiting_for_network_title">Waiting for a connection</string>
+    <string name="assessment_waiting_for_network_body">This phone will send and check this visit when it is connected. If that does not work, this screen will say what to do.</string>
+    <string name="assessment_sending_first_title">Sending this visit first</string>
+    <string name="assessment_sending_first_body">This visit has to reach the server before it can be checked. This phone is trying again.</string>
+    <string name="assessment_checking">Checking this visit</string>
+    <string name="assessment_notice_critical_vitals">⚠ Emergency: critical vitals. Refer now; physician verification is required.</string>
+    <string name="assessment_notice_emergency">⚠ Emergency referral. Refer now; physician verification is required.</string>
+    <string name="assessment_notice_no_result">⚠ Physician review is required: no AI assessment was generated for this visit.</string>
+    <string name="assessment_notice_mock">⚠ Physician review is required: this is a mock result, not an AI assessment.</string>
+    <string name="assessment_notice_flagged">⚠ This result was flagged for physician verification before any diagnosis is finalized.</string>
+    <string name="assessment_source_mock">Mock result, dev build only: the real assessment service was not reached</string>
+    <string name="assessment_mock_notice">This is a mock result from a dev build. The real assessment service was not reached, so this is not an AI assessment.</string>
+    <string name="assessment_liability_unavailable">I understand that no AI assessment was generated and physician review is required.</string>
+    <string name="assessment_liability_ai">I understand this is an AI-generated assessment, not a diagnosis, and requires physician verification.</string>
     <string name="assessment_notice_low_score_physician">⚠ Model score below 0.90 (uncalibrated): physician verification required.</string>
     <string name="assessment_notice_low_certainty_worker">⚠ Physician verification required: the model is not certain about this result.</string>
+
+    <!-- Where a visit is, with no promise about when anyone will act on it (memo section 12.5).
+         The acknowledgement says it in the worker's language and Hindi, as the screen always has. -->
+    <string name="acknowledgement_title">Case saved locally</string>
+    <string name="acknowledgement_on_server">This visit is on the server.</string>
+    <string name="acknowledgement_not_on_server">This visit is saved on this phone. It is not on the server yet. The home screen shows what is still waiting to send.</string>
+    <string name="acknowledgement_on_server_hi">यह विज़िट सर्वर पर है।</string>
+    <string name="acknowledgement_not_on_server_hi">यह विज़िट इस फ़ोन में सहेजी गई है। यह अभी सर्वर पर नहीं है। होम स्क्रीन पर दिखता है कि अभी क्या भेजना बाकी है।</string>
+    <string name="doctor_assignment_queued_title">No network. Case saved locally.</string>
+    <string name="doctor_assignment_queued_body">Dr. %1$s is assigned, but nothing has been sent yet. Press Sync now on the home screen when this phone is online.</string>
+    <string name="doctor_assignment_least_busy">This case will be assigned to the least-busy available doctor (mock auto-assignment):</string>
+    <string name="patient_summary_queued_title">Case queued on this phone, not sent yet</string>
+    <string name="patient_summary_queued_body">Press Sync now on the home screen when this phone is online.</string>
+    <string name="profile_status_online">Online</string>
+    <string name="profile_status_offline">Offline. New records are saved on this phone and are not sent.</string>
+    <string name="physician_outcome_agree">Confirmed correct. This decision is saved with the case.</string>
+    <string name="physician_outcome_modify">Corrected treatment captured. It is saved with the case.</string>
+    <string name="physician_outcome_reject">Discarded. This decision is saved with the case.</string>
+    <string name="physician_clinical_note_label">Clinical note (saved with the case)</string>
 </resources>

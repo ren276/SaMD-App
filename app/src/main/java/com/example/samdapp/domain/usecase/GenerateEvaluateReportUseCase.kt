@@ -86,4 +86,10 @@ class GenerateEvaluateReportUseCase @Inject constructor(
             Result.failure(e)
         }
     }
+
+    /** Records why the evaluate leg was not run for [caseRecordId] (H-14: a recorded failure, not
+     *  an absent row), for a cause decided before any call, such as the assess gate. */
+    suspend fun recordFailure(caseRecordId: String, failureCode: String) {
+        evaluateReportRepository.saveFailure(caseRecordId, failureCode)
+    }
 }

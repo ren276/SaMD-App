@@ -1,6 +1,7 @@
 package com.example.samdapp.data.local.dao
 
 import com.example.samdapp.domain.model.CaseStatus
+import com.example.samdapp.domain.model.SyncState
 import java.time.Instant
 
 /** Projection for [CaseRecordDao.observeDoctorTrackerRows] — the flat, cross-patient status list
@@ -16,4 +17,7 @@ data class DoctorTrackerRow(
     val chiefComplaint: String?,
     val doctorName: String?,
     val doctorSpecialty: String?,
+    /** The case record's outbox facts, for `isServerPresent`: whether the server holds it. */
+    val caseSyncState: SyncState,
+    val caseServerVersion: Int?,
 )

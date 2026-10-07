@@ -53,7 +53,7 @@
 | REQ-AIL-04 | `domain/repository/AilmentRepository` KDoc (unfiltered `observeForEncounter`), `Visibility`/`AilmentEntry` KDoc | H-10 | Documented; repository boundary verified | ✓ AilmentUseCasesTest (observe-stream check) |
 | REQ-TRS-01 | `presentation/consent/ConsentScreen`+`ConsentViewModel`, `AuditAction.CONSENT_RECORDED` | H-07 | Manual (nav flow reviewed) | ✓ ConsentViewModelTest |
 | REQ-TRS-02 | `CheckEmergencyThresholdsUseCase`, `CompounderViewModel.onContinue`, `EmergencyOverrideScreen`, `AuditAction.EMERGENCY_OVERRIDE` | H-01 | Manual (nav flow reviewed) | ✓ CheckEmergencyThresholdsUseCaseTest |
-| REQ-TRS-03 | `domain/config/SyncWindowProvider`+`AndroidSyncWindowProvider`, `res/values/integers.xml`, `AcknowledgementScreen` | — | Manual (nav flow reviewed) | TODO — passthrough only, no dedicated ViewModel test yet (see PROGRESS.md) |
+| REQ-TRS-03 (amended, PROPOSED) | `AcknowledgementViewModel`, `AcknowledgementScreen`, `res/values/strings.xml` | `AcknowledgementViewModelTest`, `UserFacingPromiseCopyTest` | JVM | DONE, pending operator sign-off of the amendment |
 | REQ-TRS-04 | `NewAilmentCard` flat fields; `AilmentEntry.severity/duration/qualifiers/onset` | — | Manual (nav flow reviewed) | PARTIAL — per-ailment-type dynamic expansion is Phase 2.5, not built |
 | REQ-TRS-05 | `VitalsCaptureMethod` enum, `Observation.captureMethod`/`ObservationEntity.captureMethod`, `CompounderScreen` dropdown | — | Manual (nav flow reviewed) | TODO |
 | REQ-TRS-06 | `AilmentEntry`/`Observation` `capturedAtOffline`(`recordedAt`)+`syncedToCloudAt` | H-05 | Manual (nav flow reviewed) | TODO |

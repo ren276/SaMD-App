@@ -1,5 +1,6 @@
 package com.example.samdapp.data.repository
 
+import com.example.samdapp.data.sync.SyncStamp
 import com.example.samdapp.data.local.dao.PrescriptionDao
 import com.example.samdapp.data.local.entity.MedicationLineEntity
 import com.example.samdapp.data.local.entity.PrescriptionEntity
@@ -18,7 +19,7 @@ class PrescriptionRepositoryImpl @Inject constructor(
     override suspend fun save(prescription: Prescription): Result<Unit> = asDataResult {
         prescriptionDao.insertPrescription(prescription.toEntity())
         prescriptionDao.insertMedicationLines(
-            prescription.medications.mapIndexed { i, line -> line.toEntity(prescription.id, i, prescription.createdAt) },
+            prescription.medications.mapIndexed { i, line -> line.toEntity(prescription.id, i, SyncStamp.now()) },
         )
     }
 
@@ -38,7 +39,7 @@ private fun Prescription.toEntity() = PrescriptionEntity(
     diagnosis = diagnosis,
     kernelDecision = kernelDecision,
     createdAt = createdAt,
-    localModifiedAt = createdAt,
+    localModifiedAt = SyncStamp.now(),
 )
 
 private fun MedicationLine.toEntity(prescriptionId: String, position: Int, localModifiedAt: Instant) = MedicationLineEntity(

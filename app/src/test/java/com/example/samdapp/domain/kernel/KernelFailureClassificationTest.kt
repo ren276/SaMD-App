@@ -33,10 +33,10 @@ class KernelFailureClassificationTest {
     // ── One per failure class ────────────────────────────────────────────────
 
     @Test
-    fun `no route to the backend is OFFLINE and waits for connectivity`() {
+    fun `no route to the backend is OFFLINE and offers Try again, since nothing re-runs it`() {
         assertEquals(KernelFailure.OFFLINE, unreachable(UnknownHostException("no dns")))
         assertEquals(KernelFailure.OFFLINE, unreachable(ConnectException("refused")))
-        assertEquals(KernelRetryAdvice.RETRY_WHEN_CONNECTED, KernelFailure.OFFLINE.advice)
+        assertEquals(KernelRetryAdvice.RETRY_NOW, KernelFailure.OFFLINE.advice)
     }
 
     @Test
@@ -88,7 +88,8 @@ class KernelFailureClassificationTest {
         ).forEach { (code, status) ->
             assertEquals("$code should be KERNEL_UNAVAILABLE", KernelFailure.KERNEL_UNAVAILABLE, failure(code, status))
         }
-        assertEquals(KernelRetryAdvice.RETRY_WHEN_CONNECTED, KernelFailure.KERNEL_UNAVAILABLE.advice)
+        // Nothing re-enqueues an assessment on its own, so "it will run by itself" was false.
+        assertEquals(KernelRetryAdvice.RETRY_NOW, KernelFailure.KERNEL_UNAVAILABLE.advice)
     }
 
     @Test
@@ -164,7 +165,9 @@ class KernelFailureClassificationTest {
         // vocabulary with ten names that all say "Retry" would pass the line above and still be
         // the bug.
         val advices = KernelFailure.entries.map { it.advice }.distinct()
-        assertEquals("all three advice classes must be in use", 3, advices.size)
+        // Two classes since the "runs on its own" one was removed: nothing re-runs an assessment
+        // on its own, so that advice was false. Both remaining ones must still be in use.
+        assertEquals("both advice classes must be in use", KernelRetryAdvice.entries.size, advices.size)
     }
 
     @Test

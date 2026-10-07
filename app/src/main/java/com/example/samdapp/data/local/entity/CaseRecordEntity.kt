@@ -33,8 +33,9 @@ data class CaseRecordEntity(
      *  [com.example.samdapp.domain.model.RETRY_EXHAUSTED_CODE]. */
     val syncAttemptCount: Int = 0,
     val lastSyncAttemptAt: Instant? = null,
-    /** Sync metadata: when this row's bytes last changed on this device. Deliberately
-     *  redundant with [updatedAt] (a clinical fact) so Phase 6 always reads one column
-     *  regardless of which entity it's syncing, see MIGRATION_12_13's KDoc. */
+    /** Sync metadata: when this row's bytes last changed on this device. Tracks [updatedAt] (a
+     *  clinical fact) so Phase 6 always reads one column regardless of which entity it's syncing,
+     *  see MIGRATION_12_13's KDoc. Stamped by `SyncStamp`, which never repeats a millisecond, so it
+     *  can sit a millisecond or two after [updatedAt]. */
     val localModifiedAt: Instant,
 )

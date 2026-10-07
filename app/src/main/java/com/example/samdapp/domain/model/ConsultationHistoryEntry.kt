@@ -20,4 +20,7 @@ data class ConsultationHistoryEntry(
     /** Assigned doctor + their department/specialty; both null until the case is sent to a doctor. */
     val doctorName: String?,
     val doctorSpecialty: String?,
+    /** Whether the server holds the case record (`isServerPresent`). Decides whether a case with
+     *  the doctor reads as such or as "Queued for doctor, not yet on the server". */
+    val caseOnServer: Boolean = false,
 )

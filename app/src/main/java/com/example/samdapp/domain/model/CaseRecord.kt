@@ -14,4 +14,7 @@ data class CaseRecord(
     val assignedDoctorId: String?,
     val createdAt: Instant,
     val updatedAt: Instant,
+    /** Whether the server holds this case record (`isServerPresent`). False for a case created
+     *  on this phone until the outbox has pushed it. */
+    val isOnServer: Boolean = false,
 )

@@ -1,5 +1,6 @@
 package com.example.samdapp.data.repository
 
+import com.example.samdapp.data.sync.SyncStamp
 import com.example.samdapp.data.local.dao.ReferralDao
 import com.example.samdapp.data.local.entity.ReferralEntity
 import com.example.samdapp.domain.model.ReferralRequest
@@ -32,7 +33,7 @@ private fun ReferralRequest.toEntity() = ReferralEntity(
     sendingPhcId = sendingPhcId,
     status = status,
     timestamp = timestamp,
-    localModifiedAt = timestamp,
+    localModifiedAt = SyncStamp.now(),
 )
 
 private fun ReferralEntity.toDomain() = ReferralRequest(

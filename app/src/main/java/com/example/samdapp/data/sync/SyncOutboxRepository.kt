@@ -11,7 +11,7 @@ import java.time.Instant
  * [SyncOutboxDrainer]. Deliberately a `data`-layer interface, not `domain/repository`: its shape
  * is the wire record ([SyncRecordDto]/[SyncResultDto]), not a domain model, and nothing above the
  * drainer needs to see it — [com.example.samdapp.data.sync.SyncStatusImpl] only reaches
- * [observeFailedCount] for the FAILED-count-observable requirement.
+ * [observeOutboxCounts] for Home's outbox counts.
  *
  * [collectPendingRecords] selects `syncState = PENDING` or `RETRYABLE` rows, per table, ordered
  * by `localModifiedAt`, and only those whose last attempt is older than
@@ -24,9 +24,10 @@ import java.time.Instant
  *   (`stale`/`duplicate` may not; [SyncState] is left untouched via `COALESCE` in that case, see
  *   each DAO's `applySyncResult`).
  * - `conflict` -> `CONFLICT`. Not re-packed by [collectPendingRecords] on the next run, so a
- *   conflicted row is never blindly resent with its stale `base_version` — it sits surfaced for
- *   review instead (api-contract.md §6.1: last-write-wins already ran server side, so a conflict
- *   here means a real `base_version` mismatch, not something worth silently retrying).
+ *   conflicted row is never blindly resent with its stale `base_version` (api-contract.md §6.1:
+ *   a conflict is a real `base_version` or timestamp mismatch, not something worth silently
+ *   retrying). [applyAck] never adopts the ack's `server_version` for it. It is surfaced:
+ *   [observeOutboxCounts] counts it as needing review and [failedRecords] lists it.
  * - `rejected` with `retry_class = TERMINAL` or `CONFLICT` -> `FAILED`, `syncErrorCode` and
  *   `syncErrorMessage` set from the ack. Excluded from the next [collectPendingRecords] call,
  *   which is what "stop retrying" means here.
@@ -61,9 +62,14 @@ interface SyncOutboxRepository {
      *  recorded and skipped, exactly as [applyAck] does, and for the same reason. */
     suspend fun requeueFailed(table: String, id: String)
 
-    fun observeFailedCount(): Flow<Int>
+    /** Pending, audit-pending and needs-review counts, from one grouped state count per table
+     *  (the same twenty observers the old FAILED-only counter used). See [OutboxCounts]. */
+    fun observeOutboxCounts(): Flow<OutboxCounts>
 
-    /** The rows behind [observeFailedCount], newest first, classified for the worker-facing
+    /** The same counts as [observeOutboxCounts], read once by one-shot suspend DAO queries. */
+    suspend fun readOutboxCounts(): OutboxCounts
+
+    /** The rows behind [OutboxCounts.needsReview], newest first, classified for the worker-facing
      *  review list (S-3). Suspend rather than a Flow: the count is already observed from app
      *  start and the list is not, so this runs only when a worker opens it. */
     suspend fun failedRecords(): List<FailedSyncRecord>

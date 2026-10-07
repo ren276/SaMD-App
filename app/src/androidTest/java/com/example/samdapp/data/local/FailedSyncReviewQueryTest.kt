@@ -12,6 +12,7 @@ import com.example.samdapp.domain.model.InferenceSource
 import com.example.samdapp.domain.model.RiskCategory
 import com.example.samdapp.domain.model.SyncState
 import com.example.samdapp.domain.model.UrgencyLevel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -182,6 +183,56 @@ class FailedSyncReviewQueryTest {
         assertTrue(
             "the recordId the list carries must be the one requeueFailed accepts",
             db.socialHistoryDao().getFailedForReview().isEmpty(),
+        )
+    }
+
+    @Test
+    fun conflictRows_areListedAndCounted_inAllFourShapes() = runBlocking {
+        // A CONFLICT row is never resent on its own, so it needs a person exactly as a FAILED row
+        // does. It must reach both the Home card's count and the list the card opens, in every
+        // structural shape of the twenty statements, or it is a silent dead end.
+        db.patientDao().insert(patient("pat-1", "Sunita Devi").copy(syncState = SyncState.CONFLICT))
+        db.caseRecordDao().insert(
+            CaseRecordEntity(
+                id = "case-1", patientId = "pat-1", encounterId = "enc-1", status = CaseStatus.DRAFT,
+                assignedDoctorId = null, createdAt = Instant.EPOCH, updatedAt = Instant.EPOCH,
+                localModifiedAt = Instant.EPOCH,
+            ),
+        )
+        db.kernelReportDao().upsert(kernelReport("kr-1", "case-1", SyncState.CONFLICT))
+        db.abhaProfileDao().upsert(
+            AbhaProfileEntity(
+                abhaId = "abha-1", abhaAddress = null, name = "Sunita Devi", dateOfBirth = null,
+                gender = "FEMALE", address = null, district = null, state = null, pincode = null,
+                mobileNumber = null, emailAddress = null, photoUrlMock = null, kycVerified = true,
+                createdAt = Instant.EPOCH, syncState = SyncState.CONFLICT, localModifiedAt = Instant.EPOCH,
+            ),
+        )
+        db.socialHistoryDao().upsert(
+            SocialHistoryEntity(
+                patientId = "pat-1", occupation = "Farmer", tobaccoUse = "NEVER", alcoholUse = "NEVER",
+                recreationalDrugUse = null, environmentalExposure = null, recentTravel = null,
+                updatedAt = Instant.EPOCH, syncState = SyncState.CONFLICT, localModifiedAt = Instant.EPOCH,
+            ),
+        )
+
+        val listed = db.patientDao().getFailedForReview() + db.kernelReportDao().getFailedForReview() +
+            db.abhaProfileDao().getFailedForReview() + db.socialHistoryDao().getFailedForReview()
+        val counted = (
+            db.patientDao().observeSyncStateCounts().first() +
+                db.kernelReportDao().observeSyncStateCounts().first() +
+                db.abhaProfileDao().observeSyncStateCounts().first() +
+                db.socialHistoryDao().observeSyncStateCounts().first()
+            ).filter { it.syncState == SyncState.FAILED || it.syncState == SyncState.CONFLICT }.sumOf { it.rowCount }
+
+        assertEquals(
+            listOf("patients", "kernel_reports", "abha_profiles", "social_histories"),
+            listed.map { it.tableName },
+        )
+        assertEquals("the card's count must match the list", 4, counted)
+        assertTrue(
+            "syncState must be projected, so the cause is classified on it",
+            listed.all { it.syncState == SyncState.CONFLICT },
         )
     }
 

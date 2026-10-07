@@ -34,7 +34,7 @@ interface KernelReportDao {
     suspend fun getServerVersion(id: String): Int?
 
     /** Phase 6b outbox — see PatientDao.getPendingForSync's KDoc. */
-    @Query("SELECT * FROM kernel_reports WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " "
+    @Query("SELECT * FROM kernel_reports WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " AND NOT " + SyncSql.HELD_KERNEL_REPORTS + " "
             + "ORDER BY localModifiedAt ASC")
     suspend fun getPendingForSync(retryEligibleBefore: Instant): List<KernelReportEntity>
 
@@ -66,19 +66,28 @@ interface KernelReportDao {
     )
     suspend fun requeueFailed(id: String)
 
-    @Query("SELECT COUNT(*) FROM kernel_reports WHERE syncState = 'FAILED'")
-    fun observeFailedSyncCount(): Flow<Int>
+    @Query("SELECT syncState AS syncState, " + SyncSql.HELD_KERNEL_REPORTS + " AS held, COUNT(*) AS rowCount FROM kernel_reports WHERE syncState != 'SYNCED' GROUP BY syncState, held")
+    fun observeSyncStateCounts(): Flow<List<SyncStateCount>>
 
-    /** The FAILED rows of this table, projected for the worker-facing review list (S-3).
-     *  Selects exactly the rows this table's FAILED counter counts, so the number on the Home
+    /** The same counts, read once (for a decision made right after a drain). */
+    @Query("SELECT syncState AS syncState, " + SyncSql.HELD_KERNEL_REPORTS + " AS held, COUNT(*) AS rowCount FROM kernel_reports WHERE syncState != 'SYNCED' GROUP BY syncState, held")
+    suspend fun getSyncStateCounts(): List<SyncStateCount>
+
+    /** The FAILED and CONFLICT rows of this table, projected for the worker-facing review list.
+     *  Selects exactly the FAILED and CONFLICT groups of observeSyncStateCounts, so the number on the Home
      *  card and the length of the list can never disagree. Suspend rather than a Flow:
      *  the list is fetched when a worker opens it, so it costs nothing at launch.
      *  See [FailedSyncRow]. */
     @Query(
-        "SELECT 'kernel_reports' AS tableName, kr.id AS recordId, cr.patientId AS patientId, " +
-        "kr.localModifiedAt AS recordedAt, kr.syncErrorCode AS syncErrorCode, kr.syncErrorMessage AS " +
-        "syncErrorMessage FROM kernel_reports kr LEFT JOIN case_records cr ON cr.id = kr.caseRecordId " +
-        "WHERE kr.syncState = 'FAILED'",
+        "SELECT 'kernel_reports' AS tableName, kernel_reports.syncState AS syncState, kernel_reports.id " +
+        "AS recordId, case_records.patientId AS patientId, kernel_reports.localModifiedAt AS recordedAt, " +
+        "kernel_reports.syncErrorCode AS syncErrorCode, kernel_reports.syncErrorMessage AS " +
+        "syncErrorMessage, kernel_reports.serverVersion AS serverVersion, case_records.encounterId AS " +
+        "encounterId, kernel_reports.caseRecordId AS caseRecordId, CAST(NULL AS TEXT) AS parentId FROM " +
+        "kernel_reports LEFT JOIN case_records ON case_records.id = kernel_reports.caseRecordId WHERE " +
+        "kernel_reports.syncState IN ('FAILED', 'CONFLICT') OR (kernel_reports.syncState IN " +
+        SyncSql.UNSENT_STATES + " AND " +
+        SyncSql.HELD_KERNEL_REPORTS + ")",
     )
     suspend fun getFailedForReview(): List<FailedSyncRow>
 }

@@ -9,7 +9,8 @@ data class SyncState(
     val isSyncing: Boolean = false,
     /** Records the outbox has stopped trying to send: the backend refused them on their merits
      *  (`rejected` with `retry_class` TERMINAL or CONFLICT), or S-2's attempt cap ran out, or
-     *  they were too large to send at all. S-3 renders this on Home as the count on a card that
+     *  they were too large to send at all, or the server acked `conflict` (record state CONFLICT,
+     *  never resent on its own). S-3 renders this on Home as the count on a card that
      *  opens [SyncStatus.failedRecords]; before S-3 it was queryable and nothing read it.
      *
      *  Deliberately does NOT include `RETRYABLE` rows. Those are rows the device is still
@@ -19,6 +20,16 @@ data class SyncState(
      *  needs a person arrives in this count on its own, the same working day, carrying
      *  [com.example.samdapp.domain.model.RETRY_EXHAUSTED_CODE]. */
     val failedCount: Int = 0,
+    /** Clinical rows the outbox still owes the server and is still working on (PENDING plus
+     *  RETRYABLE, nineteen tables). Not [pendingCount], which is the doctor-assignment queue. */
+    val outboxPending: Int = 0,
+    /** Clinical rows held behind a parent the server refused, shown with the review card and
+     *  never counted in [outboxPending]. */
+    val heldCount: Int = 0,
+    /** The same for `audit_log`, kept apart so an audit-only backlog is not shown as records. */
+    val auditPending: Int = 0,
+    /** Why the last drain failed, or null if it succeeded or none has failed since app start. */
+    val lastDrainFailure: DrainFailure? = null,
 )
 
 /**
@@ -31,6 +42,19 @@ data class SyncState(
 interface SyncStatus {
     val state: Flow<SyncState>
     suspend fun syncNow(): Result<Unit>
+
+    /** [syncNow] with the outbox drained in this process, under the drainer's own lock, instead of
+     *  through a WorkManager request. For a caller that is already a background worker and needs
+     *  the push to have finished, or failed, when this returns: it cannot be left waiting on a
+     *  second queue, and a WorkManager retry backoff reads as a failure to it. Sends every queued
+     *  case to the doctor queue exactly as [syncNow] does. */
+    suspend fun syncNowInProcess(): Result<Unit>
+
+    /** The same state as [state], read once and directly: the outbox counts from one-shot suspend
+     *  DAO reads, not from a Flow. For a decision made right after [syncNow] returns, such as the
+     *  "Sync now" message, which must reflect the drain's committed writes and not an emission
+     *  that has not caught up yet. */
+    suspend fun stateNow(): SyncState
 
     /** The rows behind [SyncState.failedCount], newest first, each already classified into the
      *  one cause and one action a worker is shown.

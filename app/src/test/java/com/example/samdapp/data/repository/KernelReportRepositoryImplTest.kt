@@ -12,6 +12,7 @@ import com.example.samdapp.domain.model.UrgencyLevel
 import java.time.Instant
 import java.util.UUID
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.runTest
@@ -79,8 +80,13 @@ class FakeKernelReportDao : KernelReportDao {
         }
     }
 
-    override fun observeFailedSyncCount(): Flow<Int> =
-        store.map { rows -> rows.count { it.syncState == SyncState.FAILED } }
+    override suspend fun getSyncStateCounts() = observeSyncStateCounts().first()
+    override fun observeSyncStateCounts(): Flow<List<com.example.samdapp.data.local.dao.SyncStateCount>> =
+        store.map { rows ->
+            rows.filter { it.syncState != com.example.samdapp.domain.model.SyncState.SYNCED }
+                .groupingBy { it.syncState }.eachCount()
+                .map { (state, n) -> com.example.samdapp.data.local.dao.SyncStateCount(state, held = false, rowCount = n) }
+        }
     override suspend fun getFailedForReview(): List<com.example.samdapp.data.local.dao.FailedSyncRow> = emptyList()
 
     /** Read-back helper, standing in for a direct-DB assertion (no in-memory Room on plain JVM
@@ -193,4 +199,23 @@ class KernelReportRepositoryImplTest {
 
         assertNull(dao.rowsForCase("case-new").single().serverVersion)
     }
+
+    @Test
+    fun twoSavesOfTheSameCaseInOneMillisecond_getStrictlyIncreasingStamps() = runTest {
+        // A re-assessment re-saves the same row (the id is resolved by case). Under a frozen wall
+        // clock the two writes used to carry one localModifiedAt; the ack guard cannot tell them
+        // apart, so an ack for the first could stamp SYNCED content the server never received.
+        com.example.samdapp.data.sync.SyncStamp.wallMillis = { 42_000L }
+        try {
+            repository.save(report(id = "attempt-1", inferenceSource = InferenceSource.UNAVAILABLE))
+            val first = dao.rowsForCase("case-1").single().localModifiedAt
+            repository.save(report(id = "attempt-2"))
+            val second = dao.rowsForCase("case-1").single().localModifiedAt
+
+            org.junit.Assert.assertTrue("$second must be after $first", second > first)
+        } finally {
+            com.example.samdapp.data.sync.SyncStamp.resetForTest()
+        }
+    }
+
 }

@@ -28,7 +28,7 @@ interface DiagnosisFeedbackDao {
      *  (`PhysicianDecision.REJECT`) is a normal row here that must sync successfully like any
      *  other — "sync-rejected" (the outbox's `FAILED` state below) is a transport concept and
      *  never means the clinical decision itself; do not conflate the two. */
-    @Query("SELECT * FROM diagnosis_feedback WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " "
+    @Query("SELECT * FROM diagnosis_feedback WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " AND NOT " + SyncSql.HELD_DIAGNOSIS_FEEDBACK + " "
             + "ORDER BY localModifiedAt ASC")
     suspend fun getPendingForSync(retryEligibleBefore: Instant): List<DiagnosisFeedbackEntity>
 
@@ -60,19 +60,30 @@ interface DiagnosisFeedbackDao {
     )
     suspend fun requeueFailed(id: String)
 
-    @Query("SELECT COUNT(*) FROM diagnosis_feedback WHERE syncState = 'FAILED'")
-    fun observeFailedSyncCount(): Flow<Int>
+    @Query("SELECT syncState AS syncState, " + SyncSql.HELD_DIAGNOSIS_FEEDBACK + " AS held, COUNT(*) AS rowCount FROM diagnosis_feedback WHERE syncState != 'SYNCED' GROUP BY syncState, held")
+    fun observeSyncStateCounts(): Flow<List<SyncStateCount>>
 
-    /** The FAILED rows of this table, projected for the worker-facing review list (S-3).
-     *  Selects exactly the rows this table's FAILED counter counts, so the number on the Home
+    /** The same counts, read once (for a decision made right after a drain). */
+    @Query("SELECT syncState AS syncState, " + SyncSql.HELD_DIAGNOSIS_FEEDBACK + " AS held, COUNT(*) AS rowCount FROM diagnosis_feedback WHERE syncState != 'SYNCED' GROUP BY syncState, held")
+    suspend fun getSyncStateCounts(): List<SyncStateCount>
+
+    /** The FAILED and CONFLICT rows of this table, projected for the worker-facing review list.
+     *  Selects exactly the FAILED and CONFLICT groups of observeSyncStateCounts, so the number on the Home
      *  card and the length of the list can never disagree. Suspend rather than a Flow:
      *  the list is fetched when a worker opens it, so it costs nothing at launch.
      *  See [FailedSyncRow]. */
     @Query(
-        "SELECT 'diagnosis_feedback' AS tableName, df.id AS recordId, cr.patientId AS patientId, " +
-        "df.localModifiedAt AS recordedAt, df.syncErrorCode AS syncErrorCode, df.syncErrorMessage AS " +
-        "syncErrorMessage FROM diagnosis_feedback df LEFT JOIN case_records cr ON cr.id = df.caseRecordId " +
-        "WHERE df.syncState = 'FAILED'",
+        "SELECT 'diagnosis_feedback' AS tableName, diagnosis_feedback.syncState AS syncState, " +
+        "diagnosis_feedback.id AS recordId, case_records.patientId AS patientId, " +
+        "diagnosis_feedback.localModifiedAt AS recordedAt, diagnosis_feedback.syncErrorCode AS " +
+        "syncErrorCode, diagnosis_feedback.syncErrorMessage AS syncErrorMessage, " +
+        "diagnosis_feedback.serverVersion AS serverVersion, case_records.encounterId AS encounterId, " +
+        "diagnosis_feedback.caseRecordId AS caseRecordId, CAST(NULL AS TEXT) AS parentId FROM " +
+        "diagnosis_feedback LEFT JOIN case_records ON case_records.id = diagnosis_feedback.caseRecordId " +
+        "WHERE diagnosis_feedback.syncState IN ('FAILED', 'CONFLICT') OR (diagnosis_feedback.syncState IN " +
+        "" +
+        SyncSql.UNSENT_STATES + " AND " +
+        SyncSql.HELD_DIAGNOSIS_FEEDBACK + ")",
     )
     suspend fun getFailedForReview(): List<FailedSyncRow>
 }

@@ -389,4 +389,45 @@ class GenerateKernelReportUseCaseTest {
         }
         assertEquals("five distinct causes must persist as five distinct codes", 5, persisted.distinct().size)
     }
+
+    @Test
+    fun `a 404 never becomes a mock result, even on a build with a fallback`() = runTest {
+        // A dev build binds a mock fallback. Consulted for every failure, it turned "the server has
+        // no case record" into a mock diagnosis labelled as an unavailable ML server. The fallback
+        // is for the classes where the real service was not reached, and only those.
+        val repo = FakeKernelReportRepository()
+        val useCase = GenerateKernelReportUseCase(
+            repo, FakeDeviceInfoProvider(),
+            FailingKernelSource(KernelApiResult.Failure(code = "SAMD-ENC-4002", httpStatus = 404, message = "Case record not found.")),
+            FakeKernelFallbackSource(result = testKernelReportOutput("case-1", InferenceSource.MOCK_FALLBACK)),
+            FakeAuditLogger(),
+        )
+
+        useCase(caseRecordId = "case-1", payload = payload())
+
+        val saved = repo.saved["case-1"]
+        assertEquals(InferenceSource.UNAVAILABLE, saved?.inferenceSource)
+        assertEquals(KernelFailure.CASE_NOT_ON_SERVER, saved?.failureCode)
+    }
+
+    @Test
+    fun `only the not-reached classes consult the fallback`() = runTest {
+        listOf(
+            KernelApiResult.Failure("SAMD-KERN-5006", 503, "x") to InferenceSource.MOCK_FALLBACK,
+            KernelApiResult.Unreachable(java.net.UnknownHostException("no dns")) to InferenceSource.MOCK_FALLBACK,
+            KernelApiResult.Unreachable(java.net.SocketTimeoutException("slow")) to InferenceSource.MOCK_FALLBACK,
+            KernelApiResult.Failure(null, 401, "x") to InferenceSource.UNAVAILABLE,
+            KernelApiResult.Failure("SAMD-KERN-5003", 422, "x") to InferenceSource.UNAVAILABLE,
+            KernelApiResult.ProtocolViolation("garbled") to InferenceSource.UNAVAILABLE,
+        ).forEach { (result, expected) ->
+            val repo = FakeKernelReportRepository()
+            GenerateKernelReportUseCase(
+                repo, FakeDeviceInfoProvider(), FailingKernelSource(result),
+                FakeKernelFallbackSource(result = testKernelReportOutput("case-1", InferenceSource.MOCK_FALLBACK)),
+                FakeAuditLogger(),
+            )(caseRecordId = "case-1", payload = payload())
+            assertEquals(result.toString(), expected, repo.saved["case-1"]?.inferenceSource)
+        }
+    }
+
 }

@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import com.example.samdapp.domain.auth.AuthSession
+import com.example.samdapp.domain.connectivity.NetworkMonitor
 import com.example.samdapp.domain.auth.CadreTier
 import com.example.samdapp.domain.auth.toCadreTier
 import kotlinx.coroutines.flow.combine
@@ -124,7 +125,7 @@ private const val UNAVAILABLE_SOURCE_LABEL = "Assessment unavailable: no AI resu
  *  predictedCondition/reasoningLines text with [GenerateKernelReportUseCase]'s own written
  *  UNAVAILABLE row (that class's `UNAVAILABLE_PREDICTED_CONDITION`/`UNAVAILABLE_REASONING_SUMMARY`
  *  constants), not a second copy of the same wording. */
-private fun stalledDisplay(): AssessmentDisplay = AssessmentDisplay(
+internal fun stalledDisplay(): AssessmentDisplay = AssessmentDisplay(
     predictedCondition = GenerateKernelReportUseCase.UNAVAILABLE_PREDICTED_CONDITION,
     icdCode = null,
     confidencePercent = 0,
@@ -140,7 +141,7 @@ private fun stalledDisplay(): AssessmentDisplay = AssessmentDisplay(
     evidenceAgainst = emptyList(),
 )
 
-private fun KernelReportOutput.toDisplay(): AssessmentDisplay = AssessmentDisplay(
+internal fun KernelReportOutput.toDisplay(): AssessmentDisplay = AssessmentDisplay(
     predictedCondition = predictedCondition,
     icdCode = icdCode,
     confidencePercent = (confidenceScore * 100).toInt(),
@@ -154,7 +155,10 @@ private fun KernelReportOutput.toDisplay(): AssessmentDisplay = AssessmentDispla
         KernelTriageRules.isCriticalVitalsFlag(predictedCondition),
     sourceLabel = when (inferenceSource) {
         InferenceSource.REAL_INFERENCE -> "Real-time AI inference (/v1/assess)"
-        InferenceSource.MOCK_FALLBACK -> "Offline fallback (mock) — ML server unavailable"
+        // Rendered from strings.xml (AssessmentCopy, `assessment_source_mock`); this string is what the
+        // acknowledgement audit entry records, so it carries the same words, and must not claim an
+        // outage the device did not observe. A ViewModel has no Context to read the resource from.
+        InferenceSource.MOCK_FALLBACK -> "Mock result, dev build only: the real assessment service was not reached"
         // Reach-neutral: UNAVAILABLE covers both an unreachable kernel and one that answered
         // with an empty differential. Naming a cause here would be wrong half the time.
         InferenceSource.UNAVAILABLE -> UNAVAILABLE_SOURCE_LABEL
@@ -170,6 +174,13 @@ data class KernelAssessmentUiState(
     val display: AssessmentDisplay? = null,
     val liabilityAcknowledged: Boolean = false,
     val isRetrying: Boolean = false,
+    /** No report yet, the job is queued, and the phone has no network. The job waits on the OS
+     *  network (NetworkType.CONNECTED), so this is shown as "Waiting for a connection" instead of
+     *  a spinner with nothing said. The job then runs on its own, which is true. */
+    val waitingForNetwork: Boolean = false,
+    /** No report yet, the phone has a network, and the assessment has already been tried again
+     *  because this visit had not reached the server. Shown as "Sending this visit first". */
+    val sendingFirst: Boolean = false,
     /** Resolved once from this consultation's AUDIO attachment row, not carried in the route.
      *  A uri that survived three screens is not evidence the attachment was persisted; the row
      *  is. Null means no audio leg, which sends the case straight to Acknowledgement. */
@@ -211,6 +222,9 @@ class KernelAssessmentViewModel @AssistedInject constructor(
     private val assessmentQueueScheduler: AssessmentQueueScheduler,
     private val auditLogger: AuditLogger,
     private val authSession: AuthSession,
+    /** The OS network, not the manual offline toggle: it is what WorkManager waits on before the
+     *  queued job runs (honouring the toggle is filed separately, operator ruling H2). */
+    private val networkMonitor: NetworkMonitor,
 ) : ViewModel(), KernelAssessmentActions {
 
     @AssistedFactory
@@ -268,9 +282,8 @@ class KernelAssessmentViewModel @AssistedInject constructor(
                 evaluateReportRepository.observeForCase(caseRecordId),
                 kernelReportRepository.observeForCase(caseRecordId),
                 assessmentQueueScheduler.observeWorkState(caseRecordId),
-            ) { evaluateOutput, kernelOutput, workState ->
-                Triple(evaluateOutput, kernelOutput, workState)
-            }.collect { (evaluateOutput, kernelOutput, workState) ->
+                networkMonitor.isNetworkAvailable,
+            ) { evaluateOutput, kernelOutput, workState, networkAvailable ->
                 val reportDisplay = evaluateOutput?.toDisplay() ?: kernelOutput?.toDisplay()
                 _uiState.update {
                     when {
@@ -278,12 +291,20 @@ class KernelAssessmentViewModel @AssistedInject constructor(
                             isLoading = false,
                             display = reportDisplay,
                             isRetrying = workState != AssessmentWorkState.NONE,
+                            waitingForNetwork = false,
+                            sendingFirst = false,
                         )
-                        workState != AssessmentWorkState.NONE -> it.copy(isLoading = true, display = null)
-                        else -> it.copy(isLoading = false, display = stalledDisplay(), isRetrying = false)
+                        workState != AssessmentWorkState.NONE -> it.copy(
+                            isLoading = true,
+                            display = null,
+                            waitingForNetwork = !networkAvailable &&
+                                (workState == AssessmentWorkState.QUEUED || workState == AssessmentWorkState.RETRYING),
+                            sendingFirst = workState == AssessmentWorkState.RETRYING && networkAvailable,
+                        )
+                        else -> it.copy(isLoading = false, display = stalledDisplay(), isRetrying = false, waitingForNetwork = false, sendingFirst = false)
                     }
                 }
-            }
+            }.collect {}
         }
     }
 

@@ -273,7 +273,7 @@ You are now on the **AI Assessment Screen**! Here is what you will see:
 Once you tap Continue from the AI Assessment Screen:
 1. **Acknowledgement Screen (`AcknowledgementScreen`):**
    - Confirms the record is safely saved to the encrypted local database.
-   - Shows an expectation message: *"Case record queued for physician review within 24 hours"*.
+   - Says where the visit is: *"This visit is on the server."* or *"This visit is saved on this phone. It is not on the server yet. The home screen shows what is still waiting to send."* It makes no promise about when a doctor will review it. (PROPOSED wording, pending operator sign-off.)
 2. **View AIIMS Outpatient Card (`ReportScreen`):**
    - Tap **"View Clinical Report"** to view the bilingual A5 outpatient card modeled on AIIMS guidelines.
    - Inspect the Code-128 barcode, demographics, vitals summary, and clinical findings.

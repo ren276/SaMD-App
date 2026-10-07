@@ -1,5 +1,6 @@
 package com.example.samdapp.data.repository
 
+import com.example.samdapp.data.sync.SyncStamp
 import com.example.samdapp.data.local.dao.AttachmentDao
 import com.example.samdapp.data.local.dao.ConsultationDao
 import com.example.samdapp.data.local.entity.AttachmentEntity
@@ -14,7 +15,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
-import java.time.Instant
 import javax.inject.Inject
 
 class ConsultationRepositoryImpl @Inject constructor(
@@ -63,7 +63,7 @@ class ConsultationRepositoryImpl @Inject constructor(
      *  carry `VOICE_UNCONFIRMED`. See [saveConsultation]'s KDoc for the refusal that does apply. */
     override suspend fun updateTranscription(consultationId: String, transcription: String): Result<Unit> =
         asDataResult {
-            consultationDao.updateTranscription(consultationId, transcription, Instant.now())
+            consultationDao.updateTranscription(consultationId, transcription, SyncStamp.now())
         }
 
     override suspend fun getById(consultationId: String): Consultation? {
@@ -100,7 +100,7 @@ private fun Consultation.toEntity() = ConsultationEntity(
     transcription = transcription,
     createdAt = createdAt,
     updatedAt = updatedAt,
-    localModifiedAt = updatedAt,
+    localModifiedAt = SyncStamp.now(),
 )
 
 private fun ConsultationEntity.toDomain(attachments: List<Attachment>) = Consultation(
@@ -128,7 +128,7 @@ private fun Attachment.toEntity() = AttachmentEntity(
     type = type,
     uri = uri,
     createdAt = createdAt,
-    localModifiedAt = createdAt,
+    localModifiedAt = SyncStamp.now(),
 )
 
 private fun AttachmentEntity.toDomain() = Attachment(

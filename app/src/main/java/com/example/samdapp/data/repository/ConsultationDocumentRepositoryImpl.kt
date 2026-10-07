@@ -1,5 +1,6 @@
 package com.example.samdapp.data.repository
 
+import com.example.samdapp.data.sync.SyncStamp
 import android.content.Context
 import android.net.Uri
 import com.example.samdapp.data.local.dao.ConsultationDocumentDao
@@ -290,7 +291,7 @@ class ConsultationDocumentRepositoryImpl @Inject constructor(
         uploadedAt: Instant,
     ): ConsultationDocument {
         try {
-            consultationDocumentDao.insert(document.toEntity(localModifiedAt = uploadedAt))
+            consultationDocumentDao.insert(document.toEntity(localModifiedAt = SyncStamp.now()))
         } catch (e: Exception) {
             destFile.delete()
             throw e
@@ -327,7 +328,7 @@ class ConsultationDocumentRepositoryImpl @Inject constructor(
             // delete failure leaves a correctly-retracted row pointing at bytes nothing will
             // serve again (readDecrypted/observeForConsultation both already exclude retracted
             // rows), rather than an active row with no content.
-            consultationDocumentDao.retract(documentId, Instant.now(), reason, Instant.now())
+            consultationDocumentDao.retract(documentId, Instant.now(), reason, SyncStamp.now())
             val file = File(documentsDir(entity.consultationId), entity.storageKey)
             file.delete()
         }

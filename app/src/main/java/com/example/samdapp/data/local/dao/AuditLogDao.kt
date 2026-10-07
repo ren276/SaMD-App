@@ -54,18 +54,25 @@ interface AuditLogDao {
     )
     suspend fun requeueFailed(id: String)
 
-    @Query("SELECT COUNT(*) FROM audit_log WHERE syncState = 'FAILED'")
-    fun observeFailedSyncCount(): Flow<Int>
+    @Query("SELECT syncState AS syncState, 0 AS held, COUNT(*) AS rowCount FROM audit_log WHERE syncState != 'SYNCED' GROUP BY syncState, held")
+    fun observeSyncStateCounts(): Flow<List<SyncStateCount>>
 
-    /** The FAILED rows of this table, projected for the worker-facing review list (S-3).
-     *  Selects exactly the rows this table's FAILED counter counts, so the number on the Home
+    /** The same counts, read once (for a decision made right after a drain). */
+    @Query("SELECT syncState AS syncState, 0 AS held, COUNT(*) AS rowCount FROM audit_log WHERE syncState != 'SYNCED' GROUP BY syncState, held")
+    suspend fun getSyncStateCounts(): List<SyncStateCount>
+
+    /** The FAILED and CONFLICT rows of this table, projected for the worker-facing review list.
+     *  Selects exactly the FAILED and CONFLICT groups of observeSyncStateCounts, so the number on the Home
      *  card and the length of the list can never disagree. Suspend rather than a Flow:
      *  the list is fetched when a worker opens it, so it costs nothing at launch.
      *  See [FailedSyncRow]. */
     @Query(
-        "SELECT 'audit_log' AS tableName, id AS recordId, patientId AS patientId, localModifiedAt AS " +
-        "recordedAt, syncErrorCode AS syncErrorCode, syncErrorMessage AS syncErrorMessage FROM audit_log " +
-        "WHERE syncState = 'FAILED'",
+        "SELECT 'audit_log' AS tableName, audit_log.syncState AS syncState, audit_log.id AS recordId, " +
+        "audit_log.patientId AS patientId, audit_log.localModifiedAt AS recordedAt, " +
+        "audit_log.syncErrorCode AS syncErrorCode, audit_log.syncErrorMessage AS syncErrorMessage, " +
+        "audit_log.serverVersion AS serverVersion, CAST(NULL AS TEXT) AS encounterId, CAST(NULL AS TEXT) " +
+        "AS caseRecordId, CAST(NULL AS TEXT) AS parentId FROM audit_log WHERE audit_log.syncState IN " +
+        "('FAILED', 'CONFLICT')",
     )
     suspend fun getFailedForReview(): List<FailedSyncRow>
 

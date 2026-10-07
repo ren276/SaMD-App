@@ -1,5 +1,7 @@
 package com.example.samdapp.presentation.patientsummary
 
+import com.example.samdapp.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -48,7 +50,8 @@ import com.example.samdapp.domain.model.TRAINED_ICD_CANDIDATES
 import com.example.samdapp.presentation.common.DropdownField
 import com.example.samdapp.presentation.common.LowResourceWarningDialog
 import com.example.samdapp.presentation.common.deviceResourceWarnings
-import com.example.samdapp.presentation.common.historyLabel
+import com.example.samdapp.presentation.common.doctorReviewHeaderRes
+import com.example.samdapp.presentation.common.historyLabelRes
 import java.time.LocalDate
 import java.time.Period
 import java.time.ZoneId
@@ -178,16 +181,16 @@ fun PatientSummaryScreen(
                 }
             }
 
-            // Doctor assigned but no network at the time — queued locally, sent automatically the
-            // next time the worker taps Sync Up on Home while online (offline-first send path).
+            // Doctor assigned but no network at the time: queued on this phone until Sync now runs
+            // online (offline-first send path).
             if (uiState.caseStatus == CaseStatus.PENDING_SYNC) {
                 Column(modifier = Modifier.padding(top = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        text = "Case queued — will send when back online",
+                        text = stringResource(R.string.patient_summary_queued_title),
                         style = MaterialTheme.typography.titleSmall,
                     )
                     Text(
-                        text = "Tap Sync Up on Home once you have network.",
+                        text = stringResource(R.string.patient_summary_queued_body),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 4.dp),
@@ -201,11 +204,7 @@ fun PatientSummaryScreen(
             if (uiState.caseStatus == CaseStatus.SENT_TO_DOCTOR || uiState.caseStatus == CaseStatus.PRESCRIPTION_RECEIVED) {
                 Column(modifier = Modifier.fillMaxWidth().padding(top = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        text = if (uiState.caseStatus == CaseStatus.PRESCRIPTION_RECEIVED) {
-                            "Doctor's review received"
-                        } else {
-                            "Awaiting doctor's review"
-                        },
+                        text = stringResource(doctorReviewHeaderRes(uiState.caseStatus ?: CaseStatus.SENT_TO_DOCTOR, uiState.caseOnServer)),
                         style = MaterialTheme.typography.titleSmall,
                     )
                     if (uiState.caseStatus == CaseStatus.SENT_TO_DOCTOR) {
@@ -349,7 +348,7 @@ private fun DoctorReviewCard(uiState: PatientSummaryUiState, actions: PatientSum
                     OutlinedTextField(
                         value = uiState.clinicalNoteText,
                         onValueChange = actions::onClinicalNoteChange,
-                        label = { Text("Clinical note (audit only, not used for retraining)") },
+                        label = { Text(stringResource(R.string.physician_clinical_note_label)) },
                         modifier = Modifier.fillMaxWidth(),
                     )
                     ManualPrescriptionFields(uiState, actions)
@@ -369,7 +368,7 @@ private fun DoctorReviewCard(uiState: PatientSummaryUiState, actions: PatientSum
             }
             uiState.selectedDecision?.let { decision ->
                 Text(
-                    decision.outcomeExplanation(),
+                    stringResource(decision.outcomeExplanationRes()),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -477,7 +476,7 @@ private fun ConsultationChainRow(
             }
             DoctorInLoopLine(latest.doctorName, latest.doctorSpecialty)
             Text(
-                text = latest.caseStatus?.historyLabel() ?: "No case record",
+                text = stringResource(latest.caseStatus?.historyLabelRes(latest.caseOnServer) ?: R.string.case_history_no_case_record),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

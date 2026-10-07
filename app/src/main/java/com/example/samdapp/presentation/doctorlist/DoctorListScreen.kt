@@ -2,6 +2,8 @@
 
 package com.example.samdapp.presentation.doctorlist
 
+import com.example.samdapp.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -26,7 +28,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.samdapp.domain.model.CaseStatus
 import com.example.samdapp.domain.model.DoctorTrackerEntry
-import com.example.samdapp.presentation.common.doctorTrackerLabel
+import com.example.samdapp.presentation.common.doctorTrackerLabelRes
 
 /**
  * Minimal read-only status tracker (Part B) — patient name/ID, one-line chief complaint, status.
@@ -36,12 +38,12 @@ import com.example.samdapp.presentation.common.doctorTrackerLabel
 @Composable
 fun DoctorListScreen(onOpenReport: (caseRecordId: String) -> Unit, viewModel: DoctorListViewModel = hiltViewModel()) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    Scaffold(topBar = { TopAppBar(title = { Text("Sent to doctor") }) }) { padding: PaddingValues ->
+    Scaffold(topBar = { TopAppBar(title = { Text(stringResource(R.string.cases_for_the_doctor)) }) }) { padding: PaddingValues ->
         Column(modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp, vertical = 8.dp)) {
             when {
                 uiState.isLoading -> SamdLoadingIndicator(modifier = Modifier.padding(24.dp))
                 uiState.entries.isEmpty() -> Text(
-                    text = "No cases sent to a doctor yet.",
+                    text = stringResource(R.string.cases_for_the_doctor_empty),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(24.dp),
@@ -84,7 +86,7 @@ private fun DoctorTrackerRow(entry: DoctorTrackerEntry, onOpenReport: (caseRecor
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
-                    text = entry.status.doctorTrackerLabel(),
+                    text = stringResource(entry.status.doctorTrackerLabelRes(entry.caseOnServer)),
                     style = MaterialTheme.typography.labelLarge,
                     color = if (isReviewed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 )

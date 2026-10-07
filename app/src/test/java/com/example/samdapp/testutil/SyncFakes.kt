@@ -42,7 +42,8 @@ class FakeSyncOutboxRepository(
     initial: List<SyncRecordDto> = emptyList(),
 ) : SyncOutboxRepository {
     private val pending = initial.toMutableList()
-    private val failedCount = MutableStateFlow(0)
+    /** Settable by a test; [needsReview] also tracks [failedIds] as acks and requeues move rows. */
+    val outboxCounts = MutableStateFlow(com.example.samdapp.data.sync.OutboxCounts())
     val syncedIds = mutableListOf<Pair<String, String>>()
     val conflictedIds = mutableListOf<Pair<String, String>>()
     val failedIds = mutableListOf<Pair<String, String>>()
@@ -89,7 +90,7 @@ class FakeSyncOutboxRepository(
         if (exhausted) {
             failedIds += key
             failedCodes[key] = com.example.samdapp.domain.model.RETRY_EXHAUSTED_CODE
-            failedCount.value = failedIds.size
+            outboxCounts.value = outboxCounts.value.copy(needsReview = failedIds.size)
             return
         }
         when (localState) {
@@ -99,7 +100,7 @@ class FakeSyncOutboxRepository(
                 failedIds += key
                 failedCodes[key] = result.code
                 failedMessages[key] = result.message
-                failedCount.value = failedIds.size
+                outboxCounts.value = outboxCounts.value.copy(needsReview = failedIds.size)
             }
             com.example.samdapp.domain.model.SyncState.RETRYABLE -> retryableIds += key
             com.example.samdapp.domain.model.SyncState.PENDING -> Unit
@@ -110,10 +111,15 @@ class FakeSyncOutboxRepository(
         requeuedIds += table to id
         attemptCounts[table to id] = 0
         failedIds.removeAll { it == (table to id) }
-        failedCount.value = failedIds.size
+        outboxCounts.value = outboxCounts.value.copy(needsReview = failedIds.size)
     }
 
-    override fun observeFailedCount() = failedCount.asStateFlow()
+    override fun observeOutboxCounts() = outboxCounts.asStateFlow()
+
+    /** What a one-shot read returns; defaults to the Flow's current value. A test sets it apart
+     *  from [outboxCounts] to model a Flow that has not caught up with the database. */
+    var directOutboxCounts: com.example.samdapp.data.sync.OutboxCounts? = null
+    override suspend fun readOutboxCounts() = directOutboxCounts ?: outboxCounts.value
 
     /** Mirrors the real repository closely enough for a ViewModel test: FAILED rows only, never
      *  a RETRYABLE one, classified by the same
@@ -126,7 +132,7 @@ class FakeSyncOutboxRepository(
                 patientName = patientNames[table to id],
                 recordedAt = java.time.Instant.EPOCH,
                 reason = com.example.samdapp.domain.model.syncFailureReasonFor(
-                    failedCodes[table to id],
+                    com.example.samdapp.domain.model.SyncState.FAILED, failedCodes[table to id],
                     failedMessages[table to id],
                 ),
             )
@@ -163,8 +169,13 @@ class FakeSyncPushService(
      *  advance (it's minted fresh by [SyncBatchPacker] inside the drain call). */
     var crashOnNextPush: Boolean = false
 
+    /** When true every call comes back as the failure an unreachable server produces (no problem
+     *  code), after recording the call. */
+    var unreachable: Boolean = false
+
     override suspend fun push(request: SyncPushRequestDto): SyncPushResult<SyncPushResponseDto> {
         calls += request
+        if (unreachable) return SyncPushResult.Failure(code = null, message = "unreachable")
         storedResponses[request.batchId]?.let { return SyncPushResult.Success(it) }
 
         val response = buildResponse(request)

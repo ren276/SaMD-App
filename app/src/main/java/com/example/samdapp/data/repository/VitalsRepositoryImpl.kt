@@ -1,5 +1,6 @@
 package com.example.samdapp.data.repository
 
+import com.example.samdapp.data.sync.SyncStamp
 import com.example.samdapp.data.local.dao.ObservationDao
 import com.example.samdapp.data.local.entity.ObservationEntity
 import com.example.samdapp.domain.model.ObservationType
@@ -74,7 +75,7 @@ private fun VitalsSnapshot.toObservationEntities(): List<ObservationEntity> {
             captureMethod = captureMethod,
             recordedAt = recordedAt,
             createdAt = now,
-            localModifiedAt = now,
+            localModifiedAt = SyncStamp.now(),
         )
     }
     val urinalysisRow = urinalysisResult?.let {
@@ -91,7 +92,7 @@ private fun VitalsSnapshot.toObservationEntities(): List<ObservationEntity> {
             captureMethod = captureMethod,
             recordedAt = recordedAt,
             createdAt = now,
-            localModifiedAt = now,
+            localModifiedAt = SyncStamp.now(),
         )
     }
     return numericRows + listOfNotNull(urinalysisRow)

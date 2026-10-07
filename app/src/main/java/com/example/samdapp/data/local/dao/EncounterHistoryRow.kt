@@ -1,6 +1,7 @@
 package com.example.samdapp.data.local.dao
 
 import com.example.samdapp.domain.model.CaseStatus
+import com.example.samdapp.domain.model.SyncState
 import java.time.Instant
 
 /** Projection for [EncounterDao.observeHistoryForPatient] — one encounter joined with its
@@ -16,4 +17,8 @@ data class EncounterHistoryRow(
      *  which dept is in the loop" line on history rows. */
     val doctorName: String?,
     val doctorSpecialty: String?,
+    /** The case record's outbox facts, for `isServerPresent`; null with no case record (LEFT
+     *  JOIN). Nullable, so a misspelt alias only warns: pinned by CaseServerPresenceQueryTest. */
+    val caseSyncState: SyncState?,
+    val caseServerVersion: Int?,
 )

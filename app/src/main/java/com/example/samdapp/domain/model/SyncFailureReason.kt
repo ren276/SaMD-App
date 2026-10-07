@@ -4,7 +4,7 @@ package com.example.samdapp.domain.model
  * What a worker is told about a `FAILED` outbox row, and what they can do about it.
  *
  * S-2 persisted the two facts this needs, `syncErrorCode` and `syncErrorMessage`, and nothing
- * read them. This is the read side: it turns the pair into one of five worker-facing causes, each
+ * read them. This is the read side: it turns the pair into one of six worker-facing causes, each
  * with exactly one action. It is pure Kotlin so it is unit-testable without a device, following
  * [com.example.samdapp.domain.kernel.KernelFailure]'s shape, and for the same reason: the copy
  * for each value lives in `strings.xml` next to the `kernel_failure_*` strings, written to the
@@ -51,6 +51,13 @@ enum class SyncFailureReason {
      *  deliberately not a blank row: the fallback copy says plainly that the app does not know
      *  why, and offers the one safe action. */
     UNRECOGNISED,
+
+    /** Record state CONFLICT: the server acked `conflict` because the row was changed somewhere
+     *  else after this phone last sent it, so it kept its own version. Never resent on its own
+     *  (it would carry a stale `base_version` and conflict again), and resolving it needs a pull
+     *  path this app does not have yet. Classified on the record state, never on the code: a
+     *  conflict ack carries none. */
+    CONFLICT_ON_SERVER,
     ;
 
     /** The single action offered for this cause. Two values, not three, because the app has no
@@ -60,7 +67,7 @@ enum class SyncFailureReason {
     val action: SyncFailureAction
         get() = when (this) {
             RETRIES_EXHAUSTED, UNRECOGNISED -> SyncFailureAction.SEND_AGAIN
-            DUPLICATE_RECORD, RECORD_REJECTED, RECORD_TOO_LARGE -> SyncFailureAction.TELL_SUPERVISOR
+            DUPLICATE_RECORD, RECORD_REJECTED, RECORD_TOO_LARGE, CONFLICT_ON_SERVER -> SyncFailureAction.TELL_SUPERVISOR
         }
 }
 
@@ -116,7 +123,7 @@ const val RECORD_TOO_LARGE_CODE = "SAMD-SYNC-RECORD-TOO-LARGE"
  * then the backend's one rejection code disambiguated by message, then the fallback. A `when`
  * rather than a map because the 6003 branch needs the message and the others must ignore it.
  */
-fun syncFailureReasonFor(code: String?, message: String?): SyncFailureReason = when (code) {
+private fun reasonFromCode(code: String?, message: String?): SyncFailureReason = when (code) {
     RETRY_EXHAUSTED_CODE -> SyncFailureReason.RETRIES_EXHAUSTED
     RECORD_TOO_LARGE_CODE -> SyncFailureReason.RECORD_TOO_LARGE
     SYNC_FORBIDDEN_FIELD_CODE -> SyncFailureReason.RECORD_REJECTED
@@ -133,3 +140,13 @@ fun syncFailureReasonFor(code: String?, message: String?): SyncFailureReason = w
     // or a rejection the backend sent with no code at all.
     else -> SyncFailureReason.UNRECOGNISED
 }
+
+/**
+ * The record state first, then the `(code, message)` pair. A CONFLICT row is
+ * [SyncFailureReason.CONFLICT_ON_SERVER] whatever code it carries: a conflict ack has no code, and
+ * a CONFLICT row written before conflicts were surfaced has a null one, which the pair alone would
+ * read as [SyncFailureReason.UNRECOGNISED] and offer a "Send again" the FAILED-only requeue guard
+ * silently ignores.
+ */
+fun syncFailureReasonFor(syncState: SyncState, code: String?, message: String?): SyncFailureReason =
+    if (syncState == SyncState.CONFLICT) SyncFailureReason.CONFLICT_ON_SERVER else reasonFromCode(code, message)

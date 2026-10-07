@@ -13,4 +13,7 @@ data class DoctorTrackerEntry(
     /** The doctor the case is with, and their department/specialty. */
     val doctorName: String?,
     val doctorSpecialty: String?,
+    /** Whether the server holds the case record (`isServerPresent`). Decides whether a case with
+     *  the doctor reads as such or as "Queued for doctor, not yet on the server". */
+    val caseOnServer: Boolean = false,
 )

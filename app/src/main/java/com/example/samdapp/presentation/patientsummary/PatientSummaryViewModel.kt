@@ -37,18 +37,13 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-/** Investor-demo-facing explanation of what each decision means for the training pipeline — see
- *  `refine_diagnosis.py`'s `DiagnosisFeedback` schema docstring / [com.example.samdapp.domain.model.DiagnosisFeedback] KDoc. */
-fun PhysicianDecision.outcomeExplanation(): String = when (this) {
-    PhysicianDecision.AGREE ->
-        "Confirmed correct. This case will be added to the training dataset as a confirmed " +
-            "example — helps refine the model."
-    PhysicianDecision.MODIFY ->
-        "Corrected treatment captured. This becomes a NEW training example using the physician's " +
-            "own prescription, not the AI's original candidate."
-    PhysicianDecision.REJECT ->
-        "Discarded. This case will NOT be used for retraining — there is no reliable ground truth " +
-            "to trust once the AI's candidate is rejected outright."
+/** What each decision does, stated as what the phone does: the decision is saved with the case. It
+ *  says nothing about a training dataset, because no consented training pipeline exists. */
+@androidx.annotation.StringRes
+fun PhysicianDecision.outcomeExplanationRes(): Int = when (this) {
+    PhysicianDecision.AGREE -> com.example.samdapp.R.string.physician_outcome_agree
+    PhysicianDecision.MODIFY -> com.example.samdapp.R.string.physician_outcome_modify
+    PhysicianDecision.REJECT -> com.example.samdapp.R.string.physician_outcome_reject
 }
 
 /**
@@ -62,6 +57,9 @@ data class PatientSummaryUiState(
     val caseRecordId: String? = null,
     val encounterId: String? = null,
     val caseStatus: CaseStatus? = null,
+    /** Whether the server holds the case record; a SENT_TO_DOCTOR case not on the server reads
+     *  "Queued for doctor, not yet on the server". */
+    val caseOnServer: Boolean = false,
     /** H-17 prescription visibility gate (Build 1): the signed-in worker's role, read so
      *  [canOpenDoctorReview] can require [UserRole.DOCTOR]. Self-asserted at login (H-06) — this
      *  is an accountability/intent gate on the decision surface, not access control. */
@@ -180,6 +178,7 @@ class PatientSummaryViewModel @AssistedInject constructor(
                             caseRecordId = caseRecord?.id,
                             encounterId = caseRecord?.encounterId,
                             caseStatus = caseRecord?.status,
+                            caseOnServer = caseRecord?.isOnServer ?: false,
                         )
                     }
                 }

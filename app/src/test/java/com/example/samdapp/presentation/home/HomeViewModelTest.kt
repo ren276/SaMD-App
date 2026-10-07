@@ -12,6 +12,7 @@ import com.example.samdapp.testutil.FakeSyncStatus
 import com.example.samdapp.testutil.MainDispatcherRule
 import com.example.samdapp.testutil.testPatient
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -98,5 +99,68 @@ class HomeViewModelTest {
         advanceUntilIdle()
 
         assertNull(viewModel.uiState.value.resumableEncounter)
+    }
+    @Test
+    fun `sync now reports its result instead of discarding it`() = runTest {
+        val sync = FakeSyncStatus().apply {
+            nextSyncResult = Result.failure(IllegalStateException("drain failed"))
+            stateAfterSync = com.example.samdapp.domain.sync.SyncState(
+                outboxPending = 2,
+                lastDrainFailure = com.example.samdapp.domain.sync.DrainFailure.SERVER_REFUSED,
+            )
+        }
+        val viewModel = HomeViewModel(
+            GetTodaysPatientsUseCase(FakePatientRepository()), sync, FakeAuthSession(), FakeCaseRecordRepository(), FakePatientRepository(),
+        )
+        val effects = mutableListOf<HomeEffect>()
+        val job = launch { viewModel.effects.collect { effects += it } }
+
+        viewModel.onSyncNow()
+        advanceUntilIdle()
+
+        assertEquals(
+            listOf(HomeEffect.ShowSyncNowResult(SyncNowMessage.Failed(com.example.samdapp.domain.sync.DrainFailure.SERVER_REFUSED))),
+            effects,
+        )
+        job.cancel()
+    }
+
+    @Test
+    fun `a successful sync now with records needing review says so`() = runTest {
+        val sync = FakeSyncStatus().apply {
+            stateAfterSync = com.example.samdapp.domain.sync.SyncState(failedCount = 3)
+        }
+        val viewModel = HomeViewModel(
+            GetTodaysPatientsUseCase(FakePatientRepository()), sync, FakeAuthSession(), FakeCaseRecordRepository(), FakePatientRepository(),
+        )
+        val effects = mutableListOf<HomeEffect>()
+        val job = launch { viewModel.effects.collect { effects += it } }
+
+        viewModel.onSyncNow()
+        advanceUntilIdle()
+
+        assertEquals(listOf(HomeEffect.ShowSyncNowResult(SyncNowMessage.SentNeedsReview(3))), effects)
+        job.cancel()
+    }
+
+    @Test
+    fun `the sync now message reads the counts directly, not a lagging Flow`() = runTest {
+        // The Flow-backed state has not caught up (no record needing review), while the database,
+        // read directly, already holds one. "Everything is sent" would be false.
+        val sync = FakeSyncStatus().apply {
+            stateAfterSync = com.example.samdapp.domain.sync.SyncState(failedCount = 0)
+            directState = com.example.samdapp.domain.sync.SyncState(failedCount = 1)
+        }
+        val viewModel = HomeViewModel(
+            GetTodaysPatientsUseCase(FakePatientRepository()), sync, FakeAuthSession(), FakeCaseRecordRepository(), FakePatientRepository(),
+        )
+        val effects = mutableListOf<HomeEffect>()
+        val job = launch { viewModel.effects.collect { effects += it } }
+
+        viewModel.onSyncNow()
+        advanceUntilIdle()
+
+        assertEquals(listOf(HomeEffect.ShowSyncNowResult(SyncNowMessage.SentNeedsReview(1))), effects)
+        job.cancel()
     }
 }

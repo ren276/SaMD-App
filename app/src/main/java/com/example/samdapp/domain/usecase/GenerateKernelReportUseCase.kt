@@ -41,9 +41,10 @@ import javax.inject.Inject
  * [AuditAction.KERNEL_EMPTY_DIFFERENTIAL] breadcrumb. It deliberately does not consult
  * [kernelFallbackSource] first, so even a dev build cannot substitute a mock scenario for it.
  *
- * **Fallback path**: if the real call fails for ANY reason (IOException, HttpException, timeout,
- * server offline), the exception is caught and logged, and [kernelFallbackSource] is asked for a
- * fallback. What that returns depends entirely on the build flavor — dev binds a mock scenario
+ * **Fallback path**: if the real service was not reached (offline, a timeout, or a 502/503/504
+ * kernel outage), [kernelFallbackSource] is asked for a fallback. Every other failure class goes
+ * straight to the honest unavailable row with its cause. What that returns depends entirely on
+ * the build flavor: dev binds a mock scenario
  * source, staging/prod bind a source that always returns null (see `MockBoundaryModule` and its
  * flavor-specific overrides). A null fallback becomes an honest
  * [InferenceSource.UNAVAILABLE] result via [buildUnavailableOutput] — never a fabricated
@@ -70,6 +71,10 @@ class GenerateKernelReportUseCase @Inject constructor(
         /** Model-version tag stamped on a dev-flavor mock fallback result — see
          *  `MockKernelFallbackSource` in `src/dev/`. */
         const val MOCK_MODEL_VERSION = "mock-kernel-v0.1"
+
+        /** The failure classes where the real service was not reached, and so the only ones a
+         *  fallback may answer for. */
+        private val FALLBACK_ELIGIBLE = setOf(KernelFailure.OFFLINE, KernelFailure.TIMEOUT, KernelFailure.KERNEL_UNAVAILABLE)
 
         /** The single source of truth for the honest-unavailable clinical text, so a
          *  written [InferenceSource.UNAVAILABLE] row and a stalled case's synthesized display
@@ -122,7 +127,12 @@ class GenerateKernelReportUseCase @Inject constructor(
             // A fallback or unavailable row still keeps the request id of the response that
             // preceded it: the backend stored that assessment (or its failure) under the id
             // whichever way the device then labelled the report.
-            ?: kernelFallbackSource.fallback(caseRecordId, payload, inferenceStartedAt, dataQualityScore(payload))
+            // The fallback (a mock scenario on dev, nothing on staging and prod) is consulted only
+            // when the real service was not reached. A 404, a 401, a rejected payload or an
+            // unreadable answer are not "the ML server is down", and a mock labelled as an outage
+            // must never stand in for them.
+            ?: attempt.failure?.takeIf { it in FALLBACK_ELIGIBLE }
+                ?.let { kernelFallbackSource.fallback(caseRecordId, payload, inferenceStartedAt, dataQualityScore(payload)) }
                 ?.copy(requestId = attempt.requestId)
             ?: buildUnavailableOutput(
                 caseRecordId,
@@ -143,15 +153,15 @@ class GenerateKernelReportUseCase @Inject constructor(
      * reached-but-failed kernel call already produces, rather than a silent gap with no row and
      * no remedy. No payload exists here, so there is nothing to score for data quality.
      */
-    suspend fun recordUnavailable(caseRecordId: String) {
-        // failure = null deliberately: nothing was sent, so no KernelFailure describes this.
-        // The pre-flight "could not build a payload" case is its own class and is NOT one of the
-        // ten this enum covers; recorded as an open item rather than guessed at here.
+    suspend fun recordUnavailable(caseRecordId: String, failure: KernelFailure? = null) {
+        // [failure] is the cause decided on this phone before any call (the assess gate, or local
+        // data that could not be resolved), so the screen can name it. Null only for a caller
+        // with no cause to give.
         val output = buildUnavailableOutput(
             caseRecordId,
             dataQualityScore = 0.0,
             inferenceStartedAt = Instant.now(),
-            failure = null,
+            failure = failure,
         )
         kernelReportRepository.save(output)
     }
