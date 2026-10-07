@@ -14,7 +14,7 @@ import org.junit.Test
  * database is exactly the failure mode that already hit this project once
  * (`DatabasePassphraseProvider` upgrade bug).
  *
- * Proves both halves of `scratchpad/asr-field-audit-memo.md` Part B.2's stated backfill policy:
+ * Proves both halves of `docs/design/asr-field-audit-memo.md` Part B.2's stated backfill policy:
  * the new column exists and every pre-existing row is backfilled to `TYPED`, not left `NULL`.
  */
 class MigrationTest16To17 {

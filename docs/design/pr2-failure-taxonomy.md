@@ -209,7 +209,7 @@ of them touches anything PR-2 changed**:
 **Correction, S-5b, 2026-09-19:** the bullet above already names the right mechanism
 (`ABDM_MODE: live` leaking into the suite), but calling this "environmental" alongside the
 credentials bullet reads as "expected noise, nothing to act on", and that part is wrong. S-5
-(`scratchpad/s5-abdm-response-unpacking.md` section 0) measured that `app.config.Settings` reads
+(`docs/design/s5-abdm-response-unpacking.md` section 0) measured that `app.config.Settings` reads
 `ABDM_MODE` from the environment/.env ahead of its own `"stub"` default, so these 13 are not inert
 credential-shaped noise, they are the suite actually making outbound requests to
 `https://dev.abdm.gov.in` and getting back a body with no `accessToken`. A test suite silently

@@ -10,8 +10,8 @@ no relabelling, no tree-building. No `.env`, `local.properties` or credential fi
 point. No commit, no staging.
 
 **Inputs treated as established fact and not re-derived**:
-`scratchpad/classifier-dataset-nlem-audit-memo.md`, `scratchpad/production-classifier-architecture-memo.md`.
-Also read for continuity: `scratchpad/classifier-wire-format-investigation.md` (the 41-item
+`docs/design/classifier-dataset-nlem-audit-memo.md`, `docs/design/production-classifier-architecture-memo.md`.
+Also read for continuity: `docs/design/classifier-wire-format-investigation.md` (the 41-item
 vocabulary measurement, which this memo supersedes — see §3.4).
 
 ---
@@ -253,7 +253,7 @@ a later step; naming it here is what makes R1–R3 testable rather than aspirati
 
 ### 3.4 This supersedes the 41-item vocabulary
 
-`scratchpad/classifier-wire-format-investigation.md` measured a drafted 41-item chief-complaint
+`docs/design/classifier-wire-format-investigation.md` measured a drafted 41-item chief-complaint
 vocabulary at **−30.6 points** and recorded finding X-4: the vocabulary and the classifier "are
 answering two different questions", with roughly **17 of 41** items having no trained equivalent at
 all. That measurement was correct and it is exactly the divergence R1 forbids. The resolution is not

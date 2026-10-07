@@ -20,7 +20,7 @@ review**, per the operator's own instruction; this audit's finding that no repo 
 a document-category taxonomy stands and is why the operator picked these values directly rather
 than this audit proposing them. Both vocabularies are implemented as Kotlin enums in
 `app/src/main/java/com/example/samdapp/domain/model/ConsultationDocument.kt`. See
-`scratchpad/consultation-documents-storage-build3a-readme.md` for what shipped.
+`docs/design/consultation-documents-storage-build3a-readme.md` for what shipped.
 
 ---
 

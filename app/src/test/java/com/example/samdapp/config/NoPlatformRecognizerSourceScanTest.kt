@@ -6,7 +6,7 @@ import org.junit.Test
 import java.io.File
 
 /**
- * Layer 1 of the three-layer egress proof (`scratchpad/pr4b-flag-flip-design-memo.md` A.1): the
+ * Layer 1 of the three-layer egress proof (`docs/design/pr4b-flag-flip-design-memo.md` A.1): the
  * shipped source tree contains no reference to the platform speech recognition API, and no file
  * on the transcription path imports an HTTP client.
  *

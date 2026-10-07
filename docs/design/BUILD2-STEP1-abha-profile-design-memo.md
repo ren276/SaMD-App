@@ -289,7 +289,7 @@ migration.
 ```
 === STOP: model switch checkpoint ===
 BUILD 2 STEP 1 complete. Branch feat/build-2-abha-profile-android created (off master; this repo has no main).
-No code written. Memo at scratchpad/BUILD2-STEP1-abha-profile-design-memo.md.
+No code written. Memo at docs/design/BUILD2-STEP1-abha-profile-design-memo.md.
 
 Deliverables of STEP 1:
 (a) Photo path: Option 1, placeholder-only initials avatar. Storage already exists

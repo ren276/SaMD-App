@@ -38,7 +38,7 @@ import java.time.Instant
 
 /**
  * Stage 1 of the SLM build: the input contract only (design memo
- * `scratchpad/slm-guardrail-service-contract-memo.md` §4.1/§4.2/§10.2). Structure first, then the
+ * `docs/design/slm-guardrail-service-contract-memo.md` §4.1/§4.2/§10.2). Structure first, then the
  * three refusal paths, then the audience-derivation guard proved against assembled content rather
  * than against the enum alone.
  *

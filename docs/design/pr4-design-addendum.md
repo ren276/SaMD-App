@@ -1,7 +1,7 @@
 # PR 4 design addendum: model identity, derivation version and the sync cross-check
 
 Drafted 2026-10-01 against master `b44d082`. Read-only design, no code. Builds on
-`scratchpad/backend-truthfulness-memo.md` (sections 1, 2, 4 and 10) and the Phase 0 recon, under
+`docs/design/backend-truthfulness-memo.md` (sections 1, 2, 4 and 10) and the Phase 0 recon, under
 operator rulings R1 to R6, which are final. Every repo claim is MEASURED (file:line or command)
 unless marked INFERRED. Where the repo and a ruling disagree, it is listed in section 0 and not
 built around silently.

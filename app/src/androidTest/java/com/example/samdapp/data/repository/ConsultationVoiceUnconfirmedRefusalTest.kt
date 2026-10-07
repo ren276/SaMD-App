@@ -17,7 +17,7 @@ import org.junit.Test
 import java.time.Instant
 
 /**
- * ASR track PR 3a (`scratchpad/pr3-voice-gate-design-memo.md` Part B, from the field-audit memo's
+ * ASR track PR 3a (`docs/design/pr3-voice-gate-design-memo.md` Part B, from the field-audit memo's
  * B.2). Proves the `VOICE_UNCONFIRMED` write-refusal against a real Room database.
  *
  * The assertion that matters is the **absence of the row**, read back through the DAO after the

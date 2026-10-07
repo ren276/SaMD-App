@@ -8,7 +8,7 @@ import org.junit.Test
 /**
  * The Parakeet row's licence identifier is the assertion with a legal consequence (CC BY 4.0
  * attribution obligation, open since PR 4a merged, attaches at APK distribution) — the rest of
- * the list is data. See docs/sbom/README.md and scratchpad/pr4b-flag-flip-design-memo.md Part E.
+ * the list is data. See docs/sbom/README.md and docs/design/pr4b-flag-flip-design-memo.md Part E.
  */
 class OpenSourceLicensesScreenTest {
 

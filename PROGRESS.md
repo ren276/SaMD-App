@@ -3349,7 +3349,7 @@ row, and a second send would re-run the assessment and upsert over the already-w
 the first run finished; `CaseRecordDao.abandonDraftsForPatient` flipped it to `ABANDONED` if the
 same patient returned the same day, silently mislabelling a case with a completed assessment.
 
-**Design memo first (Opus, read-only), `scratchpad/casestatus-after-enqueue-design.md`.** Weighed
+**Design memo first (Opus, read-only), `docs/design/casestatus-after-enqueue-design.md`.** Weighed
 a new `CaseStatus` value (`SUBMITTED`) against a query-only exclusion. Recommended the query-only
 option: the only signal needed, a `consultation_saved` audit row, already exists, is insert-only,
 indexed on `caseRecordId`, and is written and committed one navigation step before the enqueue —
@@ -3431,7 +3431,7 @@ handling assuming either shape until that check lands.
 ## Android: ASR track PR 0, off-device recognizer exposure closed (2026-08-30)
 
 First PR of the ASR track. Design of record for the whole track is two STEP-1 read-only memos,
-`scratchpad/asr-field-audit-memo.md` and `scratchpad/asr-usecase-research-memo.md`, produced
+`docs/design/asr-field-audit-memo.md` and `docs/design/asr-usecase-research-memo.md`, produced
 before any code was touched. Continue from those, not from a fresh read of the code, for any
 further ASR work.
 
@@ -3488,7 +3488,7 @@ touched. Those are later, separately scoped PRs per the field-audit memo's Part 
 
 Second PR of the ASR track (first, PR 0, is the entry above). ASR now leads the track; the
 symptom multi-select work is deferred to the model phase. Design of record is
-`scratchpad/asr-field-audit-memo.md` Part B.2, read in full before this PR, not re-derived from
+`docs/design/asr-field-audit-memo.md` Part B.2, read in full before this PR, not re-derived from
 code.
 
 **Scope, deliberately narrow.** No UI, no ASR engine, no voice capture, no model. This PR adds
@@ -3555,7 +3555,7 @@ provenance capture at the concept level and were judged sufficient without a fur
 ## Android + backend: ASR track PR 2, VOICE_FIELD_* audit actions (2026-09-01)
 
 Third PR of the ASR track (PR 0 disabled off-device recognition, PR 1 added the
-`FieldProvenance` column). Design of record is `scratchpad/asr-field-audit-memo.md` Part B.4,
+`FieldProvenance` column). Design of record is `docs/design/asr-field-audit-memo.md` Part B.4,
 read in full before this PR.
 
 **Scope, deliberately narrow.** Only the four `VOICE_FIELD_*` audit action enum values, on both
@@ -3604,8 +3604,8 @@ confirmation gate, no classifier/kernel/wire-to-model file touched. `.env`/`loca
 ## Android: ASR track PR 3a, the VOICE_UNCONFIRMED write-refusal (2026-09-01)
 
 First of four sub-steps of PR 3, the voice confirmation gate. Design of record is
-`scratchpad/pr3-voice-gate-design-memo.md` Part B, written in a read-only STEP 1 pass before any
-code, itself grounded in `scratchpad/asr-field-audit-memo.md` B.2. PR 3a is the repository
+`docs/design/pr3-voice-gate-design-memo.md` Part B, written in a read-only STEP 1 pass before any
+code, itself grounded in `docs/design/asr-field-audit-memo.md` B.2. PR 3a is the repository
 write-refusal and its test, nothing else: no UI, no `ConsultationUiState` fields, no ViewModel
 handlers, no ASR call, no breadcrumb emission, no feature flag. Those are 3b, 3c and 3d.
 
@@ -3665,7 +3665,7 @@ remain open for 3b onward.
 
 ## Android: ASR track PR 3b, the voice confirmation-gate state model (2026-09-01)
 
-Second of four sub-steps of PR 3. Design of record is `scratchpad/pr3-voice-gate-design-memo.md`
+Second of four sub-steps of PR 3. Design of record is `docs/design/pr3-voice-gate-design-memo.md`
 Part A (state model) and B.3 (honest-failure edges). 3b is state, handlers, the guard and the
 failure edges. The visible suggestion surface, the mic button and the feature flag are 3c;
 breadcrumb emission is 3d.
@@ -3755,7 +3755,7 @@ design memo's DECISION GATE items remain open, and the per-field flag question i
 ## Android: ASR track PR 3c, the suggestion UI, mic button, and per-field flag (2026-09-01)
 
 Third of four sub-steps of PR 3. Design of record is
-`scratchpad/pr3-voice-gate-design-memo.md` Part A.4 (the UI and its anti-rubber-stamp
+`docs/design/pr3-voice-gate-design-memo.md` Part A.4 (the UI and its anti-rubber-stamp
 constraints) and Part E.1 (the per-field flag decision). Breadcrumb emission is 3d; the
 on-device engine swap is PR 4.
 
@@ -3832,7 +3832,7 @@ untouched by this step and remain open for 3d.
 ## Android: ASR track PR 3d, breadcrumb emission at the gate transitions (2026-09-01)
 
 Fourth and last sub-step of PR 3. Design of record is
-`scratchpad/pr3-voice-gate-design-memo.md` Part C (C.1 transition table, C.2 payload, C.3 the
+`docs/design/pr3-voice-gate-design-memo.md` Part C (C.1 transition table, C.2 payload, C.3 the
 operator-approved `dwellMs` addition, C.4 forbidden keys). Replaces the four `TODO(PR 3d)`
 markers 3b left with real emissions. No new ASR model, no flag flipped: the feature stays dark.
 
@@ -4265,9 +4265,9 @@ tap in a process), **613 ms warm**. Reported, not asserted: there is no agreed t
 ## Prescription visibility gate + DOCTOR decision-surface gate (Build 1) — 2026-09-03
 
 Build 1 of the consultation-documents-and-prescription track (design memo:
-`scratchpad/consultation-documents-and-prescription-gate-memo.md`, Feature 2 / Part F Build 1).
+`docs/design/consultation-documents-and-prescription-gate-memo.md`, Feature 2 / Part F Build 1).
 Branch `feat/prescription-approval-gate`. Full orientation for a developer picking this up:
-`scratchpad/prescription-approval-gate-build1-readme.md`.
+`docs/design/prescription-approval-gate-build1-readme.md`.
 
 **What shipped.** A render-time gate on the worker-facing report (`ReportFormatter.format`, the
 same seam as the existing `ReportAudience.WORKER` private-ailment redaction) that hides the AI's
@@ -4301,9 +4301,9 @@ Not committed as of this entry — awaiting operator authorization per session i
 ## Consultation documents: storage, audit, retract, direct-file upload, safe viewer (Build 3a) — 2026-09-03
 
 Build 3a of the consultation-documents-and-prescription track (design memo:
-`scratchpad/consultation-documents-and-prescription-gate-memo.md`, Feature 1, Parts B1/B3/B4/B5/B6/B8/B9).
+`docs/design/consultation-documents-and-prescription-gate-memo.md`, Feature 1, Parts B1/B3/B4/B5/B6/B8/B9).
 Branch `feat/consultation-documents-storage`. Full orientation:
-`scratchpad/consultation-documents-storage-build3a-readme.md`.
+`docs/design/consultation-documents-storage-build3a-readme.md`.
 
 **What shipped.** A `consultation_documents` table (`MIGRATION_17_18`, DB version 17 to 18, purely
 additive, schema JSON committed) storing encrypted clinical documents a worker picks and tags at
@@ -4312,7 +4312,7 @@ upload. Encryption mirrors `DatabasePassphraseProvider`'s Keystore pattern under
 never external storage. Magic-byte validation (PDF/JPEG/PNG only, `DocumentTypeValidator`) rejects
 anything else before a byte is written, with the size cap (20 MB) enforced while streaming. Two
 controlled-vocabulary enums, `DepartmentCode` (17 values, derived from the existing
-doctor-specialty routing/seed data — see `scratchpad/document-vocab-audit.md`) and `RecordTypeCode`
+doctor-specialty routing/seed data — see `docs/design/document-vocab-audit.md`) and `RecordTypeCode`
 (6 values, operator-signed PROVISIONAL, no DB CHECK so the list can change without a migration).
 Naming: a display-only canonical name keyed on `Patient.id` (never ABHA, deliberately), and a
 separate non-identifying on-disk storage key. A safe in-app viewer (`PdfRenderer`/`BitmapFactory`,
@@ -4345,9 +4345,9 @@ Not committed as of this entry — awaiting operator authorization per session i
 ## Consultation documents: camera multi-capture to on-device PDF assembly (Build 3b) - 2026-09-04
 
 Build 3b of the consultation-documents-and-prescription track (design memo:
-`scratchpad/consultation-documents-and-prescription-gate-memo.md`, Feature 1 Part B2). Branch
+`docs/design/consultation-documents-and-prescription-gate-memo.md`, Feature 1 Part B2). Branch
 `feat/consultation-documents-camera`, off the merged Build 3a. Full orientation:
-`scratchpad/consultation-documents-camera-build3b-readme.md`.
+`docs/design/consultation-documents-camera-build3b-readme.md`.
 
 **What shipped.** PATH B: the worker selects department and record type exactly as for a direct
 file upload, taps "Scan report pages with camera", photographs page after page, reorders and
@@ -4427,7 +4427,7 @@ Not committed as of this entry - awaiting operator authorization per session ins
 ## Consultation documents: cadre role-visibility gate (Build 3c) — 2026-09-04
 
 Build 3c of the consultation-documents track (design memo:
-`scratchpad/consultation-documents-and-prescription-gate-memo.md`, Feature 1 Part B7;
+`docs/design/consultation-documents-and-prescription-gate-memo.md`, Feature 1 Part B7;
 `docs/domain/phc-workforce-scope.md`, the three-tier cadre model). Branch
 `feat/consultation-documents-cadre-gate`. Last piece of the documents feature: replaces Build 3a's
 interim uploader-or-`DOCTOR` gate with the operator-selected cadre mapping.
@@ -4505,7 +4505,7 @@ a drift check confirmed all three repositories (`cab78ae` / `63e85af` / `d32a197
 artifact mtimes unchanged since the audit ran. No figure was re-derived, re-estimated or
 gap-filled — transcription only.
 
-### What the audit found (`scratchpad/classifier-dataset-nlem-audit-memo.md`)
+### What the audit found (`docs/design/classifier-dataset-nlem-audit-memo.md`)
 
 *Classifier.* Shipped `symptom-clf-v0.2-enriched-symptom-pool`: word TF-IDF (1,2) vocab 2374 + char
 `char_wb` (3,5) vocab 2166, dim 4540, 18 ICD classes, 15,105 rows, accuracy 0.9212, f1_macro 0.7983.
@@ -4545,7 +4545,7 @@ nowhere), and both report tables replace one row per case on retry, so re-assess
 evidence. The backend model's own docstring: "Stored, never consumed." **The retraining flywheel is
 not buildable on the current schema — it needs new capture, not new queries.**
 
-### What the architecture research concluded (`scratchpad/production-classifier-architecture-memo.md`)
+### What the architecture research concluded (`docs/design/production-classifier-architecture-memo.md`)
 
 Written against the question of what happens when chief-complaint input changes from a closed
 118-term pipe-joined pool to open-vocabulary Indic ASR prose.
@@ -4613,7 +4613,7 @@ Not committed as of this entry - awaiting operator authorization per session ins
 
 ## Empty-symptom-input guard, Part A of the demo constrained-capture track (Branch 1) — 2026-09-06
 
-Built against `scratchpad/demo-dropdowns-and-empty-input-guard-memo.md`, on branch
+Built against `docs/design/demo-dropdowns-and-empty-input-guard-memo.md`, on branch
 `fix/evaluate-empty-symptom-guard`. Closes the H-20 hazard from the classifier audit: an empty
 `symptom_string` measures a confident E66 (Obesity) differential at 74.95%, the model's training
 prior rather than an assessment of the patient.
@@ -4639,7 +4639,7 @@ Not pushed as of this entry.
 
 ## Voice flag split: one conflated safety control becomes two, and the ungated transcribe path gets a guard - 2026-09-08
 
-Built against `scratchpad/chief-complaint-voice-flip-design-memo.md` sections 5 and 3.1(ii), on
+Built against `docs/design/chief-complaint-voice-flip-design-memo.md` sections 5 and 3.1(ii), on
 branch `feat/voice-field-expansion`. Pure refactor of a safety control plus one new guard. **No
 behaviour change: both new flags are `false`, so every affordance stays exactly as hidden as it was.**
 
@@ -4690,7 +4690,7 @@ Not pushed as of this entry.
 
 ## SLM stage 1: the approved-record input contract, and nothing else - 2026-09-09
 
-Built against `scratchpad/slm-guardrail-service-contract-memo.md` sections 4.1, 4.2 and 10.2, on
+Built against `docs/design/slm-guardrail-service-contract-memo.md` sections 4.1, 4.2 and 10.2, on
 branch `feat/slm-approved-record-reader`. Two new files in a new `domain/slm` package, one test
 file. **No behaviour change anywhere in the app: nothing calls the reader yet.** No engine, no
 seam, no scope gate, no sanitizer, no feature flag, no UI, no audit action, no DI module. Those are
@@ -4762,7 +4762,7 @@ Not committed as of this entry.
 
 ## SLM stage 2: the guardrail seam and the two scope gates - 2026-09-09
 
-Built against `scratchpad/slm-guardrail-service-contract-memo.md` sections 4.4, 5.4, 7 and 9.1, on
+Built against `docs/design/slm-guardrail-service-contract-memo.md` sections 4.4, 5.4, 7 and 9.1, on
 branch `feat/slm-guardrail-seam`, consuming stage 1's `ApprovedRecordReader`. Three new files in
 `domain/slm`, two new test files. **Still no behaviour change anywhere in the app: nothing calls
 the seam, and the engine interface has no implementation and no Hilt binding.** No engine runtime,
@@ -4876,7 +4876,7 @@ Not committed as of this entry.
 
 ## SLM stage 3a: the stream sanitizer - 2026-09-09
 
-Built against `scratchpad/slm-guardrail-service-contract-memo.md` sections 6.1 and 6.2, on branch
+Built against `docs/design/slm-guardrail-service-contract-memo.md` sections 6.1 and 6.2, on branch
 `feat/slm-stream-sanitizer` off `feat/slm-guardrail-seam`. One new source file
 (`domain/slm/SlmStreamSanitizer.kt`), one new test file, plus the streaming refinement of
 `SlmEngine` and the wiring of the sanitizer into the seam's pipeline slot 7. **Still no behaviour
@@ -5100,7 +5100,7 @@ Not committed as of this entry.
 
 Branch `fix/sync-resync-timestamp`, backend only, not merged. Three behaviour commits, each green
 on its own, then this entry, then a separate PROPOSED `api-contract.md` commit.
-Recon and design: `scratchpad/sync-resync-fix-memo.md`.
+Recon and design: `docs/design/sync-resync-fix-memo.md`.
 
 **The defect.** Re-syncing an existing row of `kernel_reports`, `evaluate_reports`,
 `medication_lines` or `referrals` raised `AttributeError` (`_timestamp_attr` fell back to a
@@ -5160,7 +5160,7 @@ Alembic test harnesses are unified into one.
 
 Branch `feat/pr4-model-identity-consumers`, rebased onto master `6ea86e0` after #69, not merged.
 Nine behaviour commits plus this entry and a separate PROPOSED `api-contract.md` commit. Design:
-`scratchpad/pr4-design-addendum.md`.
+`docs/design/pr4-design-addendum.md`.
 
 **What it does.** A kernel report now says which model produced it and can be checked against the
 model output the backend stored for it.
@@ -5281,13 +5281,13 @@ dev flavor, backend at 47b04e2).** Three items, recorded as observed. No fix is 
 **Filed item, scratchpad references in tracked docs:** tracked docs contain 164 references to
 `scratchpad/` paths, some to untracked files (dangling in any other checkout). Design memos
 (truthfulness memo, PR 4 addendum, sync fix memo) are design records and should be committed under
-a tracked path; other references should be inlined. Sweep pending.
+a tracked path; other references should be inlined. **Done 2026-10-07:** every tracked memo moved to `docs/design/` with `git mv`, the two cited untracked memos were committed there, and the 246 path citations in code, `PROGRESS.md` and `docs/` were rewritten. See `docs/design/README.md`.
 
 ## PR 1: sync failure visibility - 2026-10-07
 
 Branch `feat/sync-failure-visibility`, device only, no backend change, no Room migration (schema
 stays at v22). Must merge before any pilot use. Design and operator rulings:
-`scratchpad/sync-failure-visibility-memo.md` (sections 11 and 12.9).
+`docs/design/sync-failure-visibility-memo.md` (sections 11 and 12.9).
 
 **What it changes.**
 - The device stops saying "sent" or "Up to date" when records have not reached the server. Home

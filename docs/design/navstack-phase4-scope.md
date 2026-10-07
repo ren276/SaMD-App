@@ -1,7 +1,7 @@
 # Phase 4 scope, read-only pass (2026-09-18)
 
 Branch `fix/navstack-process-death`, HEAD `60e1ed3`. No code or tests written for this document.
-Companion to `scratchpad/navstack-phase3-scope.md`, which scoped phase 3 and folded two test items
+Companion to `docs/design/navstack-phase3-scope.md`, which scoped phase 3 and folded two test items
 into this phase.
 
 Evidence marked **VERIFIED** (read the file or ran the command in this pass) or **INFERRED**.

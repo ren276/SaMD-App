@@ -2,7 +2,7 @@
 
 - **Date:** 2026-08-27
 - **Branch:** `master` (read-only; no code, no branch, no commits)
-- **Predecessor:** `scratchpad/AUDIT-patient-registration-sync-gap.md` (diagnosis **D**)
+- **Predecessor:** `docs/design/AUDIT-patient-registration-sync-gap.md` (diagnosis **D**)
 - **Purpose:** decide the fix shape *before* STEP 2 is authorised.
 
 ---

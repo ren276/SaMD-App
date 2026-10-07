@@ -42,7 +42,7 @@ TEST_DATABASE_URL = os.environ.get(
     "postgresql+asyncpg://samd:samd_dev_only@localhost:5432/samd_test",
 )
 
-# S-5 measured (scratchpad/s5-abdm-response-unpacking.md section 0): app.config.Settings reads
+# S-5 measured (docs/design/s5-abdm-response-unpacking.md section 0): app.config.Settings reads
 # ABDM_MODE from the environment / .env ahead of its own "stub" default, so a machine whose local
 # .env or docker-compose.yml sets a live ABDM_MODE makes the WHOLE suite silently transact against
 # the real government gateway, not just a knowingly-live test. The 14 failures that produced were

@@ -6,7 +6,7 @@ import org.junit.Test
 import java.io.File
 
 /**
- * `scratchpad/slm-guardrail-service-contract-memo.md` §9.1: "It must be impossible to reach
+ * `docs/design/slm-guardrail-service-contract-memo.md` §9.1: "It must be impossible to reach
  * [the engine] from a ViewModel: no injection of the engine into presentation, ever."
  *
  * Kotlin cannot express that with a visibility modifier. `internal` is module-scoped and

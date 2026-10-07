@@ -1,7 +1,7 @@
 # Gemini brand-lookup hazard entry, drafted for operator review
 
 Read-only memo. Nothing in `docs/quality/risk-management-file.md` or any source file was edited.
-This writes the record that the amended audit (`scratchpad/perf-audit-2026-09-18.md`, item 0,
+This writes the record that the amended audit (`docs/design/perf-audit-2026-09-18.md`, item 0,
 amendment A1) called for. No `.env`, `.env.*`, `local.properties`, or credential file was opened;
 `GEMINI_API_KEY`'s storage mechanism is named below, its value never is.
 

@@ -192,7 +192,7 @@ class SyncOutboxDrainerTest {
  * S-2's own properties, kept in their own class so the Phase 6b scenarios above stay readable.
  *
  * Every test here is paired with a mutation check recorded in
- * `scratchpad/s2-states-schema-drain-requeue.md`: the property was broken deliberately in the
+ * `docs/design/s2-states-schema-drain-requeue.md`: the property was broken deliberately in the
  * production source, the test was confirmed red, and the source restored byte-identically.
  */
 class SyncOutboxRetryBehaviourTest {

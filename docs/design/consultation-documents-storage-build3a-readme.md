@@ -1,8 +1,8 @@
 # Build 3a developer README — consultation documents: storage, audit, retract, direct-file upload, safe viewer
 
 **Branch:** `feat/consultation-documents-storage`. **Status:** built, tested, NOT committed —
-awaiting operator authorization. Read `scratchpad/consultation-documents-and-prescription-gate-memo.md`
-Feature 1 (B1, B3, B4, B5, B6, B8, B9) first, plus `scratchpad/document-vocab-audit.md` for where
+awaiting operator authorization. Read `docs/design/consultation-documents-and-prescription-gate-memo.md`
+Feature 1 (B1, B3, B4, B5, B6, B8, B9) first, plus `docs/design/document-vocab-audit.md` for where
 the two controlled vocabularies came from. This doc is orientation on top of both, not a
 replacement.
 

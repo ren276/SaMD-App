@@ -30,7 +30,7 @@ class CaptureAudioAttachmentUseCase @Inject constructor(
  *  The guard below therefore lives HERE rather than only in the screen or the navigation branch:
  *  the persist has to be unreachable from any caller, including the second caller that does not
  *  exist yet. Building the confirmation gate and the provenance column is the parked follow-up
- *  (`scratchpad/chief-complaint-voice-flip-design-memo.md` sections 4 and 9); until then the flag
+ *  (`docs/design/chief-complaint-voice-flip-design-memo.md` sections 4 and 9); until then the flag
  *  is the control.
  *
  *  Refused, not silently dropped: a dropped write would return success with nothing persisted,

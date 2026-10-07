@@ -75,7 +75,7 @@ class Consultation(Base, SyncMixin):
     relieving_factors: Mapped[str | None] = mapped_column(Text)
     impact_on_daily_activities: Mapped[str | None] = mapped_column(Text)
     # FieldProvenance enum name (TYPED / VOICE_UNCONFIRMED / VOICE_CONFIRMED / VOICE_EDITED),
-    # ASR track PR 1 (scratchpad/asr-field-audit-memo.md Part B.2). No CHECK constraint: the memo
+    # ASR track PR 1 (docs/design/asr-field-audit-memo.md Part B.2). No CHECK constraint: the memo
     # does not call for one at this stage. VOICE_UNCONFIRMED must never reach this column (the
     # device repository write refusal that enforces that is a later PR); nothing currently sends
     # anything but TYPED or null.

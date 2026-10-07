@@ -38,7 +38,7 @@ import java.time.Instant
 
 /**
  * Stage 2 of the SLM build: the guardrail seam and the two scope gates
- * (`scratchpad/slm-guardrail-service-contract-memo.md` §4.4, §5.4, §7, §9.1). The engine is a
+ * (`docs/design/slm-guardrail-service-contract-memo.md` §4.4, §5.4, §7, §9.1). The engine is a
  * declared-but-unbound interface, so every test here drives the seam with [RecordingSlmEngine],
  * whose call count is the evidence for the claim that matters most: **on a refusal the model is
  * never reached.** That is the `readDecryptedCallCount == 0` pattern this project already uses for

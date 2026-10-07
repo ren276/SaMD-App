@@ -3,8 +3,8 @@
 **Branch:** `feat/consultation-documents-camera`, off merged Build 3a (`616eedd`).
 **Status:** built, tested, NOT committed - awaiting operator authorization.
 
-Read `scratchpad/consultation-documents-and-prescription-gate-memo.md` Feature 1 Part B2 and
-`scratchpad/consultation-documents-storage-build3a-readme.md` first. This is orientation on top of
+Read `docs/design/consultation-documents-and-prescription-gate-memo.md` Feature 1 Part B2 and
+`docs/design/consultation-documents-storage-build3a-readme.md` first. This is orientation on top of
 both, not a replacement.
 
 ## Scope

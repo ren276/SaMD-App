@@ -1,7 +1,7 @@
 # Build 1 developer README — prescription visibility gate + DOCTOR decision-surface gate
 
 **Branch:** `feat/prescription-approval-gate`. **Status:** built, tested, NOT committed — awaiting
-operator authorization. Read `scratchpad/consultation-documents-and-prescription-gate-memo.md`
+operator authorization. Read `docs/design/consultation-documents-and-prescription-gate-memo.md`
 Feature 2 (A1–A6) and Part F Build 1 first; this doc is orientation on top of that, not a
 replacement for it.
 

@@ -1,7 +1,7 @@
 # Production classifier architecture (STEP 1, read-only research memo)
 
 Run date: 2026-09-05. SaMD-App branch `master`, HEAD `cab78ae`.
-Input: `scratchpad/classifier-dataset-nlem-audit-memo.md`, whose measured findings are treated
+Input: `docs/design/classifier-dataset-nlem-audit-memo.md`, whose measured findings are treated
 here as established fact and are not re-derived.
 
 **The question.** Production input to the chief-complaint path is changing from a closed 118-term

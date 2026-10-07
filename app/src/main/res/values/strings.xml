@@ -125,7 +125,7 @@
 
     <!--
       Home's sync caption (presentation/home/SyncCaption.kt, truth table in
-      scratchpad/sync-failure-visibility-memo.md section 4.2). Full sentences, never fragments
+      docs/design/sync-failure-visibility-memo.md section 4.2). Full sentences, never fragments
       joined in code, so each can be translated whole. Where two counts share a sentence, the
       counts are labelled rather than inflected, so no plural has to agree with two numbers.
       "Up to date" is said in exactly one case: nothing pending, failed, conflicted or blocked.

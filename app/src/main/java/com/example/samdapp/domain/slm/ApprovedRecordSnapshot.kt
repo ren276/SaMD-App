@@ -4,7 +4,7 @@ import com.example.samdapp.domain.model.KernelDecision
 
 /**
  * The only shape a physician-approved record may take on its way to the on-device SLM readback
- * (`scratchpad/slm-guardrail-service-contract-memo.md` §4.1/§4.2). Structurally decoupled from
+ * (`docs/design/slm-guardrail-service-contract-memo.md` §4.1/§4.2). Structurally decoupled from
  * patient identity in exactly the way [com.example.samdapp.domain.model.KernelPayload] is for the
  * clinical kernel (risk H-10): no field here is of type [com.example.samdapp.domain.model.Patient]
  * or [com.example.samdapp.domain.report.ReportPatientBlock], and

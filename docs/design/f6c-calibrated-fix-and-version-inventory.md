@@ -1,6 +1,6 @@
 # F6C-01 / F6C-05: calibrated-flag fix and model-version inventory
 
-Date: 2026-09-19. Source: `scratchpad/perf-audit-2026-09-18.md`, findings F6C-01 and F6C-05.
+Date: 2026-09-19. Source: `docs/design/perf-audit-2026-09-18.md`, findings F6C-01 and F6C-05.
 Scope: `SaMDClassifier/src/app.py` only in this pass. `docs/quality/risk-management-file.md`
 not touched (rule for step 1/2). Nothing committed.
 

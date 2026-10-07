@@ -13,7 +13,7 @@ import javax.inject.Inject
 
 /**
  * Turns one case record id into an [ApprovedRecordSnapshot], or refuses.
- * `scratchpad/slm-guardrail-service-contract-memo.md` §4.2 item 2: the reader resolves the case,
+ * `docs/design/slm-guardrail-service-contract-memo.md` §4.2 item 2: the reader resolves the case,
  * requires a committed [com.example.samdapp.domain.model.KernelDecision], and returns a typed
  * [ApprovedRecordResult.Refused] otherwise. It never returns an empty snapshot (harness F5).
  *

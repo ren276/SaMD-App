@@ -7,7 +7,7 @@ import com.example.samdapp.domain.slm.SlmRefusal
  * What the read-back sheet is showing. Four states, mutually exclusive by construction.
  *
  * **The single-turn rule is enforced by this type's shape, not by the composable's discipline.**
- * `scratchpad/slm-guardrail-service-contract-memo.md` §7 enforces single turn at the seam by there
+ * `docs/design/slm-guardrail-service-contract-memo.md` §7 enforces single turn at the seam by there
  * being no history field a transcript could arrive on, and the contract enforces it again on the
  * wire the same way. This is the third instance of the same construction, at the layer where a
  * transcript would actually be built: there is **one** question in [ReportUiState] and **one**

@@ -122,7 +122,7 @@ identity, exact version and hash are already covered by that automated pipeline 
 a hand-maintained companion file. This section is the validation record IEC 62304 also requires:
 what these components are used for, what was checked, and what is still open.
 
-**Why this record exists now.** `scratchpad/capture-process-death-memo.md` traces a field-reported
+**Why this record exists now.** `docs/design/capture-process-death-memo.md` traces a field-reported
 lost captured page to the previous camera-capture mechanism (`ActivityResultContracts.TakePicture`,
 an external camera app) backgrounding this process and making it a low-memory-killer target. CameraX
 replaces that external hand-off with an in-process viewfinder (`DocumentCameraCapture`), and its
@@ -159,7 +159,7 @@ path, so the platform-owned buffer behind the capture is released promptly eithe
 (`camerax = "1.6.2"`), read by all four component declarations; a version bump is an ordinary
 reviewed dependency-catalog change, not a silent transitive upgrade of any one of the four.
 
-**C-4, honest failure.** A5 (`scratchpad/capture-process-death-memo.md` amendment A5): provider
+**C-4, honest failure.** A5 (`docs/design/capture-process-death-memo.md` amendment A5): provider
 init failure, no back camera, or the camera already in use elsewhere all route to
 `onCameraUnavailable`, which sets an explicit error state the capture surface renders instead of
 the viewfinder - never a silent fallback and never a shutter that does nothing. Covered by

@@ -10,11 +10,11 @@ in code, no dataset generated, no model trained. No `.env`, `local.properties` o
 opened at any point. No commit, no staging.
 
 **Inputs treated as binding and not re-derived:**
-`scratchpad/questionnaire-tree-design-memo.md` (THE schema: §1 branch schema, §6 five-stage
-template, §3/§4/§5 the three reference branches), `scratchpad/reason-for-encounter-category-system-memo.md`
+`docs/design/questionnaire-tree-design-memo.md` (THE schema: §1 branch schema, §6 five-stage
+template, §3/§4/§5 the three reference branches), `docs/design/reason-for-encounter-category-system-memo.md`
 (every category constant below is transcribed from its §7, not invented; RF-1…RF-4 from its §4.4),
-`scratchpad/dataset-regeneration-design-memo.md` (these branches are what the generator walks),
-`scratchpad/branch-authoring-batch-1-memo.md` (the batch-1 reference, its §7 shared registry,
+`docs/design/dataset-regeneration-design-memo.md` (these branches are what the generator walks),
+`docs/design/branch-authoring-batch-1-memo.md` (the batch-1 reference, its §7 shared registry,
 its findings G-1…G-13).
 
 **Also read on disk this session, read-only:** `ConsultationScreen.kt:87-107` (the shipped

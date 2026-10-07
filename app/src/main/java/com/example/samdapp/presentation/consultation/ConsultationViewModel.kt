@@ -62,7 +62,7 @@ data class PendingDocument(
  * callback delivers them, and nothing here is persisted. A process death therefore loses the
  * capture, which is the intended posture - the startup sweep deletes the orphaned session
  * directory rather than resurrecting a half-captured clinical document with no owner. Re-verified
- * unchanged under Option A: `scratchpad/capture-process-death-memo.md` section 1.
+ * unchanged under Option A: `docs/design/capture-process-death-memo.md` section 1.
  */
 data class DocumentCaptureUiState(
     val sessionId: String,
@@ -122,7 +122,7 @@ data class ConsultationUiState(
     /** The outstanding ASR suggestion for [impactOnDailyActivities], or null when there is none.
      *  It sits **beside** the committed value and is never the field value itself, so no code
      *  path can read an unconfirmed transcript as if the worker had accepted it
-     *  (`scratchpad/pr3-voice-gate-design-memo.md` A.2 property 1).
+     *  (`docs/design/pr3-voice-gate-design-memo.md` A.2 property 1).
      *
      *  Non-null means the gate is in its Suggested state. Nothing clears it except the three
      *  explicit worker actions and the failure edges: there is no timeout and no auto-accept, so
@@ -142,7 +142,7 @@ data class ConsultationUiState(
     val impactProvenance: FieldProvenance? = null,
     /** `System.nanoTime()` at the moment [impactVoiceSuggestion] was shown, or null when nothing
      *  is or has just been shown. Consumed at the resolving action (Use it, Edit or Discard) to
-     *  compute `dwellMs` for the audit payload (`scratchpad/pr3-voice-gate-design-memo.md` C.3):
+     *  compute `dwellMs` for the audit payload (`docs/design/pr3-voice-gate-design-memo.md` C.3):
      *  a measured interval, never content. `System.nanoTime()` rather than
      *  `android.os.SystemClock.elapsedRealtime()` because it is monotonic, immune to wall-clock
      *  changes, and pure JVM, so it needs no Android framework stub in a plain unit test.
@@ -266,7 +266,7 @@ interface ConsultationActions {
     fun onImpactChange(value: String)
 
     // ── Voice confirmation gate for impactOnDailyActivities ──────────────────────────────────
-    // `scratchpad/pr3-voice-gate-design-memo.md` Part A. Called from the mic button and the
+    // `docs/design/pr3-voice-gate-design-memo.md` Part A. Called from the mic button and the
     // suggestion surface in ConsultationScreen.kt, both hidden while
     // FeatureFlags.VOICE_FIELD_IMPACT_ENABLED is off (see its KDoc), so the gate has a caller
     // and a flag but is not yet reachable in a shipped build. Breadcrumb emission is PR 3d.
@@ -289,7 +289,7 @@ interface ConsultationActions {
 
     /** The worker declined the microphone prompt. Surfaces the refusal on the existing
      *  [ConsultationUiState.errorMessage] path so the mic is not a silent dead end
-     *  (`scratchpad/pr4b-flag-flip-design-memo.md` D.3). */
+     *  (`docs/design/pr4b-flag-flip-design-memo.md` D.3). */
     fun onVoicePermissionDenied()
 
     // ── Voice confirmation gate for aggravatingFactors, relievingFactors, relevantHistory ───────
@@ -423,7 +423,7 @@ class ConsultationViewModel @AssistedInject constructor(
      * Idle to Capturing, then to Suggested or to an honest-failure edge.
      *
      * Three properties hold on every path out of here, and they are the reason this handler is
-     * shaped the way it is (`scratchpad/pr3-voice-gate-design-memo.md` A.2 and B.3):
+     * shaped the way it is (`docs/design/pr3-voice-gate-design-memo.md` A.2 and B.3):
      *
      * 1. `impactOnDailyActivities` and `impactProvenance` are never written. A transcript reaches
      *    [ConsultationUiState.impactVoiceSuggestion] only, so nothing is committed until the

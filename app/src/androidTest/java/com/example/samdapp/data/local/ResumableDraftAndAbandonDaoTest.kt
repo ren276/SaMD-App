@@ -17,7 +17,7 @@ import java.time.Instant
 
 /**
  * Async submission queue, carried ticket from PR #23 (STEP 1 design memo,
- * `scratchpad/casestatus-after-enqueue-design.md`): a case sent via `ConsultationViewModel.onSend`
+ * `docs/design/casestatus-after-enqueue-design.md`): a case sent via `ConsultationViewModel.onSend`
  * stays at `CaseStatus.DRAFT` while its assessment is enqueued or running (`ConsultationScreen`
  * never advances the status). Both queries below must tell that case apart from a genuinely
  * in-progress `DRAFT` using the same signal, a `consultation_saved` audit row, since a real Room

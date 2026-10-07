@@ -24,4 +24,4 @@ Of 6,253 distinct literals, 6,233 exist in Gemma 4 and 20 do not. Carrying over 
 
 The sharp edge: THOUGHT_OPEN/THOUGHT_CLOSE = <unused94>/<unused95> still exist in Gemma 4, at ids 256006 and 256007, as ordinary reserved tokens with no channel meaning. Membership passes, nothing fails closed, span counters stay at zero, and the entire reasoning channel leaks to the clinician surface. The silent-failure mode and the real failure mode are indistinguishable under the current design.
 
-STOP: GPU derivation complete, handoff at /tmp/claude-1000/-media-acps-twoTBDrive-finetuninggemma4/0168ae93-8d26-40a8-b67b-b434c62a048a/scratchpad/gpu-control-token-handoff.md. Misplaced SaMD-App edit reverted, clone clean. Nothing else changed on this machine.
+STOP: GPU derivation complete, handoff at /tmp/claude-1000/-media-acps-twoTBDrive-finetuninggemma4/0168ae93-8d26-40a8-b67b-b434c62a048a/docs/design/gpu-control-token-handoff.md. Misplaced SaMD-App edit reverted, clone clean. Nothing else changed on this machine.

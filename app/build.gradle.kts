@@ -95,7 +95,7 @@ android {
             // block would stay silent on exactly those two cases; logging the resolved host here,
             // every time, is what actually surfaces a wrong address instead of it looking like an
             // unrelated "backend unavailable" on the phone. See
-            // scratchpad/resolve-dev-host-ip-review.md Q4/Q5.
+            // docs/design/resolve-dev-host-ip-review.md Q4/Q5.
             logger.lifecycle(
                 "dev backend resolved to $resolvedDevBackend" +
                     if (backendIsAuto) " via auto" else " (from local.properties)",

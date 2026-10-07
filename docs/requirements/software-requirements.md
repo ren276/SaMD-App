@@ -222,7 +222,7 @@ Conventions: `REQ-<AREA>-NN`. Status: **DONE** (implemented + manually verified)
   makes no promise about when a doctor will review it. A review-time promise returns only when a
   review-time control exists (a deployment setting, a doctor-side escalation, and an audit of
   misses); until then no screen may quote one. Memo section 12.5 and operator ruling Q1
-  (`scratchpad/sync-failure-visibility-memo.md`). Supersedes the earlier text, which quoted a
+  (`docs/design/sync-failure-visibility-memo.md`). Supersedes the earlier text, which quoted a
   24-hour window from `R.integer.sync_window_hours`; that provider and resource are removed.
 - **REQ-TRS-04** (PARTIAL) Guided structured non-measurable capture: flat severity/duration/onset/
   qualifiers fields shipped in Phase 2's `NewAilmentCard` (`AilmentEntry.severity/duration/

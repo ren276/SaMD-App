@@ -246,7 +246,7 @@ run_navstack_mode() {
     echo "to the same destination, but two screens sharing most of their text would satisfy it. The"
     echo "precise check would compare a route-specific marker, which needs the app to emit one (for"
     echo "example the restored stack depth and top route class name to logcat); that does not exist"
-    echo "and is recorded as owed in scratchpad/navstack-phase4-scope.md."
+    echo "and is recorded as owed in docs/design/navstack-phase4-scope.md."
     echo "Fields held only in ViewModel memory (a typed form, an in-flight acquisition) are expected"
     echo "to come back empty; that is RR-03, not a restore failure."
     return 0

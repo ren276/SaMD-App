@@ -111,7 +111,7 @@ enum class AuditAction(val value: String) {
      *  only the unrecognised fields present. Model vocabulary, never PHI. */
     KERNEL_UNRECOGNISED_OUTPUT("kernel_unrecognised_output"),
 
-    /** ASR track (`scratchpad/asr-field-audit-memo.md` B.4), one per state in the
+    /** ASR track (`docs/design/asr-field-audit-memo.md` B.4), one per state in the
      *  confirmation-gate model. Field-level provenance only, no transcript: `auditPayload("slot"
      *  to ..., "provenance" to ..., "asrModelId" to ..., "asrModelVersion" to ..., "charCount"
      *  to ..., "editDistance" to ...)`. Not emitted by anything yet; PR 3 wires the confirmation
@@ -164,7 +164,7 @@ enum class AuditAction(val value: String) {
      *  which nobody would otherwise find out about. */
     NAV_STACK_RESTORE_DISCARDED("nav_stack_restore_discarded"),
 
-    /** SLM approved-record readback (`scratchpad/slm-guardrail-service-contract-memo.md` §9.4), one
+    /** SLM approved-record readback (`docs/design/slm-guardrail-service-contract-memo.md` §9.4), one
      *  per pipeline outcome the seam owes a row for. Added with the backend mirror entries in
      *  `backend/core/app/domain/audit_actions_device.py` in the same commit: a device action the
      *  mirror does not accept is rejected at sync, `rejected` maps to `SyncState.FAILED`

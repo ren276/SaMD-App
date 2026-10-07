@@ -6,9 +6,9 @@ Run date: 2026-09-06. SaMDApp branch `master`, HEAD `cab78ae`.
 test, config, dataset or model file touched. Nothing staged, nothing committed. No `.env`,
 `local.properties` or any credential file opened at any point. No build run, no network call.
 
-**Inputs treated as established fact, not re-derived**: `scratchpad/classifier-dataset-nlem-audit-memo.md`
-and `scratchpad/production-classifier-architecture-memo.md`. Also read for prior-art continuity:
-`scratchpad/pr7a-structured-capture-design-memo.md` (2026-08-31, HEAD `a1f9176` — its line
+**Inputs treated as established fact, not re-derived**: `docs/design/classifier-dataset-nlem-audit-memo.md`
+and `docs/design/production-classifier-architecture-memo.md`. Also read for prior-art continuity:
+`docs/design/pr7a-structured-capture-design-memo.md` (2026-08-31, HEAD `a1f9176` — its line
 citations have drifted; every citation below was re-verified against disk at `cab78ae`).
 
 Working tree at start (pre-existing, none of it mine): `.idea/deploymentTargetSelector.xml` and
@@ -285,12 +285,12 @@ inside the ID cell). Proposed row, to be appended after H-19:
 
 | ID | Hazard / hazardous situation | Potential harm | Sev* | Prob* | Risk controls implemented | Residual / open work |
 |----|------------------------------|----------------|------|-------|---------------------------|----------------------|
-| **PROPOSED, AWAITING OPERATOR SIGN-OFF. NOT APPROVED. Drafted 2026-09-06, Part A of the demo constrained-capture track** H-20 | An empty or token-free symptom input produces a **confident** differential from the model's training prior rather than an abstention | A clinician is shown `E66 Obesity` at **74.95%** confidence for a patient about whom nothing was recorded, stamped as a real inference and indistinguishable from an assessment of that patient. Measured 2026-08-31 (`scratchpad/classifier-wire-format-investigation.md` finding X-3, transcribed in `scratchpad/classifier-dataset-nlem-audit-memo.md` §C.1): `E66 0.7495 · I10 0.0709 · M17 0.0397 · A90 0.0337 · B54 0.0308`. Root cause is the label space, not the wire: E66 is 41.82% of labelled training rows. Automation-bias amplified — cf. H-02 | High | Low | Chief complaint required at capture (`SaveConsultationUseCase` blank check) and at send (`ConsultationUiState.canSend`); **new**: defensive gate in `GenerateEvaluateReportUseCase` — an empty or token-free symptom input never reaches `/api/v1/evaluate` and is recorded as an H-14 failure marker (`EMPTY_SYMPTOM_INPUT`), surfaced on the report as "EVALUATION FAILED" | **Open.** The gate refuses the input; it does not make the model abstain. Any future change that can resolve the chief complaint to an empty token list (a collapsible pick-list, a normalization layer that drops all terms, an on-device port) re-opens this at the new seam. Out-of-vocabulary input remains **unmitigated and separate**: measured confidently-wrong single-term answers (`'Toothache' → B54 malaria 0.437`; `'Diarrhoea / loose motions' → M17 knee osteoarthritis 0.644`) are not covered by any control here and need their own row once the label space is reworked. Real resolution is the reason-for-encounter relabel (`scratchpad/production-classifier-architecture-memo.md`) |
+| **PROPOSED, AWAITING OPERATOR SIGN-OFF. NOT APPROVED. Drafted 2026-09-06, Part A of the demo constrained-capture track** H-20 | An empty or token-free symptom input produces a **confident** differential from the model's training prior rather than an abstention | A clinician is shown `E66 Obesity` at **74.95%** confidence for a patient about whom nothing was recorded, stamped as a real inference and indistinguishable from an assessment of that patient. Measured 2026-08-31 (`docs/design/classifier-wire-format-investigation.md` finding X-3, transcribed in `docs/design/classifier-dataset-nlem-audit-memo.md` §C.1): `E66 0.7495 · I10 0.0709 · M17 0.0397 · A90 0.0337 · B54 0.0308`. Root cause is the label space, not the wire: E66 is 41.82% of labelled training rows. Automation-bias amplified — cf. H-02 | High | Low | Chief complaint required at capture (`SaveConsultationUseCase` blank check) and at send (`ConsultationUiState.canSend`); **new**: defensive gate in `GenerateEvaluateReportUseCase` — an empty or token-free symptom input never reaches `/api/v1/evaluate` and is recorded as an H-14 failure marker (`EMPTY_SYMPTOM_INPUT`), surfaced on the report as "EVALUATION FAILED" | **Open.** The gate refuses the input; it does not make the model abstain. Any future change that can resolve the chief complaint to an empty token list (a collapsible pick-list, a normalization layer that drops all terms, an on-device port) re-opens this at the new seam. Out-of-vocabulary input remains **unmitigated and separate**: measured confidently-wrong single-term answers (`'Toothache' → B54 malaria 0.437`; `'Diarrhoea / loose motions' → M17 knee osteoarthritis 0.644`) are not covered by any control here and need their own row once the label space is reworked. Real resolution is the reason-for-encounter relabel (`docs/design/production-classifier-architecture-memo.md`) |
 
 Plus one sentence appended to the explanatory paragraph that already follows the table:
 
 > **H-20 is a proposed addition from the 2026-09-06 read-only design work
-> (`scratchpad/demo-dropdowns-and-empty-input-guard-memo.md`). The hazard was measured on
+> (`docs/design/demo-dropdowns-and-empty-input-guard-memo.md`). The hazard was measured on
 > 2026-08-31 and carried in a scratchpad memo only until now; the row registers it. The control
 > lands in code as Part A of the same track. The row stays open: the guard prevents the empty-input
 > path, not the confidently-wrong-answer class it belongs to.**
@@ -585,5 +585,5 @@ push without explicit per-turn consent.
 
 ## 5. Repo state at end of this memo
 
-Nothing written outside `scratchpad/demo-dropdowns-and-empty-input-guard-memo.md`. Nothing staged,
+Nothing written outside `docs/design/demo-dropdowns-and-empty-input-guard-memo.md`. Nothing staged,
 nothing committed. `git status --short` reported in the session output.

@@ -2,7 +2,7 @@
 
 **Status:** code change, committed on `feat/slm-backend-proxy`. The four pre-existing uncommitted
 changes are untouched and still dirty. No credential file was opened. `docs/quality/risk-management-file.md`
-was not edited; H-28 stays drafted in `scratchpad/slm-remote-inference-memo.md` section 1.6.
+was not edited; H-28 stays drafted in `docs/design/slm-remote-inference-memo.md` section 1.6.
 
 **Date:** 2026-09-20.
 **Tree:** SaMDApp on `feat/slm-backend-proxy`, off `feat/audit-remediation` (10 commits) off `a219da9`.

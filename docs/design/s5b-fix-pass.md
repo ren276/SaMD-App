@@ -11,7 +11,7 @@ Every claim below is tagged MEASURED or INFERRED.
 
 ## Part 1: `write_out_of_band` docstring
 
-**MEASURED** (inherited from S-5, `scratchpad/s5-abdm-response-unpacking.md` section 2, `pg_stat_activity`
+**MEASURED** (inherited from S-5, `docs/design/s5-abdm-response-unpacking.md` section 2, `pg_stat_activity`
 sampled three times at 8s intervals during a killed 70s hang): the deadlock is not a row lock. It is
 `pg_advisory_xact_lock(facility)`, taken by `app.services.audit.append`, transaction scoped. A
 request session that has appended one audit row holds that lock until its transaction ends; an
@@ -36,7 +36,7 @@ the record (S-5's memo and this one), not in the docstring, per instruction. Not
 **MEASURED** (S-5, same memo, section 0): `app.config.Settings` (`env_file=".env"`) reads
 `ABDM_MODE` from the environment / `.env` ahead of its own `"stub"` field default. This tree's
 uncommitted `backend/docker-compose.yml` sets `ABDM_MODE: live` (flagged separately in
-`scratchpad/AUDIT5-antigravity-uncommitted-work.md` as blocking, untouched by me). Any contributor
+`docs/design/AUDIT5-antigravity-uncommitted-work.md` as blocking, untouched by me). Any contributor
 or agent running the backend suite without an explicit `ABDM_MODE=stub` override risks making
 `tests/test_abha.py` transact against `https://dev.abdm.gov.in`.
 
@@ -69,14 +69,14 @@ Discarded; the number above is from a single clean process.
 caused by missing ABDM credentials." That is wrong for 13 of the 14; corrected in place, in each
 file, with a dated correction paragraph rather than a silent rewrite of the original claim:
 
-- `scratchpad/pr2-failure-taxonomy.md` (§ "Full backend suite: 260 passed, 14 failed"). This one had
+- `docs/design/pr2-failure-taxonomy.md` (§ "Full backend suite: 260 passed, 14 failed"). This one had
   already named the right mechanism (`ABDM_MODE: live` in `docker-compose.yml`) for the 13
   `test_abha.py` failures; the correction is that calling them "environmental" alongside the
   credentials bullet read as "expected noise", when they are actual failed live calls. The
   `test_config.py::test_prod_accepts_real_secrets` bullet (1 of the 14, a config validator
   correctly requiring real prod secrets this session is forbidden to supply) is unaffected and
   still correctly described.
-- `scratchpad/sync-failure-taxonomy-diagnosis.md` (§4.3, "The 14 failing ABDM tests are an
+- `docs/design/sync-failure-taxonomy-diagnosis.md` (§4.3, "The 14 failing ABDM tests are an
   environment without gateway credentials, not this bug."). This sentence was the wrong claim
   outright: the `KeyError: 'accessToken'` is what a live sandbox response missing that field
   produces, not evidence of an environment lacking credentials. The surrounding verdict — that the

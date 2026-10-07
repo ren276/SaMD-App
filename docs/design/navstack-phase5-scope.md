@@ -73,7 +73,7 @@ in a regulated document is your decision and not mine.
 
 Banner cell, matching the house style exactly:
 
-> `**PROPOSED, AWAITING OPERATOR SIGN-OFF. NOT APPROVED. Drafted 2026-09-18, navigation back-stack process-death track, phases 1 to 4 (`scratchpad/navstack-restore-memo.md`, `scratchpad/navstack-phase3-scope.md`, `scratchpad/navstack-phase4-scope.md`)** H-26`
+> `**PROPOSED, AWAITING OPERATOR SIGN-OFF. NOT APPROVED. Drafted 2026-09-18, navigation back-stack process-death track, phases 1 to 4 (`docs/design/navstack-restore-memo.md`, `docs/design/navstack-phase3-scope.md`, `docs/design/navstack-phase4-scope.md`)** H-26`
 
 **Hazard / hazardous situation.** Restoring a persisted navigation back stack places a worker into
 a clinical screen whose context is no longer the context that was saved. Four failure directions,
@@ -245,7 +245,7 @@ All three anchors VERIFIED present:
   and swept at every app start (`SaMDApplication.onCreate`, `sweepOrphanedViewerTempFiles`).
   `DocumentViewerRoute` is safe to restore into because re-decrypt is idempotent and the sweep
   runs, so H-26 depends on that property and points at it rather than restating it.
-- **Build 3b Option A.** H-18's banner already names it, and `scratchpad/capture-process-death-memo.md`
+- **Build 3b Option A.** H-18's banner already names it, and `docs/design/capture-process-death-memo.md`
   exists. `scripts/process_death_check.sh` is shared between that work and this one, now with two
   modes whose expectations about `am kill` are opposite. H-26 points at the shared script.
 

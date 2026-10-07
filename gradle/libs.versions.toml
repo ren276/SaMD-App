@@ -77,7 +77,7 @@ androidx-hilt-compiler = { group = "androidx.hilt", name = "hilt-compiler", vers
 # CameraX - in-process document capture (H-18 Build 3b, process-death fix). Replaces the external
 # ActivityResultContracts.TakePicture hand-off so a captured page never needs a plaintext staging
 # file and the camera app never takes the foreground (the low-memory-killer trigger that caused
-# the lost-page field report). See scratchpad/capture-process-death-memo.md.
+# the lost-page field report). See docs/design/capture-process-death-memo.md.
 androidx-camera-core = { group = "androidx.camera", name = "camera-core", version.ref = "camerax" }
 androidx-camera-camera2 = { group = "androidx.camera", name = "camera-camera2", version.ref = "camerax" }
 androidx-camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "camerax" }

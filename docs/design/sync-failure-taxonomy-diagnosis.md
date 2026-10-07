@@ -323,7 +323,7 @@ message and a logged traceback. That is the correct outcome. **The 14 failing AB
 environment without gateway credentials, not this bug.**
 
 **Correction, S-5b, 2026-09-19:** the last sentence is wrong and is now known to be wrong. S-5
-(`scratchpad/s5-abdm-response-unpacking.md` section 0) measured the actual cause: `app.config
+(`docs/design/s5-abdm-response-unpacking.md` section 0) measured the actual cause: `app.config
 .Settings` reads `ABDM_MODE` from the environment/.env ahead of its own `"stub"` default, and this
 tree's `docker-compose.yml` (and/or local `.env`) sets a live `ABDM_MODE`, so the suite makes real
 outbound requests to `https://dev.abdm.gov.in`. These are not tests idling in an environment that

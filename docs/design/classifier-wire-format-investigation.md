@@ -3,7 +3,7 @@
 Run date: 2026-08-31. SaMD-App branch `docs/asr-vocab-and-h16`, HEAD `a1f9176`.
 
 This memo settles PR 7a DECISION GATE items 2 and 7 from
-`scratchpad/pr7a-structured-capture-design-memo.md` against the real classifier and its real
+`docs/design/pr7a-structured-capture-design-memo.md` against the real classifier and its real
 training data, both of which are on this machine and neither of which the earlier memos could read.
 
 **The headline, stated first because it changes the build.** The design direction (a human-tapped
@@ -61,7 +61,7 @@ this session created is this memo.
 
 ### Incidental correction to an earlier memo
 
-`scratchpad/asr-field-audit-memo.md` C-4 states that `drishti_pipeline` "does not exist in this
+`docs/design/asr-field-audit-memo.md` C-4 states that `drishti_pipeline` "does not exist in this
 repository". That is true of SaMD-App and remains true. But it **does** exist on this machine, at
 `/media/sandesh/extra-ssd/dataset/dataset-make/drishti_pipeline/` (`run_pipeline.py`,
 `step1_generate.py`, `config.py`, `preflight_check.py`, `README.md`). C-4's follow-up sentence, "if
@@ -421,7 +421,7 @@ different questions.
 
 ## 4. CONCLUSIONS: updates to the PR 7a decision gate
 
-These update `scratchpad/pr7a-structured-capture-design-memo.md`'s DECISION GATE. They do not
+These update `docs/design/pr7a-structured-capture-design-memo.md`'s DECISION GATE. They do not
 replace it. Unchanged items are marked so.
 
 ### Gate 2 (wire format): SETTLED, one part corrected

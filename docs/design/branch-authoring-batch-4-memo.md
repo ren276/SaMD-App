@@ -9,14 +9,14 @@ in code, no dataset generated, no model trained. No `.env`, `local.properties` o
 opened at any point. No commit, no staging.
 
 **Inputs treated as binding and not re-derived:**
-`scratchpad/branch-authoring-batch-3-memo.md`, `scratchpad/branch-authoring-batch-2-memo.md`,
-`scratchpad/branch-authoring-batch-1-memo.md` (the reference structure, the complete shared registry
+`docs/design/branch-authoring-batch-3-memo.md`, `docs/design/branch-authoring-batch-2-memo.md`,
+`docs/design/branch-authoring-batch-1-memo.md` (the reference structure, the complete shared registry
 across all three batches, every sub-tree, and findings G-1…G-18),
-`scratchpad/questionnaire-tree-design-memo.md` (the schema: §1 branch schema, §6 five-stage
+`docs/design/questionnaire-tree-design-memo.md` (the schema: §1 branch schema, §6 five-stage
 template, §3/§4/§5 the three reference branches),
-`scratchpad/reason-for-encounter-category-system-memo.md` (every category constant from §6 and §7;
+`docs/design/reason-for-encounter-category-system-memo.md` (every category constant from §6 and §7;
 RF-1…RF-4 from §4.4),
-`scratchpad/dataset-regeneration-design-memo.md` (what the generator walks).
+`docs/design/dataset-regeneration-design-memo.md` (what the generator walks).
 
 **Also read on disk this session, read-only:**
 `SaMDClassifier/dataset/canonical_dataset.csv` (one measurement pass, §0.2).

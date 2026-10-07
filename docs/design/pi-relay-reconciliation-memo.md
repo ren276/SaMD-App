@@ -986,7 +986,7 @@ risk file is signed.
 
 ## Final stop gate
 
-Nothing was written outside `scratchpad/pi-relay-reconciliation-memo.md`. No code was changed. No
+Nothing was written outside `docs/design/pi-relay-reconciliation-memo.md`. No code was changed. No
 commit was made. `PROGRESS.md` was not updated. No `.env` or credential file was opened. No file
 in `docs/` was touched.
 

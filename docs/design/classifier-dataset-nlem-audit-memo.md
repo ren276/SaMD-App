@@ -209,7 +209,7 @@ rows, 7,850 within the labelled subset.
 
 ### C.1 Already recorded, and load-bearing
 
-`scratchpad/classifier-wire-format-investigation.md` (2026-08-31, finding X-3) measured the
+`docs/design/classifier-wire-format-investigation.md` (2026-08-31, finding X-3) measured the
 **empty-`symptom_string` prior**:
 
     E66 0.7495 · I10 0.0709 · M17 0.0397 · A90 0.0337 · B54 0.0308

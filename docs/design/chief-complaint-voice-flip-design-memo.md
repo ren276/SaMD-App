@@ -55,7 +55,7 @@ The branching tree did **not** land on this field. What landed on `feat/consulta
 
 Corroborating negative: `grep -rl "categoryId\|CategoryId\|reasonForEncounter" app/src/main/java`
 returns **nothing**. The reason-for-encounter category system and the questionnaire tree
-(`scratchpad/reason-for-encounter-category-system-memo.md`, `questionnaire-tree-design-memo.md`,
+(`docs/design/reason-for-encounter-category-system-memo.md`, `questionnaire-tree-design-memo.md`,
 `pr7a-structured-capture-design-memo.md`) are all PROPOSED. `pr7a-...-memo.md:734` says so in its own
 words: "H-15. Untouched. `FeatureFlags.VOICE_INPUT_ENABLED` stays `false`. 7a is not the voice PR."
 

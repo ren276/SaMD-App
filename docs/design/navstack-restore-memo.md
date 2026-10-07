@@ -549,7 +549,7 @@ Next free residual id is **RR-03**.
 Same row format and same PROPOSED banner convention as H-18 through H-25.
 
 > **PROPOSED, AWAITING OPERATOR SIGN-OFF. NOT APPROVED. Drafted 2026-09-17, navigation back-stack
-> process-death restore design memo (`scratchpad/navstack-restore-memo.md`), H4-a** **H-26** |
+> process-death restore design memo (`docs/design/navstack-restore-memo.md`), H4-a** **H-26** |
 > Restoring a persisted navigation back stack places the worker back into a clinical screen whose
 > context is no longer the context that stack was saved in |
 > (a) **wrong-session restore**: a stack saved under worker A is adopted by worker B's sign-in in
@@ -676,7 +676,7 @@ itself is deliberately untouched until then; this is the staging area.
   `document_viewed` audit row fires at actual decrypt-and-render. Restore re-renders, so it
   re-audits, which is correct. H-26 relies on that property; if the sweep or the audit point ever
   moves, `DocumentViewerRoute`'s verdict has to be re-examined.
-- **H-18 Build 3b Option A (`scratchpad/capture-process-death-memo.md`).** That memo's claim is
+- **H-18 Build 3b Option A (`docs/design/capture-process-death-memo.md`).** That memo's claim is
   that the capture screen never leaves the foreground and so is never an LMK candidate. H-26 is the
   complement: every other screen **is** killable, and this is the design for what happens when one
   is. The two memos share `scripts/process_death_check.sh`, which is why section 7.3 extends it

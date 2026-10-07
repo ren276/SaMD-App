@@ -13,10 +13,10 @@ run, no training, no side-effecting command. No `.env`, `local.properties` or cr
 at any point. No commit, no staging.
 
 **Inputs treated as established fact and not re-derived:**
-`scratchpad/questionnaire-tree-design-memo.md` (its §7 dataset contract is this memo's **binding
-specification**), `scratchpad/reason-for-encounter-category-system-memo.md` (the label space and the
-§2/§7 Indian-PHC anchors), `scratchpad/production-classifier-architecture-memo.md`,
-`scratchpad/classifier-dataset-nlem-audit-memo.md` (every defect this regeneration must not repeat).
+`docs/design/questionnaire-tree-design-memo.md` (its §7 dataset contract is this memo's **binding
+specification**), `docs/design/reason-for-encounter-category-system-memo.md` (the label space and the
+§2/§7 Indian-PHC anchors), `docs/design/production-classifier-architecture-memo.md`,
+`docs/design/classifier-dataset-nlem-audit-memo.md` (every defect this regeneration must not repeat).
 
 **Generator grounding, read on disk this session:** `drishti_pipeline/run_pipeline.py`, `config.py`,
 `step2_extract_vitals.py`, `step3_tiered_generator.py`, `step4_symptom_pairing.py`,

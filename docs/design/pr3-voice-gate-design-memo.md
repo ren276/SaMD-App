@@ -1,9 +1,9 @@
 # PR 3 STEP 1 design memo: the voice confirmation gate for `impactOnDailyActivities`
 
 Read-only design pass. No production code written, no migration, no controlled doc touched.
-Design of record for the track is `scratchpad/asr-field-audit-memo.md` Part B (B.2 provenance,
+Design of record for the track is `docs/design/asr-field-audit-memo.md` Part B (B.2 provenance,
 B.3 gate state model, B.4 breadcrumbs), with the evidence base in
-`scratchpad/asr-usecase-research-memo.md` TASK 1 (automation bias) and TASK 2 (formatting
+`docs/design/asr-usecase-research-memo.md` TASK 1 (automation bias) and TASK 2 (formatting
 boundary). This memo turns B.3 into a concrete state model against the code as it actually is.
 
 ## 0. Ground truth, and one thing that does not match the task's assumption

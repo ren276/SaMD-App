@@ -1,7 +1,7 @@
 # Queue seams: design memo (STEP 1, design only)
 
 Date: 2026-08-28. Branch: `design/queue-seams` (cut from master @ 600e0e2).
-Read-only except this memo. Builds on `scratchpad/async-queue-design.md` and does not
+Read-only except this memo. Builds on `docs/design/async-queue-design.md` and does not
 contradict it. Settles the two items that memo marked Opus-design-needed so STEP 2
 Sonnet never makes a design call in flight.
 

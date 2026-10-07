@@ -10,11 +10,11 @@ point. No source, dataset, model, config or generator file touched in any repo.
 
 **Inputs treated as established fact and not re-derived:**
 
-- `scratchpad/production-classifier-architecture-memo.md` — the three-layer design (Layer 2
+- `docs/design/production-classifier-architecture-memo.md` — the three-layer design (Layer 2
   calibrated boosted head, Layer 3 conformal abstention).
-- `scratchpad/dataset-regeneration-design-memo.md` — corpus contract, schema, generation rules.
-- `scratchpad/reason-for-encounter-category-system-memo.md` — label space and category semantics.
-- `scratchpad/classifier-dataset-nlem-audit-memo.md` — defects to avoid.
+- `docs/design/dataset-regeneration-design-memo.md` — corpus contract, schema, generation rules.
+- `docs/design/reason-for-encounter-category-system-memo.md` — label space and category semantics.
+- `docs/design/classifier-dataset-nlem-audit-memo.md` — defects to avoid.
 - `scratchpad/branch-authoring-batch-{1..4}-memo.md` — full label space, disposition
   floor/abstain semantics, DECISION-1 (REFER_EMERGENCY forces abstention).
 - `drishti_v2_output/corpus.csv` and `generation_manifest.json` — ground truth, read on disk.

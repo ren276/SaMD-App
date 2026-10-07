@@ -8,7 +8,7 @@ import java.time.Instant
  * derived from the union of [com.example.samdapp.domain.usecase.ResolveDoctorAssignmentUseCase]'s
  * `mapConditionToSpecialty` routing targets and the seeded `doctors` table
  * (`DatabaseModule.seedDoctorsOnCreate`, `MIGRATION_6_7`/`MIGRATION_11_12`) — see
- * `scratchpad/document-vocab-audit.md` for the full sourcing and the one taxonomy conflict found
+ * `docs/design/document-vocab-audit.md` for the full sourcing and the one taxonomy conflict found
  * ([PEDS]/[INFECT_DIS] are seeded but no routing keyword ever assigns a case to them).
  *
  * The worker SELECTS one of these from a dropdown at upload; this is never free text.
@@ -21,7 +21,7 @@ enum class DepartmentCode {
 /**
  * Document-content-category vocabulary for the `<RecordTypeCode>` slot (H-18, Build 3a).
  * **Operator-signed PROVISIONAL** — unlike [DepartmentCode], no repo source exists for this
- * vocabulary (`scratchpad/document-vocab-audit.md` section B: zero authoritative source for a
+ * vocabulary (`docs/design/document-vocab-audit.md` section B: zero authoritative source for a
  * clinical document-category taxonomy anywhere in this repo or its sibling projects). These 6
  * values were operator-picked, not repo-derived, and are marked provisional pending clinical
  * review. Adding/removing a code later is a code-list change only — this enum has deliberately

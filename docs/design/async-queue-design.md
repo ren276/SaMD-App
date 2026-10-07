@@ -2,7 +2,7 @@
 
 Date: 2026-08-28. Branch: master @ 600e0e2. Read-only. No code, no branch, no commit.
 Scope: build-sequence item 2, replace the blocking SendingScreen with a WorkManager job.
-No ABDM. Companion to `scratchpad/kernel-reports-upsert-investigation.md`.
+No ABDM. Companion to `docs/design/kernel-reports-upsert-investigation.md`.
 
 ---
 
@@ -331,7 +331,7 @@ second server-side record". The backend already prevents that, keyed on the clie
 (`backend/core/app/services/sync.py:285-287,302-309`), plus batch replay
 (`app/models/sync.py:20-25,33,47`). The gap the brief anticipated is not open.
 
-**Third, a correction to my own prior memo.** `scratchpad/kernel-reports-upsert-investigation.md`
+**Third, a correction to my own prior memo.** `docs/design/kernel-reports-upsert-investigation.md`
 listed "stranding any outbox entry holding the first id" as the consequence of the race.
 That was written before reading `RoomSyncOutboxRepository`. There are no outbox entries;
 the window is one in-flight batch and it self-heals. The real cost of the race is the

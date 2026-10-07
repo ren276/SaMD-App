@@ -26,7 +26,7 @@ import org.junit.Rule
 import org.junit.Test
 
 /**
- * PR 3d (`scratchpad/pr3-voice-gate-design-memo.md` Part C). Proves the four `VOICE_FIELD_*`
+ * PR 3d (`docs/design/pr3-voice-gate-design-memo.md` Part C). Proves the four `VOICE_FIELD_*`
  * breadcrumbs emit at the right transitions with a metadata-only payload, and that the payload
  * never carries a transcript, corrected text, URI or patient name (C.4). The feature is still
  * dark (`FeatureFlags.VOICE_FIELD_IMPACT_ENABLED` is false), so these handlers have no caller in

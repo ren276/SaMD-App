@@ -64,7 +64,7 @@ brand-name lookup only, never blocking, never patient-identifying data). No hard
 device interfacing.
 
 ## i) Speech-to-text (ASR) as a documentation aid [PROPOSED, AWAITING OPERATOR SIGN-OFF]
-**Drafted (`fix/asr-offdevice-exposure` PR 0b) from `scratchpad/asr-usecase-research-memo.md`
+**Drafted (`fix/asr-offdevice-exposure` PR 0b) from `docs/design/asr-usecase-research-memo.md`
 sections C.1 and the FORMATTING BOUNDARY STATEMENT. Not yet operator-approved.**
 
 **AMENDED 2026-09-02 (PR 4b), PROPOSED, AWAITING OPERATOR SIGN-OFF. What the device does has

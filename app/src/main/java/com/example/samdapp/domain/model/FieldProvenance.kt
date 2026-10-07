@@ -1,7 +1,7 @@
 package com.example.samdapp.domain.model
 
 /** Per-field provenance for a voice-fillable clinical field (ASR track, PR 1 of the sequence in
- *  `scratchpad/asr-field-audit-memo.md` Part B.2, "Provenance stamping, mirroring the
+ *  `docs/design/asr-field-audit-memo.md` Part B.2, "Provenance stamping, mirroring the
  *  vitals-provenance property"). Mirrors [InferenceSource]'s stamped-once discipline: recorded
  *  once, at the exact point a value is committed, so it can never drift out of sync with how that
  *  value actually got there.
@@ -11,7 +11,7 @@ package com.example.samdapp.domain.model
  *    honest, not a guess).
  *  - [VOICE_UNCONFIRMED]: an ASR suggestion sits in UI state, not yet read and accepted by the
  *    worker. **Must never be persisted and never synced.** The repository write path refuses it
- *    — that refusal is PR 3 (`scratchpad/asr-field-audit-memo.md`), not this PR. This PR only
+ *    — that refusal is PR 3 (`docs/design/asr-field-audit-memo.md`), not this PR. This PR only
  *    adds the enum value and the column; nothing in the app can produce [VOICE_UNCONFIRMED] yet,
  *    since no voice capture UI exists on this branch.
  *  - [VOICE_CONFIRMED]: the worker read an ASR suggestion and tapped confirm, unedited.

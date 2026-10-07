@@ -177,7 +177,7 @@ internal fun ConsultationContent(uiState: ConsultationUiState, actions: Consulta
     // H-18, Build 3b, Option A: document capture is in-process CameraX (DocumentCaptureSurface
     // embeds the viewfinder directly), not the external `TakePicture` hand-off the affected-area
     // photo above still uses. No launcher and no FileProvider grant needed here - see
-    // scratchpad/capture-process-death-memo.md for why this replaced the old staging-file path.
+    // docs/design/capture-process-death-memo.md for why this replaced the old staging-file path.
     val capture = uiState.documentCapture
     if (capture != null) {
         DocumentCaptureSurface(capture = capture, actions = actions)
@@ -621,7 +621,7 @@ private fun ConsultationReviewDialog(
 }
 
 /**
- * The gate's Suggested state (`scratchpad/pr3-voice-gate-design-memo.md` A.4). Rendered in its
+ * The gate's Suggested state (`docs/design/pr3-voice-gate-design-memo.md` A.4). Rendered in its
  * own [Card], adjacent to the impact `OutlinedTextField` above it, never inside it: the
  * suggestion is [uiState.impactVoiceSuggestion][ConsultationUiState.impactVoiceSuggestion], a
  * separate field from the committed value, so this composable cannot mutate the text field even

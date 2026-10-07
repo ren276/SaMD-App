@@ -10,9 +10,9 @@ dataset regenerated, no model trained. No `.env`, `local.properties` or credenti
 any point. No commit, no staging.
 
 **Inputs treated as established fact and not re-derived:**
-`scratchpad/reason-for-encounter-category-system-memo.md` (the direct input — every branch here
-roots at a `categoryId` from it), `scratchpad/production-classifier-architecture-memo.md`,
-`scratchpad/classifier-dataset-nlem-audit-memo.md`. Also read on disk for grounding:
+`docs/design/reason-for-encounter-category-system-memo.md` (the direct input — every branch here
+roots at a `categoryId` from it), `docs/design/production-classifier-architecture-memo.md`,
+`docs/design/classifier-dataset-nlem-audit-memo.md`. Also read on disk for grounding:
 `ConsultationScreen.kt`, `Consultation.kt`, `AilmentEntry.kt`, `KernelPayload.kt`,
 `EvaluateRequestDto.kt`, `VitalsSnapshot.kt`, `Attachment.kt`, `ReferralRequest.kt`,
 `AuthSession.kt`, `FieldProvenance.kt`, `GenerateEvaluateReportUseCase.kt`,

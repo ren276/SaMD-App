@@ -101,7 +101,7 @@ async def write_out_of_band(
        waiting on `write_out_of_band` to return — a permanent deadlock, not a slow query, and not
        specific to any one row: the two sessions never touch the same table row at all, only the
        same facility-scoped advisory lock. MEASURED,
-       `backend/scratchpad/s5-abdm-response-unpacking.md` section 2:
+       `backend/docs/design/s5-abdm-response-unpacking.md` section 2:
        `pg_stat_activity` showed the request session idle in transaction holding the lock while
        the out-of-band session sat `active`/`Lock`/`advisory` on the identical key, unrecovered
        until the connections were killed.

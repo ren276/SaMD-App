@@ -11,9 +11,9 @@ proceeds and records the state rather than blocking on it. Nothing was staged, c
 pushed by this session. No file outside `scratchpad/` was written. `.env`, `local.properties`,
 `BuildConfig` and every credential file untouched. No migration written, no `docs/` file modified.
 
-Read in full: `scratchpad/asr-field-audit-memo.md` (864 lines),
+Read in full: `docs/design/asr-field-audit-memo.md` (864 lines),
 `scratchpad/asr-symptom-vocabulary-research.md` (270 lines),
-`scratchpad/asr-usecase-research-memo.md` (sections 0, TASK 3, TASK 4, RECOMMENDATIONS, FORMATTING
+`docs/design/asr-usecase-research-memo.md` (sections 0, TASK 3, TASK 4, RECOMMENDATIONS, FORMATTING
 BOUNDARY STATEMENT read verbatim; TASK 0/1/2/5 read by outline and targeted section).
 Also read: `CLAUDE.md`, `PROGRESS.md` (last four session entries),
 `docs/backend/api-contract.md` section 5.4 (the evaluate leg),
@@ -945,7 +945,7 @@ No production code written. No migration written. No `docs/` file modified. No n
 written into `docs/`; the REQ-CON-03 text and the H-16 control-and-residual text in Part E are
 drafts for the operator, not entries. `.env`, `local.properties`, `BuildConfig` and every credential
 file untouched. Nothing staged, committed, or pushed. The only file written by this session is this
-one, at `scratchpad/pr7a-structured-capture-design-memo.md`.
+one, at `docs/design/pr7a-structured-capture-design-memo.md`.
 
 The ~41 vocabulary items themselves are NOT transcribed into this memo. They live in
 `scratchpad/asr-symptom-vocabulary-research.md` (30 adult general, 4 women's/maternal, 6 paediatric,

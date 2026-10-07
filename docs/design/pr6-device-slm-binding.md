@@ -16,8 +16,8 @@ STEP 0 item 1 says to add `POST /v1/generate` "using the paragraph quoted verbat
 machine's `pr5-slm-service-note.md` section 3.1". **That file is not on this machine.** MEASURED: a
 search of the whole tree for `pr5`, `PR-5` and `pr5-slm-service-note` returns no such file, and
 `/tmp/claude-1000/` (the GPU session's scratchpad root, named in
-`scratchpad/gpu-control-token-handoff.md`) does not exist here either. The only PR-5 material
-carried back to this machine is `scratchpad/gpu-control-token-handoff.md`, which covers the
+`docs/design/gpu-control-token-handoff.md`) does not exist here either. The only PR-5 material
+carried back to this machine is `docs/design/gpu-control-token-handoff.md`, which covers the
 tokenizer derivation and not the service note.
 
 So the paragraph is **not** a verbatim quote and is not presented as one. It was written from what
@@ -45,7 +45,7 @@ Commit 1, `docs/backend/slm-service-contract.md` only, 165 insertions, 15 deleti
 
 **On item 2, the digest.** MEASURED and unambiguous: the value in §3.1 was
 `cc8d3a0ce36466ccc1278bf987df5f71db1719b9ca6b4118264f45cb627bfe0f`, and that is byte for byte the
-SHA-256 `scratchpad/gpu-control-token-handoff.md` reports for `tokenizer.json` at revision
+SHA-256 `docs/design/gpu-control-token-handoff.md` reports for `tokenizer.json` at revision
 `3e22461f65e89153144f8adb70e3b8c2cc9845a7`. It is also what `SlmStreamSanitizer.kt` carries as
 `SANITIZER_TOKENIZER_SHA256`, where it is correctly labelled. Two fine-tunes of one base model share
 a tokenizer byte for byte, so the field an operator uses to confirm which **weights** are resident

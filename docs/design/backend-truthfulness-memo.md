@@ -6,8 +6,8 @@ server-side derivation gap, classifier contract discipline, historical correctio
 pin. Every claim is labelled **MEASURED** (file:line, or a command run) or **INFERRED**.
 Nothing in `docs/` is edited by this memo; section 8 holds proposals only.
 
-Sources: the Phase 0 and Phase 1 reviews of 2026-09-29 (in-session), `scratchpad/perf-audit-2026-09-18.md`
-(F6C-01 `:1004`, F6C-05 `:1148`), `scratchpad/f6c-calibrated-fix-and-version-inventory.md` (commit
+Sources: the Phase 0 and Phase 1 reviews of 2026-09-29 (in-session), `docs/design/perf-audit-2026-09-18.md`
+(F6C-01 `:1004`, F6C-05 `:1148`), `docs/design/f6c-calibrated-fix-and-version-inventory.md` (commit
 `7dfef02`), and the merged emergency fix #65.
 
 ## 0. State re-verified on master before relying on it

@@ -5,7 +5,7 @@ Run date: 2026-08-30. Branch `master`, HEAD `a69101c`. Working tree: no tracked 
 only. Nothing staged, committed, or pushed. Nothing written outside `scratchpad/`. `.env`,
 `local.properties`, `BuildConfig` untouched.
 
-Companion to `scratchpad/asr-field-audit-memo.md`, read in full and treated as ground truth for
+Companion to `docs/design/asr-field-audit-memo.md`, read in full and treated as ground truth for
 this repo. This memo updates that memo's DECISION GATE; it does not replace it.
 
 Also read: `CLAUDE.md`, `PROGRESS.md` (last four session entries, lines 3244 to 3429),

@@ -424,7 +424,7 @@ async def _apply_generic(
     unknown = set(data) - set(attr_map)
     if unknown:
         bad = sorted(unknown)[0]
-        # TERMINAL, with a known limitation recorded in scratchpad/s1-ack-contract.md: a device
+        # TERMINAL, with a known limitation recorded in docs/design/s1-ack-contract.md: a device
         # shipped AHEAD of the backend, sending a column the backend's mapper does not have yet,
         # would also land here and be destroyed rather than waiting for the backend migration.
         # Judged far more likely to be a device defect than a rollout skew, unlike the audit

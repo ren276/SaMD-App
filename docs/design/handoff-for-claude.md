@@ -114,7 +114,7 @@ This automatically:
 
 Per `.agents/AGENTS.md` Rule 5:
 1. **Broader Identity Merge / Duplicate ABHA Reconciliation:**
-   - The findings in `scratchpad/AUDIT4-offline-identity-sync-classifier.md` (offline-created patient ID reconciliation, server merge, ABHA deduplication) remain as an upcoming planned roadmap.
+   - The findings in `docs/design/AUDIT4-offline-identity-sync-classifier.md` (offline-created patient ID reconciliation, server merge, ABHA deduplication) remain as an upcoming planned roadmap.
 2. **Room DB Migrations:**
    - No migration was needed for this fix since `CaseRecordDao.getSyncState` queries the pre-existing `syncState` column. Schema is still at v13 (`MIGRATION_12_13`).
 3. **Branch Organization / PR:**

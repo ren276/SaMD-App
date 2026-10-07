@@ -33,7 +33,7 @@ import java.io.File
  * document survives an abort, and no session directory survives an abandon. A test that only
  * checked the returned `Result` would pass against an implementation that left all three behind.
  *
- * Phase B1/B2 note (scratchpad/capture-process-death-memo.md): every fixture helper here was
+ * Phase B1/B2 note (docs/design/capture-process-death-memo.md): every fixture helper here was
  * rewritten for Option A - `stagingPathFor`/the old two-argument `ingestPage` no longer exist, so
  * this went beyond the rotation-parameter plumbing the brief anticipated. Three tests
  * (`ingestingAPageEncryptsItAndLeavesNoPlaintextBehind`, `afterAMultiPageCaptureNoPlaintextPageRemains`,

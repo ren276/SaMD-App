@@ -2,7 +2,7 @@ package com.example.samdapp.domain.slm
 
 /**
  * Measured metadata about what the sanitizer removed from one generation
- * (`scratchpad/slm-guardrail-service-contract-memo.md` §6.1, "Not silent").
+ * (`docs/design/slm-guardrail-service-contract-memo.md` §6.1, "Not silent").
  *
  * The reason these counts exist is detectability, not display. The control-token set below is
  * taken from **one specific artifact's** vocabulary; a model swap can change the channel's token
@@ -71,7 +71,7 @@ internal const val SANITIZER_TOKENIZER_SHA256 =
  * this sanitizer's vocabulary was verified against.
  *
  * The comparison is against the `model_id` field of the response envelope specified in
- * `scratchpad/slm-remote-inference-memo.md` §2.2, which requires that field to be **derived from
+ * `docs/design/slm-remote-inference-memo.md` §2.2, which requires that field to be **derived from
  * the loaded artifact** rather than written as a literal. The sample serving app hardcodes its
  * `model` string and ignores the request's, which is precisely the defect this gate assumes will
  * recur.
@@ -110,7 +110,7 @@ internal fun servedModelMatchesSanitizer(servedModelId: String?): Boolean =
  * template emits the answer as plain content of the model turn and uses the channel only for
  * thought. If a future export moved the answer into a named channel, this rule would suppress it,
  * and the detector for that is [SlmSuppression.spans] being non-zero while the visible output is
- * empty. Recorded as an open item in `scratchpad/pr1-sanitizer-gemma4-repin.md`.
+ * empty. Recorded as an open item in `docs/design/pr1-sanitizer-gemma4-repin.md`.
  *
  * **What is deliberately NOT a delimiter.** `<|think|>` (id 98) is an unpaired enable flag, not an
  * opener. It has no partner and delimits nothing. It is carried as an ordinary literal in
@@ -493,7 +493,7 @@ class SlmStreamSanitizer {
      * retraction leak the window exists to prevent. The two move together or not at all. Today the
      * window is 16, set by `<|tool_response>`, so a 17-character-or-longer foreign construct passes.
      * `SlmStreamSanitizerTest` asserts this limit directly rather than leaving it implicit, and
-     * `scratchpad/pr1-sanitizer-gemma4-repin.md` carries it as an open item: the upgrade path is to
+     * `docs/design/pr1-sanitizer-gemma4-repin.md` carries it as an open item: the upgrade path is to
      * set both the window and this bound from a declared maximum rather than from the longest known
      * literal, which costs a larger hold-back on every chunk and is not worth it until a real
      * vocabulary needs it.

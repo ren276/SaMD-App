@@ -10,7 +10,7 @@ sealed class DataError(message: String, cause: Throwable? = null) : Exception(me
      *  would reach the caller disguised as a storage fault. Returning this instead keeps the
      *  refusal legible in the error channel. First use is the `VOICE_UNCONFIRMED` write-refusal
      *  in [com.example.samdapp.data.repository.ConsultationRepositoryImpl.saveConsultation]
-     *  (`scratchpad/pr3-voice-gate-design-memo.md` B.2).
+     *  (`docs/design/pr3-voice-gate-design-memo.md` B.2).
      *
      *  [message] is worker-facing text with no internal model/column names, since call sites such
      *  as `ConsultationViewModel` show `error.message` directly in UI state. [reason] carries the

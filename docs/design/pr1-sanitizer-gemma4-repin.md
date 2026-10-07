@@ -15,7 +15,7 @@ WORKER tier only.
 ## 1. Where the numbers came from
 
 **(MEASURED)** The tokenizer derivation ran on the GPU machine and arrived here as
-`scratchpad/gpu-control-token-handoff.md`. Its pin:
+`docs/design/gpu-control-token-handoff.md`. Its pin:
 
 | Item | Value |
 |---|---|
@@ -124,7 +124,7 @@ asserts the five named ones are absent, so re-adding one is a visible failure.
 `SANITIZER_TARGET_MODEL_ID`, `SANITIZER_TOKENIZER_REVISION` and `SANITIZER_TOKENIZER_SHA256` are
 declared next to the vocabulary. `servedModelMatchesSanitizer(servedModelId: String?)` compares the
 pin against the `model_id` of the response envelope specified in
-`scratchpad/slm-remote-inference-memo.md` §2.2. The seam refuses the whole readback on mismatch,
+`docs/design/slm-remote-inference-memo.md` §2.2. The seam refuses the whole readback on mismatch,
 with a new `SlmRefusal.SERVED_MODEL_MISMATCH`.
 
 - **A null or blank identity is a mismatch, not a free pass.** An envelope that has not implemented

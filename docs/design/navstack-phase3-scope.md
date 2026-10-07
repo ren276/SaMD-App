@@ -107,7 +107,7 @@ popping back past the existing `Compounder`. **INFERRED** for the pop half: I di
 something I observed in this pass. Worth confirming before anyone relies on it.
 
 **Memo-versus-code discrepancy, flagged per the hard rules.** The coupling note I wrote into
-`scratchpad/navstack-restore-memo.md` section 8.2.1 (committed in `e3e2dfb`) says the pinned
+`docs/design/navstack-restore-memo.md` section 8.2.1 (committed in `e3e2dfb`) says the pinned
 content key "is unique only while ... which is exactly what Home's resume gating prevents". That
 overstates the gate. The real guarantee is Home-at-index-0 plus clear-on-tab-switch; the resume
 gate contributes nothing today because it cannot fire. The note is not false about the

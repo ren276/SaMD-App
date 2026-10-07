@@ -247,11 +247,11 @@ times already, in writing:
    `syncState`/`serverVersion`/`syncErrorCode`/`lastSyncAttemptAt` columns, never `status`
    (the clinical `CaseStatus`, flipped only by `caseRecordRepository`'s own methods)."
    Transport state lives on disjoint columns, by design.
-2. `scratchpad/async-queue-design.md:211-213`: "No new column, no new `CaseStatus` value.
+2. `docs/design/async-queue-design.md:211-213`: "No new column, no new `CaseStatus` value.
    `CaseStatus` (`CaseRecord.kt:7`) deliberately stays untouched: it is the clinical
    status, and the existing design keeps clinical status and transport state on disjoint
    columns." Restated as an explicit non-goal at `:303`.
-3. `scratchpad/queue-seams-design.md:294-296`: "`CaseStatus` (`CaseRecord.kt:7`) stays
+3. `docs/design/queue-seams-design.md:294-296`: "`CaseStatus` (`CaseRecord.kt:7`) stays
    clinical and is NOT extended for queue or pipeline state ... No new `CaseStatus` value."
 
 And the backend enum's own header (`enums.py:100-108`) calls these "Clinical vocabularies

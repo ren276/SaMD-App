@@ -4,7 +4,7 @@
 `616eedd` and Build 3b `62bcc0c`).
 **Status:** built, unit-tested, NOT committed - awaiting operator authorization.
 
-Read `scratchpad/consultation-documents-and-prescription-gate-memo.md` Feature 1 Part B7 and
+Read `docs/design/consultation-documents-and-prescription-gate-memo.md` Feature 1 Part B7 and
 `docs/domain/phc-workforce-scope.md` (the three-tier cadre model) first. This is orientation on top
 of both, not a replacement.
 
