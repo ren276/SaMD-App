@@ -11,7 +11,7 @@ import javax.inject.Inject
 
 /**
  * One invocation of the SLM: exactly one approved-record snapshot and exactly one question
- * (`scratchpad/slm-guardrail-service-contract-memo.md` §7).
+ * (`docs/design/slm-guardrail-service-contract-memo.md` §7).
  *
  * **The single-turn rule is enforced here, by the absence of a field.** There is no history field
  * and no list-of-messages field, so a caller cannot pass a transcript - not because passing one is

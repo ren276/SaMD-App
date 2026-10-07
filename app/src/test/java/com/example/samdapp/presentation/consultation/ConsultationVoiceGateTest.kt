@@ -24,7 +24,7 @@ import org.junit.Test
 
 /**
  * PR 3b: the voice confirmation-gate state model for `impactOnDailyActivities`
- * (`scratchpad/pr3-voice-gate-design-memo.md` Part A, honest-failure edges in Part B.3).
+ * (`docs/design/pr3-voice-gate-design-memo.md` Part A, honest-failure edges in Part B.3).
  *
  * Nothing in the UI calls these handlers yet. The mic button, the suggestion surface and the
  * feature flag that gates them are a later step, so these tests are the only exercise the gate

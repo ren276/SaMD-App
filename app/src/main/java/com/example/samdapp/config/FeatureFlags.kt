@@ -36,7 +36,7 @@ object FeatureFlags {
      *  for this field and its model is never loaded on this path.
      *
      *  **Split out of the retired single voice flag** (2026-09-08,
-     *  `scratchpad/chief-complaint-voice-flip-design-memo.md` section 5). That flag gated two
+     *  `docs/design/chief-complaint-voice-flip-design-memo.md` section 5). That flag gated two
      *  affordances with different missing controls and no way to enable one without the other:
      *  this field mic, and the audio attachment plus its auto-transcribe path
      *  ([VOICE_AUDIO_ATTACHMENT_ENABLED]). The split is a refactor only. Both halves stay `false`,
@@ -62,7 +62,7 @@ object FeatureFlags {
      *  or persist anything.
      *
      *  **Split out of the retired single voice flag, and it is the half that needed splitting**
-     *  (`scratchpad/chief-complaint-voice-flip-design-memo.md` section 3.1(ii), registered as risk
+     *  (`docs/design/chief-complaint-voice-flip-design-memo.md` section 3.1(ii), registered as risk
      *  row H-15.C2). This path writes a raw ASR transcript straight into
      *  `Consultation.transcription` via `updateTranscription`, with no confirmation gate, no
      *  provenance column, and an explicit exemption from the `VOICE_UNCONFIRMED` write refusal in

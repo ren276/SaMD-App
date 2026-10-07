@@ -1,6 +1,6 @@
 """Add consultations.impact_on_daily_activities_provenance.
 
-ASR track PR 1 (scratchpad/asr-field-audit-memo.md Part B.2). Adds the first
+ASR track PR 1 (docs/design/asr-field-audit-memo.md Part B.2). Adds the first
 FieldProvenance column, nullable, no CHECK constraint (the memo does not call for one at this
 stage). Existing rows get NULL, not a backfilled 'TYPED': the device-side migration
 (MIGRATION_16_17) backfills every existing local row to 'TYPED' before it can ever reach this

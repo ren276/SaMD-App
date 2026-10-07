@@ -17,7 +17,7 @@ import com.example.samdapp.domain.connectivity.ACCESS_LOCAL_NETWORK_PERMISSION
  *  [onDenied] fires when the worker declines the prompt. It defaults to a no-op so the existing
  *  call sites are unchanged, but a call site whose control is user-reachable must pass something:
  *  without it a decline is a silent dead end, the button simply stops responding with no
- *  explanation and no way back (`scratchpad/pr4b-flag-flip-design-memo.md` D.3). The fix is here
+ *  explanation and no way back (`docs/design/pr4b-flag-flip-design-memo.md` D.3). The fix is here
  *  rather than at one call site because all four requests route through this helper. */
 @Composable
 fun rememberPermissionAction(

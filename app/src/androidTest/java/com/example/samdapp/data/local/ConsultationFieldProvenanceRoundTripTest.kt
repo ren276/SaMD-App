@@ -14,7 +14,7 @@ import org.junit.Test
 import java.time.Instant
 
 /**
- * ASR track PR 1 (`scratchpad/asr-field-audit-memo.md` Part B.2). Proves
+ * ASR track PR 1 (`docs/design/asr-field-audit-memo.md` Part B.2). Proves
  * `impactOnDailyActivitiesProvenance` round-trips through a real Room database and its
  * [com.example.samdapp.data.local.Converters] `FieldProvenance` TypeConverter — asserting the
  * value read back from a fresh query, not the object handed to `insert()`, per CLAUDE.md's

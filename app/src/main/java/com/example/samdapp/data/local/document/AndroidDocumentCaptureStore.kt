@@ -65,7 +65,7 @@ private const val THUMBNAIL_JPEG_QUALITY = 70
  * directory that exists when the process starts is by definition orphaned, and there is no live
  * session for the sweep to damage. That makes an age heuristic or a liveness registry pointless
  * complexity here. Re-verified unchanged under Option A (in-process CameraX capture,
- * `scratchpad/capture-process-death-memo.md` section 1): Option A persists nothing new, so this
+ * `docs/design/capture-process-death-memo.md` section 1): Option A persists nothing new, so this
  * premise still holds exactly as before.
  *
  * Deliberately a SECOND, separate sweep rather than an extension of Build 3a's

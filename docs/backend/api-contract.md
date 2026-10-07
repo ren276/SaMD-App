@@ -1707,7 +1707,7 @@ error codes: §5 is the kernel proxy and stays exactly what it is.
 ### 11.1 Why this exists, and what it is not
 
 The SLM generation service is reached **only** from this backend. The device never calls it. That
-is topology (A) from `scratchpad/slm-remote-inference-memo.md` §1.4, and it is the shipping
+is topology (A) from `docs/design/slm-remote-inference-memo.md` §1.4, and it is the shipping
 architecture, not a development arrangement: it gives clinical narrative one egress point, reuses
 the bearer credential the device already holds, puts the call inside the existing hash-chained
 audit log, and gives the hop a circuit breaker and a bounded timeout. The alternative, a device
@@ -1746,7 +1746,7 @@ What is enforced, structurally, server side:
 
 **So, stated plainly: no server-side guard can keep a patient's name out of a physician's
 free-text diagnosis.** The residual is real, it is the subject of the drafted hazard H-28
-(`scratchpad/slm-remote-inference-memo.md` §1.6, not written to the risk file), and it is not
+(`docs/design/slm-remote-inference-memo.md` §1.6, not written to the risk file), and it is not
 closed by this endpoint. What this endpoint does provide is that the narrative crosses exactly one
 hop, that the hop is authenticated, and that every crossing leaves a row.
 

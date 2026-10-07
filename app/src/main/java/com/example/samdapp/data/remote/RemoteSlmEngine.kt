@@ -339,7 +339,7 @@ internal fun transportErrorFor(e: IOException): SlmEngineError = when (e) {
  * rather than a transient failure because it will fail identically forever: the fix is on the sync
  * path, not on this button. The sibling kernel path has a dedicated `CASE_NOT_ON_SERVER` value for
  * this and it drives distinct copy; this vocabulary has none, so the distinction is recorded here
- * and in `scratchpad/pr6-device-slm-binding.md` rather than silently lost.
+ * and in `docs/design/pr6-device-slm-binding.md` rather than silently lost.
  *
  * A `401` or `403` reaching this function has already been through `TokenAuthenticator`, so the
  * refresh was attempted and failed. It is `PAYLOAD_REJECTED` for the same reason: unretryable

@@ -85,8 +85,8 @@ private class FakeConsultationActions : ConsultationActions {
 }
 
 /**
- * PR 3c (`scratchpad/pr3-voice-gate-design-memo.md` Part A.4, Part E.1), inverted at the flag flip
- * (`scratchpad/pr4b-flag-flip-design-memo.md` Part 0 finding 1, B.3 commit 5). Proves the mic entry
+ * PR 3c (`docs/design/pr3-voice-gate-design-memo.md` Part A.4, Part E.1), inverted at the flag flip
+ * (`docs/design/pr4b-flag-flip-design-memo.md` Part 0 finding 1, B.3 commit 5). Proves the mic entry
  * point and the suggestion surface render in `ConsultationContent` while
  * `FeatureFlags.VOICE_FIELD_IMPACT_ENABLED` is on, which is now the shipped default, and that the
  * entry point is wired to `onRecordImpactVoice`.

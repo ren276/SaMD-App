@@ -6,7 +6,7 @@ import org.junit.Test
 import java.io.File
 
 /**
- * Layer 2 of the three-layer egress proof (`scratchpad/pr4b-flag-flip-design-memo.md` A.2):
+ * Layer 2 of the three-layer egress proof (`docs/design/pr4b-flag-flip-design-memo.md` A.2):
  * nothing that participates in recognition is constructed with, or can reach, a network client,
  * and the `TranscriptionService` seam has exactly one implementation across every flavor.
  *

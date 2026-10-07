@@ -455,7 +455,7 @@ val MIGRATION_15_16 = object : Migration(15, 16) {
 }
 
 /**
- * ASR track PR 1 (`scratchpad/asr-field-audit-memo.md` Part B.2): adds
+ * ASR track PR 1 (`docs/design/asr-field-audit-memo.md` Part B.2): adds
  * `impactOnDailyActivitiesProvenance` to `consultations`, the first (and so far only)
  * [com.example.samdapp.domain.model.FieldProvenance] column. No UI or ASR code writes a
  * non-`TYPED` value yet — see `FieldProvenance`'s KDoc.
@@ -511,7 +511,7 @@ val MIGRATION_17_18 = object : Migration(17, 18) {
 /**
  * H-18, Build 3b. Adds the `pageCount` column the Build 3a table shipped without.
  *
- * The operator-signed design memo (`scratchpad/consultation-documents-and-prescription-gate-memo.md`,
+ * The operator-signed design memo (`docs/design/consultation-documents-and-prescription-gate-memo.md`,
  * B3) listed `pageCount Int?` in the `consultation_documents` column table; `MIGRATION_17_18` and
  * the exported `18.json` omitted it. Build 3b needs it: `DocumentSource.CAMERA_ASSEMBLED` rows
  * record how many captured pages were consolidated into the assembled PDF, and the

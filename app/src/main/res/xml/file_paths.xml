@@ -4,5 +4,5 @@
     <cache-path name="reports" path="reports/" />
     <!-- H-18, Build 3b's document_capture_staging entry removed: Option A moved document capture
          in-process (CameraX), so no other process ever writes a staging file here and no
-         FileProvider grant for it is needed. See scratchpad/capture-process-death-memo.md. -->
+         FileProvider grant for it is needed. See docs/design/capture-process-death-memo.md. -->
 </paths>

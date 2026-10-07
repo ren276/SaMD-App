@@ -16,7 +16,7 @@ import java.lang.reflect.Modifier
 
 /**
  * Layers 2c and 3 of the three-layer egress proof
- * (`scratchpad/pr4b-flag-flip-design-memo.md` A.2/A.3). Layers 1 and 2 establish by construction,
+ * (`docs/design/pr4b-flag-flip-design-memo.md` A.2/A.3). Layers 1 and 2 establish by construction,
  * in CI, that our own code holds no path off the device. This class runs the real engine against
  * the real vendored weights on a real device and witnesses the property, which is the only
  * statement available about the vendored native code.
@@ -213,7 +213,7 @@ class AsrEgressTest {
                 "(AsrTestSupport.sharedAsrService) and both drive the real mic, and that class " +
                 "cancels a capture mid-AudioRecord.read on purpose. The leading hypothesis is that " +
                 "AudioRecord is not fully released before the next class runs. Unproven. See the " +
-                "owed item in scratchpad/navstack-phase4-scope.md. Do NOT relax this assertion to " +
+                "owed item in docs/design/navstack-phase4-scope.md. Do NOT relax this assertion to " +
                 "make it green: it guards a pre-distribution zero-egress property of vendored " +
                 "native code, and a relaxed assertion trades a flake for undetected egress.",
             captured.isSuccess,

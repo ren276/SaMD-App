@@ -1,7 +1,7 @@
 package com.example.samdapp.domain.slm
 
 /**
- * The two scope gates of `scratchpad/slm-guardrail-service-contract-memo.md` §5.4, as code.
+ * The two scope gates of `docs/design/slm-guardrail-service-contract-memo.md` §5.4, as code.
  *
  * **The gate is code, never the prompt.** Justification is harness finding F4, measured rather
  * than assumed: this artifact refuses nothing on its own, so a system prompt saying "only answer

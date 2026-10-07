@@ -56,7 +56,7 @@ internal fun extractJpegBytes(image: ImageProxy): ByteArray = try {
 /**
  * H-18, Build 3b, Option A. The in-process camera viewfinder that replaced the external
  * `ActivityResultContracts.TakePicture` hand-off - see
- * `scratchpad/capture-process-death-memo.md` for why: the camera app taking the foreground was
+ * `docs/design/capture-process-death-memo.md` for why: the camera app taking the foreground was
  * what made this process a low-memory-killer target between shots, and there is no plaintext
  * staging file for a killed process to leave behind (the frame never touches disk unencrypted).
  *

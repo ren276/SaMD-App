@@ -23,7 +23,7 @@ class ConsultationRepositoryImpl @Inject constructor(
 ) : ConsultationRepository {
 
     /**
-     * The `VOICE_UNCONFIRMED` write-refusal (`scratchpad/pr3-voice-gate-design-memo.md` B.1/B.2,
+     * The `VOICE_UNCONFIRMED` write-refusal (`docs/design/pr3-voice-gate-design-memo.md` B.1/B.2,
      * from the field-audit memo's B.2). An ASR suggestion that no worker has read and accepted
      * must never reach the database, and the check lives here rather than in a ViewModel so that
      * every caller crosses it. Today there is exactly one caller

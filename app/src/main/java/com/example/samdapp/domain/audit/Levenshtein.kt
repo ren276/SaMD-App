@@ -2,7 +2,7 @@ package com.example.samdapp.domain.audit
 
 /**
  * Levenshtein edit distance, character-level. First use is the `editDistance` field on the
- * `VOICE_FIELD_EDITED` audit payload (`scratchpad/pr3-voice-gate-design-memo.md` C.2): a measured
+ * `VOICE_FIELD_EDITED` audit payload (`docs/design/pr3-voice-gate-design-memo.md` C.2): a measured
  * signal of how much a worker changed an ASR suggestion, carrying no content of its own. Standard
  * single-row dynamic-programming form, no dependency needed for a function this small.
  */

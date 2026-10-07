@@ -4,7 +4,7 @@ import kotlinx.coroutines.flow.Flow
 
 /**
  * The on-device generation engine, as the guardrail seam sees it
- * (`scratchpad/slm-guardrail-service-contract-memo.md` §9.1/§9.2).
+ * (`docs/design/slm-guardrail-service-contract-memo.md` §9.1/§9.2).
  *
  * **Deliberately thin, and deliberately ignorant of clinical scope.** It takes a prompt the seam
  * built and returns what the model produced. It performs no gating of its own, because every
@@ -213,7 +213,7 @@ interface SlmEngine {
      * response carried none.
      *
      * **Read after the flow completes, never before.** The identity is a field of the *response*
-     * envelope (`scratchpad/slm-remote-inference-memo.md` §2.2, `model_id`, required to be derived
+     * envelope (`docs/design/slm-remote-inference-memo.md` §2.2, `model_id`, required to be derived
      * from the loaded artifact rather than written as a literal), so it does not exist until the
      * server has answered. Under §4.1's non-streaming transport a binding performs one call, holds
      * the envelope, and emits its body as a single chunk, so the value is available the moment

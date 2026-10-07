@@ -7,9 +7,9 @@ import org.junit.Test
 
 /**
  * Stage 3a of the SLM build: the stream sanitizer
- * (`scratchpad/slm-guardrail-service-contract-memo.md` §6.1 and §6.2), **re-pointed in PR-1 from
+ * (`docs/design/slm-guardrail-service-contract-memo.md` §6.1 and §6.2), **re-pointed in PR-1 from
  * `google/medgemma-1.5-4b-it` to `google/gemma-4-E2B-it`**
- * (`scratchpad/pr1-sanitizer-gemma4-repin.md`).
+ * (`docs/design/pr1-sanitizer-gemma4-repin.md`).
  *
  * The two sections point in opposite directions on purpose. §6.1 requires text to be removed from
  * the stream; §6.2 forbids text being removed from the stream. Both sets of tests are here, next
