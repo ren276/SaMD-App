@@ -41,7 +41,11 @@ class SyncOutboxDrainer @Inject constructor(
     /** Defaulted so the many drainer tests that do not care about it stay unchanged; Hilt
      *  injects the singleton. */
     private val drainOutcomeStore: DrainOutcomeStore = DrainOutcomeStore(),
+    /** Present only in a build that binds one (the dev source set). */
+    drainObserver: java.util.Optional<DrainObserver> = java.util.Optional.empty(),
 ) {
+    private val observer: DrainObserver? = drainObserver.orElse(null)
+
     // Process-wide: the periodic (sync_push_periodic) and one-time (sync_push_now) WorkManager
     // requests are different unique-work names, so their SyncPushWorker instances can run
     // concurrently. Without this, two overlapping drains could both pack the same PENDING rows
@@ -84,6 +88,7 @@ class SyncOutboxDrainer @Inject constructor(
      */
     private suspend fun drainLocked(): Result<Unit> {
         val attempted = mutableSetOf<Pair<String, String>>()
+        observer?.onDrainStart()
 
         // Seeded with the resumed batch's members BEFORE the loop, not left empty. A resumed
         // batch is an attempt like any other, and a row it acks as RETRYABLE is still collectable
@@ -97,8 +102,9 @@ class SyncOutboxDrainer @Inject constructor(
             if (resumed.result.isFailure) return resumed.result
         }
         while (true) {
-            val pending = repository.collectPendingRecords()
-                .filter { (it.table to it.id) !in attempted }
+            val collected = repository.collectPendingRecords()
+            observer?.onCollected(collected)
+            val pending = collected.filter { (it.table to it.id) !in attempted }
             if (pending.isEmpty()) return Result.success(Unit)
             attempted += pending.map { it.table to it.id }
             val packed = packer.pack(pending)
