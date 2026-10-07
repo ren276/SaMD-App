@@ -17,7 +17,7 @@ import java.time.Instant
  * whole-row insert paths as well as the UPDATE statements, and DAOs that copy one argument into
  * both `updatedAt` and `localModifiedAt` keep them equal. Every outbox write runs in this process.
  *
- * ponytail: per-process, so a wall clock stepped back across a restart can still issue a stamp
+ * Known limit: the clock is per process, so a wall clock stepped back across a restart can still issue a stamp
  * below one written before the restart. Rule 4 (a matching base_version) protects every row that
  * has synced once; move to a per-row MAX if rows written only offline across restarts matter.
  */

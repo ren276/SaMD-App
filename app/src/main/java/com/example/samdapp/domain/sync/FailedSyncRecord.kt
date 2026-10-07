@@ -44,8 +44,9 @@ data class FailedSyncRecord(
  * Folds each record under the ancestor that holds it, so the review list shows the cause once.
  *
  * A holder is a FAILED row the server has never held ([FailedSyncRecord.holdsDescendants]: a patient,
- * encounter, case record, consultation or prescription), or a patient whose own cause needs a person
- * ([SyncFailureAction.TELL_SUPERVISOR]: a duplicate ABHA, a conflict, a refused or oversize record).
+ * encounter, case record, consultation or prescription). A CONFLICT row, or a FAILED one the server
+ * already holds, holds nothing: the server has the row, so its descendants can still land (operator
+ * ruling Q2), and the SQL that excludes held rows from the drain agrees.
  * A record folds under its first ancestor that is a holder (patient before encounter before case)
  * when it is held (PENDING or RETRYABLE behind that ancestor, so it can never send), or when the
  * holder's cause needs a person (a child that already exhausted its retries against it, whose
@@ -56,9 +57,7 @@ data class FailedSyncRecord(
  * Folded rows are counted on the holder as [FailedSyncRecord.heldRecordCount], once each.
  */
 fun foldHeldRecords(records: List<FailedSyncRecord>): List<FailedSyncRecord> {
-    val holders = records
-        .filter { it.holdsDescendants || (it.table == PATIENTS_TABLE && it.reason.action == SyncFailureAction.TELL_SUPERVISOR) }
-        .associateBy { it.table to it.recordId }
+    val holders = records.filter { it.holdsDescendants }.associateBy { it.table to it.recordId }
     fun holderOf(record: FailedSyncRecord): FailedSyncRecord? {
         val holder = record.ancestors.firstNotNullOfOrNull { holders[it] } ?: return null
         val folds = record.held || holder.reason.action == SyncFailureAction.TELL_SUPERVISOR
@@ -77,4 +76,3 @@ fun foldHeldRecords(records: List<FailedSyncRecord>): List<FailedSyncRecord> {
     return kept.map { it.copy(heldRecordCount = heldPerHolder[it.table to it.recordId] ?: 0) }
 }
 
-private const val PATIENTS_TABLE = "patients"

@@ -155,9 +155,10 @@ internal fun KernelReportOutput.toDisplay(): AssessmentDisplay = AssessmentDispl
         KernelTriageRules.isCriticalVitalsFlag(predictedCondition),
     sourceLabel = when (inferenceSource) {
         InferenceSource.REAL_INFERENCE -> "Real-time AI inference (/v1/assess)"
-        // Rendered from strings.xml (AssessmentCopy); this string is what the acknowledgement
-        // audit entry records, and must not claim an outage the device did not observe.
-        InferenceSource.MOCK_FALLBACK -> "Mock result (dev build only): the real assessment service was not reached"
+        // Rendered from strings.xml (AssessmentCopy, `assessment_source_mock`); this string is what the
+        // acknowledgement audit entry records, so it carries the same words, and must not claim an
+        // outage the device did not observe. A ViewModel has no Context to read the resource from.
+        InferenceSource.MOCK_FALLBACK -> "Mock result, dev build only: the real assessment service was not reached"
         // Reach-neutral: UNAVAILABLE covers both an unreachable kernel and one that answered
         // with an empty differential. Naming a cause here would be wrong half the time.
         InferenceSource.UNAVAILABLE -> UNAVAILABLE_SOURCE_LABEL

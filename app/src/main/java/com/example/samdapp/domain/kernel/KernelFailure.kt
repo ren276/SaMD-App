@@ -42,7 +42,7 @@ enum class KernelRetryAdvice {
  * **Why the 502/503/504 family is one value and not five.** `SAMD-KERN-5001/5002/5004/5006/5007`
  * are five genuinely different server-side conditions, and the backend already keeps them apart
  * in `kernel_call_log.outcome`, which is where an operator debugging the kernel looks. On this
- * phone they produce one identical worker action: wait, it will run on its own. Splitting them
+ * phone they produce one identical worker action: press Try again in a few minutes. Splitting them
  * here would add four values no screen could render differently and no worker could act on.
  * The distinction is kept where it is useful and dropped where it is not, which is the opposite
  * of the collapse this enum exists to undo.

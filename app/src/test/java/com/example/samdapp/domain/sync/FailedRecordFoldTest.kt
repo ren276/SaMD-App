@@ -33,7 +33,7 @@ class FailedRecordFoldTest {
     fun `children of a duplicate patient fold under it and offer no button`() {
         val folded = foldHeldRecords(
             listOf(
-                record("patients", "pat-1", "pat-1", SyncFailureReason.DUPLICATE_RECORD),
+                record("patients", "pat-1", "pat-1", SyncFailureReason.DUPLICATE_RECORD, holdsDescendants = true),
                 record("encounters", "enc-1", "pat-1", SyncFailureReason.RETRIES_EXHAUSTED),
                 record("case_records", "case-1", "pat-1", SyncFailureReason.RETRIES_EXHAUSTED),
                 record("observations", "obs-1", "pat-1", SyncFailureReason.RETRIES_EXHAUSTED),
@@ -48,21 +48,30 @@ class FailedRecordFoldTest {
         )
     }
 
+    /** Operator ruling Q2: a CONFLICT patient is on the server, so it holds nothing and its children
+     *  keep their own rows and their own Send again. */
     @Test
-    fun `a conflicted patient folds its children too`() {
-        val folded = foldHeldRecords(
-            listOf(
-                record("patients", "pat-1", "pat-1", SyncFailureReason.CONFLICT_ON_SERVER),
-                record("encounters", "enc-1", "pat-1", SyncFailureReason.RETRIES_EXHAUSTED),
-            ),
+    fun `a conflicted patient holds nothing, so its children keep their rows`() {
+        val input = listOf(
+            record("patients", "pat-1", "pat-1", SyncFailureReason.CONFLICT_ON_SERVER),
+            record("encounters", "enc-1", "pat-1", SyncFailureReason.RETRIES_EXHAUSTED),
         )
-        assertEquals(1, folded.single().heldRecordCount)
+        assertEquals(input, foldHeldRecords(input))
+    }
+
+    @Test
+    fun `a failed patient the server already holds is not a holder either`() {
+        val input = listOf(
+            record("patients", "pat-1", "pat-1", SyncFailureReason.RECORD_REJECTED),
+            record("encounters", "enc-1", "pat-1", SyncFailureReason.RETRIES_EXHAUSTED),
+        )
+        assertEquals(input, foldHeldRecords(input))
     }
 
     @Test
     fun `another patient's records and records with no patient are untouched`() {
         val input = listOf(
-            record("patients", "pat-1", "pat-1", SyncFailureReason.DUPLICATE_RECORD),
+            record("patients", "pat-1", "pat-1", SyncFailureReason.DUPLICATE_RECORD, holdsDescendants = true),
             record("encounters", "enc-2", "pat-2", SyncFailureReason.RETRIES_EXHAUSTED),
             record("abha_profiles", "abha-1", null, SyncFailureReason.UNRECOGNISED),
         )
@@ -141,13 +150,13 @@ class FailedRecordFoldTest {
     }
 
     @Test
-    fun `a conflicted ancestor that is not a holder folds nothing`() {
+    fun `a held row under a conflicted patient has no holder and is dropped`() {
         val input = listOf(
             record("patients", "pat-1", "pat-1", SyncFailureReason.CONFLICT_ON_SERVER),
             record("encounters", "enc-1", "pat-1", SyncFailureReason.UNRECOGNISED, held = true),
         )
-        // The patient is a holder only through the existing TELL_SUPERVISOR rule; a held row under
-        // it folds, which is why the SQL never marks a row held behind a CONFLICT ancestor at all.
+        // The SQL never marks a row held behind a CONFLICT ancestor, so this cannot arise from the
+        // database; the fold still must not invent a holder.
         assertEquals(listOf("patients" to "pat-1"), foldHeldRecords(input).map { it.table to it.recordId })
     }
 }

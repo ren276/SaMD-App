@@ -36,7 +36,7 @@ const val MAX_SYNC_ATTEMPTS = 5
  *
  * Exponential per-row backoff was considered and rejected: it buys nothing for the dominant case
  * (a parent landing on the next drain, where a longer wait is strictly worse) and it would need a
- * `nextAttemptAt` column on all twenty-one tables to express.
+ * `nextAttemptAt` column on all twenty tables to express.
  */
 val RETRY_MIN_INTERVAL: Duration = Duration.ofMinutes(5)
 
