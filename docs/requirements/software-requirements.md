@@ -215,7 +215,7 @@ Conventions: `REQ-<AREA>-NN`. Status: **DONE** (implemented + manually verified)
   distinctly, then `EmergencyOverrideScreen` (full-screen, high-contrast, Hindi + English) is a
   terminal state — "Acknowledged" clears the back stack to Home. No path from there into
   Consultation/Sending; store-and-forward is disallowed for acute emergencies by design.
-- **REQ-TRS-03** (DONE, AMENDED, PROPOSED pending operator sign-off) Expectation-management
+- **REQ-TRS-03** (DONE, AMENDED, operator sign-off given 2026-10-07) Expectation-management
   message on the existing Acknowledgement screen (non-emergency path only, by construction:
   emergency short-circuits before this screen is ever reached). The message states where the visit
   is, on the phone or on the server, from the same server-presence rule the assess gate uses, and
