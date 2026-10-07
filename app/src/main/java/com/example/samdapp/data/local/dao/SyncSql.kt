@@ -30,6 +30,12 @@ internal object SyncSql {
      *  four statements per table that use it (drain, observed count, one-shot count, review) share it.
      *  The three root tables (patients, abha_profiles, audit_log) have no ancestor and use none. */
 
+    /** What makes an `evaluate_reports` row syncable at all. A row with a failure code is the
+     *  local marker of an evaluate leg that did not run (H-14): it must never be pushed, so it is
+     *  never collected, never counted as waiting, never held, and never listed for review. One
+     *  definition for all four statements that read the table's outbox state. */
+    const val EVALUATE_SYNCABLE = "failureCode IS NULL"
+
     /** The states a row is in while the device still owes it to the server. Shared so the review queries
      *  name them in one place, apart from the drain's own eligibility fragment. */
     const val UNSENT_STATES = "('PENDING', 'RETRYABLE')"

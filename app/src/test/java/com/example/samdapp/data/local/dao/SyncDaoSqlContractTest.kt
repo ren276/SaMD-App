@@ -147,6 +147,19 @@ class SyncDaoSqlContractTest {
     }
 
     @Test
+    fun `all four evaluate_reports statements use the one syncable constant, and nothing else spells it`() {
+        val dao = sources().getValue("EvaluateReportDao.kt")
+        assertEquals(
+            "the drain, both counts and the review query must each use SyncSql.EVALUATE_SYNCABLE",
+            4,
+            Regex(Regex.escape("SyncSql.EVALUATE_SYNCABLE")).findAll(dao).count(),
+        )
+        assertEquals("the predicate must not be spelled out beside the constant", 0, Regex("failureCode IS NULL").findAll(dao).count())
+        assertEquals("no other DAO may carry the predicate", 0, sources().filterKeys { it != "SyncSql.kt" && it != "EvaluateReportDao.kt" }.values.sumOf { Regex("failureCode IS NULL").findAll(it).count() })
+        assertEquals("failureCode IS NULL", SyncSql.EVALUATE_SYNCABLE)
+    }
+
+    @Test
     fun `each held fragment names its own table and holds only behind a FAILED ancestor the server never had`() {
         heldTables.forEach { table ->
             val fragment = SyncSql::class.java.getDeclaredField("HELD_" + table.uppercase()).also { it.isAccessible = true }.get(null) as String
@@ -325,6 +338,7 @@ class SyncDaoSqlContractTest {
         // double the observers on the launch path (perf audit F2A-01).
         val counters = sources().values.flatMap { s ->
             val flat = s.replace(Regex("\"\\s*\\+\\s*SyncSql\\.HELD_\\w+\\s*\\+\\s*\""), "<HELD>")
+                .replace(Regex("\"\\s*\\+\\s*SyncSql\\.EVALUATE_SYNCABLE\\s*\\+\\s*\""), "<SYNCABLE>")
                 .replace(Regex("\"\\s*\\+\\s*\""), "")
             Regex("SELECT [^\"]*COUNT\\(\\*\\)[^\"]*FROM \\w+ WHERE syncState[^\"]*").findAll(flat).map { it.value }.toList()
         }
@@ -334,7 +348,7 @@ class SyncDaoSqlContractTest {
         counters.forEach { sql ->
             assertTrue(
                 "a counter is not the grouped, SYNCED-excluding shape: $sql",
-                Regex("^SELECT syncState AS syncState, (<HELD>|0) AS held, COUNT\\(\\*\\) AS rowCount FROM \\w+ WHERE syncState != 'SYNCED' GROUP BY syncState, held$").matches(sql),
+                Regex("^SELECT syncState AS syncState, (<HELD>|0) AS held, COUNT\\(\\*\\) AS rowCount FROM \\w+ WHERE syncState != 'SYNCED'( AND <SYNCABLE>)? GROUP BY syncState, held$").matches(sql),
             )
         }
     }

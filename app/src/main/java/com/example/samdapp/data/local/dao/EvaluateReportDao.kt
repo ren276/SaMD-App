@@ -37,12 +37,12 @@ interface EvaluateReportDao {
     @Query("SELECT serverVersion FROM evaluate_reports WHERE id = :id")
     suspend fun getServerVersion(id: String): Int?
 
-    /** Phase 6b outbox — see PatientDao.getPendingForSync's KDoc. `failureCode IS NULL` is the
-     *  H-14 safety property: a persisted evaluate-failure marker must never be pushable to the
+    /** Phase 6b outbox, see PatientDao.getPendingForSync's KDoc. [SyncSql.EVALUATE_SYNCABLE] is
+     *  the H-14 safety property: a persisted evaluate-failure marker must never be pushable to the
      *  backend as a real report, enforced here rather than relying on every caller to check. */
     @Query(
         "SELECT * FROM evaluate_reports WHERE " + SyncSql.PENDING_ELIGIBILITY_FRAGMENT + " AND NOT " + SyncSql.HELD_EVALUATE_REPORTS + " " +
-        "AND failureCode IS NULL " +
+        "AND " + SyncSql.EVALUATE_SYNCABLE + " " +
         "ORDER BY localModifiedAt ASC",
     )
     suspend fun getPendingForSync(retryEligibleBefore: Instant): List<EvaluateReportEntity>
@@ -75,11 +75,11 @@ interface EvaluateReportDao {
     )
     suspend fun requeueFailed(id: String)
 
-    @Query("SELECT syncState AS syncState, " + SyncSql.HELD_EVALUATE_REPORTS + " AS held, COUNT(*) AS rowCount FROM evaluate_reports WHERE syncState != 'SYNCED' GROUP BY syncState, held")
+    @Query("SELECT syncState AS syncState, " + SyncSql.HELD_EVALUATE_REPORTS + " AS held, COUNT(*) AS rowCount FROM evaluate_reports WHERE syncState != 'SYNCED' AND " + SyncSql.EVALUATE_SYNCABLE + " GROUP BY syncState, held")
     fun observeSyncStateCounts(): Flow<List<SyncStateCount>>
 
     /** The same counts, read once (for a decision made right after a drain). */
-    @Query("SELECT syncState AS syncState, " + SyncSql.HELD_EVALUATE_REPORTS + " AS held, COUNT(*) AS rowCount FROM evaluate_reports WHERE syncState != 'SYNCED' GROUP BY syncState, held")
+    @Query("SELECT syncState AS syncState, " + SyncSql.HELD_EVALUATE_REPORTS + " AS held, COUNT(*) AS rowCount FROM evaluate_reports WHERE syncState != 'SYNCED' AND " + SyncSql.EVALUATE_SYNCABLE + " GROUP BY syncState, held")
     suspend fun getSyncStateCounts(): List<SyncStateCount>
 
     /** The FAILED and CONFLICT rows of this table, projected for the worker-facing review list.
@@ -94,10 +94,10 @@ interface EvaluateReportDao {
         "evaluate_reports.syncErrorMessage AS syncErrorMessage, evaluate_reports.serverVersion AS " +
         "serverVersion, case_records.encounterId AS encounterId, evaluate_reports.caseRecordId AS " +
         "caseRecordId, CAST(NULL AS TEXT) AS parentId FROM evaluate_reports LEFT JOIN case_records ON " +
-        "case_records.id = evaluate_reports.caseRecordId WHERE evaluate_reports.syncState IN ('FAILED', " +
+        "case_records.id = evaluate_reports.caseRecordId WHERE (evaluate_reports.syncState IN ('FAILED', " +
         "'CONFLICT') OR (evaluate_reports.syncState IN " +
         SyncSql.UNSENT_STATES + " AND " +
-        SyncSql.HELD_EVALUATE_REPORTS + ")",
+        SyncSql.HELD_EVALUATE_REPORTS + ")) AND evaluate_reports." + SyncSql.EVALUATE_SYNCABLE,
     )
     suspend fun getFailedForReview(): List<FailedSyncRow>
 }

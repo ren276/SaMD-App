@@ -23,11 +23,11 @@ import com.example.samdapp.domain.model.RiskCategory
 import com.example.samdapp.domain.model.SyncState
 import com.example.samdapp.domain.model.UrgencyLevel
 import com.example.samdapp.domain.model.Visibility
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before
-import org.junit.Ignore
 import org.junit.Test
 import java.time.Duration
 import java.time.Instant
@@ -41,8 +41,8 @@ import java.time.Instant
  * Found by the D2 diagnostic (2026-10-07): two `evaluate_reports` rows sat PENDING with zero
  * attempts, counted as waiting on every drain and collected on none, because that drain query
  * carries `AND failureCode IS NULL` (an evaluate-failure marker must never be pushed, H-14) and
- * its two counts do not. That shape is [evaluateReports_failureMarkersAreCountedButNeverCollected],
- * ignored until the operator rules on the fix so that this class stays green at head.
+ * its two counts did not. Fixed by `SyncSql.EVALUATE_SYNCABLE`, pinned by
+ * [evaluateReports_failureMarkersAreNeverWaitingHeldCollectedOrListed].
  *
  * One test per table shape, as the held-ancestor tests do: root (`patients`), direct patient and
  * encounter (`ailments`), a differently named patient column (`referrals`), the self reference
@@ -267,18 +267,33 @@ class CountDrainConsistencyTest {
         )
     }
 
-    @Ignore("Known mismatch found by the D2 diagnostic: pending evaluate-failure markers are counted as waiting but never collected (the drain query has AND failureCode IS NULL, the counts do not). Un-ignore with the fix; operator ruling pending.")
     @Test
-    fun evaluateReports_failureMarkersAreCountedButNeverCollected() = runBlocking {
+    fun evaluateReports_failureMarkersAreNeverWaitingHeldCollectedOrListed() = runBlocking {
         ancestors()
-        db.caseRecordDao().insert(caseRecord("case-marker", "pat-ok", "enc-ok", SyncState.SYNCED, 1))
-        db.evaluateReportDao().upsert(evaluateReport("marker-1", "case-marker", SyncState.PENDING, null, null, failureCode = "CASE_NOT_SENT_YET"))
+        val markers = listOf(
+            Triple("marker-pending", "pat-ok", SyncState.PENDING),
+            Triple("marker-retryable", "pat-ok", SyncState.RETRYABLE),
+            Triple("marker-held", "pat-bad", SyncState.PENDING),
+            Triple("marker-failed", "pat-ok", SyncState.FAILED),
+            Triple("marker-conflict", "pat-ok", SyncState.CONFLICT),
+        )
+        markers.forEach { (id, patient, state) ->
+            db.caseRecordDao().insert(caseRecord("case-$id", patient, "enc-ok", SyncState.SYNCED, 1))
+            db.evaluateReportDao().upsert(
+                evaluateReport(id, "case-$id", state, null, if (state == SyncState.RETRYABLE) longAgo else null, failureCode = "CASE_NOT_SENT_YET"),
+            )
+        }
+        // A real report beside them behaves exactly as before.
+        db.caseRecordDao().insert(caseRecord("case-real", "pat-ok", "enc-ok", SyncState.SYNCED, 1))
+        db.evaluateReportDao().upsert(evaluateReport("real-pending", "case-real", SyncState.PENDING, null, null, failureCode = null))
 
         val counts = db.evaluateReportDao().getSyncStateCounts()
-        val waiting = counts.filter { !it.held && it.syncState == SyncState.PENDING }.sumOf { it.rowCount }
-        val collected = db.evaluateReportDao().getPendingForSync(afterInterval).map { it.id }
-
-        assertEquals("a counted waiting row must be a collected row", waiting, collected.size)
+        assertEquals("only the real report is waiting", 1, counts.filter { !it.held && (it.syncState == SyncState.PENDING || it.syncState == SyncState.RETRYABLE) }.sumOf { it.rowCount })
+        assertEquals("a marker is never held", 0, counts.filter { it.held }.sumOf { it.rowCount })
+        assertEquals("a marker is never FAILED or CONFLICT for review", 0, counts.filter { it.syncState == SyncState.FAILED || it.syncState == SyncState.CONFLICT }.sumOf { it.rowCount })
+        assertEquals(listOf("real-pending"), db.evaluateReportDao().getPendingForSync(afterInterval).map { it.id })
+        assertEquals("a marker is never on the review list", emptyList<String>(), db.evaluateReportDao().getFailedForReview().map { it.recordId })
+        assertEquals("the observed count agrees with the one-shot count", counts.toSet(), db.evaluateReportDao().observeSyncStateCounts().first().toSet())
     }
 
     // ── fixtures ─────────────────────────────────────────────────────────────────
