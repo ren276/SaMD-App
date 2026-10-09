@@ -398,6 +398,22 @@ class CompounderViewModelTest {
             }
         }
 
+    // --- G-B10: no acquisition path writes the worker's capture-method attestation --------------
+
+    @Test
+    fun `an accepted reading over either transport leaves captureMethod null`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val source = FakeVitalsSource()
+            val vm = viewModel(source)
+
+            for (transport in AcquisitionTransport.entries) {
+                source.nextResult = bpAccepted().copy(synthetic = true, hubId = "kernelhub2", transport = transport)
+                vm.onStartAcquisition()
+                assertTrue("an accepted $transport reading must have written a field", vm.uiState.value.bpSystolic.isNotEmpty())
+                assertNull("$transport acquisition wrote captureMethod", vm.uiState.value.captureMethod)
+            }
+        }
+
     // --- B12: the synthetic flag behind the Emulated labels (G-B27) ---------------------------
 
     @Test
