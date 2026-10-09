@@ -527,6 +527,9 @@ class CompounderViewModel @AssistedInject constructor(
                             "deviceType" to result.deviceType,
                             "instrument" to result.instrument.name,
                             "synthetic" to result.synthetic?.toString(),
+                            "hubId" to result.hubId,
+                            "transport" to result.transport?.name,
+                            "emulatorBuild" to result.emulatorBuild,
                             "measuredAt" to result.measuredAt,
                             "fieldsPopulated" to writtenFields.joinToString(",") { it.name },
                             "fieldProvenance" to writtenFields.joinToString(",") {
@@ -550,6 +553,8 @@ class CompounderViewModel @AssistedInject constructor(
                             "sessionId" to current.activeSessionId,
                             "instrumentRequested" to request.instrument.name,
                             "rejectReason" to result.reason.name,
+                            "hubId" to result.hubId,
+                            "transport" to result.transport?.name,
                         ),
                     )
                 }

@@ -17,6 +17,7 @@ import com.example.samdapp.domain.usecase.StartCaseUseCase
 import com.example.samdapp.domain.usecase.StopDeviceAcquisitionUseCase
 import com.example.samdapp.domain.vitalssource.AcquisitionRequest
 import com.example.samdapp.domain.vitalssource.AcquisitionResult
+import com.example.samdapp.domain.vitalssource.AcquisitionTransport
 import com.example.samdapp.domain.vitalssource.Instrument
 import com.example.samdapp.domain.vitalssource.RejectReason
 import com.example.samdapp.domain.vitalssource.Scenario
@@ -30,6 +31,10 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -328,6 +333,69 @@ class CompounderViewModelTest {
 
             val entry = audit.logged.last { it.action == AuditAction.VITALS_DEVICE_READING_FAILED.value }
             assertTrue("payload must never carry the measured value", "174" !in entry.payload)
+        }
+
+    // --- B4 / Q7: provenance on every acquisition audit row (G-B24) ---------------------------
+
+    private fun payloadOf(action: AuditAction) =
+        Json.parseToJsonElement(audit.logged.last { it.action == action.value }.payload).jsonObject
+
+    @Test
+    fun `the RECEIVED payload carries hubId, transport and emulatorBuild`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val source = FakeVitalsSource().apply {
+                nextResult = bpAccepted().copy(
+                    hubId = "kernelhub1",
+                    transport = AcquisitionTransport.WIFI,
+                    emulatorBuild = "sha=abc1234;dirty=false;merged=true",
+                )
+            }
+            val vm = viewModel(source)
+
+            vm.onStartAcquisition()
+
+            val payload = payloadOf(AuditAction.VITALS_DEVICE_READING_RECEIVED)
+            assertEquals("kernelhub1", payload["hubId"]?.jsonPrimitive?.content)
+            assertEquals("WIFI", payload["transport"]?.jsonPrimitive?.content)
+            assertEquals("sha=abc1234;dirty=false;merged=true", payload["emulatorBuild"]?.jsonPrimitive?.content)
+        }
+
+    @Test
+    fun `the FAILED payload carries hubId and transport`() = runTest(mainDispatcherRule.dispatcher) {
+        val source = FakeVitalsSource().apply {
+            nextResult = AcquisitionResult.Rejected(
+                RejectReason.HUB_MISMATCH,
+                hubId = "kernelhub1",
+                transport = AcquisitionTransport.WIFI,
+            )
+        }
+        val vm = viewModel(source)
+
+        vm.onStartAcquisition()
+
+        val payload = payloadOf(AuditAction.VITALS_DEVICE_READING_FAILED)
+        assertEquals("kernelhub1", payload["hubId"]?.jsonPrimitive?.content)
+        assertEquals("WIFI", payload["transport"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `an unrouted result records the provenance keys as null rather than omitting them`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val source = FakeVitalsSource().apply { nextResult = bpAccepted() }
+            val vm = viewModel(source)
+
+            vm.onStartAcquisition()
+            source.nextResult = AcquisitionResult.Rejected(RejectReason.NOT_SUPPORTED)
+            vm.onStartAcquisition()
+
+            val received = payloadOf(AuditAction.VITALS_DEVICE_READING_RECEIVED)
+            val failed = payloadOf(AuditAction.VITALS_DEVICE_READING_FAILED)
+            listOf("hubId", "transport", "emulatorBuild").forEach { key ->
+                assertEquals("RECEIVED $key", JsonNull, received[key])
+            }
+            listOf("hubId", "transport").forEach { key ->
+                assertEquals("FAILED $key", JsonNull, failed[key])
+            }
         }
 
     // --- Rejection paths -----------------------------------------------------------------------
