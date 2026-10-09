@@ -134,9 +134,19 @@ class RoutingVitalsSourceTest {
         assertEquals("the second Stop has nothing to close", 1, wifi.stops)
     }
 
+    /** A refused BLE Start opens no session, so it must not displace the Wi-Fi session that is
+     *  still waiting for its Stop (for example after NO_MEASUREMENT). */
     @Test
-    fun `Stop after a BLE Start does not close the Wi-Fi source`() = runTest {
+    fun `a refused BLE Start leaves the Wi-Fi session open for Stop`() = runTest {
         router.startAcquisition(request(Instrument.SPO2))
+        router.startAcquisition(request(Instrument.BP))
+        router.stopAcquisition()
+
+        assertEquals(1, wifi.stops)
+    }
+
+    @Test
+    fun `Stop after only a BLE Start closes nothing`() = runTest {
         router.startAcquisition(request(Instrument.BP))
         router.stopAcquisition()
 

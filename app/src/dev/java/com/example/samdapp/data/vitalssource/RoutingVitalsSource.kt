@@ -29,7 +29,7 @@ class RoutingVitalsSource(
     private val assignment: HubAssignment,
 ) : VitalsSource {
 
-    /** The transport the last Start went to, so Stop closes that one and no other. */
+    /** The transport of the last Start that opened a session, so Stop closes that one and no other. */
     @Volatile
     private var lastStarted: AcquisitionTransport? = null
 
@@ -43,9 +43,10 @@ class RoutingVitalsSource(
                 wifi.startAcquisition(request).stamped(AcquisitionTransport.WIFI, route.hubId)
             }
             is HubRoute.Ble -> {
-                lastStarted = AcquisitionTransport.BLE
                 // No transport on the result: it is keyed to the generic not-supported text, and
                 // the BLE "not paired yet" text must not be reachable while no BLE client exists.
+                // lastStarted is left alone: this stub opens no session, so it must not displace a
+                // Wi-Fi session still waiting for its Stop.
                 AcquisitionResult.Rejected(RejectReason.NOT_SUPPORTED, hubId = route.hubId)
             }
         }
