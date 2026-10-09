@@ -5384,3 +5384,20 @@ design memo is committed at `docs/design/samdpi-two-hub-memo.md`; its section 14
 ruling, erratum, residual and the PR-B requirements.
 
 - [ ] Next: PR-B, the SaMD-App BLE client (memo section 11 and section 14.5).
+
+## SaMDPi two-hub client, PR-B: started - 2026-10-09
+
+PR-B is split in two. PR-B1 (`feat/two-hub-routing-wifi`) is two-hub routing, the Wi-Fi `hub_id`
+checks and the `src/main` changes M1 to M6. PR-B2 (`feat/two-hub-ble-client`) is the BLE client.
+The design is `docs/design/samdpi-pr-b-client-memo.md` (gated 2026-10-09, section 15 holds over
+sections 0 to 14), on top of `docs/design/samdpi-two-hub-memo.md` section 14.
+
+- [ ] PR-B1: routing, Wi-Fi checks, M1 to M6, guards. No BLE code.
+- [ ] PR-B2: BLE client (`ble-ktx` as `devImplementation`, CDM association, `BleAcquisition`).
+
+Filed items, not part of PR-B:
+
+- Q3: on SDK 37 and later the local-network prompt precedes a BLE Start. Harmless but inaccurate.
+  Revisit when a handset reaches API 37.
+- Q9: a SaMDPi guard that `local_name == "SaMD-" + hub_id`, for a later SaMDPi PR. The CDM name
+  pattern assumes it; identity is still proved by the DIS serial.
