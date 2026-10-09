@@ -5375,3 +5375,12 @@ stays at v22). Must merge before any pilot use. Design and operator rulings:
     of merged Alembic migrations, so a merged migration can never be edited in place.
 16. Ops: move Docker Desktop's disk image to the SSD (the root disk filled up and holds the
     Postgres volume).
+
+## SaMDPi two-hub split: done - 2026-10-08
+
+SaMDPi PR #3 (PR-A) and PR #4 (its review fixes) are merged; SaMDPi `master` is `bba2c6b`. Both
+hubs run merged builds: kernelhub1 serves SPO2 over Wi-Fi and kernelhub2 serves BP over BLE. The
+design memo is committed at `docs/design/samdpi-two-hub-memo.md`; its section 14 records every
+ruling, erratum, residual and the PR-B requirements.
+
+- [ ] Next: PR-B, the SaMD-App BLE client (memo section 11 and section 14.5).
