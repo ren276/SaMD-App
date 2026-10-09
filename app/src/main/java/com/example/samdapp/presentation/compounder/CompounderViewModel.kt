@@ -131,6 +131,10 @@ data class CompounderUiState(
     /** Held apart from [errorMessage] so an instrument failure never overwrites a save failure and
      *  a save failure never overwrites an instrument one. */
     @StringRes val acquisitionError: Int? = null,
+    /** True while the values the instrument wrote were emulated. Set only from
+     *  [AcquisitionResult.Accepted.synthetic] and replaced by the next accepted reading; a
+     *  rejection leaves it alone, because the fields it labels are unchanged by a rejection. */
+    val synthetic: Boolean = false,
     val activeSessionId: String? = null,
     val fieldProvenance: Map<VitalsField, VitalsFieldProvenance> = emptyMap(),
 ) {
@@ -622,6 +626,7 @@ class CompounderViewModel @AssistedInject constructor(
                 acquiringInstrument = null,
                 activeSessionId = accepted.sessionId,
                 acquisitionError = null,
+                synthetic = accepted.synthetic == true,
                 pulseBpm = written[VitalsField.PULSE_BPM] ?: state.pulseBpm,
                 bpSystolic = written[VitalsField.BP_SYSTOLIC] ?: state.bpSystolic,
                 bpDiastolic = written[VitalsField.BP_DIASTOLIC] ?: state.bpDiastolic,

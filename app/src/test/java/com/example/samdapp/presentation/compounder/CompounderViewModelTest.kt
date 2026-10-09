@@ -398,6 +398,46 @@ class CompounderViewModelTest {
             }
         }
 
+    // --- B12: the synthetic flag behind the Emulated labels (G-B27) ---------------------------
+
+    @Test
+    fun `an accepted synthetic reading sets the flag, and only Accepted can set it`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val source = FakeVitalsSource().apply {
+                nextResult = AcquisitionResult.Rejected(RejectReason.QUALITY_STATUS_NOT_OK)
+            }
+            val vm = viewModel(source)
+
+            vm.onStartAcquisition()
+            assertEquals("a rejection must not set it", false, vm.uiState.value.synthetic)
+
+            source.nextResult = bpAccepted().copy(synthetic = true)
+            vm.onStartAcquisition()
+            assertEquals(true, vm.uiState.value.synthetic)
+        }
+
+    @Test
+    fun `a later rejection leaves the flag as it was, a later accepted reading replaces it`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val source = FakeVitalsSource().apply { nextResult = bpAccepted().copy(synthetic = true) }
+            val vm = viewModel(source)
+            vm.onStartAcquisition()
+
+            source.nextResult = AcquisitionResult.Rejected(RejectReason.UNREACHABLE)
+            vm.onStartAcquisition()
+            assertEquals("the labelled fields are unchanged by a rejection", true, vm.uiState.value.synthetic)
+
+            source.nextResult = bpAccepted().copy(synthetic = false)
+            vm.onStartAcquisition()
+            assertEquals(false, vm.uiState.value.synthetic)
+
+            source.nextResult = bpAccepted().copy(synthetic = true)
+            vm.onStartAcquisition()
+            source.nextResult = bpAccepted()
+            vm.onStartAcquisition()
+            assertEquals("an unreported synthetic flag is not synthetic", false, vm.uiState.value.synthetic)
+        }
+
     // --- Rejection paths -----------------------------------------------------------------------
 
     @Test

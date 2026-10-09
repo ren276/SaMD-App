@@ -504,4 +504,8 @@
     <string name="acq_reject_unreachable_ble">Cannot connect to the instrument. Move closer and check it is switched on. If another phone is using it, wait and try again.</string>
     <string name="acq_reject_timeout_ble">The instrument did not answer in time. Try again.</string>
     <string name="acq_reject_not_paired_ble">This instrument has not been paired with the app yet.</string>
+
+    <!-- Shown while the form holds values an emulated instrument wrote (memo 14.5 item 12). -->
+    <string name="emulated_instrument_banner">Emulated instrument. Synthetic values, not a real measurement.</string>
+    <string name="emulated_field_supporting_text">Emulated</string>
 </resources>
