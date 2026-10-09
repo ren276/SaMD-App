@@ -14,13 +14,6 @@ const val ACCESS_LOCAL_NETWORK_ENFORCED_SDK = 37
 
 enum class LocalNetworkFailure { PERMISSION_DENIED, UNREACHABLE, UNREACHABLE_OR_BLOCKED }
 
-/** On-screen mitigation for [LocalNetworkFailure.UNREACHABLE_OR_BLOCKED]. Names both possible
- *  causes without claiming code can tell them apart, since checkSelfPermission cannot see a
- *  vendor-level local-network toggle. TODO(PR4): surface this on the Pi connection error banner. */
-const val UNREACHABLE_OR_BLOCKED_MESSAGE =
-    "Cannot reach the device gateway. Check the Pi is running and on the same Wi-Fi, and check " +
-        "this app's local-network access in system settings."
-
 /** Classifies a failed LAN socket attempt (to the Pi relay or any other local-network peer).
  *
  *  [permissionGranted] must come from `ContextCompat.checkSelfPermission`. [cause] exists for

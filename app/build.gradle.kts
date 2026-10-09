@@ -48,6 +48,39 @@ fun resolveDevHostIp(): String {
     return "127.0.0.1"
 }
 
+// PI_HUB_ASSIGNMENT: which hub serves which instrument, over which wire (two-hub PR-B addendum
+// 7.1). Returns the one Wi-Fi hub_id, or null when no instrument is assigned to Wi-Fi, and throws
+// on the first broken rule so a bad value fails the build here rather than every acquisition at
+// runtime. HubAssignment.parse (src/dev) applies the same rules; BuildConfig is tested against it
+// so the two layers cannot drift apart. The samd.dev.kernelFallback check below is the precedent.
+val piHubAssignmentDefault = "SPO2=wifi:kernelhub1,BP=ble:kernelhub2"
+
+fun piWifiHubId(raw: String): String? {
+    fun refuse(rule: String): Nothing = throw GradleException("PI_HUB_ASSIGNMENT $rule, got '$raw'")
+    if (raw.isEmpty()) refuse("is empty")
+    if (raw.any { it.isWhitespace() }) refuse("contains whitespace")
+    val instruments = listOf("BP", "SPO2", "THERMOMETER", "GLUCOMETER", "WEIGHT_SCALE", "HEART_RATE")
+    val bleInstruments = setOf("BP", "SPO2", "THERMOMETER")
+    val hubIdRule = Regex("^[a-z0-9-]{3,32}$")
+    val seen = mutableSetOf<String>()
+    val wifiHubs = mutableSetOf<String>()
+    for (entry in raw.split(",")) {
+        val sides = entry.split("=")
+        if (sides.size != 2) refuse("has the malformed entry '$entry', expected INSTRUMENT=TRANSPORT:HUB_ID")
+        val parts = sides[1].split(":")
+        if (parts.size != 2) refuse("has the malformed entry '$entry', expected INSTRUMENT=TRANSPORT:HUB_ID")
+        val (instrument, transport, hubId) = listOf(sides[0], parts[0], parts[1])
+        if (instrument !in instruments) refuse("names the unknown instrument '$instrument'")
+        if (transport != "wifi" && transport != "ble") refuse("names the unknown transport '$transport', expected wifi or ble")
+        if (!hubIdRule.matches(hubId)) refuse("has the hub_id '$hubId', which does not match ^[a-z0-9-]{3,32}$")
+        if (!seen.add(instrument)) refuse("names $instrument twice")
+        if (transport == "ble" && instrument !in bleInstruments) refuse("assigns $instrument to ble, which only BP, SPO2 and THERMOMETER may use")
+        if (transport == "wifi") wifiHubs += hubId
+    }
+    if (wifiHubs.size > 1) refuse("names more than one Wi-Fi hub_id: ${wifiHubs.sorted()}")
+    return wifiHubs.firstOrNull()
+}
+
 android {
     namespace = "com.example.samdapp"
     compileSdk {
@@ -106,16 +139,39 @@ android {
             // layer on top of PiGatewayVitalsSource living in src/dev/: the class does not exist
             // outside dev, and the control that would call it does not render.
             buildConfigField("boolean", "PI_GATEWAY_ENABLED", "true")
-            // Raspberry Pi instrument gateway on the LAN, dev flavour only. Overridable from
-            // local.properties the same way BACKEND_BASE_URL is, so moving the Pi to a new address
-            // is a property edit rather than a source edit. Staging and prod define no such field:
-            // the code that reads it lives in src/dev/ and does not exist in those builds.
-            // The `.local` default is resolved by NsdGatewayDns, installed on the gateway's own
+            // Instrument hubs, dev flavour only. PI_HUB_ASSIGNMENT says which hub serves which
+            // instrument over which wire (default SPO2 over Wi-Fi from kernelhub1, BP over BLE from
+            // kernelhub2); a bad value fails the build here. The gateway base URL is derived from the
+            // Wi-Fi entry as http://<hub_id>.local:8090/ (8090 is the profile and Avahi port), so
+            // moving a hub means editing the assignment. PI_GATEWAY_BASE_URL in local.properties
+            // stays as an explicit override, for desk work against the laptop container
+            // (http://127.0.0.1:8090/ with SPO2=wifi:laptop-docker); with no Wi-Fi entry and no
+            // override the URL is a placeholder no call ever reaches. Staging and prod define none
+            // of these fields: the code that reads them lives in src/dev/ and does not exist there.
+            // The `.local` host is resolved by NsdGatewayDns, installed on the gateway's own
             // OkHttpClient only; Android's system resolver has no mDNS path and would throw
-            // UnknownHostException here. It requires the Pi to advertise the DNS-SD service in
-            // tools/kernel-hub-avahi.service. Override with a literal IP in local.properties when
-            // the handset is off the gateway's LAN (adb reverse) or mDNS is blocked by the AP.
-            buildConfigField("String", "PI_GATEWAY_BASE_URL", "\"${localProperties.getProperty("PI_GATEWAY_BASE_URL", "http://kernel-hub.local:8090/")}\"")
+            // UnknownHostException. It requires the hub to advertise the DNS-SD service in
+            // SaMDPi deploy/avahi/kernelhub1.service. Override with a literal IP when the handset is
+            // off the hub's LAN (adb reverse) or mDNS is blocked by the AP.
+            val piHubAssignment = localProperties.getProperty("PI_HUB_ASSIGNMENT", piHubAssignmentDefault)
+            val piWifiHub = piWifiHubId(piHubAssignment)
+            val piBaseUrlOverride = localProperties.getProperty("PI_GATEWAY_BASE_URL", "").trim()
+            val piBaseUrl = when {
+                piBaseUrlOverride.isNotEmpty() -> piBaseUrlOverride
+                piWifiHub != null -> "http://$piWifiHub.local:8090/"
+                else -> "http://no-wifi-hub-assigned.invalid:8090/"
+            }
+            logger.lifecycle(
+                "dev pi hubs: $piHubAssignment" +
+                    (if (localProperties.containsKey("PI_HUB_ASSIGNMENT")) " (from local.properties)" else " (default)") +
+                    "; gateway $piBaseUrl" +
+                    (if (piBaseUrlOverride.isNotEmpty()) " (override from local.properties)" else " (derived)"),
+            )
+            buildConfigField("String", "PI_HUB_ASSIGNMENT", "\"$piHubAssignment\"")
+            buildConfigField("String", "PI_GATEWAY_BASE_URL", "\"$piBaseUrl\"")
+            // True when local.properties overrode the derived URL. A test of the derivation skips
+            // on it, so a dev build made for desk work or a live check does not fail the suite.
+            buildConfigField("boolean", "PI_GATEWAY_BASE_URL_OVERRIDDEN", "${piBaseUrlOverride.isNotEmpty()}")
             // FLAG_SECURE off in dev so investor/demo screen recordings work; staging/prod enforce it.
             buildConfigField("boolean", "SCREEN_SECURITY_ENABLED", "false")
             // samd.dev.kernelFallback=none binds the always-null kernel fallback staging and prod

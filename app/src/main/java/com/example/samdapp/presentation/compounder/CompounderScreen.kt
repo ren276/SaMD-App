@@ -17,7 +17,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import com.example.samdapp.R
 import com.example.samdapp.presentation.common.SamdLoadingIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -36,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -188,6 +191,11 @@ internal fun CompounderContent(uiState: CompounderUiState, actions: CompounderAc
             if (com.example.samdapp.BuildConfig.PI_GATEWAY_ENABLED) {
                 item { AcquisitionControls(uiState, actions) }
             }
+            // Rendered from `synthetic` alone, not from the dev flag: whatever put an emulated value
+            // in the form, the worker is told so for as long as the form shows it (14.5 item 12).
+            if (uiState.synthetic) {
+                item { EmulatedBanner() }
+            }
             item {
                 // One capture-method value for the whole snapshot (REQ-TRS-05) — mirrors the
                 // existing per-snapshot ObservationSource granularity rather than one dropdown
@@ -203,27 +211,27 @@ internal fun CompounderContent(uiState: CompounderUiState, actions: CompounderAc
                 )
             }
             item {
-                OutlinedTextField(uiState.pulseBpm, { actions.onPulseChange(filterDigitsOnly(it, maxLength = 3)) }, label = { Text("Pulse (bpm)") }, trailingIcon = { if (uiState.isAcquiring(VitalsField.PULSE_BPM)) AcquiringIndicator() }, keyboardOptions = numberKeyboard, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(uiState.pulseBpm, { actions.onPulseChange(filterDigitsOnly(it, maxLength = 3)) }, label = { Text("Pulse (bpm)") }, supportingText = emulatedSupportingText(uiState, VitalsField.PULSE_BPM), trailingIcon = { if (uiState.isAcquiring(VitalsField.PULSE_BPM)) AcquiringIndicator() }, keyboardOptions = numberKeyboard, modifier = Modifier.fillMaxWidth())
             }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(uiState.bpSystolic, { actions.onBpSystolicChange(filterDigitsOnly(it, maxLength = 3)) }, label = { Text("BP systolic") }, trailingIcon = { if (uiState.isAcquiring(VitalsField.BP_SYSTOLIC)) AcquiringIndicator() }, keyboardOptions = numberKeyboard, modifier = Modifier.fillMaxWidth(0.5f))
-                    OutlinedTextField(uiState.bpDiastolic, { actions.onBpDiastolicChange(filterDigitsOnly(it, maxLength = 3)) }, label = { Text("BP diastolic") }, trailingIcon = { if (uiState.isAcquiring(VitalsField.BP_DIASTOLIC)) AcquiringIndicator() }, keyboardOptions = numberKeyboard, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(uiState.bpSystolic, { actions.onBpSystolicChange(filterDigitsOnly(it, maxLength = 3)) }, label = { Text("BP systolic") }, supportingText = emulatedSupportingText(uiState, VitalsField.BP_SYSTOLIC), trailingIcon = { if (uiState.isAcquiring(VitalsField.BP_SYSTOLIC)) AcquiringIndicator() }, keyboardOptions = numberKeyboard, modifier = Modifier.fillMaxWidth(0.5f))
+                    OutlinedTextField(uiState.bpDiastolic, { actions.onBpDiastolicChange(filterDigitsOnly(it, maxLength = 3)) }, label = { Text("BP diastolic") }, supportingText = emulatedSupportingText(uiState, VitalsField.BP_DIASTOLIC), trailingIcon = { if (uiState.isAcquiring(VitalsField.BP_DIASTOLIC)) AcquiringIndicator() }, keyboardOptions = numberKeyboard, modifier = Modifier.fillMaxWidth())
                 }
             }
             item {
-                OutlinedTextField(uiState.spo2Percent, { actions.onSpo2Change(filterDigitsOnly(it, maxLength = 3)) }, label = { Text("SpO2 (%)") }, trailingIcon = { if (uiState.isAcquiring(VitalsField.SPO2_PERCENT)) AcquiringIndicator() }, keyboardOptions = numberKeyboard, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(uiState.spo2Percent, { actions.onSpo2Change(filterDigitsOnly(it, maxLength = 3)) }, label = { Text("SpO2 (%)") }, supportingText = emulatedSupportingText(uiState, VitalsField.SPO2_PERCENT), trailingIcon = { if (uiState.isAcquiring(VitalsField.SPO2_PERCENT)) AcquiringIndicator() }, keyboardOptions = numberKeyboard, modifier = Modifier.fillMaxWidth())
             }
             item {
-                OutlinedTextField(uiState.temperatureCelsius, { actions.onTemperatureChange(filterDecimal(it)) }, label = { Text("Temperature (°C)") }, trailingIcon = { if (uiState.isAcquiring(VitalsField.TEMPERATURE_CELSIUS)) AcquiringIndicator() }, keyboardOptions = decimalKeyboard, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(uiState.temperatureCelsius, { actions.onTemperatureChange(filterDecimal(it)) }, label = { Text("Temperature (°C)") }, supportingText = emulatedSupportingText(uiState, VitalsField.TEMPERATURE_CELSIUS), trailingIcon = { if (uiState.isAcquiring(VitalsField.TEMPERATURE_CELSIUS)) AcquiringIndicator() }, keyboardOptions = decimalKeyboard, modifier = Modifier.fillMaxWidth())
             }
             item {
-                OutlinedTextField(uiState.respiratoryRate, { actions.onRespiratoryRateChange(filterDigitsOnly(it, maxLength = 3)) }, label = { Text("Respiratory rate (breaths/min)") }, keyboardOptions = numberKeyboard, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(uiState.respiratoryRate, { actions.onRespiratoryRateChange(filterDigitsOnly(it, maxLength = 3)) }, label = { Text("Respiratory rate (breaths/min)") }, supportingText = emulatedSupportingText(uiState, VitalsField.RESPIRATORY_RATE), keyboardOptions = numberKeyboard, modifier = Modifier.fillMaxWidth())
             }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(uiState.weightKg, { actions.onWeightChange(filterDecimal(it)) }, label = { Text("Weight (kg)") }, trailingIcon = { if (uiState.isAcquiring(VitalsField.WEIGHT_KG)) AcquiringIndicator() }, keyboardOptions = decimalKeyboard, modifier = Modifier.fillMaxWidth(0.5f))
-                    OutlinedTextField(uiState.heightCm, { actions.onHeightChange(filterDecimal(it)) }, label = { Text("Height (cm)") }, keyboardOptions = decimalKeyboard, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(uiState.weightKg, { actions.onWeightChange(filterDecimal(it)) }, label = { Text("Weight (kg)") }, supportingText = emulatedSupportingText(uiState, VitalsField.WEIGHT_KG), trailingIcon = { if (uiState.isAcquiring(VitalsField.WEIGHT_KG)) AcquiringIndicator() }, keyboardOptions = decimalKeyboard, modifier = Modifier.fillMaxWidth(0.5f))
+                    OutlinedTextField(uiState.heightCm, { actions.onHeightChange(filterDecimal(it)) }, label = { Text("Height (cm)") }, supportingText = emulatedSupportingText(uiState, VitalsField.HEIGHT_CM), keyboardOptions = decimalKeyboard, modifier = Modifier.fillMaxWidth())
                 }
             }
             uiState.bmi?.let { bmi -> item { Text("BMI: $bmi kg/m²", style = MaterialTheme.typography.bodyMedium) } }
@@ -245,7 +253,7 @@ internal fun CompounderContent(uiState: CompounderUiState, actions: CompounderAc
             }
             if (uiState.showPointOfCareTests) {
                 item {
-                    OutlinedTextField(uiState.bloodGlucoseMgDl, { actions.onBloodGlucoseChange(filterDigitsOnly(it, maxLength = 3)) }, label = { Text("Blood glucose (mg/dL)") }, trailingIcon = { if (uiState.isAcquiring(VitalsField.BLOOD_GLUCOSE_MG_DL)) AcquiringIndicator() }, keyboardOptions = numberKeyboard, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(uiState.bloodGlucoseMgDl, { actions.onBloodGlucoseChange(filterDigitsOnly(it, maxLength = 3)) }, label = { Text("Blood glucose (mg/dL)") }, supportingText = emulatedSupportingText(uiState, VitalsField.BLOOD_GLUCOSE_MG_DL), trailingIcon = { if (uiState.isAcquiring(VitalsField.BLOOD_GLUCOSE_MG_DL)) AcquiringIndicator() }, keyboardOptions = numberKeyboard, modifier = Modifier.fillMaxWidth())
                 }
                 item {
                     OutlinedTextField(uiState.urinalysisResult, actions::onUrinalysisChange, label = { Text("Urinalysis result") }, modifier = Modifier.fillMaxWidth())
@@ -314,12 +322,43 @@ private fun AcquisitionControls(uiState: CompounderUiState, actions: CompounderA
                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("stop_acquisition_button"),
                 ) { Text("Stop") }
             }
-            uiState.acquisitionError?.let { message ->
-                Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            uiState.acquisitionError?.let { messageRes ->
+                Text(stringResource(messageRes), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             }
         }
     }
 }
+
+/** The card-level half of the Emulated labelling; the per-field half is [emulatedSupportingText]. */
+@Composable
+private fun EmulatedBanner() {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+        modifier = Modifier.fillMaxWidth().testTag("emulated_banner"),
+    ) {
+        Text(
+            stringResource(R.string.emulated_instrument_banner),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onTertiaryContainer,
+            modifier = Modifier.padding(12.dp),
+        )
+    }
+}
+
+/** "Emulated" under every field an emulated instrument wrote and the worker has not since typed
+ *  over. A field the worker edits is DEVICE_EDITED, which is a human's number, so it loses the
+ *  label. Null (no supporting text at all) whenever the reading is not synthetic. */
+private fun emulatedSupportingText(uiState: CompounderUiState, field: VitalsField): (@Composable () -> Unit)? =
+    if (uiState.synthetic && uiState.fieldProvenance[field] == VitalsFieldProvenance.DEVICE) {
+        {
+            Text(
+                stringResource(R.string.emulated_field_supporting_text),
+                modifier = Modifier.testTag("emulated_label_${field.name}"),
+            )
+        }
+    } else {
+        null
+    }
 
 /**
  * A saved [Visibility.PRIVATE] ailment renders as a locked placeholder here — [AilmentListItem]

@@ -194,6 +194,50 @@ class CompounderScreenTest {
         composeRule.onNodeWithTag("stop_acquisition_button").assertExists()
     }
 
+    /**
+     * G-B12. The Emulated banner and the per-field label render only while `synthetic` is true,
+     * and only on a field still marked DEVICE: a field the worker typed over loses its label.
+     */
+    @Test
+    fun theEmulatedBannerAndFieldLabelsRenderOnlyForSyntheticReadings() {
+        val synthetic = autofilledState().copy(
+            synthetic = true,
+            fieldProvenance = mapOf(
+                VitalsField.BP_SYSTOLIC to VitalsFieldProvenance.DEVICE,
+                VitalsField.BP_DIASTOLIC to VitalsFieldProvenance.DEVICE,
+                VitalsField.PULSE_BPM to VitalsFieldProvenance.DEVICE_EDITED,
+            ),
+        )
+        composeRule.setContent { CompounderContent(uiState = synthetic, actions = FakeCompounderActions()) }
+
+        composeRule.onNode(hasScrollAction()).performScrollToNode(hasTestTag("emulated_banner"))
+        composeRule.onNodeWithTag("emulated_banner").assertIsDisplayed()
+        composeRule.onNodeWithText("Emulated instrument. Synthetic values, not a real measurement.").assertExists()
+        // The label is the field's supporting text, which the text field merges into its own node,
+        // so the tag is only visible in the unmerged tree. Scroll to the field by its label first.
+        composeRule.onNode(hasScrollAction()).performScrollToNode(hasText("BP systolic"))
+        composeRule.onNodeWithTag("emulated_label_BP_SYSTOLIC", useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithTag("emulated_label_BP_DIASTOLIC", useUnmergedTree = true).assertExists()
+        composeRule.onNode(hasScrollAction()).performScrollToNode(hasText("Pulse (bpm)"))
+        composeRule.onNodeWithTag("emulated_label_PULSE_BPM", useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun noEmulatedBannerOrFieldLabelRendersForAReadingThatIsNotSynthetic() {
+        composeRule.setContent {
+            CompounderContent(uiState = autofilledState().copy(synthetic = false), actions = FakeCompounderActions())
+        }
+
+        // The banner item sits directly below the acquisition controls. Scroll there first, or the
+        // list has not composed it yet and "does not exist" would hold for any reason at all.
+        composeRule.onNode(hasScrollAction()).performScrollToNode(hasTestTag("acquisition_controls"))
+        composeRule.onNodeWithTag("acquisition_controls").assertExists()
+        composeRule.onNodeWithTag("emulated_banner").assertDoesNotExist()
+        composeRule.onNode(hasScrollAction()).performScrollToNode(hasText("BP systolic"))
+        composeRule.onNodeWithTag("emulated_label_BP_SYSTOLIC", useUnmergedTree = true).assertDoesNotExist()
+        composeRule.onNodeWithTag("emulated_label_BP_DIASTOLIC", useUnmergedTree = true).assertDoesNotExist()
+    }
+
     private fun autofilledState() = CompounderUiState(
         isLoadingPrefill = false,
         encounterId = "encounter-1",

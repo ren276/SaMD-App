@@ -5384,3 +5384,29 @@ design memo is committed at `docs/design/samdpi-two-hub-memo.md`; its section 14
 ruling, erratum, residual and the PR-B requirements.
 
 - [ ] Next: PR-B, the SaMD-App BLE client (memo section 11 and section 14.5).
+
+## SaMDPi two-hub client, PR-B: started - 2026-10-09
+
+PR-B is split in two. PR-B1 (`feat/two-hub-routing-wifi`) is two-hub routing, the Wi-Fi `hub_id`
+checks and the `src/main` changes M1 to M6. PR-B2 (`feat/two-hub-ble-client`) is the BLE client.
+The design is `docs/design/samdpi-pr-b-client-memo.md` (gated 2026-10-09, section 15 holds over
+sections 0 to 14), on top of `docs/design/samdpi-two-hub-memo.md` section 14.
+
+- [ ] PR-B1: routing, Wi-Fi checks, M1 to M6, guards. No BLE code.
+- [ ] PR-B2: BLE client (`ble-ktx` as `devImplementation`, CDM association, `BleAcquisition`).
+
+Filed items, not part of PR-B:
+
+- Q3: on SDK 37 and later the local-network prompt precedes a BLE Start. Harmless but inaccurate.
+  Revisit when a handset reaches API 37.
+- Q9: a SaMDPi guard that `local_name == "SaMD-" + hub_id`, for a later SaMDPi PR. The CDM name
+  pattern assumes it; identity is still proved by the DIS serial.
+
+Observed during PR-B1 live checks, not resolved:
+
+- The first SPO2 Start over Wi-Fi after a fresh install of the dev build (2026-10-09) answered
+  UNREACHABLE and never reached the hub: the kernelhub1 journal had no entry, while ping and a raw
+  TCP GET from the phone shell reached it. It was seen once. It did not recur in 4 later cold starts:
+  2 over mDNS (a 60 s cache expiry after 70 s idle, and a fresh install plus force-stop) and 2 over
+  the 127.0.0.1 laptop-container path. Cause INFERRED as first-use mDNS discovery
+  (`NsdGatewayDns`); not observed directly. Revisit if it recurs.

@@ -1,7 +1,7 @@
 package com.example.samdapp.presentation.compounder
 
+import com.example.samdapp.R
 import com.example.samdapp.domain.audit.AuditAction
-import com.example.samdapp.domain.connectivity.UNREACHABLE_OR_BLOCKED_MESSAGE
 import com.example.samdapp.domain.media.AilmentAudioRecorder
 import com.example.samdapp.domain.model.ObservationSource
 import com.example.samdapp.domain.model.VitalsReading
@@ -17,6 +17,7 @@ import com.example.samdapp.domain.usecase.StartCaseUseCase
 import com.example.samdapp.domain.usecase.StopDeviceAcquisitionUseCase
 import com.example.samdapp.domain.vitalssource.AcquisitionRequest
 import com.example.samdapp.domain.vitalssource.AcquisitionResult
+import com.example.samdapp.domain.vitalssource.AcquisitionTransport
 import com.example.samdapp.domain.vitalssource.Instrument
 import com.example.samdapp.domain.vitalssource.RejectReason
 import com.example.samdapp.domain.vitalssource.Scenario
@@ -30,6 +31,10 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -330,6 +335,125 @@ class CompounderViewModelTest {
             assertTrue("payload must never carry the measured value", "174" !in entry.payload)
         }
 
+    // --- B4 / Q7: provenance on every acquisition audit row (G-B24) ---------------------------
+
+    private fun payloadOf(action: AuditAction) =
+        Json.parseToJsonElement(audit.logged.last { it.action == action.value }.payload).jsonObject
+
+    @Test
+    fun `the RECEIVED payload carries hubId, transport and emulatorBuild`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val source = FakeVitalsSource().apply {
+                nextResult = bpAccepted().copy(
+                    hubId = "kernelhub1",
+                    transport = AcquisitionTransport.WIFI,
+                    emulatorBuild = "sha=abc1234;dirty=false;merged=true",
+                )
+            }
+            val vm = viewModel(source)
+
+            vm.onStartAcquisition()
+
+            val payload = payloadOf(AuditAction.VITALS_DEVICE_READING_RECEIVED)
+            assertEquals("kernelhub1", payload["hubId"]?.jsonPrimitive?.content)
+            assertEquals("WIFI", payload["transport"]?.jsonPrimitive?.content)
+            assertEquals("sha=abc1234;dirty=false;merged=true", payload["emulatorBuild"]?.jsonPrimitive?.content)
+        }
+
+    @Test
+    fun `the FAILED payload carries hubId and transport`() = runTest(mainDispatcherRule.dispatcher) {
+        val source = FakeVitalsSource().apply {
+            nextResult = AcquisitionResult.Rejected(
+                RejectReason.HUB_MISMATCH,
+                hubId = "kernelhub1",
+                transport = AcquisitionTransport.WIFI,
+            )
+        }
+        val vm = viewModel(source)
+
+        vm.onStartAcquisition()
+
+        val payload = payloadOf(AuditAction.VITALS_DEVICE_READING_FAILED)
+        assertEquals("kernelhub1", payload["hubId"]?.jsonPrimitive?.content)
+        assertEquals("WIFI", payload["transport"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `an unrouted result records the provenance keys as null rather than omitting them`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val source = FakeVitalsSource().apply { nextResult = bpAccepted() }
+            val vm = viewModel(source)
+
+            vm.onStartAcquisition()
+            source.nextResult = AcquisitionResult.Rejected(RejectReason.NOT_SUPPORTED)
+            vm.onStartAcquisition()
+
+            val received = payloadOf(AuditAction.VITALS_DEVICE_READING_RECEIVED)
+            val failed = payloadOf(AuditAction.VITALS_DEVICE_READING_FAILED)
+            listOf("hubId", "transport", "emulatorBuild").forEach { key ->
+                assertEquals("RECEIVED $key", JsonNull, received[key])
+            }
+            listOf("hubId", "transport").forEach { key ->
+                assertEquals("FAILED $key", JsonNull, failed[key])
+            }
+        }
+
+    // --- G-B10: no acquisition path writes the worker's capture-method attestation --------------
+
+    @Test
+    fun `an accepted reading over either transport leaves captureMethod null`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val source = FakeVitalsSource()
+            val vm = viewModel(source)
+
+            for (transport in AcquisitionTransport.entries) {
+                source.nextResult = bpAccepted().copy(synthetic = true, hubId = "kernelhub2", transport = transport)
+                vm.onStartAcquisition()
+                assertTrue("an accepted $transport reading must have written a field", vm.uiState.value.bpSystolic.isNotEmpty())
+                assertNull("$transport acquisition wrote captureMethod", vm.uiState.value.captureMethod)
+            }
+        }
+
+    // --- B12: the synthetic flag behind the Emulated labels (G-B27) ---------------------------
+
+    @Test
+    fun `an accepted synthetic reading sets the flag, and only Accepted can set it`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val source = FakeVitalsSource().apply {
+                nextResult = AcquisitionResult.Rejected(RejectReason.QUALITY_STATUS_NOT_OK)
+            }
+            val vm = viewModel(source)
+
+            vm.onStartAcquisition()
+            assertEquals("a rejection must not set it", false, vm.uiState.value.synthetic)
+
+            source.nextResult = bpAccepted().copy(synthetic = true)
+            vm.onStartAcquisition()
+            assertEquals(true, vm.uiState.value.synthetic)
+        }
+
+    @Test
+    fun `a later rejection leaves the flag as it was, a later accepted reading replaces it`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val source = FakeVitalsSource().apply { nextResult = bpAccepted().copy(synthetic = true) }
+            val vm = viewModel(source)
+            vm.onStartAcquisition()
+
+            source.nextResult = AcquisitionResult.Rejected(RejectReason.UNREACHABLE)
+            vm.onStartAcquisition()
+            assertEquals("the labelled fields are unchanged by a rejection", true, vm.uiState.value.synthetic)
+
+            source.nextResult = bpAccepted().copy(synthetic = false)
+            vm.onStartAcquisition()
+            assertEquals(false, vm.uiState.value.synthetic)
+
+            source.nextResult = bpAccepted().copy(synthetic = true)
+            vm.onStartAcquisition()
+            source.nextResult = bpAccepted()
+            vm.onStartAcquisition()
+            assertEquals("an unreported synthetic flag is not synthetic", false, vm.uiState.value.synthetic)
+        }
+
     // --- Rejection paths -----------------------------------------------------------------------
 
     @Test
@@ -346,7 +470,7 @@ class CompounderViewModelTest {
             // Build.VERSION.SDK_INT reads 0 on the host JVM, which is below the enforcement level,
             // so the classifier's third state is the correct answer here: this app cannot tell a
             // genuinely unreachable gateway from a vendor-level local-network block.
-            assertEquals(UNREACHABLE_OR_BLOCKED_MESSAGE, state.acquisitionError)
+            assertEquals(R.string.acq_reject_unreachable_or_blocked_wifi, state.acquisitionError)
             assertNull(state.acquiringInstrument)
             // No field written, and errorMessage (the save channel) untouched.
             assertEquals("", state.bpSystolic)
@@ -355,22 +479,21 @@ class CompounderViewModelTest {
         }
 
     @Test
-    fun `every reject reason maps to a message and none leaks a measured value`() {
+    fun `every reject reason maps to a message resource`() {
         for (reason in RejectReason.entries) {
-            val message = rejectionMessage(reason, sdkInt = 37)
-            assertTrue("$reason produced no message", message.isNotBlank())
+            assertTrue("$reason produced no message", acquisitionRejectionRes(reason, sdkInt = 37) != 0)
         }
         assertEquals(
-            "Local network access is off for this app. Allow it in system settings to reach the device gateway.",
-            rejectionMessage(RejectReason.PERMISSION_DENIED, sdkInt = 37),
+            R.string.acq_reject_permission_denied_wifi,
+            acquisitionRejectionRes(RejectReason.PERMISSION_DENIED, sdkInt = 37),
         )
         assertEquals(
-            "Cannot reach the device gateway. Check it is powered on and on the same Wi-Fi.",
-            rejectionMessage(RejectReason.UNREACHABLE, sdkInt = 37),
+            R.string.acq_reject_unreachable_wifi,
+            acquisitionRejectionRes(RejectReason.UNREACHABLE, sdkInt = 37),
         )
         assertEquals(
-            UNREACHABLE_OR_BLOCKED_MESSAGE,
-            rejectionMessage(RejectReason.UNREACHABLE, sdkInt = 36),
+            R.string.acq_reject_unreachable_or_blocked_wifi,
+            acquisitionRejectionRes(RejectReason.UNREACHABLE, sdkInt = 36),
         )
     }
 
