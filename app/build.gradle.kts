@@ -113,7 +113,7 @@ android {
             // The `.local` default is resolved by NsdGatewayDns, installed on the gateway's own
             // OkHttpClient only; Android's system resolver has no mDNS path and would throw
             // UnknownHostException here. It requires the Pi to advertise the DNS-SD service in
-            // tools/kernel-hub-avahi.service. Override with a literal IP in local.properties when
+            // SaMDPi deploy/avahi/kernelhub1.service. Override with a literal IP in local.properties when
             // the handset is off the gateway's LAN (adb reverse) or mDNS is blocked by the AP.
             buildConfigField("String", "PI_GATEWAY_BASE_URL", "\"${localProperties.getProperty("PI_GATEWAY_BASE_URL", "http://kernel-hub.local:8090/")}\"")
             // FLAG_SECURE off in dev so investor/demo screen recordings work; staging/prod enforce it.

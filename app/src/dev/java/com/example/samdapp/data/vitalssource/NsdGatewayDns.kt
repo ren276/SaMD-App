@@ -32,7 +32,7 @@ import java.util.logging.Logger
  *
  * Requires the gateway to advertise a DNS-SD service of type [SERVICE_TYPE]. Avahi's default
  * `_workstation._tcp` record is NOT usable: it advertises port 9 (discard), not the gateway. See
- * `tools/kernel-hub-avahi.service` for the file that must be installed on the Pi.
+ * SaMDPi's `deploy/avahi/kernelhub1.service` for the file that must be installed on the hub.
  */
 class NsdGatewayDns(
     private val systemDns: Dns = Dns.SYSTEM,
@@ -40,7 +40,7 @@ class NsdGatewayDns(
     // manual time change, which would leave a negative cache age permanently below
     // CACHE_TTL_MILLIS and cache a stale gateway address indefinitely.
     private val nowMillis: () -> Long = { SystemClock.elapsedRealtime() },
-    /** Resolves an mDNS instance name (`kernel-hub`) to an address, or null if it is not found in
+    /** Resolves an mDNS instance name (`kernelhub1`) to an address, or null if it is not found in
      *  time. Seam so the cache and delegation logic are testable without a device or a LAN. */
     private val discover: (String) -> InetAddress?,
 ) : Dns {
@@ -67,8 +67,8 @@ class NsdGatewayDns(
         val address = discover(instanceName)
             ?: throw UnknownHostException(
                 "mDNS: no '$SERVICE_TYPE' service named '$instanceName' on this network. " +
-                    "Check the handset is on the gateway's LAN and that the Pi has " +
-                    "tools/kernel-hub-avahi.service installed.",
+                    "Check the handset is on the gateway's LAN and that the hub has " +
+                    "SaMDPi's deploy/avahi/kernelhub1.service installed.",
             )
 
         cached.set(Entry(address, nowMillis()))
