@@ -71,10 +71,18 @@ data class AcquisitionRequest(
     val scenario: Scenario = Scenario.NORMAL,
 )
 
+/** Which wire an acquisition went over. Provenance for the audit trail and for the worker-facing
+ *  copy, never a routing input: routing is decided before a result exists. */
+enum class AcquisitionTransport { WIFI, BLE }
+
 sealed interface AcquisitionResult {
 
     /** [reading] carries only the fields the requested instrument supplies; every other field is
-     *  null. The remaining values are provenance for the audit trail, not clinical data. */
+     *  null. The remaining values are provenance for the audit trail, not clinical data.
+     *
+     *  [hubId] and [transport] are null when the source does not route (the dev mock, an older
+     *  fake). [emulatorBuild] is the emulator's build stamp as one string, or null when the
+     *  instrument did not report one. */
     data class Accepted(
         val reading: VitalsReading,
         val instrument: Instrument,
@@ -82,7 +90,16 @@ sealed interface AcquisitionResult {
         val deviceType: String,
         val measuredAt: String? = null,
         val synthetic: Boolean? = null,
+        val hubId: String? = null,
+        val transport: AcquisitionTransport? = null,
+        val emulatorBuild: String? = null,
     ) : AcquisitionResult
 
-    data class Rejected(val reason: RejectReason) : AcquisitionResult
+    /** [hubId] is the hub this acquisition was addressed to, not one the hub claimed to be, and is
+     *  null when no hub was assigned. */
+    data class Rejected(
+        val reason: RejectReason,
+        val hubId: String? = null,
+        val transport: AcquisitionTransport? = null,
+    ) : AcquisitionResult
 }
