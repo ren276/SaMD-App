@@ -5401,3 +5401,12 @@ Filed items, not part of PR-B:
   Revisit when a handset reaches API 37.
 - Q9: a SaMDPi guard that `local_name == "SaMD-" + hub_id`, for a later SaMDPi PR. The CDM name
   pattern assumes it; identity is still proved by the DIS serial.
+
+Observed during PR-B1 live checks, not resolved:
+
+- The first SPO2 Start over Wi-Fi after a fresh install of the dev build (2026-10-09) answered
+  UNREACHABLE and never reached the hub: the kernelhub1 journal had no entry, while ping and a raw
+  TCP GET from the phone shell reached it. It was seen once. It did not recur in 4 later cold starts:
+  2 over mDNS (a 60 s cache expiry after 70 s idle, and a fresh install plus force-stop) and 2 over
+  the 127.0.0.1 laptop-container path. Cause INFERRED as first-use mDNS discovery
+  (`NsdGatewayDns`); not observed directly. Revisit if it recurs.
