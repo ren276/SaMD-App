@@ -540,7 +540,7 @@ class CompounderViewModel @AssistedInject constructor(
                     // No field is written on any rejection path. A refused reading leaves the form
                     // exactly as the worker left it.
                     _uiState.update {
-                        it.copy(acquiringInstrument = null, acquisitionError = acquisitionRejectionRes(result.reason))
+                        it.copy(acquiringInstrument = null, acquisitionError = acquisitionRejectionRes(result.reason, result.transport))
                     }
                     auditLogger.log(
                         action = AuditAction.VITALS_DEVICE_READING_FAILED,

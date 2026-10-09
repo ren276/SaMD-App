@@ -64,6 +64,14 @@ enum class RejectReason {
 
     /** The gateway accepted the connection and then did not answer in time. */
     TIMEOUT,
+
+    /** Bluetooth is off or missing, Location Services are off, or this app may not use Nearby
+     *  devices. Only a BLE acquisition produces this; the Wi-Fi path never does. */
+    BLUETOOTH_UNAVAILABLE,
+
+    /** The peer is not the hub assigned to this instrument: a response carrying another (or no)
+     *  `hub_id`, or a hub that does not serve the instrument asked for. Nothing it said is trusted. */
+    HUB_MISMATCH,
 }
 
 data class AcquisitionRequest(

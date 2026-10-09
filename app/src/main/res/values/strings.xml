@@ -497,4 +497,11 @@
     <string name="acq_reject_mismatch">That reading did not match this measurement, so nothing was filled in. Try again.</string>
     <string name="acq_reject_malformed">The device gateway sent something this app could not read.</string>
     <string name="acq_reject_not_supported">No instrument gateway is available in this build.</string>
+    <string name="acq_reject_hub_mismatch">That reading came from a different instrument hub, so nothing was filled in.</string>
+    <!-- Bluetooth transport. A hub that is busy with another phone is reported as unreachable, so
+         the unreachable text covers both being out of range and being in use. -->
+    <string name="acq_reject_bluetooth_unavailable">Bluetooth or Location is off, or this app is not allowed to use Nearby devices. Turn them on, allow Nearby devices, then try again.</string>
+    <string name="acq_reject_unreachable_ble">Cannot connect to the instrument. Move closer and check it is switched on. If another phone is using it, wait and try again.</string>
+    <string name="acq_reject_timeout_ble">The instrument did not answer in time. Try again.</string>
+    <string name="acq_reject_not_paired_ble">This instrument has not been paired with the app yet.</string>
 </resources>
