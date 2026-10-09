@@ -36,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -314,8 +315,8 @@ private fun AcquisitionControls(uiState: CompounderUiState, actions: CompounderA
                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("stop_acquisition_button"),
                 ) { Text("Stop") }
             }
-            uiState.acquisitionError?.let { message ->
-                Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            uiState.acquisitionError?.let { messageRes ->
+                Text(stringResource(messageRes), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             }
         }
     }

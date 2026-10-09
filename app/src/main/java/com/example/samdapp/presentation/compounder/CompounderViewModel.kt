@@ -1,6 +1,6 @@
 package com.example.samdapp.presentation.compounder
 
-import android.os.Build
+import androidx.annotation.StringRes
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -8,9 +8,6 @@ import com.example.samdapp.data.mock.DemoPatientProfile
 import com.example.samdapp.domain.audit.AuditAction
 import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
-import com.example.samdapp.domain.connectivity.LocalNetworkFailure
-import com.example.samdapp.domain.connectivity.UNREACHABLE_OR_BLOCKED_MESSAGE
-import com.example.samdapp.domain.connectivity.classifyLocalNetworkFailure
 import com.example.samdapp.domain.media.AilmentAudioRecorder
 import com.example.samdapp.domain.model.AilmentEntry
 import com.example.samdapp.domain.model.MeasurementType
@@ -133,7 +130,7 @@ data class CompounderUiState(
     val selectedScenario: Scenario = Scenario.NORMAL,
     /** Held apart from [errorMessage] so an instrument failure never overwrites a save failure and
      *  a save failure never overwrites an instrument one. */
-    val acquisitionError: String? = null,
+    @StringRes val acquisitionError: Int? = null,
     val activeSessionId: String? = null,
     val fieldProvenance: Map<VitalsField, VitalsFieldProvenance> = emptyMap(),
 ) {
@@ -176,37 +173,6 @@ data class CompounderUiState(
      *  in flight, so the worker keeps sight of what they have already typed. */
     fun isAcquiring(field: VitalsField): Boolean =
         acquiringInstrument?.writtenFields()?.contains(field) == true
-}
-
-/**
- * User-facing copy for a failure that could be the local network. Routed through
- * [classifyLocalNetworkFailure] rather than written inline, so the pre-enforcement third state
- * (a vendor-level local-network toggle that `checkSelfPermission` cannot see) reaches the worker
- * with both causes named instead of a confident wrong one.
- *
- * [sdkInt] is a parameter rather than a direct `Build.VERSION.SDK_INT` read so the mapping is
- * testable on the host JVM at each enforcement level.
- */
-internal fun localNetworkFailureMessage(reason: RejectReason, sdkInt: Int): String =
-    when (classifyLocalNetworkFailure(permissionGranted = reason != RejectReason.PERMISSION_DENIED, sdkInt = sdkInt)) {
-        LocalNetworkFailure.PERMISSION_DENIED ->
-            "Local network access is off for this app. Allow it in system settings to reach the device gateway."
-        LocalNetworkFailure.UNREACHABLE ->
-            "Cannot reach the device gateway. Check it is powered on and on the same Wi-Fi."
-        LocalNetworkFailure.UNREACHABLE_OR_BLOCKED -> UNREACHABLE_OR_BLOCKED_MESSAGE
-    }
-
-/** Why a reading was refused, in the worker's terms. Never carries a measured value. */
-internal fun rejectionMessage(reason: RejectReason, sdkInt: Int = Build.VERSION.SDK_INT): String = when (reason) {
-    RejectReason.UNREACHABLE, RejectReason.PERMISSION_DENIED -> localNetworkFailureMessage(reason, sdkInt)
-    RejectReason.TIMEOUT -> "The device gateway did not answer in time. Try again."
-    RejectReason.NO_MEASUREMENT -> "The instrument has not produced a reading yet. Try again."
-    RejectReason.QUALITY_STATUS_NOT_OK ->
-        "The instrument reported a fault reading, so nothing was filled in. Check the instrument and try again."
-    RejectReason.SESSION_ID_MISMATCH, RejectReason.DEVICE_TYPE_MISMATCH ->
-        "That reading did not match this measurement, so nothing was filled in. Try again."
-    RejectReason.MALFORMED -> "The device gateway sent something this app could not read."
-    RejectReason.NOT_SUPPORTED -> "No instrument gateway is available in this build."
 }
 
 sealed interface CompounderEffect {
@@ -574,7 +540,7 @@ class CompounderViewModel @AssistedInject constructor(
                     // No field is written on any rejection path. A refused reading leaves the form
                     // exactly as the worker left it.
                     _uiState.update {
-                        it.copy(acquiringInstrument = null, acquisitionError = rejectionMessage(result.reason))
+                        it.copy(acquiringInstrument = null, acquisitionError = acquisitionRejectionRes(result.reason))
                     }
                     auditLogger.log(
                         action = AuditAction.VITALS_DEVICE_READING_FAILED,
@@ -592,7 +558,7 @@ class CompounderViewModel @AssistedInject constructor(
     }
 
     override fun onLocalNetworkPermissionDenied() = _uiState.update {
-        it.copy(acquiringInstrument = null, acquisitionError = rejectionMessage(RejectReason.PERMISSION_DENIED))
+        it.copy(acquiringInstrument = null, acquisitionError = acquisitionRejectionRes(RejectReason.PERMISSION_DENIED))
     }
 
     /** Stop closes the session on the gateway. It deliberately does NOT clear any field the worker

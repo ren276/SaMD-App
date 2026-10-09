@@ -482,4 +482,19 @@
     <string name="physician_outcome_modify">Corrected treatment captured. It is saved with the case.</string>
     <string name="physician_outcome_reject">Discarded. This decision is saved with the case.</string>
     <string name="physician_clinical_note_label">Clinical note (saved with the case)</string>
+
+    <!-- Why an instrument reading was refused (AcquisitionRejectionCopy). The reasons that read
+         differently by transport carry a transport suffix; every other reason has one string.
+         Keep each text free of any measured value. -->
+    <string name="acq_reject_unreachable_wifi">Cannot reach the device gateway. Check it is powered on and on the same Wi-Fi.</string>
+    <string name="acq_reject_permission_denied_wifi">Local network access is off for this app. Allow it in system settings to reach the device gateway.</string>
+    <!-- Below the enforcement level the app cannot tell a gateway that is down from a vendor-level
+         local-network block, so this text names both causes instead of claiming one. -->
+    <string name="acq_reject_unreachable_or_blocked_wifi">Cannot reach the device gateway. Check the Pi is running and on the same Wi-Fi, and check this app\'s local-network access in system settings.</string>
+    <string name="acq_reject_timeout_wifi">The device gateway did not answer in time. Try again.</string>
+    <string name="acq_reject_no_measurement">The instrument has not produced a reading yet. Try again.</string>
+    <string name="acq_reject_quality">The instrument reported a fault reading, so nothing was filled in. Check the instrument and try again.</string>
+    <string name="acq_reject_mismatch">That reading did not match this measurement, so nothing was filled in. Try again.</string>
+    <string name="acq_reject_malformed">The device gateway sent something this app could not read.</string>
+    <string name="acq_reject_not_supported">No instrument gateway is available in this build.</string>
 </resources>

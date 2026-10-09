@@ -1,7 +1,7 @@
 package com.example.samdapp.presentation.compounder
 
+import com.example.samdapp.R
 import com.example.samdapp.domain.audit.AuditAction
-import com.example.samdapp.domain.connectivity.UNREACHABLE_OR_BLOCKED_MESSAGE
 import com.example.samdapp.domain.media.AilmentAudioRecorder
 import com.example.samdapp.domain.model.ObservationSource
 import com.example.samdapp.domain.model.VitalsReading
@@ -346,7 +346,7 @@ class CompounderViewModelTest {
             // Build.VERSION.SDK_INT reads 0 on the host JVM, which is below the enforcement level,
             // so the classifier's third state is the correct answer here: this app cannot tell a
             // genuinely unreachable gateway from a vendor-level local-network block.
-            assertEquals(UNREACHABLE_OR_BLOCKED_MESSAGE, state.acquisitionError)
+            assertEquals(R.string.acq_reject_unreachable_or_blocked_wifi, state.acquisitionError)
             assertNull(state.acquiringInstrument)
             // No field written, and errorMessage (the save channel) untouched.
             assertEquals("", state.bpSystolic)
@@ -355,22 +355,21 @@ class CompounderViewModelTest {
         }
 
     @Test
-    fun `every reject reason maps to a message and none leaks a measured value`() {
+    fun `every reject reason maps to a message resource`() {
         for (reason in RejectReason.entries) {
-            val message = rejectionMessage(reason, sdkInt = 37)
-            assertTrue("$reason produced no message", message.isNotBlank())
+            assertTrue("$reason produced no message", acquisitionRejectionRes(reason, sdkInt = 37) != 0)
         }
         assertEquals(
-            "Local network access is off for this app. Allow it in system settings to reach the device gateway.",
-            rejectionMessage(RejectReason.PERMISSION_DENIED, sdkInt = 37),
+            R.string.acq_reject_permission_denied_wifi,
+            acquisitionRejectionRes(RejectReason.PERMISSION_DENIED, sdkInt = 37),
         )
         assertEquals(
-            "Cannot reach the device gateway. Check it is powered on and on the same Wi-Fi.",
-            rejectionMessage(RejectReason.UNREACHABLE, sdkInt = 37),
+            R.string.acq_reject_unreachable_wifi,
+            acquisitionRejectionRes(RejectReason.UNREACHABLE, sdkInt = 37),
         )
         assertEquals(
-            UNREACHABLE_OR_BLOCKED_MESSAGE,
-            rejectionMessage(RejectReason.UNREACHABLE, sdkInt = 36),
+            R.string.acq_reject_unreachable_or_blocked_wifi,
+            acquisitionRejectionRes(RejectReason.UNREACHABLE, sdkInt = 36),
         )
     }
 

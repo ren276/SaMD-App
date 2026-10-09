@@ -16,9 +16,10 @@ import com.example.samdapp.domain.kernel.KernelFailure
  * Resource ids, not strings. The screen resolves them with `stringResource`, so the copy is
  * translatable and so a test can assert WHICH message a failure selects without asserting the
  * English in it. `res/values/strings.xml` is where every string this track adds or changes lives;
- * strings outside it (`AbhaEnrolResult.messageForCode`, `UNREACHABLE_OR_BLOCKED_MESSAGE`,
+ * strings outside it (`AbhaEnrolResult.messageForCode`,
  * `GenerateKernelReportUseCase.UNAVAILABLE_REASONING_SUMMARY`) are still inline constants, filed
- * for the pre-pilot externalisation and Hindi locale item.
+ * for the pre-pilot externalisation and Hindi locale item. The instrument-gateway refusal texts
+ * (`acq_reject_*`) are in `strings.xml` too, selected by `AcquisitionRejectionCopy`.
  */
 data class KernelFailureCopy(
     @StringRes val titleRes: Int,
