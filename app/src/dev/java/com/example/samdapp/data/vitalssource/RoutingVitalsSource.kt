@@ -7,6 +7,12 @@ import com.example.samdapp.domain.vitalssource.AcquisitionTransport
 import com.example.samdapp.domain.vitalssource.RejectReason
 import com.example.samdapp.domain.vitalssource.VitalsSource
 
+/** The BLE side of the router: one acquisition from the hub [hubId] names. [onStarted] runs once
+ *  preparation has passed and a real BLE acquisition begins, and never for a refusal before that. */
+fun interface BleRoute {
+    suspend fun startAcquisition(request: AcquisitionRequest, hubId: String, onStarted: () -> Unit): AcquisitionResult
+}
+
 /**
  * The single [VitalsSource] binding of the dev flavour. It sends each acquisition to the transport
  * [assignment] names for that instrument, and to nothing else:
