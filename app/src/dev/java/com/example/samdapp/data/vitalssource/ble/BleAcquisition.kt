@@ -122,7 +122,9 @@ object BleAcquisition {
         // required services, is checked by the adapter during connect: NOT_SUPPORTED, UNREACHABLE.
         val failedInit = link.connect(CONNECT_TIMEOUT_MS, HubInitPlan.steps())
         progress.connected = true
-        if (failedInit.isNotEmpty()) return Outcome(rejected(RejectReason.MALFORMED))
+        // A failed init step is a link that could not be set up, not bytes the hub sent: UNREACHABLE
+        // (2026-10-14 ruling after review; was MALFORMED, whose copy was untrue here).
+        if (failedInit.isNotEmpty()) return Outcome(rejected(RejectReason.UNREACHABLE))
 
         // Step 5.
         if (link.mtu() < MIN_MTU) return Outcome(rejected(RejectReason.MALFORMED))

@@ -247,10 +247,13 @@ class BleAcquisitionTest {
     }
 
     @Test
-    fun `a recorded init failure is MALFORMED and no START is written`() = runTest {
-        for (failed in HubInitPlan.steps()) {
-            val link = FakeHubLink(initFailures = listOf(failed))
-            assertEquals("$failed", RejectReason.MALFORMED, acquire(link).reason())
+    fun `each kind of recorded init failure is UNREACHABLE and no START is written`() = runTest {
+        // One case per step of the plan (the MTU request and both CCCD enables), and all of them.
+        val cases = HubInitPlan.steps().map { listOf(it) } + listOf(HubInitPlan.steps())
+        assertEquals(setOf("mtu(517)", "enable(CONTROL_POINT)", "enable(ENVELOPE)"), cases.flatten().map { it.label() }.toSet())
+        for (failed in cases) {
+            val link = FakeHubLink(initFailures = failed)
+            assertEquals("$failed", RejectReason.UNREACHABLE, acquire(link).reason())
             assertTrue("$failed", link.startWrites.isEmpty())
         }
     }
