@@ -17,6 +17,7 @@ import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
+import androidx.core.content.IntentCompat
 import dagger.hilt.android.AndroidEntryPoint
 import java.util.regex.Pattern
 import javax.inject.Inject
@@ -38,18 +39,33 @@ class BlePrepActivity : ComponentActivity() {
 
     private var requestId = NO_REQUEST
 
-    /** Set once the system dialog was shown: a failure after it is the human's refusal, before it
-     *  the system's inability to run the step (Bluetooth or Location off, a CDM error). */
-    private var dialogShown = false
+    private var hubId = ""
+
+    /** This instance, as the bridge routes the companion-device callbacks to it. */
+    private val host = object : BlePrepBridge.Host {
+        override fun showDialog(dialog: Any) {
+            associationDialog.launch(IntentSenderRequest.Builder(dialog as IntentSender).build())
+        }
+
+        override fun finish() = this@BlePrepActivity.finish()
+    }
 
     private val permission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         answer(if (granted) BlePrepBridge.Answer.GRANTED else BlePrepBridge.Answer.REFUSED)
     }
 
-    /** The secondary signal (3.3): only a cancel answers here; RESULT_OK is answered by
-     *  `onAssociationCreated`, which also stores the ID. */
+    /** The secondary signal (3.3). RESULT_OK carries the created association, which completes the
+     *  request through the same path as `onAssociationCreated`, whichever of the two arrives first. */
     private val associationDialog = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
-        if (result.resultCode == RESULT_OK) finish() else answer(BlePrepBridge.Answer.REFUSED)
+        if (result.resultCode != RESULT_OK) {
+            answer(BlePrepBridge.Answer.REFUSED)
+            return@registerForActivityResult
+        }
+        val data = result.data
+        if (data != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            createdAssociation(data)?.let { associationCreated(bridge, associations, requestId, hubId, it) }
+        }
+        finish()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -60,6 +76,8 @@ class BlePrepActivity : ComponentActivity() {
             finish()
             return
         }
+        hubId = request.hubId
+        bridge.attach(requestId, host)
         // Recreated with the dialog already up: its result comes back through the launchers.
         if (savedInstanceState != null) return
         when (request.kind) {
@@ -73,6 +91,11 @@ class BlePrepActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         if (bridge.pending(requestId) == null) finish()
+    }
+
+    override fun onDestroy() {
+        bridge.detach(requestId, host)
+        super.onDestroy()
     }
 
     /** Addendum 3.1 and 3.2: the vendor service UUID and the hub's local name filter the dialog;
@@ -89,26 +112,20 @@ class BlePrepActivity : ComponentActivity() {
             .setNamePattern(Pattern.compile("^SaMD-${Pattern.quote(hubId)}$"))
             .build()
         val request = AssociationRequest.Builder().addDeviceFilter(filter).setSingleDevice(true).build()
-        // Neither callback needs this activity alive: a recreated instance finishes through its launcher.
+        // The callback outlives this instance, so it holds no state of it: it reaches the live instance,
+        // the recreated one after a rotation, only through the bridge.
         val bridge = bridge
         val associations = associations
         val id = requestId
         try {
             cdm.associate(request, ContextCompat.getMainExecutor(this), object : CompanionDeviceManager.Callback() {
-                override fun onAssociationPending(intentSender: IntentSender) {
-                    dialogShown = true
-                    associationDialog.launch(IntentSenderRequest.Builder(intentSender).build())
-                }
+                override fun onAssociationPending(intentSender: IntentSender) = bridge.dialogReady(id, intentSender)
 
                 override fun onAssociationCreated(associationInfo: AssociationInfo) {
-                    associations.onCreated(hubId, associationInfo.id)
-                    bridge.complete(id, BlePrepBridge.Answer.GRANTED)
-                    finish()
+                    associationCreated(bridge, associations, id, hubId, associationInfo)
                 }
 
-                override fun onFailure(error: CharSequence?) {
-                    answer(if (dialogShown) BlePrepBridge.Answer.REFUSED else BlePrepBridge.Answer.UNAVAILABLE)
-                }
+                override fun onFailure(error: CharSequence?) = bridge.associationFailed(id)
             })
         } catch (e: RuntimeException) {
             answer(BlePrepBridge.Answer.UNAVAILABLE)
@@ -130,5 +147,20 @@ class BlePrepActivity : ComponentActivity() {
             Intent(context, BlePrepActivity::class.java)
                 .putExtra(EXTRA_REQUEST_ID, request.id)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+        /** The one path for both signals of a created association; the bridge lets only the first
+         *  store the ID and answer. */
+        @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+        private fun associationCreated(
+            bridge: BlePrepBridge,
+            associations: HubAssociations,
+            id: Long,
+            hubId: String,
+            info: AssociationInfo,
+        ) = bridge.associationCreated(id) { associations.onCreated(hubId, info.id) }
+
+        @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+        private fun createdAssociation(data: Intent): AssociationInfo? =
+            IntentCompat.getParcelableExtra(data, CompanionDeviceManager.EXTRA_ASSOCIATION, AssociationInfo::class.java)
     }
 }
