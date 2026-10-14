@@ -300,6 +300,28 @@ class BleAcquisitionTest {
     }
 
     @Test
+    fun `F1 the cap with an abort whose gatt close throws and a link that still reads up sends no STOP and no disconnect`() = runTest {
+        // 16 s to connect leaves 9 s of the cap for the 10 s envelope wait: the cap fires first, START answered.
+        val link = FakeHubLink().apply {
+            connectDelayMs = 16_000
+            onStart = { answer(0x01) }
+            linkReadsUpAfterAbortCloseThrows = true
+        }
+
+        val outcome = runCatching { acquire(link) }
+
+        assertTrue("the abort failure escaped: ${outcome.exceptionOrNull()}", outcome.isSuccess)
+        assertEquals(RejectReason.TIMEOUT, outcome.getOrThrow().reason())
+        assertTrue("the library still reports the link up", link.isConnected())
+        assertEquals("abort is attempted once", 1, link.aborts)
+        assertTrue("an aborted link cannot carry a STOP", link.stopWrites.isEmpty())
+        assertEquals("no disconnect on an aborted link", 0, link.log.count { it == "disconnect" })
+        assertEquals("close is still attempted", 1, link.closes)
+        assertEquals(listOf("abort", "close"), link.log.dropWhile { it != "abort" })
+        assertEquals(listOf("BLE teardown abort failed: java.lang.IllegalStateException"), warnings)
+    }
+
+    @Test
     fun `the closed-link fake refuses every operation after abort and after close`() = runTest {
         for (kill in listOf<(FakeHubLink) -> Unit>({ it.abort() }, { it.close() })) {
             val link = FakeHubLink()

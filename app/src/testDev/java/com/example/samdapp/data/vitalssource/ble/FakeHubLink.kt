@@ -78,10 +78,21 @@ class FakeHubLink(
     /** Thrown by the teardown call with this [log] label: "write(STOP)", "disconnect", "abort" or "close". */
     val teardownFailures = mutableMapOf<String, Exception>()
 
+    /**
+     * The library behaviour behind the cap path's second guard: `BleManagerHandler.close()` clears
+     * `connected` only after `gatt.close()` returns (BleManagerHandler.java:563), so a `gatt.close()`
+     * that throws leaves `isConnected()` true. With this set, [abort] refuses every later operation
+     * like a closed manager but throws from its close and [isConnected] keeps reading true, and the
+     * [close] that follows does nothing more, as `BleHubManager.close()` after an abort.
+     */
+    var linkReadsUpAfterAbortCloseThrows = false
+
     private var dead = false
     private var linkUp = false
+    private var libraryLinkDown = false
+    private var abortThrew = false
 
-    override fun isConnected(): Boolean = linkUp && !dead
+    override fun isConnected(): Boolean = linkUp && !libraryLinkDown
 
     private fun alive(call: String) {
         log += call
@@ -151,6 +162,12 @@ class FakeHubLink(
     override fun abort() {
         alive("abort")
         aborts++
+        if (linkReadsUpAfterAbortCloseThrows) {
+            dead = true
+            abortThrew = true
+            sink.close(HubLinkException(HubLinkException.Failure.DISCONNECTED, "the link was closed"))
+            throw IllegalStateException("gatt.close() threw")
+        }
         die()
         teardownFailures["abort"]?.let { throw it }
     }
@@ -158,12 +175,13 @@ class FakeHubLink(
     override fun close() {
         log += "close"
         closes++
-        die()
+        if (!abortThrew) die()
         teardownFailures["close"]?.let { throw it }
     }
 
     private fun die() {
         dead = true
+        libraryLinkDown = true
         sink.close(HubLinkException(HubLinkException.Failure.DISCONNECTED, "the link was closed"))
     }
 
@@ -182,6 +200,7 @@ class FakeHubLink(
 
     fun dropLink() {
         linkUp = false
+        libraryLinkDown = true
         sink.close(HubLinkException(HubLinkException.Failure.DISCONNECTED))
     }
 
