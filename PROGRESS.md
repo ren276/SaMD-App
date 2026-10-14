@@ -5413,8 +5413,8 @@ Observed during PR-B1 live checks, not resolved:
 
 ## SaMDPi two-hub client, PR-B2: built, live-checked, live findings fixed - 2026-10-14
 
-`feat/two-hub-ble-client` holds the BLE client as local commits only: no push, no upstream. The
-dev flavor carries all of it; staging and prod are unchanged (852 tests each) and their release
+`feat/two-hub-ble-client` holds the BLE client, pushed with its upstream set, as PR #80
+(https://github.com/ren276/SaMD-App/pull/80). The dev flavor carries all of it; staging and prod are unchanged (852 tests each) and their release
 runtime classpaths hold no `no.nordicsemi` artifact. Every guard is mutation-proven
 (`samd-prb2/mutation.log` on the SSD scratch).
 
@@ -5425,7 +5425,10 @@ runtime classpaths hold no `no.nordicsemi` artifact. Every guard is mutation-pro
   abort and close release the manager once).
 - [x] Phase 4: live checks L1 to L16 on the iQOO against kernelhub2 and kernelhub1.
 - [x] Phase 5: the live findings D1 to D3 fixed (below).
-- [ ] Targeted live re-checks of L5, L8 and the teardown warnings on the fixed build.
+- [x] Targeted live re-checks of L5, L8 and the teardown warnings on the fixed build, done on the
+  iQOO I2302.
+- [ ] The remaining live checks (L10b, L1, L12, and a BP and an SPO2 regression round on the
+  review-fix build) move to the Google Pixel 11 Pro, the demo and test device from 2026-10-15.
 
 Live results (evidence in `samd-prb2/live/` on the SSD scratch):
 
@@ -5501,8 +5504,9 @@ touches `src/main/res`: one string text, `acq_reject_hub_mismatch`; no Kotlin in
   of which have no reading at all (INSTRUMENT_NOT_SERVED, no DIS serial or two, the Wi-Fi header).
 - G2: a failed init-plan step (the MTU request or either CCCD enable) maps to UNREACHABLE, not
   MALFORMED: the hub sent nothing readable. Every other MALFORMED producer is unchanged.
-- G3: teardown reads `isConnected()` through `runCatching`, defaulting to false, so a link that
-  cannot say it is up gets no STOP and no disconnect, and close still runs once.
+- G3, as corrected by H1: teardown reads `isConnected()` under `catch (e: Exception)`, defaulting to
+  false with one WARN that names the failure or the class, so a link that cannot say it is up gets
+  no STOP and no disconnect, and close still runs once. An Error propagates.
 - G4: a `HubLinkException` from `prepare` or `openLink` maps through `reasonFor`, as before a
   connect, instead of escaping the source.
 - G5: the `BlePrepActivity` KDoc says that an association created after the request was abandoned

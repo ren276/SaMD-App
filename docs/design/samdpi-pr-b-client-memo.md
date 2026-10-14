@@ -768,6 +768,7 @@ entry of the fixture, the fault vectors included (all-NaN present fields).
 | `acq_reject_not_supported` | existing `:209` | existing |
 | `acq_reject_bluetooth_unavailable` | "Bluetooth or Location is off, or this app is not allowed to use Nearby devices. Turn them on, allow Nearby devices, then try again." | new, parent 7.7; text ruled in Q4. BLE only: the Wi-Fi path never produces this reason. |
 | `acq_reject_hub_mismatch` | "That reading came from a different instrument hub, so nothing was filled in." | new, parent 7.7 |
+| | 2026-10-14: replaced in 78614d3 by "The app could not confirm this is the right instrument hub for this test, so no reading was saved." | |
 | `acq_reject_unreachable_ble` | "Cannot connect to the instrument. Move closer and check it is switched on. If another phone is using it, wait and try again." | new, B5; approved (Q4) |
 | `acq_reject_timeout_ble` | "The instrument did not answer in time. Try again." | new; approved (Q4) |
 | `acq_reject_not_paired_ble` | "This instrument has not been paired with the app yet." | new, parent 7.7 |
@@ -808,6 +809,7 @@ test RED, restore from the snapshot, sha256 identical, GREEN.
 | G-B11b | No forbidden token in `src/main`, `src/staging` or `src/prod` (section 1.3) | JVM, text | Add `import android.bluetooth.BluetoothAdapter` to a main file; one row per token |
 | G-B12 | Banner and labels render only when `synthetic` | androidTest, `CompounderScreenTest` | Render the banner unconditionally |
 | G-B13 | CCCDs before any CP write, on every connection: `HubInitPlan.steps()` is exactly `[RequestMtu(517), Enable(CP), Enable(ENV)]` (G2); over two acquisitions on `FakeHubLink`, each connection's call log has `enable(CP)` and `enable(ENV)` before its first `writeControlPoint`, and no `enable(SIG)`; a recorded init-step failure gives MALFORMED and no START is written | JVM | Move `Enable(CP)` after the START write; separately, run the plan only on the first connection; separately, append `Enable(SIG)`; separately, ignore the recorded init failure |
+| | 2026-10-14: init-plan failure maps to UNREACHABLE (e7984ac) | | |
 | G-B14 | MTU 517 requested every connection; a negotiated MTU of 88 gives MALFORMED and no START is written | JVM | Request 23; separately, drop the 89 check |
 | G-B15 | DIS search: one 2A25 across two 0x180A passes; zero or two gives HUB_MISMATCH | JVM, `DisSearch` over plain lists | Search only the first 0x180A |
 | G-B16 | Wi-Fi: wrong or missing `X-SaMDPi-Hub-Id` on a 200, a 400 and a 404 gives HUB_MISMATCH; body and header disagreeing gives HUB_MISMATCH; no exception escapes the dispatcher | JVM, MockWebServer | Check the header only on 2xx |

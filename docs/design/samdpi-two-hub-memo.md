@@ -1017,6 +1017,7 @@ nothing).
 | Bluetooth off, or `BLUETOOTH_CONNECT` denied | **`BLUETOOTH_UNAVAILABLE`** (new) | "Bluetooth is off or not allowed for this app. Turn it on and allow Nearby devices, then try again." |
 | No CDM association, or dialog dismissed | `NOT_SUPPORTED`, or a new value if the operator prefers | "This instrument has not been paired with the app yet." |
 | DIS Serial or envelope `hub_id` differs from assignment; hub answers `INSTRUMENT_NOT_SERVED` | **`HUB_MISMATCH`** (new) | "That reading came from a different instrument hub, so nothing was filled in." |
+| | | 2026-10-14: replaced in 78614d3 by "The app could not confirm this is the right instrument hub for this test, so no reading was saved." |
 | Connect failed or link dropped | `UNREACHABLE` | needs a BLE-specific message, because the existing text is local-network wording (VERIFIED `CompounderViewModel.kt:201`) |
 | No response or no envelope in time | `TIMEOUT` | existing |
 | `BUSY` | `UNREACHABLE` | "The instrument is in use by another device." |
