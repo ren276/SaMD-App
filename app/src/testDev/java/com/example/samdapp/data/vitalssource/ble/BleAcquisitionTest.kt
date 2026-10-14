@@ -28,7 +28,13 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.After
+import org.junit.Before
 import org.junit.Test
+import java.util.logging.Handler
+import java.util.logging.Level
+import java.util.logging.LogRecord
+import java.util.logging.Logger
 
 /** The protocol of addendum 5.2 over a scripted [FakeHubLink]: G-B2, G-B3, G-B4 (second half), G-B5,
  *  G-B9, G-B13 (order over two connections), G-B14 and G-B23, plus the 5.3 and 5.4 mappings, and the
@@ -50,6 +56,22 @@ class BleAcquisitionTest {
     private fun BleAcquisition.Outcome.reason(): RejectReason? = (result as? AcquisitionResult.Rejected)?.reason
 
     private fun HubLinkException.Failure.ex() = HubLinkException(this)
+
+    /** Every WARN BleAcquisition logs while a test runs. */
+    private val warnings = mutableListOf<String>()
+    private val warnCapture = object : Handler() {
+        override fun publish(record: LogRecord) {
+            if (record.level.intValue() >= Level.WARNING.intValue()) warnings += record.message
+        }
+        override fun flush() = Unit
+        override fun close() = Unit
+    }
+
+    @Before
+    fun captureWarnings() = Logger.getLogger("BleAcquisition").addHandler(warnCapture)
+
+    @After
+    fun releaseWarnings() = Logger.getLogger("BleAcquisition").removeHandler(warnCapture)
 
     // ---- the happy path ----------------------------------------------------------------------
 
@@ -474,6 +496,35 @@ class BleAcquisitionTest {
         assertEquals(RejectReason.MALFORMED, acquire(link).reason())
         assertTrue(link.startWrites.isEmpty() && link.stopWrites.isEmpty())
         assertEquals(listOf("disconnect", "close"), link.log.takeLast(2))
+    }
+
+    // ---- STOP 7b ruling D3: a link already down takes no STOP and no disconnect --------------------
+
+    @Test
+    fun `D3 a link down at teardown gets no STOP and no disconnect, closes once, and warns nothing`() = runTest {
+        val succeeded = FakeHubLink().apply { onStart = { answer(0x01); dropLink() } }
+        val inFlight = FakeHubLink().apply { onStart = { dropLink() } }
+        for ((state, link) in listOf("SUCCEEDED" to succeeded, "IN_FLIGHT" to inFlight)) {
+            warnings.clear()
+
+            assertEquals(state, RejectReason.UNREACHABLE, acquire(link).reason())
+            assertTrue("$state: STOP on a dropped link", link.stopWrites.isEmpty())
+            assertEquals("$state: disconnect on a dropped link", 0, link.log.count { it == "disconnect" })
+            assertEquals(state, 1, link.closes)
+            assertEquals(state, emptyList<String>(), warnings)
+        }
+    }
+
+    @Test
+    fun `D3 a teardown WARN names the link failure, or else the exception class, never its message`() = runTest {
+        val linkFailure = FakeHubLink().apply { teardownFailures["disconnect"] = HubLinkException(HubLinkException.Failure.FAILED, "status 133 from the library") }
+        acquire(linkFailure)
+        assertEquals(listOf("BLE teardown disconnect failed: FAILED"), warnings)
+
+        warnings.clear()
+        val other = FakeHubLink().apply { teardownFailures["close"] = IllegalStateException("library text") }
+        acquire(other)
+        assertEquals(listOf("BLE teardown close failed: java.lang.IllegalStateException"), warnings)
     }
 
     @Test

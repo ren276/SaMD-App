@@ -39,6 +39,10 @@ fun InitStep.label(): String = when (this) {
  * and then throws [HubLinkException.Failure.DISCONNECTED]. Only [close] may be repeated. Like the
  * adapter's cancellable awaits, a suspending call made by a cancelled caller never reaches the hub:
  * it throws before it is logged.
+ *
+ * [isConnected] follows `BleManager.isConnected()`: true from the link-level connect, so already while
+ * the init plan runs ([connectDelayMs] is that time), false after a failed connect, [dropLink],
+ * [abort] or [close]. A hung connect never got a link.
  */
 class FakeHubLink(
     hubId: String = "kernelhub2",
@@ -75,6 +79,9 @@ class FakeHubLink(
     val teardownFailures = mutableMapOf<String, Exception>()
 
     private var dead = false
+    private var linkUp = false
+
+    override fun isConnected(): Boolean = linkUp && !dead
 
     private fun alive(call: String) {
         log += call
@@ -95,8 +102,9 @@ class FakeHubLink(
         currentCoroutineContext().ensureActive()
         alive("connect")
         if (hang == "connect") awaitCancellation()
+        linkUp = true
         delay(connectDelayMs)
-        connectFailure?.let { throw it }
+        connectFailure?.let { linkUp = false; throw it }
         plan.forEach { log += it.label() }
         return initFailures
     }
@@ -173,6 +181,7 @@ class FakeHubLink(
     }
 
     fun dropLink() {
+        linkUp = false
         sink.close(HubLinkException(HubLinkException.Failure.DISCONNECTED))
     }
 

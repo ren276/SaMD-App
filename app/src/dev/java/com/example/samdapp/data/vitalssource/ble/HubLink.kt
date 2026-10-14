@@ -72,6 +72,10 @@ interface HubLink<R> {
     /** Write with response to the Control Point. */
     suspend fun writeControlPoint(value: ByteArray, timeoutMs: Long)
 
+    /** True while the GATT link is up: from the link-level connect, before the init plan finished,
+     *  until it drops. [BleHubManager] inherits `BleManager.isConnected()` for it. */
+    fun isConnected(): Boolean
+
     /** Indications in arrival order. Closed with a [HubLinkException] when the link drops. */
     val events: ReceiveChannel<HubEvent>
 

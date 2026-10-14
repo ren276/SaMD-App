@@ -67,21 +67,25 @@ object BleAcquisition {
         } finally {
             // Step 15. STOP for a START the hub may have opened, that is unless none was submitted or
             // the hub refused it, then disconnect, then close, each bounded. After the cap, abort, then
-            // only close. Under NonCancellable, so a cancelled caller still reaches the hub.
+            // only close. Under NonCancellable, so a cancelled caller still reaches the hub. A link
+            // already down takes neither STOP nor disconnect: the hub discards a session when its owner
+            // drops (A13), and the library has closed its side.
             withContext(NonCancellable) {
                 if (progress.aborted) {
                     teardownStep("abort") { link.abort() }
                 } else {
-                    if (progress.mayHoldSession()) {
+                    if (progress.mayHoldSession() && link.isConnected()) {
                         teardownStep("STOP") {
                             withTimeoutOrNull(TEARDOWN_TIMEOUT_MS) {
                                 link.writeControlPoint(ControlPoint.encodeStop(nonceBytes), TEARDOWN_TIMEOUT_MS)
                             } ?: logger.warning("BLE teardown STOP timed out")
                         }
                     }
-                    teardownStep("disconnect") {
-                        withTimeoutOrNull(TEARDOWN_TIMEOUT_MS) { link.disconnect(TEARDOWN_TIMEOUT_MS) }
-                            ?: logger.warning("BLE teardown disconnect timed out")
+                    if (link.isConnected()) {
+                        teardownStep("disconnect") {
+                            withTimeoutOrNull(TEARDOWN_TIMEOUT_MS) { link.disconnect(TEARDOWN_TIMEOUT_MS) }
+                                ?: logger.warning("BLE teardown disconnect timed out")
+                        }
                     }
                 }
                 teardownStep("close") { link.close() }
@@ -261,12 +265,13 @@ object BleAcquisition {
     private val logger = Logger.getLogger("BleAcquisition")
 
     /** Teardown is best effort: the result is already decided, so no failure here may replace it, a
-     *  cancellation a step raises included. An Error still propagates. */
+     *  cancellation a step raises included. An Error still propagates. The WARN names the link failure
+     *  or the exception class, never a library message. */
     private inline fun teardownStep(step: String, block: () -> Unit) {
         try {
             block()
         } catch (e: Exception) {
-            logger.warning("BLE teardown $step failed: ${e.javaClass.name}")
+            logger.warning("BLE teardown $step failed: ${(e as? HubLinkException)?.failure?.name ?: e.javaClass.name}")
         }
     }
 }
