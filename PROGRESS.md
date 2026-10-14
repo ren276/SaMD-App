@@ -5410,3 +5410,33 @@ Observed during PR-B1 live checks, not resolved:
   2 over mDNS (a 60 s cache expiry after 70 s idle, and a fresh install plus force-stop) and 2 over
   the 127.0.0.1 laptop-container path. Cause INFERRED as first-use mDNS discovery
   (`NsdGatewayDns`); not observed directly. Revisit if it recurs.
+
+## SaMDPi two-hub client, PR-B2: built, live checks pending - 2026-10-14
+
+`feat/two-hub-ble-client` holds the BLE client as local commits only: no push, no upstream. The
+dev flavor carries all of it; staging and prod are unchanged (852 tests each) and their release
+runtime classpaths hold no `no.nordicsemi` artifact. Every guard is mutation-proven
+(`samd-prb2/mutation.log` on the SSD scratch).
+
+- [x] Phase 1: SIG decoders, envelope parse, Control Point, DIS search, init plan.
+- [x] Phase 2: `HubLink`, `BleAcquisition`, `BlePrepBridge`, `BleHubVitalsSource`.
+- [x] Phase 3: `BleHubManager` and `AndroidBleHubPlatform`, CDM association by stored ID,
+  `BlePrepActivity`, routing and DI, and the STOP 4 rulings (teardown keeps a decided result;
+  abort and close release the manager once).
+- [ ] Phase 4: live checks on the iQOO against kernelhub2.
+
+Assumptions still INFERRED, to be settled by the live checks (memo section 15.5 numbering):
+
+1. `BlePrepActivity` started from the application context with `FLAG_ACTIVITY_NEW_TASK` joins the
+   app's existing task.
+2. CDM association grants no exemption from `BLUETOOTH_CONNECT` for `connectGatt`.
+3. `uses-feature companion_device_setup` with `required="false"` satisfies CDM's requirement.
+10. `@android:style/Theme.Translucent.NoTitleBar` works with `ComponentActivity` and
+    `registerForActivityResult`.
+- The `BleHubManager` release path (abort and close release once, a throwing queue cancel
+  included) is proved by reading only: the adapter cannot run on the JVM.
+
+Filed items, not part of PR-B2:
+
+- The CycloneDX SBOM covers `devReleaseRuntimeClasspath`, so its next regeneration lists the
+  Nordic BLE artifacts. Regenerate and review it with the next SBOM pass.

@@ -41,6 +41,17 @@ private class CountingSource(var next: AcquisitionResult) : VitalsSource {
     }
 }
 
+/** The BLE side as the router sees it. [begin] says whether preparation passed, so `onStarted` runs. */
+private class CountingBle(var next: AcquisitionResult, var begin: Boolean = true) : BleRoute {
+    val starts = mutableListOf<Pair<AcquisitionRequest, String>>()
+
+    override suspend fun startAcquisition(request: AcquisitionRequest, hubId: String, onStarted: () -> Unit): AcquisitionResult {
+        starts += request to hubId
+        if (begin) onStarted()
+        return next
+    }
+}
+
 /** G-B1 and G-B8. */
 class RoutingVitalsSourceTest {
 
@@ -54,14 +65,21 @@ class RoutingVitalsSourceTest {
         sessionId = "s",
         deviceType = "PULSE_OXIMETER",
     )
+    private val bleAccepted = AcquisitionResult.Accepted(
+        reading = VitalsReading(bpSystolic = 120, bpDiastolic = 80),
+        instrument = Instrument.BP,
+        sessionId = "n",
+        deviceType = "BLOOD_PRESSURE",
+    )
     private val wifi = CountingSource(wifiAccepted)
-    private val router = RoutingVitalsSource(wifi, assignment)
+    private val ble = CountingBle(bleAccepted)
+    private val router = RoutingVitalsSource(wifi, ble, assignment)
 
     private fun request(instrument: Instrument) = AcquisitionRequest(instrument)
 
     @Test
     fun `a Wi-Fi instrument goes to the Wi-Fi source, stamped with its transport and hub`() = runTest {
-        val result = router.startAcquisition(request(Instrument.SPO2)) as AcquisitionResult.Accepted
+        val result = router.startAcquisition(request(Instrument.SPO2)).expect<AcquisitionResult.Accepted>()
 
         assertEquals(listOf(request(Instrument.SPO2)), wifi.starts)
         assertEquals(AcquisitionTransport.WIFI, result.transport)
@@ -73,7 +91,7 @@ class RoutingVitalsSourceTest {
     fun `a Wi-Fi rejection is stamped too and is never retried over another wire`() = runTest {
         wifi.next = AcquisitionResult.Rejected(RejectReason.UNREACHABLE)
 
-        val result = router.startAcquisition(request(Instrument.SPO2)) as AcquisitionResult.Rejected
+        val result = router.startAcquisition(request(Instrument.SPO2)).expect<AcquisitionResult.Rejected>()
 
         assertEquals(RejectReason.UNREACHABLE, result.reason)
         assertEquals(AcquisitionTransport.WIFI, result.transport)
@@ -82,30 +100,43 @@ class RoutingVitalsSourceTest {
     }
 
     @Test
-    fun `a BLE instrument is refused as NOT_SUPPORTED without touching the Wi-Fi source`() = runTest {
-        val result = router.startAcquisition(request(Instrument.BP)) as AcquisitionResult.Rejected
+    fun `a BLE instrument goes to the BLE source with its hub, stamped BLE, without touching Wi-Fi`() = runTest {
+        val result = router.startAcquisition(request(Instrument.BP)).expect<AcquisitionResult.Accepted>()
 
-        assertEquals(RejectReason.NOT_SUPPORTED, result.reason)
-        assertNull("no BLE client exists, so no result may claim the BLE transport", result.transport)
+        assertEquals(listOf(request(Instrument.BP) to "kernelhub2"), ble.starts)
+        assertEquals(AcquisitionTransport.BLE, result.transport)
         assertEquals("kernelhub2", result.hubId)
-        assertTrue("a BLE reject must never reach the Wi-Fi source", wifi.starts.isEmpty())
+        assertTrue(wifi.starts.isEmpty())
         assertEquals(0, wifi.reads)
         assertEquals(0, wifi.stops)
     }
 
-    /** R1. While there is no BLE client the stub's refusal must read as the generic not-supported
-     *  text. "This instrument has not been paired with the app yet" is keyed to BLE and would tell
-     *  a worker something false. */
     @Test
-    fun `a BP Start shows the generic not-supported text, never the BLE not-paired text`() = runTest {
-        val result = router.startAcquisition(request(Instrument.BP)) as AcquisitionResult.Rejected
+    fun `a BLE rejection is stamped and never retried over Wi-Fi`() = runTest {
+        ble.next = AcquisitionResult.Rejected(RejectReason.UNREACHABLE)
 
-        assertEquals(R.string.acq_reject_not_supported, acquisitionRejectionRes(result.reason, result.transport, sdkInt = 36))
+        val result = router.startAcquisition(request(Instrument.BP)).expect<AcquisitionResult.Rejected>()
+
+        assertEquals(RejectReason.UNREACHABLE, result.reason)
+        assertEquals(AcquisitionTransport.BLE, result.transport)
+        assertEquals("kernelhub2", result.hubId)
+        assertEquals("one attempt", 1, ble.starts.size)
+        assertTrue("a BLE reject must never reach the Wi-Fi source", wifi.starts.isEmpty())
+    }
+
+    /** With the BLE client in place a BLE NOT_SUPPORTED means "not paired yet", and reads so. */
+    @Test
+    fun `a BLE NOT_SUPPORTED shows the not-paired text`() = runTest {
+        ble.next = AcquisitionResult.Rejected(RejectReason.NOT_SUPPORTED)
+
+        val result = router.startAcquisition(request(Instrument.BP)).expect<AcquisitionResult.Rejected>()
+
+        assertEquals(R.string.acq_reject_not_paired_ble, acquisitionRejectionRes(result.reason, result.transport, sdkInt = 36))
     }
 
     @Test
     fun `an unassigned instrument is NOT_SUPPORTED with no transport and no hub`() = runTest {
-        val result = router.startAcquisition(request(Instrument.GLUCOMETER)) as AcquisitionResult.Rejected
+        val result = router.startAcquisition(request(Instrument.GLUCOMETER)).expect<AcquisitionResult.Rejected>()
 
         assertEquals(RejectReason.NOT_SUPPORTED, result.reason)
         assertNull(result.transport)
@@ -115,13 +146,14 @@ class RoutingVitalsSourceTest {
 
     @Test
     fun `an assignment that serves nothing refuses every instrument`() = runTest {
-        val none = RoutingVitalsSource(wifi, HubAssignment.NONE)
+        val none = RoutingVitalsSource(wifi, ble, HubAssignment.NONE)
 
         Instrument.entries.forEach { instrument ->
             val result = none.startAcquisition(request(instrument))
-            assertEquals("$instrument", RejectReason.NOT_SUPPORTED, (result as AcquisitionResult.Rejected).reason)
+            assertEquals("$instrument", RejectReason.NOT_SUPPORTED, result.expect<AcquisitionResult.Rejected>().reason)
         }
         assertTrue(wifi.starts.isEmpty())
+        assertTrue(ble.starts.isEmpty())
     }
 
     @Test
@@ -134,15 +166,28 @@ class RoutingVitalsSourceTest {
         assertEquals("the second Stop has nothing to close", 1, wifi.stops)
     }
 
-    /** A refused BLE Start opens no session, so it must not displace the Wi-Fi session that is
-     *  still waiting for its Stop (for example after NO_MEASUREMENT). */
+    /** A BLE Start refused in preparation opens no session, so it must not displace the Wi-Fi
+     *  session that is still waiting for its Stop (for example after NO_MEASUREMENT). */
     @Test
-    fun `a refused BLE Start leaves the Wi-Fi session open for Stop`() = runTest {
+    fun `a BLE Start refused in preparation leaves the Wi-Fi session open for Stop`() = runTest {
+        ble.begin = false
+        ble.next = AcquisitionResult.Rejected(RejectReason.BLUETOOTH_UNAVAILABLE)
         router.startAcquisition(request(Instrument.SPO2))
         router.startAcquisition(request(Instrument.BP))
         router.stopAcquisition()
 
         assertEquals(1, wifi.stops)
+    }
+
+    /** A BLE acquisition that began owns the session now; its own teardown closes it, so Stop sends
+     *  nothing to the Wi-Fi hub. */
+    @Test
+    fun `a BLE acquisition that began takes the Stop away from Wi-Fi`() = runTest {
+        router.startAcquisition(request(Instrument.SPO2))
+        router.startAcquisition(request(Instrument.BP))
+        router.stopAcquisition()
+
+        assertEquals(0, wifi.stops)
     }
 
     @Test
@@ -170,6 +215,7 @@ class RoutingVitalsSourceTest {
         assertEquals(0, wifi.reads)
         assertTrue(wifi.starts.isEmpty())
         assertEquals(0, wifi.stops)
+        assertTrue("readVitals makes no BLE call", ble.starts.isEmpty())
     }
 
     @Test
@@ -182,7 +228,7 @@ class RoutingVitalsSourceTest {
                 .addConverterFactory(GsonConverterFactory.create(SyncGson.create()))
                 .build()
                 .create(PiGatewayApi::class.java)
-            val real = RoutingVitalsSource(PiGatewayVitalsSource(api, "kernelhub1"), assignment)
+            val real = RoutingVitalsSource(PiGatewayVitalsSource(api, "kernelhub1"), ble, assignment)
 
             val reading = real.readVitals()
 

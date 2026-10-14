@@ -1,16 +1,24 @@
 package com.example.samdapp.di
 
+import android.content.Context
+import android.os.Build
 import com.example.samdapp.BuildConfig
 import com.example.samdapp.data.kernel.MockKernelFallbackSource
 import com.example.samdapp.data.kernel.NoFallbackKernelSource
 import com.example.samdapp.data.vitalssource.HubAssignment
 import com.example.samdapp.data.vitalssource.PiGatewayVitalsSource
 import com.example.samdapp.data.vitalssource.RoutingVitalsSource
+import com.example.samdapp.data.vitalssource.ble.AndroidBleHubPlatform
+import com.example.samdapp.data.vitalssource.ble.BleHubVitalsSource
+import com.example.samdapp.data.vitalssource.ble.BlePrepActivity
+import com.example.samdapp.data.vitalssource.ble.BlePrepBridge
+import com.example.samdapp.data.vitalssource.ble.HubAssociations
 import com.example.samdapp.domain.kernel.KernelFallbackSource
 import com.example.samdapp.domain.vitalssource.VitalsSource
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Provider
 import javax.inject.Singleton
@@ -41,8 +49,24 @@ abstract class DevClinicalMockModule {
         /** The one [VitalsSource] binding: each instrument goes to the transport the hub assignment
          *  names for it. See [RoutingVitalsSource]. */
         @Provides @Singleton
-        fun provideVitalsSource(wifi: PiGatewayVitalsSource, assignment: HubAssignment): VitalsSource =
-            RoutingVitalsSource(wifi, assignment)
+        fun provideVitalsSource(wifi: PiGatewayVitalsSource, ble: BleHubVitalsSource, assignment: HubAssignment): VitalsSource =
+            RoutingVitalsSource(wifi, ble, assignment)
+
+        /** The BLE side: preparation through [BlePrepActivity], then one acquisition per Start. */
+        @Provides @Singleton
+        fun provideBleHubVitalsSource(
+            @ApplicationContext context: Context,
+            bridge: BlePrepBridge,
+            associations: HubAssociations,
+        ): BleHubVitalsSource = BleHubVitalsSource(AndroidBleHubPlatform(context, associations), bridge, Build.VERSION.SDK_INT)
+
+        /** One per process: the activity answers the request the source is suspended on (B1). */
+        @Provides @Singleton
+        fun provideBlePrepBridge(@ApplicationContext context: Context): BlePrepBridge =
+            BlePrepBridge(launch = { request -> context.startActivity(BlePrepActivity.intent(context, request)) })
+
+        @Provides @Singleton
+        fun provideHubAssociations(@ApplicationContext context: Context): HubAssociations = HubAssociations.android(context)
 
         /** [Provider]s, so only the selected source is ever constructed. */
         @Provides @Singleton
