@@ -87,12 +87,18 @@ class FakeHubLink(
      */
     var linkReadsUpAfterAbortCloseThrows = false
 
+    /** Thrown by every [isConnected] call: a link that cannot say whether it is up. */
+    var isConnectedFailure: Exception? = null
+
     private var dead = false
     private var linkUp = false
     private var libraryLinkDown = false
     private var abortThrew = false
 
-    override fun isConnected(): Boolean = linkUp && !libraryLinkDown
+    override fun isConnected(): Boolean {
+        isConnectedFailure?.let { throw it }
+        return linkUp && !libraryLinkDown
+    }
 
     private fun alive(call: String) {
         log += call

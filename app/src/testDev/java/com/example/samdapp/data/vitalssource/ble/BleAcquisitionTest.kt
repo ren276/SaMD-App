@@ -540,6 +540,30 @@ class BleAcquisitionTest {
         }
     }
 
+    // ---- review fix G3: a link that cannot say whether it is up ------------------------------------
+
+    @Test
+    fun `G3 an isConnected that throws at teardown means no STOP and no disconnect, one close, and the result kept`() = runTest {
+        val accepted = FakeHubLink()
+        val unanswered = FakeHubLink().apply { onStart = {} }
+        for ((label, link) in listOf("Accepted" to accepted, "START IN_FLIGHT, then TIMEOUT" to unanswered)) {
+            link.isConnectedFailure = IllegalStateException("library fault")
+
+            val outcome = runCatching { acquire(link) }
+
+            assertTrue("$label: the isConnected failure escaped: ${outcome.exceptionOrNull()}", outcome.isSuccess)
+            if (link === accepted) {
+                outcome.getOrThrow().result.expect<AcquisitionResult.Accepted>()
+            } else {
+                assertEquals(label, RejectReason.TIMEOUT, outcome.getOrThrow().reason())
+            }
+            assertTrue("$label: STOP on a link that cannot say it is up", link.stopWrites.isEmpty())
+            assertEquals("$label: disconnect on a link that cannot say it is up", 0, link.log.count { it == "disconnect" })
+            assertEquals(label, 1, link.closes)
+            assertEquals(label, "close", link.log.last())
+        }
+    }
+
     @Test
     fun `D3 a teardown WARN names the link failure, or else the exception class, never its message`() = runTest {
         val linkFailure = FakeHubLink().apply { teardownFailures["disconnect"] = HubLinkException(HubLinkException.Failure.FAILED, "status 133 from the library") }

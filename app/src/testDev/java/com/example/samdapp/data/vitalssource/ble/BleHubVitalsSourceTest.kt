@@ -25,6 +25,9 @@ private class FakePlatform(
     val links = mutableListOf<FakeHubLink>()
     var nextLink: () -> FakeHubLink = { FakeHubLink() }
 
+    /** Thrown by [openLink], before any link exists. */
+    var openFailure: HubLinkException? = null
+
     override fun isBluetoothEnabled(): Boolean = enabled.also { calls += "enabled" }
     override fun hasConnectPermission(): Boolean = permitted.also { calls += "permission" }
     override fun canAssociate(): Boolean = companionDevices.also { calls += "canAssociate" }
@@ -35,6 +38,7 @@ private class FakePlatform(
     }
     override fun openLink(address: String, instrument: Instrument): HubLink<*> {
         calls += "open($address,$instrument)"
+        openFailure?.let { throw it }
         return nextLink().also { links += it }
     }
 }
@@ -46,10 +50,14 @@ class BleHubVitalsSourceTest {
     private val platform = FakePlatform()
     private val prepared = mutableListOf<BlePrepBridge.Request>()
     private var answer: BlePrepBridge.Answer? = BlePrepBridge.Answer.GRANTED
+
+    /** Thrown by the bridge's launch, so out of [BlePrepBridge.prepare]. */
+    private var launchFailure: HubLinkException? = null
     private lateinit var bridge: BlePrepBridge
     private fun source(sdkInt: Int = 36): BleHubVitalsSource {
         bridge = BlePrepBridge(launch = { r ->
             prepared += r
+            launchFailure?.let { throw it }
             answer?.let { a ->
                 if (r.kind == BlePrepBridge.Kind.ASSOCIATION && a == BlePrepBridge.Answer.GRANTED) platform.address = "D8:3A:DD:9F:DC:16"
                 if (r.kind == BlePrepBridge.Kind.CONNECT_PERMISSION && a == BlePrepBridge.Answer.GRANTED) platform.permitted = true
@@ -215,6 +223,61 @@ class BleHubVitalsSourceTest {
 
         assertEquals(RejectReason.HUB_MISMATCH, source().startBp().reason())
         assertFalse(platform.calls.any { it.startsWith("forget(") })
+    }
+
+    // ---- review fix G4: a link failure before any connect is mapped, never left to escape ----------
+
+    /** TIMED_OUT shows the failure maps as before a connect (UNREACHABLE, not TIMEOUT). */
+    private val linkFailures = listOf(
+        HubLinkException.Failure.TIMED_OUT to RejectReason.UNREACHABLE,
+        HubLinkException.Failure.BLUETOOTH_DISABLED to RejectReason.BLUETOOTH_UNAVAILABLE,
+    )
+
+    @Test
+    fun `G4 a link failure from openLink is the mapped reason, after onStarted`() = runTest {
+        for ((failure, reason) in linkFailures) {
+            platform.openFailure = HubLinkException(failure)
+            started = 0
+
+            val result = runCatching { source().startBp() }
+
+            assertTrue("$failure escaped: ${result.exceptionOrNull()}", result.isSuccess)
+            assertEquals("$failure", reason, result.getOrThrow().reason())
+            assertEquals("$failure", 1, started)
+            assertTrue("$failure", platform.links.isEmpty())
+        }
+    }
+
+    @Test
+    fun `G4 a link failure from the association step is the mapped reason, and nothing is started`() = runTest {
+        for ((failure, reason) in linkFailures) {
+            platform.address = null
+            launchFailure = HubLinkException(failure)
+
+            val result = runCatching { source().startBp() }
+
+            assertTrue("$failure escaped: ${result.exceptionOrNull()}", result.isSuccess)
+            assertEquals("$failure", reason, result.getOrThrow().reason())
+            assertEquals("$failure", BlePrepBridge.Kind.ASSOCIATION, prepared.last().kind)
+            assertEquals("$failure", 0, started)
+            assertFalse("$failure", platform.calls.any { it.startsWith("open(") })
+        }
+    }
+
+    @Test
+    fun `G4 a link failure from the permission step is the mapped reason, and nothing is started`() = runTest {
+        for ((failure, reason) in linkFailures) {
+            platform.permitted = false
+            launchFailure = HubLinkException(failure)
+
+            val result = runCatching { source().startBp() }
+
+            assertTrue("$failure escaped: ${result.exceptionOrNull()}", result.isSuccess)
+            assertEquals("$failure", reason, result.getOrThrow().reason())
+            assertEquals("$failure", BlePrepBridge.Kind.CONNECT_PERMISSION, prepared.last().kind)
+            assertEquals("$failure", 0, started)
+            assertFalse("$failure", platform.calls.any { it.startsWith("open(") })
+        }
     }
 
     @Test

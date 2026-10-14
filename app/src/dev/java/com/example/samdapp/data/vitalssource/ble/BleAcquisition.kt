@@ -74,14 +74,14 @@ object BleAcquisition {
                 if (progress.aborted) {
                     teardownStep("abort") { link.abort() }
                 } else {
-                    if (progress.mayHoldSession() && link.isConnected()) {
+                    if (progress.mayHoldSession() && linkReportsUp(link)) {
                         teardownStep("STOP") {
                             withTimeoutOrNull(TEARDOWN_TIMEOUT_MS) {
                                 link.writeControlPoint(ControlPoint.encodeStop(nonceBytes), TEARDOWN_TIMEOUT_MS)
                             } ?: logger.warning("BLE teardown STOP timed out")
                         }
                     }
-                    if (link.isConnected()) {
+                    if (linkReportsUp(link)) {
                         teardownStep("disconnect") {
                             withTimeoutOrNull(TEARDOWN_TIMEOUT_MS) { link.disconnect(TEARDOWN_TIMEOUT_MS) }
                                 ?: logger.warning("BLE teardown disconnect timed out")
@@ -187,8 +187,9 @@ object BleAcquisition {
         return Outcome(if (mapped is AcquisitionResult.Accepted) mapped.copy(emulatorBuild = emulatorBuild) else mapped)
     }
 
-    /** Addendum 5.4. A request timeout during connect is an unreachable hub; later it is TIMEOUT. */
-    private fun reasonFor(failure: HubLinkException.Failure, connected: Boolean): RejectReason = when (failure) {
+    /** Addendum 5.4. A request timeout during connect is an unreachable hub; later it is TIMEOUT. The BLE
+     *  source maps a link failure raised before any connect through this too, with [connected] false. */
+    internal fun reasonFor(failure: HubLinkException.Failure, connected: Boolean): RejectReason = when (failure) {
         HubLinkException.Failure.BLUETOOTH_DISABLED -> RejectReason.BLUETOOTH_UNAVAILABLE
         HubLinkException.Failure.DISCONNECTED -> RejectReason.UNREACHABLE
         // The link was opened only through this hub's stored association, so a missing service is a hub
@@ -265,6 +266,10 @@ object BleAcquisition {
     }
 
     private val logger = Logger.getLogger("BleAcquisition")
+
+    /** Teardown asks the link whether it is up, and a link that cannot say is treated as down: no STOP
+     *  and no disconnect, and close still runs. */
+    private fun linkReportsUp(link: HubLink<*>): Boolean = runCatching { link.isConnected() }.getOrDefault(false)
 
     /** Teardown is best effort: the result is already decided, so no failure here may replace it, a
      *  cancellation a step raises included. An Error still propagates. The WARN names the link failure

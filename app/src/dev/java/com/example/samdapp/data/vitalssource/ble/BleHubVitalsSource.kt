@@ -62,26 +62,46 @@ class BleHubVitalsSource(
         if (!platform.isBluetoothEnabled()) return refused(RejectReason.BLUETOOTH_UNAVAILABLE)
 
         val address = platform.associatedAddress(hubId) ?: when (
-            if (platform.canAssociate()) bridge.prepare(BlePrepBridge.Kind.ASSOCIATION, hubId) else BlePrepBridge.Answer.UNAVAILABLE
+            if (platform.canAssociate()) {
+                try {
+                    bridge.prepare(BlePrepBridge.Kind.ASSOCIATION, hubId)
+                } catch (e: HubLinkException) {
+                    return linkFailure(e)
+                }
+            } else {
+                BlePrepBridge.Answer.UNAVAILABLE
+            }
         ) {
             BlePrepBridge.Answer.GRANTED -> platform.associatedAddress(hubId) ?: return refused(RejectReason.NOT_SUPPORTED)
             BlePrepBridge.Answer.REFUSED, BlePrepBridge.Answer.TIMED_OUT -> return refused(RejectReason.NOT_SUPPORTED)
             BlePrepBridge.Answer.UNAVAILABLE -> return refused(RejectReason.BLUETOOTH_UNAVAILABLE)
         }
 
-        if (!platform.hasConnectPermission() &&
-            bridge.prepare(BlePrepBridge.Kind.CONNECT_PERMISSION, hubId) != BlePrepBridge.Answer.GRANTED
-        ) {
-            return refused(RejectReason.BLUETOOTH_UNAVAILABLE)
+        if (!platform.hasConnectPermission()) {
+            val answer = try {
+                bridge.prepare(BlePrepBridge.Kind.CONNECT_PERMISSION, hubId)
+            } catch (e: HubLinkException) {
+                return linkFailure(e)
+            }
+            if (answer != BlePrepBridge.Answer.GRANTED) return refused(RejectReason.BLUETOOTH_UNAVAILABLE)
         }
 
         onStarted()
-        val outcome = BleAcquisition.run(platform.openLink(address, request.instrument), request, hubId)
+        val link = try {
+            platform.openLink(address, request.instrument)
+        } catch (e: HubLinkException) {
+            return linkFailure(e)
+        }
+        val outcome = BleAcquisition.run(link, request, hubId)
         if (outcome.disSerialMismatch) platform.forgetAssociation(hubId)
         return outcome.result
     }
 
     private fun refused(reason: RejectReason) = AcquisitionResult.Rejected(reason)
+
+    /** A link failure from preparation or from opening the link maps as any link failure does
+     *  (addendum 5.4), before anything is connected, rather than escaping the source. */
+    private fun linkFailure(e: HubLinkException) = refused(BleAcquisition.reasonFor(e.failure, connected = false))
 
     companion object {
         /** `Build.VERSION_CODES.TIRAMISU`: `getMyAssociations()` and the executor `associate()` (3.2). */
