@@ -9,10 +9,11 @@ import com.example.samdapp.domain.vitalssource.RejectReason
 import java.time.Instant
 import java.util.UUID
 import java.util.logging.Logger
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
@@ -60,26 +61,33 @@ object BleAcquisition {
             return withTimeout(CAP_MS) { exchange(link, request, hubId, nonceBytes, expectedSessionId, now, progress) }
         } catch (_: TimeoutCancellationException) {
             progress.aborted = true
-            teardownStep("abort") { link.abort() }
             return Outcome(rejected(RejectReason.TIMEOUT))
         } catch (e: HubLinkException) {
             return Outcome(rejected(reasonFor(e.failure, progress.connected)))
         } finally {
             // Step 15. STOP only for a session the hub said it opened, then disconnect, then close,
-            // each bounded, none able to change the result. After the cap's abort, only close.
+            // each bounded. After the cap, abort, then only close. Under NonCancellable, so a cancelled
+            // caller still reaches the hub.
             withContext(NonCancellable) {
-                if (!progress.aborted) {
+                if (progress.aborted) {
+                    teardownStep("abort") { link.abort() }
+                } else {
                     if (progress.startSucceeded) {
                         teardownStep("STOP") {
                             withTimeoutOrNull(TEARDOWN_TIMEOUT_MS) {
                                 link.writeControlPoint(ControlPoint.encodeStop(nonceBytes), TEARDOWN_TIMEOUT_MS)
-                            }
+                            } ?: logger.warning("BLE teardown STOP timed out")
                         }
                     }
-                    teardownStep("disconnect") { withTimeoutOrNull(TEARDOWN_TIMEOUT_MS) { link.disconnect(TEARDOWN_TIMEOUT_MS) } }
+                    teardownStep("disconnect") {
+                        withTimeoutOrNull(TEARDOWN_TIMEOUT_MS) { link.disconnect(TEARDOWN_TIMEOUT_MS) }
+                            ?: logger.warning("BLE teardown disconnect timed out")
+                    }
                 }
                 teardownStep("close") { link.close() }
             }
+            // Teardown never changes a decided result. Only the caller's own cancellation replaces it.
+            currentCoroutineContext().ensureActive()
         }
     }
 
@@ -238,14 +246,13 @@ object BleAcquisition {
 
     private val logger = Logger.getLogger("BleAcquisition")
 
-    /** Teardown is best effort: the result is already decided, so no failure here may replace it. */
+    /** Teardown is best effort: the result is already decided, so no failure here may replace it, a
+     *  cancellation a step raises included. An Error still propagates. */
     private inline fun teardownStep(step: String, block: () -> Unit) {
         try {
             block()
-        } catch (e: CancellationException) {
-            throw e
         } catch (e: Exception) {
-            logger.warning("BLE teardown $step failed: $e")
+            logger.warning("BLE teardown $step failed: ${e.javaClass.name}")
         }
     }
 }

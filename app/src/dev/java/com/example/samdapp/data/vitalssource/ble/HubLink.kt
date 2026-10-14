@@ -1,5 +1,7 @@
 package com.example.samdapp.data.vitalssource.ble
 
+import java.util.logging.Logger
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 
 /** One indication from the hub. The adapter delivers Control Point and Envelope indications into one
@@ -79,4 +81,34 @@ interface HubLink<R> {
 
     /** Releases the link. Called at the end of every acquisition; idempotent. */
     fun close()
+}
+
+/**
+ * The one way an indication enters a link's [HubLink.events]. Unlimited, because the protocol bounds
+ * the indications (one answer and one envelope per session), and fed only by `trySend`, so a library
+ * callback never suspends or blocks. An indication after [close] is expected, since the hub can still
+ * be indicating while the link is torn down, and is dropped; any other refusal closes the channel as
+ * a lost link rather than losing a reading in silence.
+ */
+internal class IndicationSink(capacity: Int = Channel.UNLIMITED) {
+    private val channel = Channel<HubEvent>(capacity)
+
+    val events: ReceiveChannel<HubEvent> get() = channel
+
+    fun offer(event: HubEvent) {
+        val sent = channel.trySend(event)
+        if (sent.isClosed) {
+            logger.fine("an indication after close was dropped")
+        } else if (sent.isFailure) {
+            channel.close(HubLinkException(HubLinkException.Failure.DISCONNECTED, "the indication channel refused an event"))
+        }
+    }
+
+    fun close(cause: HubLinkException) {
+        channel.close(cause)
+    }
+
+    private companion object {
+        val logger: Logger = Logger.getLogger("IndicationSink")
+    }
 }

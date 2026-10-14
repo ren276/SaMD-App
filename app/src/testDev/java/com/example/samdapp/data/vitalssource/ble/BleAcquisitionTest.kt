@@ -13,6 +13,7 @@ import java.time.Instant
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
@@ -21,16 +22,19 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** The protocol of addendum 5.2 over a scripted [FakeHubLink]: G-B2, G-B3, G-B4 (second half), G-B5,
  *  G-B9, G-B13 (order over two connections), G-B14 and G-B23, plus the 5.3 and 5.4 mappings, and the
  *  STOP 2 rulings F1 (the cap closes only), F2 (teardown cannot change the result), F3 (decode by the
- *  envelope's instrument) and F5 (Stop during connect). */
+ *  envelope's instrument) and F5 (Stop during connect), and the STOP 4 ruling B1 (only the caller's own
+ *  cancellation may replace a decided result). */
 class BleAcquisitionTest {
 
     private val nonce = UUID.fromString("a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d")
@@ -274,18 +278,34 @@ class BleAcquisitionTest {
     }
 
     @Test
-    fun `the closed-link fake refuses every operation after abort`() = runTest {
-        val link = FakeHubLink()
-        link.abort()
+    fun `the closed-link fake refuses every operation after abort and after close`() = runTest {
+        for (kill in listOf<(FakeHubLink) -> Unit>({ it.abort() }, { it.close() })) {
+            val link = FakeHubLink()
+            kill(link)
 
-        val refused = listOf<suspend () -> Unit>(
-            { link.connect(1, emptyList()) }, { link.mtu() }, { link.disServices() }, { link.read("hub-serial", 1) },
-            { link.writeControlPoint(byteArrayOf(0x02), 1) }, { link.disconnect(1) }, { link.abort() },
-        ).count { op -> try { op(); false } catch (e: HubLinkException) { e.failure == HubLinkException.Failure.DISCONNECTED } }
-        assertEquals(7, refused)
-        link.close()
-        link.close()
-        assertEquals(2, link.closes)
+            val refused = listOf<suspend () -> Unit>(
+                { link.connect(1, emptyList()) }, { link.mtu() }, { link.disServices() }, { link.read("hub-serial", 1) },
+                { link.writeControlPoint(byteArrayOf(0x02), 1) }, { link.disconnect(1) }, { link.abort() },
+            ).count { op -> try { op(); false } catch (e: HubLinkException) { e.failure == HubLinkException.Failure.DISCONNECTED } }
+            assertEquals(7, refused)
+            link.close()
+            link.close()
+            assertTrue("close may always be repeated", link.closes >= 2)
+        }
+    }
+
+    @Test
+    fun `an abort that throws on the cap path keeps TIMEOUT and still closes`() = runTest {
+        val link = FakeHubLink().apply {
+            hang = "connect"
+            teardownFailures["abort"] = IllegalStateException("library fault")
+        }
+
+        val outcome = runCatching { acquire(link) }
+        assertTrue("the abort failure escaped: ${outcome.exceptionOrNull()}", outcome.isSuccess)
+        assertEquals(RejectReason.TIMEOUT, outcome.getOrThrow().reason())
+        assertEquals(listOf("connect", "abort", "close"), link.log)
+        assertEquals(1, link.closes)
     }
 
     @Test
@@ -324,6 +344,95 @@ class BleAcquisitionTest {
         assertTrue("START never succeeded", link.startWrites.isEmpty() && link.stopWrites.isEmpty())
         assertEquals("Stop is not the cap", 0, link.aborts)
         assertEquals(listOf("connect", "disconnect", "close"), link.log)
+    }
+
+    @Test
+    fun `F6a a caller cancelled mid-measurement still STOPs, disconnects and closes once, then propagates`() = runTest {
+        val link = FakeHubLink().apply { onStart = { answer(0x01) } }
+        // Not Stop and not the cap: the job the caller runs in is cancelled from above.
+        val caller = Job()
+        val outside = CoroutineScope(StandardTestDispatcher(testScheduler) + caller)
+        val outcome = outside.async { acquire(link) }
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertTrue("START is answered and the envelope is awaited", link.startWrites.size == 1 && !outcome.isCompleted)
+
+        caller.cancel()
+        val ended = withTimeoutOrNull(BleAcquisition.TEARDOWN_TIMEOUT_MS * 3) { outcome.join(); true }
+
+        assertEquals("the teardown did not end", true, ended)
+        assertEquals(listOf("write(START)", "write(STOP)", "disconnect", "close"), link.log.dropWhile { it != "write(START)" })
+        assertArrayEquals(ControlPoint.encodeStop(ControlPoint.nonceBytes(nonce)), link.stopWrites.only("STOP write"))
+        assertEquals(1, link.closes)
+        assertTrue("the cancellation propagates", outcome.isCancelled)
+        assertTrue("no result at all, so no Accepted", outcome.getCompletionExceptionOrNull() is CancellationException)
+    }
+
+    @Test
+    fun `F6b a STOP write that never returns is bounded, and disconnect and close still run`() = runTest {
+        val link = FakeHubLink().apply { hang = "write(STOP)" }
+        // Outside runTest's own scope, as in the hung disconnect case: an unbounded NonCancellable
+        // await could be neither timed out nor cancelled.
+        val outside = CoroutineScope(StandardTestDispatcher(testScheduler))
+        val outcome = outside.async { acquire(link) }
+
+        val ended = withTimeoutOrNull(BleAcquisition.TEARDOWN_TIMEOUT_MS * 3) { outcome.join(); true }
+
+        assertEquals("the STOP write was not bounded", true, ended)
+        assertTrue(outcome.await().result is AcquisitionResult.Accepted)
+        assertEquals(listOf("write(STOP)", "disconnect", "close"), link.log.takeLast(3))
+        assertEquals(1, link.closes)
+        outside.cancel()
+    }
+
+    @Test
+    fun `B1 a STOP write that throws CancellationException leaves Accepted unchanged, and disconnect and close run once`() = runTest {
+        val link = FakeHubLink().apply { teardownFailures["write(STOP)"] = CancellationException("the library cancelled it") }
+
+        val outcome = runCatching { acquire(link) }
+
+        assertTrue("the teardown cancellation escaped: ${outcome.exceptionOrNull()}", outcome.isSuccess)
+        outcome.getOrThrow().result.expect<AcquisitionResult.Accepted>()
+        assertEquals(listOf("write(STOP)", "disconnect", "close"), link.log.takeLast(3))
+        assertEquals(1, link.log.count { it == "disconnect" })
+        assertEquals(1, link.closes)
+    }
+
+    @Test
+    fun `B1 a STOP write that throws CancellationException leaves Rejected unchanged, and disconnect and close run once`() = runTest {
+        val link = FakeHubLink().apply {
+            onStart = { n -> answer(0x01); envelope(envelopeBytes(nonce = n, quality = 2)) }
+            teardownFailures["write(STOP)"] = CancellationException("the library cancelled it")
+        }
+
+        val outcome = runCatching { acquire(link) }
+
+        assertTrue("the teardown cancellation escaped: ${outcome.exceptionOrNull()}", outcome.isSuccess)
+        assertEquals(RejectReason.QUALITY_STATUS_NOT_OK, outcome.getOrThrow().reason())
+        assertEquals(listOf("write(STOP)", "disconnect", "close"), link.log.takeLast(3))
+        assertEquals(1, link.log.count { it == "disconnect" })
+        assertEquals(1, link.closes)
+    }
+
+    @Test
+    fun `B1 a caller cancelled during the teardown of a decided result gets its cancellation, not the result`() = runTest {
+        val link = FakeHubLink().apply { hang = "write(STOP)" }
+        val caller = Job()
+        val outside = CoroutineScope(StandardTestDispatcher(testScheduler) + caller)
+        var seen: BleAcquisition.Outcome? = null
+        val outcome = outside.async { acquire(link).also { seen = it } }
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals("Accepted is decided and the STOP write is in flight", "write(STOP)", link.log.last())
+
+        caller.cancel()
+        val ended = withTimeoutOrNull(BleAcquisition.TEARDOWN_TIMEOUT_MS * 3) { outcome.join(); true }
+
+        assertEquals("the teardown did not end", true, ended)
+        assertEquals(listOf("write(STOP)", "disconnect", "close"), link.log.takeLast(3))
+        assertEquals(1, link.closes)
+        assertNull("the caller went on with a result after its own cancellation", seen)
+        assertTrue(outcome.isCancelled)
     }
 
     @Test

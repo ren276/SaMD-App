@@ -2,8 +2,9 @@ package com.example.samdapp.data.vitalssource.ble
 
 import java.util.UUID
 import kotlinx.coroutines.awaitCancellation
-import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 
 /** The hub's Device Information service, BlueZ's own, and the vendor service, as a central sees them. */
 fun hubServices(): List<DisSearch.Service<String>> = listOf(
@@ -35,7 +36,9 @@ fun InitStep.label(): String = when (this) {
  * one envelope echoing the START nonce.
  *
  * Like a real GATT client, it is dead once [abort] or [close] ran: every later operation is logged
- * and then throws [HubLinkException.Failure.DISCONNECTED]. Only [close] may be repeated.
+ * and then throws [HubLinkException.Failure.DISCONNECTED]. Only [close] may be repeated. Like the
+ * adapter's cancellable awaits, a suspending call made by a cancelled caller never reaches the hub:
+ * it throws before it is logged.
  */
 class FakeHubLink(
     hubId: String = "kernelhub2",
@@ -65,10 +68,10 @@ class FakeHubLink(
     /** Virtual time [connect] takes. */
     var connectDelayMs = 0L
 
-    /** The call that never returns: "connect", "read", "write" or "disconnect". */
+    /** The call that never returns: "connect", "read", "write" (either), "write(STOP)" or "disconnect". */
     var hang: String? = null
 
-    /** Thrown by the teardown call with this [log] label: "write(STOP)", "disconnect" or "close". */
+    /** Thrown by the teardown call with this [log] label: "write(STOP)", "disconnect", "abort" or "close". */
     val teardownFailures = mutableMapOf<String, Exception>()
 
     private var dead = false
@@ -84,9 +87,12 @@ class FakeHubLink(
         envelope(envelopeBytes(nonce = nonce))
     }
 
-    override val events = Channel<HubEvent>(Channel.UNLIMITED)
+    private val sink = IndicationSink()
+
+    override val events = sink.events
 
     override suspend fun connect(timeoutMs: Long, plan: List<InitStep>): List<InitStep> {
+        currentCoroutineContext().ensureActive()
         alive("connect")
         if (hang == "connect") awaitCancellation()
         delay(connectDelayMs)
@@ -106,6 +112,7 @@ class FakeHubLink(
     }
 
     override suspend fun read(ref: String, timeoutMs: Long): ByteArray {
+        currentCoroutineContext().ensureActive()
         alive("read($ref)")
         if (hang == "read") awaitCancellation()
         readFailure?.let { throw it }
@@ -115,10 +122,11 @@ class FakeHubLink(
     override suspend fun writeControlPoint(value: ByteArray, timeoutMs: Long) {
         val start = value[0] == 0x01.toByte()
         val label = if (start) "write(START)" else "write(STOP)"
+        currentCoroutineContext().ensureActive()
         writes += value
         alive(label)
         teardownFailures[label]?.let { throw it }
-        if (hang == "write") awaitCancellation()
+        if (hang == "write" || hang == label) awaitCancellation()
         if (start) {
             startWriteFailure?.let { throw it }
             onStart(value.copyOfRange(3, 19))
@@ -126,6 +134,7 @@ class FakeHubLink(
     }
 
     override suspend fun disconnect(timeoutMs: Long) {
+        currentCoroutineContext().ensureActive()
         alive("disconnect")
         teardownFailures["disconnect"]?.let { throw it }
         if (hang == "disconnect") awaitCancellation()
@@ -135,6 +144,7 @@ class FakeHubLink(
         alive("abort")
         aborts++
         die()
+        teardownFailures["abort"]?.let { throw it }
     }
 
     override fun close() {
@@ -146,19 +156,19 @@ class FakeHubLink(
 
     private fun die() {
         dead = true
-        events.close(HubLinkException(HubLinkException.Failure.DISCONNECTED, "the link was closed"))
+        sink.close(HubLinkException(HubLinkException.Failure.DISCONNECTED, "the link was closed"))
     }
 
     fun answer(result: Int) {
-        events.trySend(HubEvent.ControlPointIndication(byteArrayOf(0x80.toByte(), 0x01, result.toByte())))
+        sink.offer(HubEvent.ControlPointIndication(byteArrayOf(0x80.toByte(), 0x01, result.toByte())))
     }
 
     fun envelope(bytes: ByteArray) {
-        events.trySend(HubEvent.EnvelopeIndication(bytes))
+        sink.offer(HubEvent.EnvelopeIndication(bytes))
     }
 
     fun dropLink() {
-        events.close(HubLinkException(HubLinkException.Failure.DISCONNECTED))
+        sink.close(HubLinkException(HubLinkException.Failure.DISCONNECTED))
     }
 
     val startWrites: List<ByteArray> get() = writes.filter { it[0] == 0x01.toByte() }
