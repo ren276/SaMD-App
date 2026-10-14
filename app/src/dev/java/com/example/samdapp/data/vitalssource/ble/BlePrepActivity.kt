@@ -26,7 +26,10 @@ import javax.inject.Inject
  * The transparent dev-only activity that hosts one preparation step for the BLE source (B1,
  * addendum 3.3 to 3.6): the Nearby devices permission, or the companion-device association. It reads
  * its request from [BlePrepBridge], answers it once, and finishes. A request the source already
- * abandoned (Stop, screen exit, the ceiling, process death) is not acted on.
+ * abandoned (Stop, screen exit, the ceiling, process death) is not answered. One thing is still done
+ * for it: an association the system creates after the abandonment has its ID stored (the companion
+ * object's `associationCreated`), because the system holds that association either way and the next
+ * Start should find it rather than ask the human again.
  *
  * Reached only on API 33 and up: the source refuses below it before asking for anything (Q1).
  */
