@@ -19,6 +19,7 @@ private class FakePlatform(
     var enabled: Boolean = true,
     var permitted: Boolean = true,
     var address: String? = "D8:3A:DD:9F:DC:16",
+    var companionDevices: Boolean = true,
 ) : BleHubPlatform {
     val calls = mutableListOf<String>()
     val links = mutableListOf<FakeHubLink>()
@@ -26,6 +27,7 @@ private class FakePlatform(
 
     override fun isBluetoothEnabled(): Boolean = enabled.also { calls += "enabled" }
     override fun hasConnectPermission(): Boolean = permitted.also { calls += "permission" }
+    override fun canAssociate(): Boolean = companionDevices.also { calls += "canAssociate" }
     override fun associatedAddress(hubId: String): String? = address.also { calls += "associated($hubId)" }
     override fun forgetAssociation(hubId: String) {
         calls += "forget($hubId)"
@@ -128,6 +130,16 @@ class BleHubVitalsSourceTest {
         answer = BlePrepBridge.Answer.UNAVAILABLE
 
         assertEquals(RejectReason.BLUETOOTH_UNAVAILABLE, source().startBp().reason())
+        assertEquals(0, started)
+    }
+
+    @Test
+    fun `a device without companion-device support is BLUETOOTH_UNAVAILABLE and no dialog is launched`() = runTest {
+        platform.address = null
+        platform.companionDevices = false
+
+        assertEquals(RejectReason.BLUETOOTH_UNAVAILABLE, source().startBp().reason())
+        assertTrue("the association dialog was launched", prepared.isEmpty())
         assertEquals(0, started)
     }
 

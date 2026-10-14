@@ -15,6 +15,10 @@ interface BleHubPlatform {
 
     fun hasConnectPermission(): Boolean
 
+    /** The device has the companion-device feature and its system service, so the association
+     *  dialog can run at all. */
+    fun canAssociate(): Boolean
+
     /** The address of the companion-device association stored for [hubId], found by its stored id
      *  (G1), or null when none is stored or the system no longer holds it. */
     fun associatedAddress(hubId: String): String?
@@ -34,8 +38,8 @@ interface BleHubPlatform {
  * 2. an instrument with a SIG decoder (BP, SPO2, THERMOMETER); the assignment allows no other;
  * 3. Bluetooth on, else BLUETOOTH_UNAVAILABLE;
  * 4. the stored association; with none, the companion-device dialog through [BlePrepBridge];
- *    dismissed or unanswered, NOT_SUPPORTED ("not paired yet"); the system unable to run it,
- *    BLUETOOTH_UNAVAILABLE;
+ *    dismissed or unanswered, NOT_SUPPORTED ("not paired yet"); the system unable to run it, or a
+ *    device without the companion-device feature, BLUETOOTH_UNAVAILABLE;
  * 5. the Nearby devices permission, asked for through [BlePrepBridge] when missing; anything but a
  *    grant is BLUETOOTH_UNAVAILABLE.
  *
@@ -57,7 +61,9 @@ class BleHubVitalsSource(
         if (request.instrument !in DECODED) return refused(RejectReason.NOT_SUPPORTED)
         if (!platform.isBluetoothEnabled()) return refused(RejectReason.BLUETOOTH_UNAVAILABLE)
 
-        val address = platform.associatedAddress(hubId) ?: when (bridge.prepare(BlePrepBridge.Kind.ASSOCIATION, hubId)) {
+        val address = platform.associatedAddress(hubId) ?: when (
+            if (platform.canAssociate()) bridge.prepare(BlePrepBridge.Kind.ASSOCIATION, hubId) else BlePrepBridge.Answer.UNAVAILABLE
+        ) {
             BlePrepBridge.Answer.GRANTED -> platform.associatedAddress(hubId) ?: return refused(RejectReason.NOT_SUPPORTED)
             BlePrepBridge.Answer.REFUSED, BlePrepBridge.Answer.TIMED_OUT -> return refused(RejectReason.NOT_SUPPORTED)
             BlePrepBridge.Answer.UNAVAILABLE -> return refused(RejectReason.BLUETOOTH_UNAVAILABLE)
