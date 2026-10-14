@@ -28,7 +28,8 @@ class HubLinkException(val failure: Failure, message: String? = null, cause: Thr
         DISCONNECTED,
 
         /** The peripheral lacks the vendor service, its Control Point or Envelope, or the SIG service
-         *  for the instrument: it is not the hub this acquisition is for. */
+         *  for the instrument. The device is the hub's stored association, so this is a hub not serving
+         *  right now, not another hub: identity is proved by the DIS serial and the envelope hub_id. */
         NOT_SUPPORTED,
 
         /** The request's own timeout expired. */

@@ -197,6 +197,15 @@ class BleHubVitalsSourceTest {
     }
 
     @Test
+    fun `a required service missing on the associated hub is UNREACHABLE and keeps the association`() = runTest {
+        platform.nextLink = { FakeHubLink().apply { connectFailure = HubLinkException(HubLinkException.Failure.NOT_SUPPORTED) } }
+
+        assertEquals(RejectReason.UNREACHABLE, source().startBp().reason())
+        assertFalse(platform.calls.any { it.startsWith("forget(") })
+        assertEquals("D8:3A:DD:9F:DC:16", platform.address)
+    }
+
+    @Test
     fun `an envelope hub_id mismatch keeps the association`() = runTest {
         platform.nextLink = {
             FakeHubLink().apply {

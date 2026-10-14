@@ -84,7 +84,8 @@ class BleHubManager(
     // ---- the library's side --------------------------------------------------------------------
 
     /** Step 3: the vendor Control Point and Envelope and the instrument's SIG measurement. False is
-     *  REASON_DEVICE_NOT_SUPPORTED on the connect, NOT_SUPPORTED here, HUB_MISMATCH in 5.4. */
+     *  REASON_DEVICE_NOT_SUPPORTED on the connect, NOT_SUPPORTED here, UNREACHABLE in 5.4 as amended
+     *  2026-10-14: the device is the associated hub, which is not serving right now. */
     override fun isRequiredServiceSupported(gatt: BluetoothGatt): Boolean {
         val vendor = gatt.getService(ControlPoint.VENDOR_SERVICE)
         controlPoint = vendor?.getCharacteristic(ControlPoint.CONTROL_POINT)

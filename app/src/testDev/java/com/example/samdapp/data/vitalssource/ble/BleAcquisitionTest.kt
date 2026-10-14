@@ -531,7 +531,7 @@ class BleAcquisitionTest {
         val cases = mapOf(
             HubLinkException.Failure.BLUETOOTH_DISABLED to RejectReason.BLUETOOTH_UNAVAILABLE,
             HubLinkException.Failure.DISCONNECTED to RejectReason.UNREACHABLE,
-            HubLinkException.Failure.NOT_SUPPORTED to RejectReason.HUB_MISMATCH,
+            HubLinkException.Failure.NOT_SUPPORTED to RejectReason.UNREACHABLE,
             HubLinkException.Failure.TIMED_OUT to RejectReason.UNREACHABLE,
             HubLinkException.Failure.FAILED to RejectReason.UNREACHABLE,
             HubLinkException.Failure.INVALID_REQUEST to RejectReason.MALFORMED,
@@ -543,6 +543,17 @@ class BleAcquisitionTest {
             assertEquals("$failure", reason, acquire(link).reason())
             assertEquals(1, link.closes)
         }
+    }
+
+    @Test
+    fun `D2 a required service missing on the associated hub is UNREACHABLE and keeps the association`() = runTest {
+        val link = FakeHubLink().apply { connectFailure = HubLinkException.Failure.NOT_SUPPORTED.ex() }
+
+        val outcome = acquire(link)
+
+        assertEquals(RejectReason.UNREACHABLE, outcome.reason())
+        assertFalse("only a DIS serial mismatch drops the association", outcome.disSerialMismatch)
+        assertEquals(1, link.closes)
     }
 
     @Test

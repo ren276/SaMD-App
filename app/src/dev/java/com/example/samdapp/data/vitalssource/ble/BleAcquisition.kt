@@ -115,7 +115,7 @@ object BleAcquisition {
     ): Outcome {
         // Steps 2 to 4. The plan runs as this connection's init, so the CCCDs and the MTU request
         // precede any Control Point write, on every connection (14.5 items 1 and 6). Step 3, the
-        // required services, is checked by the adapter during connect: NOT_SUPPORTED, HUB_MISMATCH.
+        // required services, is checked by the adapter during connect: NOT_SUPPORTED, UNREACHABLE.
         val failedInit = link.connect(CONNECT_TIMEOUT_MS, HubInitPlan.steps())
         progress.connected = true
         if (failedInit.isNotEmpty()) return Outcome(rejected(RejectReason.MALFORMED))
@@ -185,7 +185,10 @@ object BleAcquisition {
     private fun reasonFor(failure: HubLinkException.Failure, connected: Boolean): RejectReason = when (failure) {
         HubLinkException.Failure.BLUETOOTH_DISABLED -> RejectReason.BLUETOOTH_UNAVAILABLE
         HubLinkException.Failure.DISCONNECTED -> RejectReason.UNREACHABLE
-        HubLinkException.Failure.NOT_SUPPORTED -> RejectReason.HUB_MISMATCH
+        // The link was opened only through this hub's stored association, so a missing service is a hub
+        // not serving right now, as when its GATT application stops mid-discovery (live check L5).
+        // Identity failures stay HUB_MISMATCH: the DIS serial, the envelope hub_id, INSTRUMENT_NOT_SERVED.
+        HubLinkException.Failure.NOT_SUPPORTED -> RejectReason.UNREACHABLE
         HubLinkException.Failure.TIMED_OUT -> if (connected) RejectReason.TIMEOUT else RejectReason.UNREACHABLE
         HubLinkException.Failure.FAILED -> RejectReason.UNREACHABLE
         HubLinkException.Failure.INVALID_REQUEST -> RejectReason.MALFORMED
