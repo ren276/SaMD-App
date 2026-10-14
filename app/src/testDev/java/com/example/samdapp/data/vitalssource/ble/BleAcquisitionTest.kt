@@ -559,9 +559,11 @@ class BleAcquisitionTest {
         assertEquals(RejectReason.SESSION_ID_MISMATCH, acquire(foreign).reason())
 
         // And PiMeasurementMapper is the only producer of the reason.
-        val producers = File(listOf(File("src/dev"), File("app/src/dev")).first { it.isDirectory }, "java")
-            .walkTopDown().filter { it.isFile && it.extension == "kt" && "RejectReason.DEVICE_TYPE_MISMATCH)" in it.readText() }
-            .map { it.name }.toList()
+        val scanned = File(listOf(File("src/dev"), File("app/src/dev")).first { it.isDirectory }, "java")
+            .walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
+        assertTrue("the producer scan read no Kotlin sources", scanned.isNotEmpty())
+        assertTrue("the producer scan does not reach the mapper", scanned.any { it.name == "PiMeasurementMapper.kt" })
+        val producers = scanned.filter { "RejectReason.DEVICE_TYPE_MISMATCH)" in it.readText() }.map { it.name }
         assertEquals(listOf("PiMeasurementMapper.kt"), producers)
     }
 }

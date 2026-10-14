@@ -10,7 +10,8 @@ import org.junit.Test
  * `suspendForResponse` family built on it, ignore coroutine cancellation, and `close()` does not fail
  * the request in flight: an await parked there would never resume, and the 25 s cap could not end
  * it. The only ktx await allowed in `src/dev` is the cancellable one, reached by upcasting:
- * `(request as TimeoutableRequest).suspend()`. The MTU request uses a local cancellable helper.
+ * `(request as TimeoutableRequest).suspend()`. The MTU request is never awaited: it runs queued in the
+ * connection's init, which the connect await covers.
  *
  * A text scan, comments included, so the rule stays checkable. `app/src` is a Gradle test input, so
  * this cannot go UP-TO-DATE after an edit.
@@ -20,7 +21,8 @@ class NoNonCancellableBleAwaitTest {
     @Test
     fun `every ble-ktx await in src dev is the cancellable one`() {
         val files = DEV.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
-        assertTrue("scan root ${DEV.absolutePath} holds the BLE sources", files.any { it.name == "BleAcquisition.kt" })
+        assertTrue("scan root ${DEV.absolutePath} has no Kotlin sources", files.isNotEmpty())
+        assertTrue("scan root ${DEV.absolutePath} does not hold the adapter", files.any { it.name == "BleHubManager.kt" })
         val hits = files.flatMap { file ->
             file.readLines().mapIndexedNotNull { i, line -> if (violates(line)) "${file.path}:${i + 1}: ${line.trim()}" else null }
         }

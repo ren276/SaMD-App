@@ -15,7 +15,8 @@ class NoPhase3TempRouteTest {
     @Test
     fun `no file under app src carries the Phase 3 temporary marker`() {
         val files = SRC.walkTopDown().filter { it.isFile && it.extension in TEXT }.toList()
-        assertTrue("scan root ${SRC.absolutePath} holds the dev sources", files.any { it.name == "DevClinicalMockModule.kt" })
+        assertTrue("scan root ${SRC.absolutePath} has no text sources", files.isNotEmpty())
+        assertTrue("scan root ${SRC.absolutePath} does not hold the dev DI module", files.any { it.name == "DevClinicalMockModule.kt" })
         val hits = files.flatMap { file ->
             file.readLines().mapIndexedNotNull { i, line -> if (MARKER in line) "${file.path}:${i + 1}: ${line.trim()}" else null }
         }
