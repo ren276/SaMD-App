@@ -435,6 +435,47 @@ class BleAcquisitionTest {
         assertTrue(outcome.isCancelled)
     }
 
+    // ---- STOP 7b ruling D1: a START in flight is stopped ----------------------------------------
+
+    @Test
+    fun `D1 a caller cancelled while the START write is in flight still STOPs, disconnects and closes once, then propagates`() = runTest {
+        val link = FakeHubLink().apply { hang = "write(START)" }
+        val caller = Job()
+        val outside = CoroutineScope(StandardTestDispatcher(testScheduler) + caller)
+        val outcome = outside.async { acquire(link) }
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals("START is delivered and its await is pending", "write(START)", link.log.last())
+
+        caller.cancel()
+        val ended = withTimeoutOrNull(BleAcquisition.TEARDOWN_TIMEOUT_MS * 3) { outcome.join(); true }
+
+        assertEquals("the teardown did not end", true, ended)
+        assertEquals(listOf("write(START)", "write(STOP)", "disconnect", "close"), link.log.dropWhile { it != "write(START)" })
+        assertArrayEquals(ControlPoint.encodeStop(ControlPoint.nonceBytes(nonce)), link.stopWrites.only("STOP write"))
+        assertEquals(1, link.closes)
+        assertTrue("the cancellation propagates", outcome.isCancelled)
+    }
+
+    @Test
+    fun `D1 an undecodable START answer is MALFORMED, and the teardown still writes STOP`() = runTest {
+        // A well-formed answer to the STOP opcode, not to START: the hub's state is unknown.
+        val link = FakeHubLink().apply { onStart = { controlPoint(byteArrayOf(0x80.toByte(), 0x02, 0x01)) } }
+
+        assertEquals(RejectReason.MALFORMED, acquire(link).reason())
+        assertArrayEquals(ControlPoint.encodeStop(ControlPoint.nonceBytes(nonce)), link.stopWrites.only("STOP write"))
+        assertEquals(listOf("write(STOP)", "disconnect", "close"), link.log.takeLast(3))
+    }
+
+    @Test
+    fun `D1 a refusal before any START is submitted writes no STOP, and still disconnects and closes`() = runTest {
+        val link = FakeHubLink(mtu = 88)
+
+        assertEquals(RejectReason.MALFORMED, acquire(link).reason())
+        assertTrue(link.startWrites.isEmpty() && link.stopWrites.isEmpty())
+        assertEquals(listOf("disconnect", "close"), link.log.takeLast(2))
+    }
+
     @Test
     fun `a teardown step that throws cannot change the result`() = runTest {
         for (step in listOf("write(STOP)", "disconnect", "close")) {

@@ -65,14 +65,14 @@ object BleAcquisition {
         } catch (e: HubLinkException) {
             return Outcome(rejected(reasonFor(e.failure, progress.connected)))
         } finally {
-            // Step 15. STOP only for a session the hub said it opened, then disconnect, then close,
-            // each bounded. After the cap, abort, then only close. Under NonCancellable, so a cancelled
-            // caller still reaches the hub.
+            // Step 15. STOP for a START the hub may have opened, that is unless none was submitted or
+            // the hub refused it, then disconnect, then close, each bounded. After the cap, abort, then
+            // only close. Under NonCancellable, so a cancelled caller still reaches the hub.
             withContext(NonCancellable) {
                 if (progress.aborted) {
                     teardownStep("abort") { link.abort() }
                 } else {
-                    if (progress.startSucceeded) {
+                    if (progress.mayHoldSession()) {
                         teardownStep("STOP") {
                             withTimeoutOrNull(TEARDOWN_TIMEOUT_MS) {
                                 link.writeControlPoint(ControlPoint.encodeStop(nonceBytes), TEARDOWN_TIMEOUT_MS)
@@ -91,10 +91,17 @@ object BleAcquisition {
         }
     }
 
+    /** Where START stands. IN_FLIGHT from the moment the write is handed to the link until a decoded
+     *  answer: the hub may have opened a session the phone never heard about, so teardown stops it. A
+     *  STOP with no session is answered NOT_RUNNING and changes nothing (SaMDPi control_point.py). */
+    private enum class StartState { NOT_SUBMITTED, IN_FLIGHT, SUCCEEDED, REFUSED }
+
     private class Progress {
         var connected = false
-        var startSucceeded = false
+        var start = StartState.NOT_SUBMITTED
         var aborted = false
+
+        fun mayHoldSession() = start == StartState.SUCCEEDED || start == StartState.IN_FLIGHT
     }
 
     private suspend fun <R> exchange(
@@ -130,6 +137,7 @@ object BleAcquisition {
         while (link.events.tryReceive().isSuccess) Unit
 
         // Step 8.
+        progress.start = StartState.IN_FLIGHT
         link.writeControlPoint(ControlPoint.encodeStart(request.instrument, request.scenario, nonceBytes), STEP_TIMEOUT_MS)
 
         // Step 9. The first Control Point indication is the answer. An envelope before it is stale
@@ -137,8 +145,11 @@ object BleAcquisition {
         val answer = withTimeoutOrNull(STEP_TIMEOUT_MS) { link.events.nextControlPoint() }
             ?: return Outcome(rejected(RejectReason.TIMEOUT))
         when (val response = ControlPoint.decodeStartResponse(answer)) {
-            is StartResponse.Refused -> return Outcome(rejected(response.reason))
-            StartResponse.Success -> progress.startSucceeded = true
+            is StartResponse.Refused -> {
+                if (ControlPoint.isStartAnswer(answer)) progress.start = StartState.REFUSED
+                return Outcome(rejected(response.reason))
+            }
+            StartResponse.Success -> progress.start = StartState.SUCCEEDED
         }
 
         // Step 10. The first envelope after the answer.

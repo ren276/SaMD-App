@@ -163,6 +163,11 @@ class FakeHubLink(
         sink.offer(HubEvent.ControlPointIndication(byteArrayOf(0x80.toByte(), 0x01, result.toByte())))
     }
 
+    /** A raw Control Point indication, well-formed or not. */
+    fun controlPoint(bytes: ByteArray) {
+        sink.offer(HubEvent.ControlPointIndication(bytes))
+    }
+
     fun envelope(bytes: ByteArray) {
         sink.offer(HubEvent.EnvelopeIndication(bytes))
     }

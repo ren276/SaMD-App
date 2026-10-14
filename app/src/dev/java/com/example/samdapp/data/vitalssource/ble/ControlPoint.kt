@@ -38,6 +38,8 @@ object ControlPoint {
     private const val BUSY = 0x05
     private const val MTU_TOO_SMALL = 0x07
     private const val CCCD_NOT_ENABLED = 0x08
+    private val START_RESULTS =
+        setOf(SUCCESS, OPCODE_NOT_SUPPORTED, INVALID_PARAMETER, INSTRUMENT_NOT_SERVED, BUSY, MTU_TOO_SMALL, CCCD_NOT_ENABLED)
 
     /** The nonce as the 16 big-endian bytes of [uuid]. The hub echoes them back verbatim. */
     fun nonceBytes(uuid: UUID): ByteArray =
@@ -73,23 +75,29 @@ object ControlPoint {
      * A result byte outside the table is MALFORMED too, and so is 0x06 NOT_RUNNING: the hub sends it
      * for STOP only, so on a START answer it is a result this client has no meaning for.
      */
-    fun decodeStartResponse(raw: ByteArray): StartResponse {
+    fun decodeStartResponse(raw: ByteArray): StartResponse = when (startResult(raw)) {
+        SUCCESS -> StartResponse.Success
+        OPCODE_NOT_SUPPORTED -> StartResponse.Refused(RejectReason.MALFORMED)
+        INVALID_PARAMETER -> StartResponse.Refused(RejectReason.MALFORMED)
+        INSTRUMENT_NOT_SERVED -> StartResponse.Refused(RejectReason.HUB_MISMATCH)
+        BUSY -> StartResponse.Refused(RejectReason.UNREACHABLE)
+        MTU_TOO_SMALL -> StartResponse.Refused(RejectReason.MALFORMED)
+        CCCD_NOT_ENABLED -> StartResponse.Refused(RejectReason.UNREACHABLE)
+        else -> StartResponse.Refused(RejectReason.MALFORMED)
+    }
+
+    /** True only for `80 01 <result>` with a result in the table: an answer this client decoded,
+     *  SUCCESS or a refusal. After anything else the hub's session state is unknown. */
+    fun isStartAnswer(raw: ByteArray): Boolean = startResult(raw) != null
+
+    private fun startResult(raw: ByteArray): Int? {
         if (raw.size != RESPONSE_LEN ||
             (raw[0].toInt() and 0xFF) != OP_RESPONSE ||
             (raw[1].toInt() and 0xFF) != OP_START
         ) {
-            return StartResponse.Refused(RejectReason.MALFORMED)
+            return null
         }
-        return when (raw[2].toInt() and 0xFF) {
-            SUCCESS -> StartResponse.Success
-            OPCODE_NOT_SUPPORTED -> StartResponse.Refused(RejectReason.MALFORMED)
-            INVALID_PARAMETER -> StartResponse.Refused(RejectReason.MALFORMED)
-            INSTRUMENT_NOT_SERVED -> StartResponse.Refused(RejectReason.HUB_MISMATCH)
-            BUSY -> StartResponse.Refused(RejectReason.UNREACHABLE)
-            MTU_TOO_SMALL -> StartResponse.Refused(RejectReason.MALFORMED)
-            CCCD_NOT_ENABLED -> StartResponse.Refused(RejectReason.UNREACHABLE)
-            else -> StartResponse.Refused(RejectReason.MALFORMED)
-        }
+        return (raw[2].toInt() and 0xFF).takeIf { it in START_RESULTS }
     }
 
     private fun scenarioCode(scenario: Scenario): Int = when (scenario) {
