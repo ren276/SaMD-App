@@ -5411,7 +5411,7 @@ Observed during PR-B1 live checks, not resolved:
   the 127.0.0.1 laptop-container path. Cause INFERRED as first-use mDNS discovery
   (`NsdGatewayDns`); not observed directly. Revisit if it recurs.
 
-## SaMDPi two-hub client, PR-B2: built, live checks pending - 2026-10-14
+## SaMDPi two-hub client, PR-B2: built, live-checked, live findings fixed - 2026-10-14
 
 `feat/two-hub-ble-client` holds the BLE client as local commits only: no push, no upstream. The
 dev flavor carries all of it; staging and prod are unchanged (852 tests each) and their release
@@ -5423,20 +5423,70 @@ runtime classpaths hold no `no.nordicsemi` artifact. Every guard is mutation-pro
 - [x] Phase 3: `BleHubManager` and `AndroidBleHubPlatform`, CDM association by stored ID,
   `BlePrepActivity`, routing and DI, and the STOP 4 rulings (teardown keeps a decided result;
   abort and close release the manager once).
-- [ ] Phase 4: live checks on the iQOO against kernelhub2.
+- [x] Phase 4: live checks L1 to L16 on the iQOO against kernelhub2 and kernelhub1.
+- [x] Phase 5: the live findings D1 to D3 fixed (below).
+- [ ] Targeted live re-checks of L5, L8 and the teardown warnings on the fixed build.
 
-Assumptions still INFERRED, to be settled by the live checks (memo section 15.5 numbering):
+Live results (evidence in `samd-prb2/live/` on the SSD scratch):
 
-1. `BlePrepActivity` started from the application context with `FLAG_ACTIVITY_NEW_TASK` joins the
-   app's existing task.
-2. CDM association grants no exemption from `BLUETOOTH_CONNECT` for `connectGatt`.
-3. `uses-feature companion_device_setup` with `required="false"` satisfies CDM's requirement.
-10. `@android:style/Theme.Translucent.NoTitleBar` works with `ComponentActivity` and
-    `registerForActivityResult`.
-- The `BleHubManager` release path (abort and close release once, a throwing queue cancel
-  included) is proved by reading only: the adapter cannot run on the JVM.
+- PASS: L1 (CDM dialog, then the Nearby devices prompt, then a BP reading), L2 (five BP rounds over
+  BLE and five SPO2 rounds over Wi-Fi alternating, audit rows `BLE`/`kernelhub2` and
+  `WIFI`/`kernelhub1`), L3 (audit `emulatorBuild` is the DIS 2A28 label), L4, L7, L9, L11, L12, L13,
+  L14, L15 (debug APK dexdump and the release manifests and classpaths), L16 (5 runs).
+- L5 FAILED on the first build: the hub stopped during service discovery read as HUB_MISMATCH.
+  Fixed by D2. The acquisition after the hub restart connected without a Bluetooth toggle.
+- L5b PARTIAL: `dumpsys bluetooth_manager` prints nothing on this handset; the app logs
+  `close()` and `unregisterApp()` for every acquisition.
+- L6 PARTIAL: a hub frozen on connect gave TIMEOUT from the 3 s request timer, not the 25 s cap.
+  The next acquisition after SIGCONT connected without a Bluetooth toggle.
+- L8 FAILED on the first build: no cancel reached the hub as a STOP; one cancel landed with START
+  in flight. Fixed by D1. Teardown also warned on links that were already down. Fixed by D3.
+- L10: the THERMOMETER row gave HUB_MISMATCH (INSTRUMENT_NOT_SERVED). The `BP=ble:kernelhub9` row
+  cannot run: with no association for `kernelhub9` the CDM filter `^SaMD-kernelhub9$` finds
+  nothing, so the DIS serial check is never reached.
+
+Fixes after the live checks (STOP 7b rulings):
+
+- D1: START is IN_FLIGHT from the moment its write is handed to the link. Teardown writes STOP
+  unless no START was submitted or the hub refused it. A STOP with no session is answered
+  NOT_RUNNING and changes nothing on the hub (SaMDPi `control_point.py:297-298`).
+- D2: NOT_SUPPORTED (a required service missing on the associated hub) maps to UNREACHABLE.
+  HUB_MISMATCH stays for identity failures: the DIS serial, the envelope `hub_id`,
+  INSTRUMENT_NOT_SERVED. The memo's addendum 5.4 table carries the amendment.
+- D3: `HubLink.isConnected()`; teardown sends neither STOP nor disconnect on a link that is
+  already down, and close always runs. A teardown WARN names the link failure or the exception
+  class, never library text.
+
+Closed by the live checks (memo section 15.5 numbering):
+
+1. `BlePrepActivity` started from the application context joins the app's existing task (L12).
+2. CDM association grants no exemption from `BLUETOOTH_CONNECT`: the Nearby devices prompt followed
+   the association (L1).
+3. `uses-feature companion_device_setup` with `required="false"` is enough: associations were
+   created (L1, L12, L13).
+10. The translucent theme works with `ComponentActivity` and the result launchers, through rotation
+    (L12).
+11. No linkage error at runtime from the Kotlin and coroutines versions over `ble-ktx`.
+- L5b, the release on every path: shown by the `unregisterApp()` log line per acquisition.
+- Indication order: the hub indicates the envelope only after the Control Point indication is
+  confirmed (ATT allows one unconfirmed indication per bearer), so the answer always arrives first.
+- L13: with Location off, the CDM dialog still finds the hub and the association is created; no
+  failure is mapped.
+
+Still open:
+
+- Abort and the 25 s cap are unreachable live: the 3 s and 10 s step timers fire first.
+- The DIS-serial disassociation is unreachable live without a device advertising another
+  `SaMD-<hub_id>`.
+- Release exactly once (abort and close, a throwing queue cancel included) is proved by reading only.
+- D3 leaves a race of about 10 ms: a cancel can reach teardown before the library reports the link
+  down, and the disconnect then still waits its 2 s bound.
 
 Filed items, not part of PR-B2:
 
+- HIGH, pre-existing audit provenance defect: a `vitals_device_reading_failed` row carries the
+  session id of the last Accepted reading, not of the failed acquisition
+  (`CompounderViewModel.kt:557` reads `activeSessionId`, set at `:627`, cleared only at `:578`).
+  It affects both transports, and synced server rows carry it (live L4 row). Not changed by PR-B2.
 - The CycloneDX SBOM covers `devReleaseRuntimeClasspath`, so its next regeneration lists the
   Nordic BLE artifacts. Regenerate and review it with the next SBOM pass.

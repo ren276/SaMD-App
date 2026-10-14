@@ -536,13 +536,15 @@ A reused nonce on a link whose CCCD is off therefore answers 0x03 before 0x08 (p
 |---|---|
 | `BluetoothDisabledException` | BLUETOOTH_UNAVAILABLE |
 | `DeviceDisconnectedException` | UNREACHABLE |
-| `RequestFailedException(status = REASON_DEVICE_NOT_SUPPORTED)` | HUB_MISMATCH |
+| `RequestFailedException(status = REASON_DEVICE_NOT_SUPPORTED)` | UNREACHABLE (amended 2026-10-14; was HUB_MISMATCH) |
 | `RequestFailedException(status = REASON_TIMEOUT)` | UNREACHABLE on connect; TIMEOUT on a later step |
 | `RequestFailedException`, any other status | UNREACHABLE |
 | `InvalidRequestException` | MALFORMED |
 | `SecurityException` (permission revoked mid-run) | BLUETOOTH_UNAVAILABLE |
 | `TimeoutCancellationException` from the cap | TIMEOUT |
 | `CancellationException` | rethrown, as today (`PiGatewayVitalsSource.kt:91-94`) |
+
+2026-10-14 ruling after live L5: NOT_SUPPORTED maps to UNREACHABLE; HUB_MISMATCH stays for identity failures.
 
 ### 5.5 DTO built from BLE
 
