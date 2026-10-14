@@ -87,8 +87,8 @@ class FakeHubLink(
      */
     var linkReadsUpAfterAbortCloseThrows = false
 
-    /** Thrown by every [isConnected] call: a link that cannot say whether it is up. */
-    var isConnectedFailure: Exception? = null
+    /** Thrown by every [isConnected] call: a link that cannot say whether it is up, or an Error. */
+    var isConnectedFailure: Throwable? = null
 
     private var dead = false
     private var linkUp = false

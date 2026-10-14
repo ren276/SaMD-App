@@ -540,14 +540,21 @@ class BleAcquisitionTest {
         }
     }
 
-    // ---- review fix G3: a link that cannot say whether it is up ------------------------------------
+    // ---- review fixes G3 and H1: a link that cannot say whether it is up ---------------------------
 
     @Test
-    fun `G3 an isConnected that throws at teardown means no STOP and no disconnect, one close, and the result kept`() = runTest {
-        val accepted = FakeHubLink()
-        val unanswered = FakeHubLink().apply { onStart = {} }
-        for ((label, link) in listOf("Accepted" to accepted, "START IN_FLIGHT, then TIMEOUT" to unanswered)) {
-            link.isConnectedFailure = IllegalStateException("library fault")
+    fun `G3 an isConnected that throws an Exception at teardown means no STOP and no disconnect, one close, one WARN, and the result kept`() = runTest {
+        val accepted = FakeHubLink().apply { isConnectedFailure = IllegalStateException("library fault") }
+        val unanswered = FakeHubLink().apply {
+            onStart = {}
+            isConnectedFailure = HubLinkException(HubLinkException.Failure.DISCONNECTED, "library text")
+        }
+        val cases = listOf(
+            Triple("Accepted", accepted, "BLE teardown isConnected failed: java.lang.IllegalStateException"),
+            Triple("START IN_FLIGHT, then TIMEOUT", unanswered, "BLE teardown isConnected failed: DISCONNECTED"),
+        )
+        for ((label, link, warning) in cases) {
+            warnings.clear()
 
             val outcome = runCatching { acquire(link) }
 
@@ -561,7 +568,17 @@ class BleAcquisitionTest {
             assertEquals("$label: disconnect on a link that cannot say it is up", 0, link.log.count { it == "disconnect" })
             assertEquals(label, 1, link.closes)
             assertEquals(label, "close", link.log.last())
+            assertEquals(label, listOf(warning), warnings)
         }
+    }
+
+    @Test
+    fun `H1 an Error from isConnected at teardown propagates`() = runTest {
+        val link = FakeHubLink().apply { isConnectedFailure = LinkageError("library error") }
+
+        val outcome = runCatching { acquire(link) }
+
+        assertTrue("the Error was swallowed: ${outcome.getOrNull()}", outcome.exceptionOrNull() is LinkageError)
     }
 
     @Test

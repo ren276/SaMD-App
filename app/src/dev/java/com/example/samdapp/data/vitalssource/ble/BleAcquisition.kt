@@ -71,17 +71,27 @@ object BleAcquisition {
             // already down takes neither STOP nor disconnect: the hub discards a session when its owner
             // drops (A13), and the library has closed its side.
             withContext(NonCancellable) {
+                // A link that cannot say whether it is up is treated as down for the rest of the
+                // teardown: no STOP, no disconnect, one WARN, and close still runs. An Error propagates.
+                var probeFailed = false
+                fun linkReportsUp(): Boolean = !probeFailed && try {
+                    link.isConnected()
+                } catch (e: Exception) {
+                    probeFailed = true
+                    logger.warning("BLE teardown isConnected failed: ${failureName(e)}")
+                    false
+                }
                 if (progress.aborted) {
                     teardownStep("abort") { link.abort() }
                 } else {
-                    if (progress.mayHoldSession() && linkReportsUp(link)) {
+                    if (progress.mayHoldSession() && linkReportsUp()) {
                         teardownStep("STOP") {
                             withTimeoutOrNull(TEARDOWN_TIMEOUT_MS) {
                                 link.writeControlPoint(ControlPoint.encodeStop(nonceBytes), TEARDOWN_TIMEOUT_MS)
                             } ?: logger.warning("BLE teardown STOP timed out")
                         }
                     }
-                    if (linkReportsUp(link)) {
+                    if (linkReportsUp()) {
                         teardownStep("disconnect") {
                             withTimeoutOrNull(TEARDOWN_TIMEOUT_MS) { link.disconnect(TEARDOWN_TIMEOUT_MS) }
                                 ?: logger.warning("BLE teardown disconnect timed out")
@@ -267,18 +277,16 @@ object BleAcquisition {
 
     private val logger = Logger.getLogger("BleAcquisition")
 
-    /** Teardown asks the link whether it is up, and a link that cannot say is treated as down: no STOP
-     *  and no disconnect, and close still runs. */
-    private fun linkReportsUp(link: HubLink<*>): Boolean = runCatching { link.isConnected() }.getOrDefault(false)
-
     /** Teardown is best effort: the result is already decided, so no failure here may replace it, a
      *  cancellation a step raises included. An Error still propagates. The WARN names the link failure
      *  or the exception class, never a library message. */
+    private fun failureName(e: Exception): String = (e as? HubLinkException)?.failure?.name ?: e.javaClass.name
+
     private inline fun teardownStep(step: String, block: () -> Unit) {
         try {
             block()
         } catch (e: Exception) {
-            logger.warning("BLE teardown $step failed: ${(e as? HubLinkException)?.failure?.name ?: e.javaClass.name}")
+            logger.warning("BLE teardown $step failed: ${failureName(e)}")
         }
     }
 }
