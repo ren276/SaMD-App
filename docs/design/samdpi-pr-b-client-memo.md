@@ -493,8 +493,11 @@ preparation (sections 3 and 4), then runs `BleAcquisition.run(link, request, hub
 |---|---|---|---|
 | 1 | `nonce = UUID.randomUUID()`. `nonceBytes` is the 16 big-endian bytes; `nonceString = nonce.toString()`, which is lowercase canonical (B7, 14.5 item 15). | | |
 | 2 | `connect(device)` with `useAutoConnect(false)`, `retry(0)` | 10 s | Disconnect or GATT error: UNREACHABLE. `REASON_DEVICE_NOT_SUPPORTED`: HUB_MISMATCH. `RequestFailedException(REASON_TIMEOUT)`: UNREACHABLE. |
+| | 2026-10-14: superseded by the 5.4 amendment; NOT_SUPPORTED and a missing service on the associated hub map to UNREACHABLE. | | |
 | 3 | `isRequiredServiceSupported` requires the vendor service with CP `f4610002-...` and ENV `f4610003-...`, and the SIG service for the instrument (0x1810/0x2A35 BP, 0x1822/0x2A5E SPO2, 0x1809/0x2A1C THERMOMETER). It collects every 2A25 across every 0x180A service. | | Missing: HUB_MISMATCH (step 2 path) |
+| | 2026-10-14: superseded by the 5.4 amendment; NOT_SUPPORTED and a missing service on the associated hub map to UNREACHABLE. | | |
 | 4 | Init plan, run in `initialize()` on **every** connection, in exactly this order: `RequestMtu(517)`; `EnableIndications(CP)`; `EnableIndications(ENV)`. The phone does not enable the SIG characteristic's CCCD (G2). This satisfies 14.5 items 1 and 6: CCCDs and MTU before any Control Point write, on every connect and reconnect, because each acquisition is a fresh connection and the plan runs before the device is ready. A failed init step does not fail the connect (section 15, G5 item 5), so each step's `.fail {}` records the failure and `BleAcquisition` checks the record after `connect` returns. | per step 3 s | Recorded enable failure: MALFORMED |
+| | 2026-10-14 ruling after review: an init-plan failure maps to UNREACHABLE; the hub sent nothing readable, so MALFORMED copy was untrue. | | |
 | 5 | `getMtu() >= 89` | | MALFORMED |
 | 6 | DIS search: `DisSearch.pick(candidates)` must return exactly one 2A25 across all 0x180A instances (14.5 item 2; BlueZ's own 0x180A has none, parent 14.1 item 10). Read it; its ASCII value must equal the assigned `hub_id` exactly. Read 2A28 from the same service for audit. | 3 s each | 0 or more than one, or a mismatch: HUB_MISMATCH. On a serial mismatch only, `disassociate(id)` and delete the stored ID, so the next Start asks the human again (Q10). |
 | 7 | Drain `events` (anything before START is stale) | | |
@@ -506,6 +509,7 @@ preparation (sections 3 and 4), then runs `BleAcquisition.run(link, request, hub
 | 13 | Decode the SIG bytes for the requested instrument (section 8.2). Any present field holding a special value, with quality OK: QUALITY_STATUS_NOT_OK (G-B4). | | MALFORMED for a structure error |
 | 14 | Build the DTO (section 5.5) and call `PiMeasurementMapper.map(dto, request.instrument, nonceString)`. RC-2, then RC-1 session (the formatted echo against `nonceString`), then RC-1 device type. | | Mapper reasons |
 | 15 | `finally`, under `withContext(NonCancellable)`: if START was answered SUCCESS, write STOP `02 <nonce 16>` with a 2 s bound, and ignore its result. Then `disconnect()` with a 2 s bound, then `close()`. | | Never surfaces |
+| | 2026-10-14 (D1): STOP is also written while START is IN_FLIGHT; only NOT_SUBMITTED and REFUSED skip it. | | |
 
 - **The cap.** Steps 2 to 14 run inside `withTimeout(25_000)` (parent 7.4). On expiry: `abort()`,
   then TIMEOUT. A Stop or screen exit cancels the job, and step 15 still runs.

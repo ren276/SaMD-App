@@ -5490,3 +5490,38 @@ Filed items, not part of PR-B2:
   It affects both transports, and synced server rows carry it (live L4 row). Not changed by PR-B2.
 - The CycloneDX SBOM covers `devReleaseRuntimeClasspath`, so its next regeneration lists the
   Nordic BLE artifacts. Regenerate and review it with the next SBOM pass.
+
+### PR-B2 review fixes (PR #80, STOP 10b rulings) - 2026-10-14
+
+An independent review of the branch and CodeRabbit's two comments, fixed as ruled. The branch now
+touches `src/main/res`: one string text, `acq_reject_hub_mismatch`; no Kotlin in `src/main` changed.
+
+- G1: `acq_reject_hub_mismatch` reads "The app could not confirm this is the right instrument hub
+  for this test, so no reading was saved." It is true for every producer on both transports, most
+  of which have no reading at all (INSTRUMENT_NOT_SERVED, no DIS serial or two, the Wi-Fi header).
+- G2: a failed init-plan step (the MTU request or either CCCD enable) maps to UNREACHABLE, not
+  MALFORMED: the hub sent nothing readable. Every other MALFORMED producer is unchanged.
+- G3: teardown reads `isConnected()` through `runCatching`, defaulting to false, so a link that
+  cannot say it is up gets no STOP and no disconnect, and close still runs once.
+- G4: a `HubLinkException` from `prepare` or `openLink` maps through `reasonFor`, as before a
+  connect, instead of escaping the source.
+- G5: the `BlePrepActivity` KDoc says that an association created after the request was abandoned
+  still has its ID stored.
+- G6: `NoPhase3TempRouteTest` has a positive control for its matcher.
+- G7 (CodeRabbit): the association dialog's RESULT_OK reads `EXTRA_ASSOCIATION` and completes the
+  request through the same path as `onAssociationCreated`; `BlePrepBridge.associationCreated` lets
+  the first of the two signals store the ID and answer, and the second is a no-op. The CDM callback
+  holds no state of the activity instance that registered it: the bridge routes the dialog, the
+  failure answer and the finish to the instance attached now, the recreated one after a rotation.
+- G8 (CodeRabbit): the memo's section 5.2 carries dated lines under steps 2, 3, 4 and 15.
+
+Declined: catching every non-`HubLinkException` in `BleAcquisition.run` (review #2); no reachable
+throw exists. Filed, not changed by PR-B2:
+
+- Review #6: below API 33 the BLE source refuses BLUETOOTH_UNAVAILABLE, whose text tells the worker
+  to turn Bluetooth on; on API 31 and 32 that advice is false. Revisit with the release copy pass.
+- Review #8: a stored association ID whose association lists no MAC address reads as no
+  association, so the dialog runs again and the old CDM association is never disassociated
+  (`HubAssociations.addressFor`).
+- Review #10: a DIS Software Revision that is not valid UTF-8 becomes U+FFFD in `emulatorBuild`
+  without a warning (`BleAcquisition.kt`, the 2A28 read).
