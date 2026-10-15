@@ -100,6 +100,10 @@ enum class SlmRefusal {
      */
     ENGINE_UNREACHABLE,
 
+    /** The backend is on the local network and this app is not allowed to use it (memo 11.4).
+     *  Separate from [ENGINE_UNREACHABLE] because the remedy is a setting, not a signal. */
+    LOCAL_NETWORK_NOT_ALLOWED,
+
     /**
      * The connection to the backend could not be secured: a TLS handshake that failed, a peer that
      * could not be verified, any `SSLException`.
@@ -513,6 +517,7 @@ internal val COMPLETE_FINISH_REASONS: Set<SlmFinishReason?> =
  */
 internal fun engineRefusalFor(t: Throwable): SlmRefusal = when ((t as? SlmEngineException)?.error) {
     SlmEngineError.UNREACHABLE -> SlmRefusal.ENGINE_UNREACHABLE
+    SlmEngineError.LOCAL_NETWORK_NOT_ALLOWED -> SlmRefusal.LOCAL_NETWORK_NOT_ALLOWED
     SlmEngineError.SECURE_CONNECTION_FAILED -> SlmRefusal.SECURE_CONNECTION_FAILED
     SlmEngineError.TIMEOUT -> SlmRefusal.ENGINE_TIMEOUT
     SlmEngineError.UNAVAILABLE -> SlmRefusal.ENGINE_UNAVAILABLE

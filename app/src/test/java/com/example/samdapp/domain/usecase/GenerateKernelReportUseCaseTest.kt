@@ -25,14 +25,14 @@ import java.net.SocketTimeoutException
 import javax.net.ssl.SSLException
 
 /** Stub RemoteKernelSource that always throws IOException — simulates the ML server being offline. */
-private class OfflineKernelSource : RemoteKernelSource {
+private class OfflineKernelSource(
+    private val cause: IOException = IOException("Simulated network unavailability"),
+) : RemoteKernelSource {
     override suspend fun assess(
         payload: KernelPayload,
         patientAge: Int,
         patientSex: String,
-    ): KernelApiResult<KernelAssessmentResult> = KernelApiResult.Unreachable(
-        IOException("Simulated network unavailability"),
-    )
+    ): KernelApiResult<KernelAssessmentResult> = KernelApiResult.Unreachable(cause)
 }
 
 /** Stub RemoteKernelSource that always throws CancellationException — simulates the calling
@@ -155,6 +155,20 @@ class GenerateKernelReportUseCaseTest {
         val mockResult = testKernelReportOutput("case-1", InferenceSource.MOCK_FALLBACK, predictedCondition = "Dev mock scenario")
         val fallback = FakeKernelFallbackSource(result = mockResult)
         val useCase = GenerateKernelReportUseCase(repo, FakeDeviceInfoProvider(), OfflineKernelSource(), fallback, FakeAuditLogger())
+
+        val output = useCase("case-1", payload()).getOrThrow()
+
+        assertEquals(mockResult, output)
+        assertEquals(1, fallback.callCount)
+    }
+
+    @Test
+    fun `a call blocked by the local network gate is fallback-eligible, as the same denial was before F1`() = runTest {
+        val repo = FakeKernelReportRepository()
+        val mockResult = testKernelReportOutput("case-1", InferenceSource.MOCK_FALLBACK, predictedCondition = "Dev mock scenario")
+        val fallback = FakeKernelFallbackSource(result = mockResult)
+        val blocked = OfflineKernelSource(com.example.samdapp.domain.connectivity.LocalNetworkNotAllowedException())
+        val useCase = GenerateKernelReportUseCase(repo, FakeDeviceInfoProvider(), blocked, fallback, FakeAuditLogger())
 
         val output = useCase("case-1", payload()).getOrThrow()
 

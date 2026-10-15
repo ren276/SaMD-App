@@ -52,6 +52,11 @@ enum class KernelFailure(val advice: KernelRetryAdvice) {
      *  never left the phone, so nothing server-side happened and nothing needs undoing. */
     OFFLINE(KernelRetryAdvice.RETRY_NOW),
 
+    /** The backend is on the local network and this app does not hold the local network
+     *  permission, so the call was stopped before any socket (memo 11.4). Allowing Nearby devices
+     *  in Settings fixes it, after which Try again works, hence a retry advice. */
+    LOCAL_NETWORK_NOT_ALLOWED(KernelRetryAdvice.RETRY_NOW),
+
     /** `SocketTimeoutException`. The connection was made and the answer did not arrive in time.
      *  The one class where an immediate second press is genuinely reasonable. */
     TIMEOUT(KernelRetryAdvice.RETRY_NOW),

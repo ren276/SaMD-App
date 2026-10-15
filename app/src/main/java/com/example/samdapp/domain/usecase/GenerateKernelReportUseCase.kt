@@ -73,8 +73,14 @@ class GenerateKernelReportUseCase @Inject constructor(
         const val MOCK_MODEL_VERSION = "mock-kernel-v0.1"
 
         /** The failure classes where the real service was not reached, and so the only ones a
-         *  fallback may answer for. */
-        private val FALLBACK_ELIGIBLE = setOf(KernelFailure.OFFLINE, KernelFailure.TIMEOUT, KernelFailure.KERNEL_UNAVAILABLE)
+         *  fallback may answer for. LOCAL_NETWORK_NOT_ALLOWED is one: before it existed the same
+         *  blocked call landed in OFFLINE or TIMEOUT, so including it keeps that behaviour. */
+        private val FALLBACK_ELIGIBLE = setOf(
+            KernelFailure.OFFLINE,
+            KernelFailure.TIMEOUT,
+            KernelFailure.KERNEL_UNAVAILABLE,
+            KernelFailure.LOCAL_NETWORK_NOT_ALLOWED,
+        )
 
         /** The single source of truth for the honest-unavailable clinical text, so a
          *  written [InferenceSource.UNAVAILABLE] row and a stalled case's synthesized display

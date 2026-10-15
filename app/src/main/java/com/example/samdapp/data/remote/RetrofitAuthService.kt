@@ -46,11 +46,12 @@ class RetrofitAuthService @Inject constructor(
         val response = try {
             block()
         } catch (e: IOException) {
-            return AuthApiResult.Failure(code = null, message = e.message ?: "Network error.")
+            return AuthApiResult.Failure(code = null, message = e.message ?: "Network error.", cause = e)
         }
 
         if (response.isSuccessful) {
-            val body = response.body() ?: return AuthApiResult.Failure(code = null, message = "Empty response body.")
+            val body = response.body()
+                ?: return AuthApiResult.Failure(code = null, message = "Empty response body.", httpStatus = response.code())
             return AuthApiResult.Success(body.data)
         }
 
@@ -60,6 +61,7 @@ class RetrofitAuthService @Inject constructor(
         return AuthApiResult.Failure(
             code = problem?.code,
             message = problem?.detail ?: "Request failed (HTTP ${response.code()}).",
+            httpStatus = response.code(),
         )
     }
 }

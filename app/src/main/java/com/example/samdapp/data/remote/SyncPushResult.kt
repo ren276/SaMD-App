@@ -6,5 +6,7 @@ package com.example.samdapp.data.remote
  *  SyncOutboxDrainer's ack handling. */
 sealed interface SyncPushResult<out T> {
     data class Success<T>(val data: T) : SyncPushResult<T>
-    data class Failure(val code: String?, val message: String) : SyncPushResult<Nothing>
+    /** [cause] is the transport exception when the batch never reached the server, kept so the
+     *  drain can tell a blocked local network apart from a dropped connection. */
+    data class Failure(val code: String?, val message: String, val cause: Throwable? = null) : SyncPushResult<Nothing>
 }

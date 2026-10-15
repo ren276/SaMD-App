@@ -150,6 +150,7 @@ class KernelFailureClassificationTest {
         // future change routes everything back through one bucket, the distinct-count drops.
         val classified = listOf(
             unreachable(UnknownHostException("x")),
+            unreachable(com.example.samdapp.domain.connectivity.LocalNetworkNotAllowedException()),
             unreachable(SocketTimeoutException("x")),
             unreachable(SSLException("x")),
             failure(null, 401),

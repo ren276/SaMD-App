@@ -164,6 +164,25 @@ class PiGatewayVitalsSourceTest {
         assertEquals(RejectReason.UNREACHABLE, (result as AcquisitionResult.Rejected).reason)
     }
 
+    @Test
+    fun `a call stopped by the local network gate is PERMISSION_DENIED, not UNREACHABLE`() = runTest {
+        // A shut gate and a .local host, as on a denied Android 17 phone: no lookup, no socket.
+        val blocked = PiGatewayVitalsSource(
+            Retrofit.Builder()
+                .baseUrl("http://kernelhub1.local:8090/")
+                .client(PiGatewayNetworkModule.piGatewayOkHttpClient(HUB, gate = LocalNetworkGate(sdkInt = 37) { false }))
+                .addConverterFactory(GsonConverterFactory.create(SyncGson.create()))
+                .build()
+                .create(PiGatewayApi::class.java),
+            expectedHubId = HUB,
+        )
+
+        val result = blocked.startAcquisition(bpRequest)
+
+        assertTrue("expected Rejected, was $result", result is AcquisitionResult.Rejected)
+        assertEquals(RejectReason.PERMISSION_DENIED, (result as AcquisitionResult.Rejected).reason)
+    }
+
     /**
      * Pins the structural absence of `BearerInterceptor` and `TokenAuthenticator` on this stack.
      * The gateway is an accessory on the same Wi-Fi as the handset; the backend access token has

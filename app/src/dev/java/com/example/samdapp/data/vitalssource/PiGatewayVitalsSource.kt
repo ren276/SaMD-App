@@ -160,6 +160,8 @@ class PiGatewayVitalsSource(
      *  matches none of these and so is always rethrown. */
     private fun Throwable.toRejectReason(): RejectReason? = when (this) {
         is HubIdMismatchException -> RejectReason.HUB_MISMATCH
+        // The gate stopped the call before any socket: the permission, not the hub.
+        is com.example.samdapp.domain.connectivity.LocalNetworkNotAllowedException -> RejectReason.PERMISSION_DENIED
         is JsonParseException, is MalformedJsonException -> RejectReason.MALFORMED
         is SocketTimeoutException -> RejectReason.TIMEOUT
         is IOException -> RejectReason.UNREACHABLE

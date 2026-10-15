@@ -520,6 +520,8 @@ class SlmReadbackUseCaseTest {
     fun `each engine failure class refuses with its own reason, with no substitute output`() = runTest {
         val cases = mapOf(
             SlmEngineError.UNREACHABLE to SlmRefusal.ENGINE_UNREACHABLE,
+            // F1: the phone is connected and Android blocks the app; "back on Wi-Fi" would be false.
+            SlmEngineError.LOCAL_NETWORK_NOT_ALLOWED to SlmRefusal.LOCAL_NETWORK_NOT_ALLOWED,
             // PR-6. Deliberately NOT folded into ENGINE_UNREACHABLE: SSLException extends
             // IOException, so the offline bucket is where a TLS failure lands by default, and the
             // advice that bucket carries is "keep tapping, it will go through when you have

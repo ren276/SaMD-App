@@ -483,6 +483,7 @@ class RemoteSlmEngineTest {
                 transportErrorFor(SSLException("tls")),
                 transportErrorFor(SocketTimeoutException("t")),
                 transportErrorFor(UnknownHostException("dns")),
+                transportErrorFor(com.example.samdapp.domain.connectivity.LocalNetworkNotAllowedException()),
             ) +
             SlmEngineError.MALFORMED_RESPONSE // proved by the malformed-envelope tests above
 

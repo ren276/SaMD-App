@@ -77,6 +77,11 @@ enum class SlmEngineError {
     /** No route, DNS failure, connection refused. **The normal case on an offline-first device.** */
     UNREACHABLE,
 
+    /** The backend is on the local network and this app does not hold the local network
+     *  permission; the call was stopped before any socket (memo 11.4). Not [UNREACHABLE]: the phone
+     *  is connected, and "back on Wi-Fi" would be false. */
+    LOCAL_NETWORK_NOT_ALLOWED,
+
     /**
      * A TLS failure: `SSLException` and everything under it, including a handshake that failed and
      * a peer that could not be verified.

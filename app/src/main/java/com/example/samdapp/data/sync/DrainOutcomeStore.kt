@@ -1,5 +1,6 @@
 package com.example.samdapp.data.sync
 
+import com.example.samdapp.domain.connectivity.LocalNetworkNotAllowedException
 import com.example.samdapp.domain.sync.DrainFailure
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -26,13 +27,14 @@ class DrainOutcomeStore @Inject constructor() {
 
 /** A whole-batch push failure, keeping the problem document's [code] so the drain's failure can
  *  be classified. Before this the code was flattened into an exception message and lost. */
-class SyncPushFailedException(val code: String?, message: String) : IllegalStateException(message)
+class SyncPushFailedException(val code: String?, message: String, cause: Throwable? = null) : IllegalStateException(message, cause)
 
 /** Pure, so the classification is testable without a drain. Any failure that is not a push
  *  failure comes from preparing the batch on this phone (the in-flight store), see
  *  [SyncOutboxDrainer.drain]. */
 fun drainFailureFor(error: Throwable): DrainFailure = when (error) {
     is SyncPushFailedException -> when {
+        error.cause is LocalNetworkNotAllowedException -> DrainFailure.LOCAL_NETWORK_NOT_ALLOWED
         error.code == null -> DrainFailure.NO_CONNECTION
         error.code.startsWith("SAMD-AUTH-") -> DrainFailure.SIGN_IN
         else -> DrainFailure.SERVER_REFUSED

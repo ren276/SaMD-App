@@ -25,6 +25,8 @@
     <!-- SECURE_CONNECTION_FAILED. Escalation, not retry: one cause is interception. -->
     <string name="kernel_failure_secure_connection_failed_title">The connection is not secure</string>
     <string name="kernel_failure_secure_connection_failed_body">This phone could not make a safe connection to the server. Do not send patient details until this is fixed. Tell your supervisor.</string>
+    <string name="kernel_failure_local_network_title">This app cannot use the local network</string>
+    <string name="kernel_failure_local_network_body">Android is not letting this app reach the clinic server on the local network. Allow Nearby devices for this app in Settings, then press Try again. You can carry on with the patient.</string>
 
     <!-- NOT_AUTHORIZED. 401 or 403. -->
     <string name="kernel_failure_not_authorized_title">Sign in again</string>
@@ -147,6 +149,7 @@
     <string name="sync_caption_could_not_send_sign_in">Could not send: sign in again to send. %1$d waiting.</string>
     <string name="sync_caption_could_not_send_server_refused">Could not send: the server is not accepting records right now. %1$d waiting.</string>
     <string name="sync_caption_could_not_send_local_store">Could not send: this phone could not prepare records to send. %1$d waiting.</string>
+    <string name="sync_caption_could_not_send_local_network">Could not send: this app is not allowed to use the local network. Allow Nearby devices for this app in Settings. %1$d waiting.</string>
     <plurals name="sync_caption_waiting_records">
         <item quantity="one">1 record waiting to send.</item>
         <item quantity="other">%1$d records waiting to send.</item>
@@ -181,6 +184,7 @@
     <string name="sync_now_failed_sign_in">Could not send: sign in again to send.</string>
     <string name="sync_now_failed_server_refused">Could not send: the server is not accepting records right now.</string>
     <string name="sync_now_failed_local_store">Could not send: this phone could not prepare records to send.</string>
+    <string name="sync_now_failed_local_network">Could not send: this app is not allowed to use the local network.</string>
     <plurals name="sync_now_sent_needs_review">
         <item quantity="one">Sent what could be sent. 1 record needs review.</item>
         <item quantity="other">Sent what could be sent. %1$d records need review.</item>
@@ -384,6 +388,8 @@
     -->
     <string name="readback_refusal_secure_connection_failed_title">The connection is not secure</string>
     <string name="readback_refusal_secure_connection_failed_body">This phone could not make a safe connection. Do not try again. Read the report above with the patient, and tell your supervisor.</string>
+    <string name="readback_refusal_local_network_title">The read-back cannot use the local network</string>
+    <string name="readback_refusal_local_network_body">Android is not letting this app reach the clinic server on the local network. The report above is complete, and you can read it with the patient now. Allow Nearby devices for this app in Settings to use the read-back.</string>
 
     <!-- ENGINE_TIMEOUT. Connected, no answer in time. The one class where pressing again now is right. -->
     <string name="readback_refusal_engine_timeout_title">The read-back took too long</string>

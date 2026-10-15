@@ -212,7 +212,7 @@ class SyncOutboxDrainer @Inject constructor(
                 // failure means "never reached the backend" or "backend applied it but the
                 // response never arrived", resending under this same batch_id on the next run is
                 // safe either way (see this class's KDoc).
-                Result.failure(SyncPushFailedException(result.code, result.message))
+                Result.failure(SyncPushFailedException(result.code, result.message, result.cause))
             }
         }
     }

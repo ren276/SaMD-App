@@ -25,6 +25,12 @@ import javax.inject.Provider
  *    already-rotated token instead of firing a second refresh, which is exactly the shape that
  *    would trip the backend's own reuse detection (SAMD-AUTH-1004) against this app.
  *
+ * 4. Only a definitive answer from the refresh endpoint ends the session (Q10, memo 11.5): a 401,
+ *    or the OAuth `invalid_grant` code. A refresh that got no answer at all (any `IOException`,
+ *    including `LocalNetworkNotAllowedException`) is rethrown, so the original call fails with that
+ *    transport error and its own caller classifies it; the session is kept. Any other answer (403,
+ *    5xx, an unreadable body) also keeps the session and lets the original 401 through.
+ *
  * [authService] is `Provider<RetrofitAuthService>`, not a direct dependency, to break the DI
  * cycle: the authenticated `OkHttpClient` needs this authenticator, which needs
  * `RetrofitAuthService`, which needs a `Retrofit` built on that same `OkHttpClient`.
@@ -72,16 +78,26 @@ class TokenAuthenticator @Inject constructor(
                             .build()
                     }
                     is AuthApiResult.Failure -> {
-                        // SAMD-AUTH-1004 (reuse detected, chain revoked) or any other refresh
-                        // failure. Clearing here is what routes the app to sign-in: AuthViewModel
-                        // observes AuthTokenStore.session going null and AppNavHost's existing
-                        // sign-in gate reacts, so no separate navigation signal is needed.
-                        tokenStore.clear()
+                        // No answer: "cannot refresh now", never "session invalid" (rule 4).
+                        // Thrown out of runBlocking, which releases the mutex; OkHttp hands it to
+                        // the original caller unchanged.
+                        result.cause?.let { throw it }
+                        if (result.httpStatus == 401 || result.code == INVALID_GRANT) {
+                            // SAMD-AUTH-1002/1003/1004: the chain is expired, invalid or revoked.
+                            // Clearing here is what routes the app to sign-in: AuthViewModel
+                            // observes AuthTokenStore.session going null and AppNavHost's existing
+                            // sign-in gate reacts, so no separate navigation signal is needed.
+                            tokenStore.clear()
+                        }
                         null
                     }
                 }
             }
         }
+    }
+
+    private companion object {
+        const val INVALID_GRANT = "invalid_grant"
     }
 
     private fun responseCount(response: Response): Int {

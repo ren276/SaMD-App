@@ -285,6 +285,8 @@ internal fun finishReasonOf(raw: String?): SlmFinishReason? = when (raw) {
  * that path carries eight numeric features under a pseudonym.
  */
 internal fun transportErrorFor(e: IOException): SlmEngineError = when (e) {
+    // Thrown by the local-network gate before any socket; no other branch is true of it.
+    is com.example.samdapp.domain.connectivity.LocalNetworkNotAllowedException -> SlmEngineError.LOCAL_NETWORK_NOT_ALLOWED
     // Above SocketTimeoutException and above the catch-all. SSLException extends IOException and
     // nothing else here is a supertype of it, so this is the only ordering that reaches it.
     is SSLException -> SlmEngineError.SECURE_CONNECTION_FAILED

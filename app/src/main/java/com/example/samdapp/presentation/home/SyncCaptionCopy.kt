@@ -1,6 +1,7 @@
 package com.example.samdapp.presentation.home
 
 import android.content.res.Resources
+import androidx.annotation.StringRes
 import com.example.samdapp.R
 import com.example.samdapp.domain.sync.DrainFailure
 
@@ -17,15 +18,7 @@ fun SyncCaption.text(resources: Resources): String = when (this) {
     SyncCaption.OfflineActivityLog -> resources.getString(R.string.sync_caption_offline_activity_log)
     SyncCaption.OfflineNothingElse -> resources.getString(R.string.sync_caption_offline_nothing_else)
     SyncCaption.OfflineAllSent -> resources.getString(R.string.sync_caption_offline_all_sent)
-    is SyncCaption.CouldNotSend -> resources.getString(
-        when (failure) {
-            DrainFailure.NO_CONNECTION -> R.string.sync_caption_could_not_send_no_connection
-            DrainFailure.SIGN_IN -> R.string.sync_caption_could_not_send_sign_in
-            DrainFailure.SERVER_REFUSED -> R.string.sync_caption_could_not_send_server_refused
-            DrainFailure.LOCAL_STORE -> R.string.sync_caption_could_not_send_local_store
-        },
-        waiting,
-    )
+    is SyncCaption.CouldNotSend -> resources.getString(failure.captionRes, waiting)
     is SyncCaption.Waiting ->
         if (doctorCases > 0) {
             resources.getString(R.string.sync_caption_waiting_records_and_doctor_cases, records, doctorCases)
@@ -46,15 +39,31 @@ fun SyncCaption.text(resources: Resources): String = when (this) {
 fun SyncNowMessage.text(resources: Resources): String = when (this) {
     SyncNowMessage.Offline -> resources.getString(R.string.sync_now_offline)
     SyncNowMessage.StillTrying -> resources.getString(R.string.sync_now_still_trying)
-    is SyncNowMessage.Failed -> resources.getString(
-        when (failure) {
-            DrainFailure.NO_CONNECTION -> R.string.sync_now_failed_no_connection
-            DrainFailure.SIGN_IN -> R.string.sync_now_failed_sign_in
-            DrainFailure.SERVER_REFUSED -> R.string.sync_now_failed_server_refused
-            DrainFailure.LOCAL_STORE -> R.string.sync_now_failed_local_store
-        },
-    )
+    is SyncNowMessage.Failed -> resources.getString(failure.syncNowFailedRes)
     is SyncNowMessage.SentNeedsReview -> resources.getQuantityString(R.plurals.sync_now_sent_needs_review, count, count)
     is SyncNowMessage.SentRetryLater -> resources.getQuantityString(R.plurals.sync_now_sent_retry_later, count, count)
     SyncNowMessage.AllSent -> resources.getString(R.string.sync_now_all_sent)
 }
+
+/** The Home caption for a failed drain, as a string id so the mapping is testable without
+ *  [Resources]. Takes the waiting count as its one format argument. */
+@get:StringRes
+val DrainFailure.captionRes: Int
+    get() = when (this) {
+        DrainFailure.NO_CONNECTION -> R.string.sync_caption_could_not_send_no_connection
+        DrainFailure.SIGN_IN -> R.string.sync_caption_could_not_send_sign_in
+        DrainFailure.SERVER_REFUSED -> R.string.sync_caption_could_not_send_server_refused
+        DrainFailure.LOCAL_STORE -> R.string.sync_caption_could_not_send_local_store
+        DrainFailure.LOCAL_NETWORK_NOT_ALLOWED -> R.string.sync_caption_could_not_send_local_network
+    }
+
+/** The "Sync now" snackbar for a failed drain. */
+@get:StringRes
+val DrainFailure.syncNowFailedRes: Int
+    get() = when (this) {
+        DrainFailure.NO_CONNECTION -> R.string.sync_now_failed_no_connection
+        DrainFailure.SIGN_IN -> R.string.sync_now_failed_sign_in
+        DrainFailure.SERVER_REFUSED -> R.string.sync_now_failed_server_refused
+        DrainFailure.LOCAL_STORE -> R.string.sync_now_failed_local_store
+        DrainFailure.LOCAL_NETWORK_NOT_ALLOWED -> R.string.sync_now_failed_local_network
+    }

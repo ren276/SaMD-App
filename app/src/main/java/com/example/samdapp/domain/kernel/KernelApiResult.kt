@@ -89,6 +89,8 @@ fun classifyKernelFailure(result: KernelApiResult<*>): KernelFailure = when (res
     // OS-dependent and is not a contract, the same reasoning classifyLocalNetworkFailure records
     // for its own `cause` parameter.
     is KernelApiResult.Unreachable -> when (result.cause) {
+        // First: the gate threw it before any socket, so neither TIMEOUT nor OFFLINE is true.
+        is com.example.samdapp.domain.connectivity.LocalNetworkNotAllowedException -> KernelFailure.LOCAL_NETWORK_NOT_ALLOWED
         is java.net.SocketTimeoutException -> KernelFailure.TIMEOUT
         is javax.net.ssl.SSLException -> KernelFailure.SECURE_CONNECTION_FAILED
         // UnknownHostException, ConnectException, and every other IOException that means the

@@ -20,4 +20,9 @@ enum class DrainFailure {
 
     /** This phone could not prepare the batch: the persisted in-flight batch could not be read. */
     LOCAL_STORE,
+
+    /** The server is on the local network and this app does not hold the local network
+     *  permission, so the batch was stopped before any socket (memo 5.5, 11.4). Allowing Nearby
+     *  devices in Settings fixes it; the batch stays queued and the worker keeps retrying. */
+    LOCAL_NETWORK_NOT_ALLOWED,
 }

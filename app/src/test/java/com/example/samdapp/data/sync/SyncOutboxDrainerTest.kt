@@ -449,9 +449,9 @@ class DrainOutcomeRecordingTest {
         data = AllergySyncPayloadDto(patientId = "p1", category = "ENVIRONMENTAL", allergen = "pollen", reactionType = null, createdAt = Instant.EPOCH),
     )
 
-    private fun failingPush(code: String?) = object : com.example.samdapp.data.remote.SyncPushService {
+    private fun failingPush(code: String?, cause: Throwable? = null) = object : com.example.samdapp.data.remote.SyncPushService {
         override suspend fun push(request: com.example.samdapp.data.remote.dto.SyncPushRequestDto) =
-            com.example.samdapp.data.remote.SyncPushResult.Failure(code = code, message = "push failed")
+            com.example.samdapp.data.remote.SyncPushResult.Failure(code = code, message = "push failed", cause = cause)
     }
 
     private suspend fun drainWith(
@@ -468,6 +468,25 @@ class DrainOutcomeRecordingTest {
     fun `a push that never reached the server records NO_CONNECTION`() = runTest {
         val outcome = DrainOutcomeStore()
         drainWith(failingPush(code = null), outcome)
+        assertEquals(com.example.samdapp.domain.sync.DrainFailure.NO_CONNECTION, outcome.lastFailure.value)
+    }
+
+    @Test
+    fun `a push stopped by the local network gate records LOCAL_NETWORK_NOT_ALLOWED and fails the drain`() = runTest {
+        val outcome = DrainOutcomeStore()
+        val result = drainWith(
+            failingPush(code = null, cause = com.example.samdapp.domain.connectivity.LocalNetworkNotAllowedException()),
+            outcome,
+        )
+        assertEquals(com.example.samdapp.domain.sync.DrainFailure.LOCAL_NETWORK_NOT_ALLOWED, outcome.lastFailure.value)
+        // A failed drain is what SyncPushWorker turns into Result.retry(): the queue is kept.
+        assertTrue(result.isFailure)
+    }
+
+    @Test
+    fun `a push that dropped for any other transport reason stays NO_CONNECTION`() = runTest {
+        val outcome = DrainOutcomeStore()
+        drainWith(failingPush(code = null, cause = java.net.SocketTimeoutException("x")), outcome)
         assertEquals(com.example.samdapp.domain.sync.DrainFailure.NO_CONNECTION, outcome.lastFailure.value)
     }
 
