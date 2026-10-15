@@ -8,6 +8,7 @@ import androidx.core.content.ContextCompat
 import com.example.samdapp.data.remote.BearerInterceptor
 import com.example.samdapp.data.remote.LocalNetworkGateDns
 import com.example.samdapp.data.remote.LocalNetworkGateInterceptor
+import com.example.samdapp.data.remote.NetworkLoggingInterceptor
 import com.example.samdapp.data.remote.RetrofitAbhaSource
 import com.example.samdapp.data.remote.RetrofitEvaluateSource
 import com.example.samdapp.data.remote.RetrofitKernelSource
@@ -43,7 +44,7 @@ import javax.inject.Singleton
 
 /** Marks the ABHA-only [OkHttpClient]/[Retrofit] pair — see [NetworkModule.provideAbhaOkHttpClient]'s
  *  KDoc for why ABHA traffic cannot share the general-purpose client that
- *  [NetworkModule.provideHttpLoggingInterceptor] can put in `BODY` logging mode. */
+ *  [NetworkModule.provideNetworkLoggingInterceptor] can put in `BODY` logging mode. */
 @Qualifier
 @Retention(AnnotationRetention.BINARY)
 annotation class AbhaHttpStack
@@ -83,17 +84,19 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideHttpLoggingInterceptor(): HttpLoggingInterceptor =
-        HttpLoggingInterceptor { message -> Log.d(TAG, message) }.apply {
-            // Network logging is gated by a local.properties flag to prevent PHI leaks in logcat.
-            // Full request/response tracing is disabled by default. Audit logging handles
-            // secure, timestamped persistence of necessary clinical data.
+    fun provideNetworkLoggingInterceptor(): NetworkLoggingInterceptor =
+        // Network logging is gated by a local.properties flag to prevent PHI leaks in logcat.
+        // Full request/response tracing is disabled by default. Audit logging handles secure,
+        // timestamped persistence of necessary clinical data. Even when on, credentials are
+        // redacted and auth and read-back bodies are never logged (NetworkLoggingInterceptor).
+        NetworkLoggingInterceptor(
+            logger = { message -> Log.d(TAG, message) },
             level = if (com.example.samdapp.BuildConfig.ENABLE_NETWORK_LOGGING) {
                 HttpLoggingInterceptor.Level.BODY
             } else {
                 HttpLoggingInterceptor.Level.NONE
-            }
-        }
+            },
+        )
 
     /** The local-network gate every client in the app is built with (memo 11.1). */
     @Provides
@@ -108,7 +111,7 @@ object NetworkModule {
     @Provides
     @Singleton
     fun provideOkHttpClient(
-        loggingInterceptor: HttpLoggingInterceptor,
+        loggingInterceptor: NetworkLoggingInterceptor,
         bearerInterceptor: BearerInterceptor,
         tokenAuthenticator: TokenAuthenticator,
         @DevHostInterceptors devInterceptors: List<@JvmSuppressWildcards Interceptor>,
