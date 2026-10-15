@@ -228,4 +228,66 @@ class TokenAuthenticatorTest {
         assertEquals(401, response.code)
         assertSessionKept()
     }
+
+    // ---- Q10a: the 403 allowlist ---------------------------------------------------------
+
+    private fun refreshAnswered403(code: String): okhttp3.Response {
+        server.enqueue(MockResponse().setResponseCode(401))
+        server.enqueue(
+            MockResponse().setResponseCode(403)
+                .setHeader("Content-Type", "application/problem+json")
+                .setBody("""{"code":"$code","detail":"x"}"""),
+        )
+        return call("/api/v1/kernel/assess")
+    }
+
+    private fun assertSessionEnded() {
+        val snapshot = runBlocking { tokenStore.snapshot() }
+        assertNull("access token must be cleared", snapshot.accessToken)
+        assertNull("refresh token must be cleared", snapshot.refreshToken)
+    }
+
+    @Test
+    fun `a refresh answered 403 account disabled ends the session`() {
+        assertEquals(401, refreshAnswered403("SAMD-AUTH-1006").code)
+        assertSessionEnded()
+    }
+
+    @Test
+    fun `a refresh answered 403 device mismatch ends the session`() {
+        assertEquals(401, refreshAnswered403("SAMD-AUTH-1007").code)
+        assertSessionEnded()
+    }
+
+    @Test
+    fun `a refresh answered 403 with any other code keeps the session`() {
+        assertEquals(401, refreshAnswered403("SAMD-AUTH-1005").code)
+        assertSessionKept()
+        // A code this build does not know is not a reason to sign anyone out either.
+        assertEquals(401, refreshAnswered403("SAMD-FUTURE-9999").code)
+        assertSessionKept()
+    }
+
+    @Test
+    fun `a refresh answered with invalid_grant ends the session`() {
+        server.enqueue(MockResponse().setResponseCode(401))
+        server.enqueue(
+            MockResponse().setResponseCode(400)
+                .setHeader("Content-Type", "application/problem+json")
+                .setBody("""{"code":"invalid_grant","detail":"x"}"""),
+        )
+        call("/api/v1/kernel/assess")
+        assertSessionEnded()
+    }
+
+    @Test
+    fun `a refresh with an empty 200 body keeps the session`() {
+        server.enqueue(MockResponse().setResponseCode(401))
+        server.enqueue(MockResponse().setResponseCode(200))
+        // Gson reads an empty body as an EOFException, which reaches RetrofitAuthService as an
+        // IOException, so the original call fails with it. The session is what Q10a protects.
+        val thrown = failedCall(okHttpClient)
+        assertTrue(thrown is java.io.EOFException)
+        assertSessionKept()
+    }
 }
