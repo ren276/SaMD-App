@@ -5427,8 +5427,9 @@ runtime classpaths hold no `no.nordicsemi` artifact. Every guard is mutation-pro
 - [x] Phase 5: the live findings D1 to D3 fixed (below).
 - [x] Targeted live re-checks of L5, L8 and the teardown warnings on the fixed build, done on the
   iQOO I2302.
-- [ ] The remaining live checks (L10b, L1, L12, and a BP and an SPO2 regression round on the
-  review-fix build) move to the Google Pixel 11 Pro, the demo and test device from 2026-10-15.
+- [x] The remaining live checks (L10b, L1, L12, and a BP and an SPO2 regression round on the
+  review-fix build) were run on the Google Pixel 11 Pro, the demo and test device from 2026-10-15
+  (below).
 
 Live results (evidence in `samd-prb2/live/` on the SSD scratch):
 
@@ -5529,3 +5530,44 @@ throw exists. Filed, not changed by PR-B2:
   (`HubAssociations.addressFor`).
 - Review #10: a DIS Software Revision that is not valid UTF-8 becomes U+FFFD in `emulatorBuild`
   without a warning (`BleAcquisition.kt`, the 2A28 read).
+
+### PR-B2 live pass on the Google Pixel 11 Pro - 2026-10-15
+
+Device: Pixel 11 Pro (serial 67041FDKX004ZY), Android 17, API 37, security patch 2026-10-05, app
+targetSdk 37. Build: `fc3c4fc`, default routing (`SPO2=wifi:kernelhub1,BP=ble:kernelhub2`), mock data
+only. `ACCESS_LOCAL_NETWORK` was granted with `adb shell pm grant` after each install, because login
+fails on API 37 without it (F1). Evidence is on the SSD scratch, `samd-prb2/live4/` and
+`samd-prb2/live-pixel/`. 0 BLE teardown WARNs, 0 linkage errors and 0 fatal exceptions across all
+the Pixel logs.
+
+- P1 PASS: fresh association, CDM dialog, Nearby devices prompt, BP accepted.
+- P2 PASS: 13 audit rows, all accepted (5 BP over BLE, 8 SPO2 over Wi-Fi).
+- P3 PASS: BP `BLE`/`kernelhub2` and SPO2 `WIFI`/`kernelhub1`, `emulatorBuild` `bba2c6b1b`.
+- P4 PASS: Bluetooth off gives the refusal copy, no dialog, no connect.
+- P5 PASS: hub stopped in discovery gives the UNREACHABLE copy and keeps the association; the next
+  acquisition after the restart connected with no dialog and no Bluetooth toggle.
+- P6 accepted: proven on the iQOO (R-L6).
+- P7 PASS: 9 cancels each ended in disconnect and `close()`, then a fresh acquisition connected.
+- P8 accepted: proven on the iQOO (R-L8).
+- P9 PASS: the Device error scenario is rejected on BP and SPO2, form unchanged.
+- P10 PASS: THERMOMETER on kernelhub2 gives the UNREACHABLE copy and keeps the association (F2).
+- P11 PASS: force-stop, then Start, no dialog, association kept.
+- P12 accepted: dialog survived rotation, one association created (P12 `dumpsys` task check not run).
+- P13 PASS: Location off does not stop the first association.
+- P14 not a defect: on Android 17 `ACCESS_LOCAL_NETWORK` sits in the NEARBY_DEVICES group, so with
+  it granted a re-request for `BLUETOOTH_CONNECT` is not prompted; the denial path was proven on the
+  iQOO (L14).
+- P15 PASS: `CompounderScreenTest` 5 of 5 runs, 9 tests each, via `am instrument`.
+
+Filed, not fixed in PR-B2:
+
+- F1 HIGH, next PR: the app targets SDK 37 and never requests `ACCESS_LOCAL_NETWORK`, so login to
+  the LAN backend and `kernelhub1.local` fail on a fresh install.
+- F2 MEDIUM: an instrument's service missing on a hub whose core service is present should be
+  HUB_MISMATCH, not UNREACHABLE ("Move closer" is false). It refines the 2026-10-14 D2 ruling and is
+  reachable only through a misconfigured route (P10).
+- F3 LOW: a GATT INVALID (0x1) after a hub restart (P5), probably stale cached handles (inferred).
+- F4 HIGH: D4, a `vitals_device_reading_failed` row carries a stale `sessionId` (already filed).
+- F5: the consultation wizard's Back dead end (already filed).
+- F6: the kernelhub2 spontaneous reboot; check `journalctl --list-boots` and
+  `vcgencmd get_throttled`.
