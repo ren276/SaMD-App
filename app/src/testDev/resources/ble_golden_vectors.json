@@ -1,0 +1,127 @@
+{
+  "fixture_version": 1,
+  "note": "Shared with PR-B (SaMD-App): copy byte-identically. Hand-verified against GSS 2026-09-09.",
+  "sfloat": [
+    {
+      "value": 120.0,
+      "hex": "7800"
+    },
+    {
+      "value": 80.0,
+      "hex": "5000"
+    },
+    {
+      "value": 72.0,
+      "hex": "4800"
+    },
+    {
+      "value": 98.0,
+      "hex": "6200"
+    },
+    {
+      "value": 93.33333,
+      "hex": "a5f3"
+    },
+    {
+      "value": 36.7,
+      "hex": "6ff1"
+    },
+    {
+      "value": 0.0,
+      "hex": "0000",
+      "note": "a VALID zero; faults must never use it"
+    },
+    {
+      "value": null,
+      "hex": "ff07",
+      "note": "NaN 0x07FF"
+    }
+  ],
+  "float": [
+    {
+      "value": 36.7,
+      "hex": "6f0100ff"
+    },
+    {
+      "value": 39.4,
+      "hex": "8a0100ff"
+    },
+    {
+      "value": null,
+      "hex": "ffff7f00",
+      "note": "NaN 0x007FFFFF"
+    }
+  ],
+  "timestamp": {
+    "utc": "2026-10-07T10:30:15",
+    "hex": "ea070a070a1e0f",
+    "device_time_ms": 1791369015000
+  },
+  "bp": {
+    "normal_no_ts": {
+      "systolic": 120.0,
+      "diastolic": 80.0,
+      "pulse": 72.0,
+      "hex": "0478005000a5f34800"
+    },
+    "normal_ts": {
+      "systolic": 120.0,
+      "diastolic": 80.0,
+      "pulse": 72.0,
+      "hex": "0678005000a5f3ea070a070a1e0f4800"
+    },
+    "fault_ts": {
+      "hex": "06ff07ff07ff07ea070a070a1e0fff07"
+    }
+  },
+  "plx_spot_check": {
+    "normal": {
+      "spo2": 98.0,
+      "pulse": 72.0,
+      "hex": "0062004800"
+    },
+    "normal_ts": {
+      "spo2": 98.0,
+      "pulse": 72.0,
+      "hex": "0162004800ea070a070a1e0f"
+    },
+    "fault_ts": {
+      "hex": "01ff07ff07ea070a070a1e0f"
+    }
+  },
+  "thermometer": {
+    "normal": {
+      "celsius": 36.7,
+      "hex": "046f0100ff02"
+    },
+    "normal_ts": {
+      "celsius": 36.7,
+      "hex": "066f0100ffea070a070a1e0f02"
+    },
+    "fault_ts": {
+      "hex": "06ffff7f00ea070a070a1e0f02"
+    }
+  },
+  "envelope": {
+    "profile_version": 1,
+    "instrument": "BP",
+    "quality": "OK",
+    "emulated": true,
+    "nonce_hex": "00112233445566778899aabbccddeeff",
+    "sequence": 1,
+    "device_time_ms": 1791369015000,
+    "hub_id": "kernelhub2",
+    "device_id": "kernelhub2-BP",
+    "sig_hex": "0678005000a5f3ea070a070a1e0f4800",
+    "hex": "010101010000112233445566778899aabbccddeeff01000000d8eee915a10100000a6b65726e656c68756232100678005000a5f3ea070a070a1e0f4800",
+    "length": 61
+  },
+  "control_point": {
+    "start_bp_normal": "01010000112233445566778899aabbccddeeff",
+    "stop": "0200112233445566778899aabbccddeeff",
+    "response_start_success": "800101",
+    "response_busy_for_start": "800105",
+    "response_cccd_not_enabled_for_start": "800108",
+    "response_mtu_too_small_for_start": "800107"
+  }
+}

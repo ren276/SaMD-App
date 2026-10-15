@@ -319,6 +319,9 @@ dependencies {
     implementation(libs.retrofit.core)
     implementation(libs.retrofit.converter.gson)
     implementation(libs.okhttp.logging.interceptor)
+    // BLE client for the kernelhub2 emulator, dev flavour only (PR-B addendum 2, Q11): staging and
+    // prod resolve no no.nordicsemi artifact (addendum 1.3, live check 9).
+    "devImplementation"(libs.nordic.ble.ktx)
     // On-device ASR — sherpa-onnx 1.13.7 release AAR, vendored under app/libs/ because the
     // group com.k2fsa.sherpa.onnx does not publish to Maven Central (searched 2026-09-02: zero
     // artifacts). A file dependency, so it needs no repository declaration under this project's

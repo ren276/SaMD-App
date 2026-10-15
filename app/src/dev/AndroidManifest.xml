@@ -14,6 +14,14 @@
         android:name="com.example.samdapp.dev.permission.SET_BACKEND_URL"
         android:protectionLevel="signature" />
 
+    <!-- BLE acquisition from kernelhub2 (PR-B addendum section 4). Declared here, dev only: staging
+         and prod gain no Bluetooth permission (G-B11, G-B11b). The Nordic AAR merges BLUETOOTH
+         (max 30) and BLUETOOTH_CONNECT into dev as well; this one is explicit so the app does not
+         depend on the library for it. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+    <uses-feature android:name="android.software.companion_device_setup" android:required="false" />
+
     <application android:usesCleartextTraffic="true">
         <receiver
             android:name=".receiver.DevServerReceiver"
@@ -23,6 +31,12 @@
                 <action android:name="com.example.samdapp.dev.SET_BACKEND_URL" />
             </intent-filter>
         </receiver>
+
+        <activity
+            android:name=".data.vitalssource.ble.BlePrepActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
     </application>
 
 </manifest>

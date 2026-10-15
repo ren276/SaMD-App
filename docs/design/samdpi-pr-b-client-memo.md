@@ -493,8 +493,11 @@ preparation (sections 3 and 4), then runs `BleAcquisition.run(link, request, hub
 |---|---|---|---|
 | 1 | `nonce = UUID.randomUUID()`. `nonceBytes` is the 16 big-endian bytes; `nonceString = nonce.toString()`, which is lowercase canonical (B7, 14.5 item 15). | | |
 | 2 | `connect(device)` with `useAutoConnect(false)`, `retry(0)` | 10 s | Disconnect or GATT error: UNREACHABLE. `REASON_DEVICE_NOT_SUPPORTED`: HUB_MISMATCH. `RequestFailedException(REASON_TIMEOUT)`: UNREACHABLE. |
+| | 2026-10-14: superseded by the 5.4 amendment; NOT_SUPPORTED and a missing service on the associated hub map to UNREACHABLE. | | |
 | 3 | `isRequiredServiceSupported` requires the vendor service with CP `f4610002-...` and ENV `f4610003-...`, and the SIG service for the instrument (0x1810/0x2A35 BP, 0x1822/0x2A5E SPO2, 0x1809/0x2A1C THERMOMETER). It collects every 2A25 across every 0x180A service. | | Missing: HUB_MISMATCH (step 2 path) |
+| | 2026-10-14: superseded by the 5.4 amendment; NOT_SUPPORTED and a missing service on the associated hub map to UNREACHABLE. | | |
 | 4 | Init plan, run in `initialize()` on **every** connection, in exactly this order: `RequestMtu(517)`; `EnableIndications(CP)`; `EnableIndications(ENV)`. The phone does not enable the SIG characteristic's CCCD (G2). This satisfies 14.5 items 1 and 6: CCCDs and MTU before any Control Point write, on every connect and reconnect, because each acquisition is a fresh connection and the plan runs before the device is ready. A failed init step does not fail the connect (section 15, G5 item 5), so each step's `.fail {}` records the failure and `BleAcquisition` checks the record after `connect` returns. | per step 3 s | Recorded enable failure: MALFORMED |
+| | 2026-10-14 ruling after review: an init-plan failure maps to UNREACHABLE; the hub sent nothing readable, so MALFORMED copy was untrue. | | |
 | 5 | `getMtu() >= 89` | | MALFORMED |
 | 6 | DIS search: `DisSearch.pick(candidates)` must return exactly one 2A25 across all 0x180A instances (14.5 item 2; BlueZ's own 0x180A has none, parent 14.1 item 10). Read it; its ASCII value must equal the assigned `hub_id` exactly. Read 2A28 from the same service for audit. | 3 s each | 0 or more than one, or a mismatch: HUB_MISMATCH. On a serial mismatch only, `disassociate(id)` and delete the stored ID, so the next Start asks the human again (Q10). |
 | 7 | Drain `events` (anything before START is stale) | | |
@@ -506,6 +509,7 @@ preparation (sections 3 and 4), then runs `BleAcquisition.run(link, request, hub
 | 13 | Decode the SIG bytes for the requested instrument (section 8.2). Any present field holding a special value, with quality OK: QUALITY_STATUS_NOT_OK (G-B4). | | MALFORMED for a structure error |
 | 14 | Build the DTO (section 5.5) and call `PiMeasurementMapper.map(dto, request.instrument, nonceString)`. RC-2, then RC-1 session (the formatted echo against `nonceString`), then RC-1 device type. | | Mapper reasons |
 | 15 | `finally`, under `withContext(NonCancellable)`: if START was answered SUCCESS, write STOP `02 <nonce 16>` with a 2 s bound, and ignore its result. Then `disconnect()` with a 2 s bound, then `close()`. | | Never surfaces |
+| | 2026-10-14 (D1): STOP is also written while START is IN_FLIGHT; only NOT_SUBMITTED and REFUSED skip it. | | |
 
 - **The cap.** Steps 2 to 14 run inside `withTimeout(25_000)` (parent 7.4). On expiry: `abort()`,
   then TIMEOUT. A Stop or screen exit cancels the job, and step 15 still runs.
@@ -536,13 +540,15 @@ A reused nonce on a link whose CCCD is off therefore answers 0x03 before 0x08 (p
 |---|---|
 | `BluetoothDisabledException` | BLUETOOTH_UNAVAILABLE |
 | `DeviceDisconnectedException` | UNREACHABLE |
-| `RequestFailedException(status = REASON_DEVICE_NOT_SUPPORTED)` | HUB_MISMATCH |
+| `RequestFailedException(status = REASON_DEVICE_NOT_SUPPORTED)` | UNREACHABLE (amended 2026-10-14; was HUB_MISMATCH) |
 | `RequestFailedException(status = REASON_TIMEOUT)` | UNREACHABLE on connect; TIMEOUT on a later step |
 | `RequestFailedException`, any other status | UNREACHABLE |
 | `InvalidRequestException` | MALFORMED |
 | `SecurityException` (permission revoked mid-run) | BLUETOOTH_UNAVAILABLE |
 | `TimeoutCancellationException` from the cap | TIMEOUT |
 | `CancellationException` | rethrown, as today (`PiGatewayVitalsSource.kt:91-94`) |
+
+2026-10-14 ruling after live L5: NOT_SUPPORTED maps to UNREACHABLE; HUB_MISMATCH stays for identity failures.
 
 ### 5.5 DTO built from BLE
 
@@ -762,6 +768,7 @@ entry of the fixture, the fault vectors included (all-NaN present fields).
 | `acq_reject_not_supported` | existing `:209` | existing |
 | `acq_reject_bluetooth_unavailable` | "Bluetooth or Location is off, or this app is not allowed to use Nearby devices. Turn them on, allow Nearby devices, then try again." | new, parent 7.7; text ruled in Q4. BLE only: the Wi-Fi path never produces this reason. |
 | `acq_reject_hub_mismatch` | "That reading came from a different instrument hub, so nothing was filled in." | new, parent 7.7 |
+| | 2026-10-14: replaced in 78614d3 by "The app could not confirm this is the right instrument hub for this test, so no reading was saved." | |
 | `acq_reject_unreachable_ble` | "Cannot connect to the instrument. Move closer and check it is switched on. If another phone is using it, wait and try again." | new, B5; approved (Q4) |
 | `acq_reject_timeout_ble` | "The instrument did not answer in time. Try again." | new; approved (Q4) |
 | `acq_reject_not_paired_ble` | "This instrument has not been paired with the app yet." | new, parent 7.7 |
@@ -802,6 +809,7 @@ test RED, restore from the snapshot, sha256 identical, GREEN.
 | G-B11b | No forbidden token in `src/main`, `src/staging` or `src/prod` (section 1.3) | JVM, text | Add `import android.bluetooth.BluetoothAdapter` to a main file; one row per token |
 | G-B12 | Banner and labels render only when `synthetic` | androidTest, `CompounderScreenTest` | Render the banner unconditionally |
 | G-B13 | CCCDs before any CP write, on every connection: `HubInitPlan.steps()` is exactly `[RequestMtu(517), Enable(CP), Enable(ENV)]` (G2); over two acquisitions on `FakeHubLink`, each connection's call log has `enable(CP)` and `enable(ENV)` before its first `writeControlPoint`, and no `enable(SIG)`; a recorded init-step failure gives MALFORMED and no START is written | JVM | Move `Enable(CP)` after the START write; separately, run the plan only on the first connection; separately, append `Enable(SIG)`; separately, ignore the recorded init failure |
+| | 2026-10-14: init-plan failure maps to UNREACHABLE (e7984ac) | | |
 | G-B14 | MTU 517 requested every connection; a negotiated MTU of 88 gives MALFORMED and no START is written | JVM | Request 23; separately, drop the 89 check |
 | G-B15 | DIS search: one 2A25 across two 0x180A passes; zero or two gives HUB_MISMATCH | JVM, `DisSearch` over plain lists | Search only the first 0x180A |
 | G-B16 | Wi-Fi: wrong or missing `X-SaMDPi-Hub-Id` on a 200, a 400 and a 404 gives HUB_MISMATCH; body and header disagreeing gives HUB_MISMATCH; no exception escapes the dispatcher | JVM, MockWebServer | Check the header only on 2xx |

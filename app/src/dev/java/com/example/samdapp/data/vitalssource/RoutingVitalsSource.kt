@@ -7,29 +7,37 @@ import com.example.samdapp.domain.vitalssource.AcquisitionTransport
 import com.example.samdapp.domain.vitalssource.RejectReason
 import com.example.samdapp.domain.vitalssource.VitalsSource
 
+/** The BLE side of the router: one acquisition from the hub [hubId] names. [onStarted] runs once
+ *  preparation has passed and a real BLE acquisition begins, and never for a refusal before that. */
+fun interface BleRoute {
+    suspend fun startAcquisition(request: AcquisitionRequest, hubId: String, onStarted: () -> Unit): AcquisitionResult
+}
+
 /**
  * The single [VitalsSource] binding of the dev flavour. It sends each acquisition to the transport
  * [assignment] names for that instrument, and to nothing else:
  *
  * - an unassigned instrument is `Rejected(NOT_SUPPORTED)`, carrying no transport and no hub;
  * - a Wi-Fi instrument goes to [wifi];
- * - a BLE instrument is `Rejected(NOT_SUPPORTED)` carrying the assigned hub and no transport,
- *   until the BLE client exists. There is no BLE delegate here and no call is made.
+ * - a BLE instrument goes to [ble].
  *
- * There is no fallback from one transport to the other: a failed Wi-Fi acquisition is a failed
- * acquisition, never a second attempt over Bluetooth, because a reading that came from a different
- * wire than the one assigned is a reading from a source nobody chose. Every result is stamped with
- * the transport and hub it was routed to.
+ * There is no fallback from one transport to the other: a failed acquisition is a failed
+ * acquisition, never a second attempt over the other wire, because a reading that came from a
+ * different wire than the one assigned is a reading from a source nobody chose. Every routed result
+ * is stamped with the transport and hub it was routed to.
  *
  * [readVitals] returns an empty reading and calls no delegate. Prefill runs on screen open, and an
  * instrument read there would be data nobody asked for (see [PiGatewayVitalsSource]).
  */
 class RoutingVitalsSource(
     private val wifi: VitalsSource,
+    private val ble: BleRoute,
     private val assignment: HubAssignment,
 ) : VitalsSource {
 
-    /** The transport of the last Start that opened a session, so Stop closes that one and no other. */
+    /** The transport of the last Start that opened a session, so Stop closes that one and no other.
+     *  BLE counts only once its preparation passed: a refused BLE Start opens nothing and must not
+     *  displace a Wi-Fi session still waiting for its Stop. */
     @Volatile
     private var lastStarted: AcquisitionTransport? = null
 
@@ -42,15 +50,13 @@ class RoutingVitalsSource(
                 lastStarted = AcquisitionTransport.WIFI
                 wifi.startAcquisition(request).stamped(AcquisitionTransport.WIFI, route.hubId)
             }
-            is HubRoute.Ble -> {
-                // No transport on the result: it is keyed to the generic not-supported text, and
-                // the BLE "not paired yet" text must not be reachable while no BLE client exists.
-                // lastStarted is left alone: this stub opens no session, so it must not displace a
-                // Wi-Fi session still waiting for its Stop.
-                AcquisitionResult.Rejected(RejectReason.NOT_SUPPORTED, hubId = route.hubId)
-            }
+            is HubRoute.Ble ->
+                ble.startAcquisition(request, route.hubId) { lastStarted = AcquisitionTransport.BLE }
+                    .stamped(AcquisitionTransport.BLE, route.hubId)
         }
 
+    /** A BLE session needs nothing here: the acquisition owns its connection, and Stop or screen exit
+     *  cancels it, which runs its own STOP, disconnect and close. */
     override suspend fun stopAcquisition() {
         val transport = lastStarted
         lastStarted = null
