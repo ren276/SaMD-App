@@ -562,6 +562,23 @@ E8 (Q11) The Q9 redaction commit also suppresses request and response bodies on 
 
 Hazard id resolved in section 8: H-46.
 
+Second batch, 2026-10-15:
+
+Q10a (supersedes the 403 part of Q10): a refresh ends the session only on 401, invalid_grant, or
+   403 whose app error code is 1006 (account disabled) or 1007 (device mismatch). Every other 403,
+   5xx, empty body, LocalNetworkNotAllowedException or other IOException keeps the session.
+Q11 (= E8) SLM read-back bodies never logged.
+Q12 Phase 2 adds B6: PinChangeViewModel maps every IOException to string resources, never
+   e.message (same rule as Q4).
+Q13 Phase 2 classifies IPv6 ULA fc00::/7 as local, with a test and mutation row; Phase 3 adds one
+   device check of a ULA or documents why it cannot be produced.
+Q14 Approved copy: kernel_failure_local_network_title, readback_refusal_local_network_title,
+   readback_refusal_local_network_body, login_failed_no_connection, login_failed_secure_connection
+   as reported at STOP L1. kernel_failure_local_network_body is HELD pending the item 3 finding.
+Filed, not in F1: single refresh coordinator PR (one @Singleton authenticator with a Mutex shared
+   by backend and ABHA clients; DataStore read error distinct from missing token); ABHA fallback
+   copy to strings.xml.
+
 ## 11. Step 2 design addendum
 
 Written before any step 2 code. Supersedes sections 4.6, 5.5 (the drain gate placement) and the
