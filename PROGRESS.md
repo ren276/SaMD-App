@@ -5571,3 +5571,41 @@ Filed, not fixed in PR-B2:
 - F5: the consultation wizard's Back dead end (already filed).
 - F6: the kernelhub2 spontaneous reboot; check `journalctl --list-boots` and
   `vcgencmd get_throttled`.
+
+## F1 local network permission, step 2 Phase 1: gate, consumers, refresh, login copy, logging - 2026-10-15
+
+Branch `feat/local-network-permission` from `1ce3b4a`. Design: `docs/design/local-network-permission-memo.md`
+sections 10 (operator rulings Q1 to Q11, E1 to E8) and 11 (design addendum). Hazard row id H-46
+(H-37 to H-45 are reserved for PR-C, `docs/design/samdpi-two-hub-memo.md:1813-1829`); the row is
+written in Phase 3.
+
+- [x] Memo sections 10 and 11 (`3fa494a`).
+- [x] Classifiers and gate: `isLocalNetworkHost`, `isLocalNetworkAddress` (loopback excluded),
+      `isLocalNetworkBlocked`; constants now `Build.VERSION_CODES.CINNAMON_BUN` and
+      `Manifest.permission.ACCESS_LOCAL_NETWORK` (`2186453`).
+- [x] One enforcement point on every OkHttp client: an application interceptor (IP literals and
+      `.local`, which OkHttp 4.12.0 never passes to `Dns`) plus a `Dns` wrapper over the client's
+      own `Dns` (a public name resolving to a private address, Q1). The caller receives
+      `LocalNetworkNotAllowedException` itself with zero sockets, retries on or off. Scan guard
+      `LocalNetworkGateCoverageTest` (`edccea2`).
+- [x] Consumers: drain kind `LOCAL_NETWORK_NOT_ALLOWED` with the memo 5.5 caption and snackbar
+      (queue kept); kernel and SLM read-back get their own failure class and copy; the dev hub maps
+      to `PERMISSION_DENIED`; ABHA and evaluate keep documented true fallbacks. Refresh (Q10): a
+      refresh with no answer is rethrown and the session kept; only a 401 or `invalid_grant` ends it
+      (`198e392`).
+- [x] Login shows a string resource for every transport failure, never exception text (Q4,
+      `67854b8`).
+- [x] Network logging always redacts `Authorization`, `Cookie`, `Set-Cookie`, and logs no body on
+      `/api/v1/auth/` or the SLM read-back (Q9, Q11, closes A-02 for the remote engine, `c6279f9`).
+
+Tests: dev unit suite 1121, 1133, 1146, 1151, 1156 at the five code commits, all green. Mutation
+rows: 30, each RED at an assertion, restored sha256-identical and green again; 3 attempts voided
+and redone (a mutation that did not compile, one that failed the build, one run with the wrong test
+filter). Log: `/media/sandesh/extra-ssd/samd-lnp/mutation.log`.
+
+New strings awaiting wording approval (not in memo 5.2 to 5.5): `kernel_failure_local_network_*`,
+`readback_refusal_local_network_*`, `login_failed_no_connection`, `login_failed_secure_connection`.
+
+- [ ] Phase 2 (login request flow, hub scoping and copy, Home caption): paused; resumes only when
+      the operator says RESUME L2.
+- [ ] Phase 3 (device pass D1 to D10, API 36 AVD, hazard row H-46, PR).
