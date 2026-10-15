@@ -1,16 +1,17 @@
 package com.example.samdapp.domain.connectivity
 
+import android.Manifest
 import android.os.Build
 
-/** android.permission.ACCESS_LOCAL_NETWORK, the runtime permission LAN sockets need on
- *  Android 17+ (API 37+). Kept as a string constant, not [android.Manifest.permission], because
- *  it may not exist in every compileSdk this module has built against historically. */
-const val ACCESS_LOCAL_NETWORK_PERMISSION = "android.permission.ACCESS_LOCAL_NETWORK"
+/** The runtime permission LAN sockets need on Android 17+ (API 37+). Both this and
+ *  [ACCESS_LOCAL_NETWORK_ENFORCED_SDK] are compile-time constants in the compileSdk 37 jar, so they
+ *  inline and stay usable from JVM tests. */
+const val ACCESS_LOCAL_NETWORK_PERMISSION = Manifest.permission.ACCESS_LOCAL_NETWORK
 
 /** First API level that enforces [ACCESS_LOCAL_NETWORK_PERMISSION] for LAN sockets. Below this,
  *  LAN access is implicit via INTERNET and the Android permission is inert, though a vendor-level
  *  toggle outside the Android permission model (for example vivo/Funtouch) can still block it. */
-const val ACCESS_LOCAL_NETWORK_ENFORCED_SDK = 37
+const val ACCESS_LOCAL_NETWORK_ENFORCED_SDK = Build.VERSION_CODES.CINNAMON_BUN
 
 enum class LocalNetworkFailure { PERMISSION_DENIED, UNREACHABLE, UNREACHABLE_OR_BLOCKED }
 
