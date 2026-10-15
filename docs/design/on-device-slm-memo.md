@@ -1,0 +1,881 @@
+# On-device SLM engine: STEP 1 design memo
+
+Status: DESIGN, reviewed at gate M1 and updated at gate M2 with the G2 report and the operator
+rulings of 2026-10-15 (section 16). Risk and SOUP content in section 13 is PROPOSED, AWAITING
+OPERATOR SIGN-OFF.
+Branch: `feat/on-device-slm`, worktree `/media/sandesh/extra-ssd/wt-on-device-slm`, base
+origin/master `1ce3b4aada3a3a904302039d6162266b41deb3b7` (VERIFIED, `git rev-parse HEAD`).
+Date: 2026-10-15.
+
+Tag convention: VERIFIED means a file:line in this worktree, a command plus its output, or a
+document at a pinned commit. "G2 REPORT section N" cites the GPU-machine report
+`/mnt/twotb/ondevice-parity/REPORT.md` (VERIFIED there, pasted by the operator at M2). INFERRED
+gives its reason. PENDING T1 marks the one fact still open: the tokenization-divergence
+characterization running on the GPU machine (G-5).
+
+LiteRT-LM citations are to tag `v0.18.0` = commit `b2f686e2ed4718fb84ec398a61dd59ca0f0aff27`,
+sources fetched into `/media/sandesh/extra-ssd/samd-slm-parity/litertlm-src-b2f686e2/`.
+
+---
+
+## 1. Scope, non-goals, untouched
+
+### 1.1 Scope of the first PR (R2)
+
+- A `LocalSlmEngine` that runs Gemma 4 E2B from the pinned generic `.litertlm` through
+  LiteRT-LM 0.18.0, in the **dev flavor only**.
+- Engine identity, artifact verification, accelerator selection at init, deadline,
+  single-flight, cancellation, release on memory pressure (SLM only; ASR release is a separate PR,
+  Y-11).
+- The four device `SLM_READBACK_*` audit rows, written by the seam for both engines (R6).
+- An `SlmEngine` contract extension that carries "who answered" (R3), applied to both engines.
+- A parity harness: golden prompt export, server run (operator terminal), desktop run, Pixel
+  instrumented run, comparator.
+- Proposed risk-file and SOUP amendments (section 13), all PROPOSED.
+
+### 1.2 Non-goals
+
+- Turning on `SLM_READBACK_ENABLED` anywhere. It stays `false` in every flavor
+  (`app/src/main/java/com/example/samdapp/config/FeatureFlags.kt:176`, VERIFIED). UI in dev is a
+  later, separate ruling (R2).
+- Any routing between engines at runtime in the product path. The product seam keeps
+  `RemoteSlmEngine` in every flavor in this PR (section 4.1).
+- The Google Tensor G6 artifact: the follow-up PR right after the generic path passes parity
+  (Y-18, section 3.7).
+- Production artifact delivery (Y-10, deferred).
+- ASR release on memory pressure (Y-11, separate PR).
+- A device request id joining remote `slm_call_log` rows (Y-9, deferred: it changes the backend
+  StrictModel).
+- Any change to the backend proxy, the GPU service, or the remote wire contract.
+- Any change to prompt text or `PROMPT_TEMPLATE_VERSION` (`slm-readback-v1`). G-5's candidate
+  whitespace normalization would change `buildPrompt` for both engines and is a later ruling.
+
+### 1.3 Untouched, and how that is proven
+
+| Thing | Guarantee | Proof in STEP 2 |
+|---|---|---|
+| staging, prod behaviour | No new class reachable; Hilt graph for `SlmEngine` unchanged; flag false | Existing `ReportReadbackTest."the flag as shipped is off in every flavor"` stays green; new test (Y-1): the R6 audit writes are unreachable in staging and prod while `SLM_READBACK_ENABLED` is false; APK scan: staging and prod contain no `liblitertlm_jni.so` and no `com.google.ai.edge.litertlm` class (slice S1) |
+| `RemoteSlmEngine` request and response wire | Byte-identical JSON | `RemoteSlmEngineTest.theRequestCarriesThisBuildsPinAndTemplateAndOmitsTheDeterminismFields` stays green unchanged |
+| Backend `backend/core` | No file changes | `git diff --stat origin/master -- backend/` empty at PR time |
+| F1 files | No edits to F1-only files | Section 12 list; PR diff checked against it |
+
+Y-1 (ruled): the R6 audit writes land in the shared seam (`SlmReadbackUseCase`, `src/main`),
+which is compiled into staging and prod. They are unreachable there because the only caller is
+behind the flag (`ReportViewModel.kt:237,267`, VERIFIED). Accepted, provided the flag-off tests
+stay green and a test asserts the unreachability.
+
+---
+
+## 2. Verified facts relied on
+
+All in the worktree at 1ce3b4a unless stated.
+
+Device seam:
+- F-1 `SlmEngine` at `domain/slm/SlmEngine.kt:171`; `generate(caseRecordId: String, prompt: String,
+  maxOutputTokens: Int): Flow<String>` :209; `servedModelId(): String?` :240;
+  `finishReason(): SlmFinishReason?` :252. `SlmEngineError` 8 values :75-135. VERIFIED.
+- F-2 `RemoteSlmEngine` `@Singleton` `data/remote/RemoteSlmEngine.kt:67-68`; single-flight
+  `Mutex` :98 with `tryLock` :111 throwing UNAVAILABLE; `lastResponse` :105 cleared before each
+  call :121; `servedModelId()` returns null unless both `model_id` and `model_sha256` non-blank
+  :146-152. VERIFIED.
+- F-3 Binding `@Binds @Singleton bindSlmEngine(impl: RemoteSlmEngine): SlmEngine` in
+  `di/SlmNetworkModule.kt:137-139`, in `src/main`, so all flavors. VERIFIED.
+- F-4 `buildPrompt` `domain/slm/SlmReadbackUseCase.kt:441-463`, one plain string, no roles.
+  `PROMPT_TEMPLATE_VERSION = "slm-readback-v1"` :430. The question is `trim()`ed :339. VERIFIED.
+- F-5 Limits `MAX_QUESTION_CHARS = 500`, `MAX_PROMPT_CHARS = 6000`, `MAX_OUTPUT_TOKENS = 512`
+  at `domain/slm/SlmScopeGate.kt:30,39,43`. VERIFIED.
+- F-6 Pre-call control-token refusal `SlmReadbackUseCase.kt:350`; stream sanitizer :372-378;
+  identity gate `servedModelMatchesSanitizer(engine.servedModelId())` :393; completeness gate
+  :402 against `COMPLETE_FINISH_REASONS = {STOP, STOP_SEQUENCE}` :493-494; grounding gate for
+  non-physician tier :408; tier :360, :483; engine error to refusal map :514-524 (PAYLOAD_REJECTED
+  gives ENGINE_REJECTED_INPUT :519, TIMEOUT gives ENGINE_TIMEOUT :517). VERIFIED.
+- F-7 Sanitizer pin `SANITIZER_TARGET_MODEL_ID = "google/gemma-4-E2B-it"`,
+  `SANITIZER_TOKENIZER_REVISION = "3e22461f65e89153144f8adb70e3b8c2cc9845a7"`,
+  `SANITIZER_TOKENIZER_SHA256 = "cc8d3a0c...bfe0f"` at `domain/slm/SlmStreamSanitizer.kt:60-66`;
+  exact-match `servedModelMatchesSanitizer` :88-89; `CONTROL_TOKENS` :203 =
+  `RESERVED_UNUSED` (:142, `<unused0>`..`<unused6226>`) + `NAMED_RESERVED` (:173-180).
+  `SlmSuppression` fields `spans`, `characters`, `droppedTokens`, `unknownTokens` :37-40.
+  VERIFIED.
+- F-8 Approval: `ApprovedRecordReader.kt:57-58`, null `kernelDecision` gives NOT_APPROVED.
+  VERIFIED.
+- F-9 Audit vocabulary `AuditAction.SLM_READBACK_INVOKED/_INPUT_REFUSED/_OUTPUT_SUPPRESSED/
+  _SANITIZER_ACTIVITY` at `domain/audit/AuditLogger.kt:185,191,195,205`; KDoc :167-183 says "Not
+  emitted yet" and fixes the payload rule (metadata only, never question, output or drug name).
+  No write site anywhere in `app/src` (grep, same commit). Writer
+  `AuditLogger.log(action, patientId, caseRecordId, payload)` :6-8; helper
+  `auditPayload(vararg Pair<String,String?>)` :209-210. VERIFIED.
+- F-10 Backend accepts those four device actions:
+  `backend/core/app/domain/audit_actions_device.py:79-93`. VERIFIED.
+- F-11 Flavor guard `SlmEngineIsUnreachableFromPresentationTest.noFlavorSourceSetImplementsOrBindsTheEngine`
+  fails if any flavor source set names `SlmEngine`
+  (`app/src/test/java/com/example/samdapp/config/SlmEngineIsUnreachableFromPresentationTest.kt:94-105`).
+  VERIFIED. This guard must be narrowed for a dev-only engine (4.1).
+- F-12 SLM HTTP stack is `backendClient.newBuilder()` with 10/55/55/60 s
+  (`di/SlmNetworkModule.kt:55,65,82,110-116`). VERIFIED. Not used by the local path.
+- F-13 Control-token mirror test asserts the backend maps the service's 8009 to device
+  CONTROL_TOKENS_REJECTED without tripping the breaker
+  (`app/src/test/java/com/example/samdapp/data/remote/SlmControlTokenMirrorTest.kt:73-125`).
+  VERIFIED.
+- F-14 ASR: `SherpaOnnxTranscriptionService` `@Singleton`
+  (`data/transcription/SherpaOnnxTranscriptionService.kt:103-111`), recognizer lazy :175-178,
+  never released; `MODEL_THREADS = 4` :61; decode on `Dispatchers.Default` :145. No
+  `onTrimMemory` or `ComponentCallbacks2` in `app/src`. VERIFIED.
+- F-15 Gradle: AGP 9.2.1, Kotlin 2.3.10, coroutines 1.11.0 (`gradle/libs.versions.toml:2-3,18`);
+  compileSdk 37, minSdk 26, targetSdk 37, `abiFilters += listOf("arm64-v8a", "x86_64")`
+  (`app/build.gradle.kts:86-93,104`); `noCompress += listOf("onnx")` :256; sherpa AAR :329; no
+  `ndkVersion`. VERIFIED.
+- F-16 Manifest: `<application android:name=".SaMDApplication"` (`app/src/main/AndroidManifest.xml:20-21`);
+  a dev manifest exists (`app/src/dev/AndroidManifest.xml`); no `uses-native-library` anywhere.
+  VERIFIED.
+- F-17 Dev applicationId `com.example.samdapp.dev` (`app/build.gradle.kts:91,115`). VERIFIED.
+
+Backend proxy (remote path only):
+- F-18 Fixed decode `temperature 0, do_sample False, stop []`; pass-through `max_tokens`, `seed`,
+  `model_id`, `prompt_template_version`, `prompt` (`backend/core/app/services/slm.py:371-380`).
+  Facility scope :406-409; phi_guard :424-425 (`adapters/slm/phi_guard.py:58-81`); breaker :435;
+  `_record` writes `slm_call_log` + audit :150-222; SLM_CALL_FAILED via `_fail` :225-241;
+  SLM_CALL_FORWARDED :586-593; 8009 maps to SAMD-SLM-8016 :109, :530-545; any other 4xx
+  (including the service's 8003 over-length) maps to `SLM_PAYLOAD_REJECTED` :546-552, which the
+  device maps to PAYLOAD_REJECTED (`RemoteSlmEngine.kt:363`) and the seam to
+  ENGINE_REJECTED_INPUT (F-6). No approval check. VERIFIED.
+
+GPU service (G1 and G2 REPORT section 1): `google/gemma-4-E2B-it` rev 3e22461f, bf16,
+transformers 5.5.0, torch 2.4.1+cu124, weights sha256
+`2db5482b20d746879bb3ef79b5203e9075a2e2b98f54ec7c2f281c1477ddc550`; renders
+`'<bos><|turn>user\n{prompt trimmed}<turn|>\n<|turn>model\n'`; greedy; EOS ids 1, 106, 50;
+2048-token prompt cap (8003); decode cap 512; 40 s deadline; rejects 24 special tokens (8009).
+
+Risk register:
+- F-19 Highest row in `docs/quality/risk-management-file.md` §2 is H-36; SLM rows H-22..H-25
+  (:50-53), H-27; H-28 reserved (:68). VERIFIED.
+- F-20 H-37..H-45 reserved by `docs/design/samdpi-two-hub-memo.md:1813-1829`, which also states
+  "H-30 and H-31 are reserved". VERIFIED. H-46 taken by F1. New rows start at **H-47**.
+- F-21 `docs/quality/soup-validation-record.md` covers ASR and CameraX only; no Gemma, SLM or
+  LiteRT entry (grep, VERIFIED).
+
+Device (Pixel 11 Pro, S1 probe 2026-10-15): Android 17, SDK 37, Tensor G6, `ro.hardware.egl`
+powervr, PAGE_SIZE 4096, MemTotal 16,030,796 kB, MemAvailable 4,478,500 kB at probe,
+`/vendor/lib64` has `libOpenCL.so`, `libOpenCL-pixel.so`, `libedgetpu_litert.so`,
+`libdarwinn_hal.so`; no Vulkan library matched; `/data` 415G free. VERIFIED (adb outputs).
+
+Contradictions found between facts, code and rulings: none (section 15.1 lists the one gap the
+rulings make visible in code: four control-token literals the device does not yet carry).
+
+---
+
+## 3. Runtime and dependency
+
+### 3.1 Version (Y-2: 0.18.0)
+
+- `litertlm-android` on Google Maven: latest and release **0.18.0**, `lastUpdated 20261006154905`
+  (VERIFIED, `https://dl.google.com/android/maven2/com/google/ai/edge/litertlm/litertlm-android/maven-metadata.xml`,
+  saved as `/media/sandesh/extra-ssd/samd-slm-parity/litertlm-android-maven-metadata.xml`).
+- Upstream tag `v0.18.0` = `b2f686e2ed4718fb84ec398a61dd59ca0f0aff27` (VERIFIED, GitHub tags API).
+- The G2 desktop run used the same runtime version: litert-lm 0.18.0 (litert-lm-api 0.18.0,
+  litert-lm-builder 0.18.0) (G2 REPORT section 1).
+- AAR sha256 `706cbb8a87739b2818111bf3a19a78b8f7781586d10f80adf3415581fab7595f`, POM sha256
+  `3c631cd8e04fe4289818d41675c0f6b1f26a7a37db63606699a51e2c95695a54` (VERIFIED, `sha256sum`).
+  No `-sources.jar` and no `.module` published (HTTP 404, VERIFIED). Licence Apache-2.0 (POM).
+
+### 3.2 minSdk and transitive dependencies
+
+- AAR manifest `<uses-sdk android:minSdkVersion="24" />` (VERIFIED). App minSdk 26: no conflict.
+- POM compile dependencies (VERIFIED): `com.google.code.gson:gson:2.14.0`,
+  `org.jetbrains.kotlin:kotlin-reflect:2.4.0`, `org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0`.
+  - coroutines matches the app (1.11.0).
+  - gson 2.14.0 wins resolution over the version `retrofit converter-gson 2.11.0` brings.
+    INFERRED (highest-version resolution). Existing DTO and sync Gson tests are the net.
+  - `kotlin-reflect 2.4.0` pulls `kotlin-stdlib 2.4.0`. INFERRED (same-version stdlib).
+
+### 3.3 Kotlin metadata compatibility (Y-3)
+
+- `META-INF/...litertlm-android.kotlin_module` header bytes
+  `0000 0003 0000 0002 0000 0004 0000 0000`: metadata version **2.4.0** (VERIFIED, `xxd`).
+- Kotlin 2.3.10 consuming 2.4.0 metadata and stdlib: INFERRED compatible (a compiler reads the
+  next minor's metadata). Proof is a build.
+- Y-3 fallback order (ruled):
+  1. Build as is (slice S1) and report the resolved `kotlin-stdlib` and `kotlin-reflect`
+     versions from `dependencyInsight`.
+  2. If it fails, pin the newest `litertlm-android` whose Kotlin metadata is 2.3 or lower, and
+     record it (the `.kotlin_module` header check above, per candidate).
+  3. A Kotlin bump only as its own PR.
+  `kotlin-reflect` is never excluded.
+- AGP 9.2.1: no AGP-specific constraint in the AAR (plain `jni/` + `classes.jar`). Same S1 gate.
+
+### 3.4 Native libraries added
+
+From the 0.18.0 AAR (VERIFIED, `unzip -l`):
+
+| ABI | Library | Bytes |
+|---|---|---|
+| arm64-v8a | `liblitertlm_jni.so` | 22,155,680 |
+| x86_64 | `liblitertlm_jni.so` | 26,353,160 |
+
+`NEEDED` entries are system only: `libandroid libz libGLESv2 libEGL libGLESv3 liblog libdl libm
+libc` (VERIFIED, `readelf -d`).
+
+The JNI library also names, as strings, libraries it may `dlopen` that are not in the AAR
+(VERIFIED, `strings`): `libLiteRtGpuAccelerator.so`, `libLiteRtOpenClAccelerator.so`,
+`libLiteRtClGlAccelerator.so`, `libLiteRtVulkanAccelerator.so`, `libLiteRtWebGpuAccelerator.so`,
+`libLiteRtTopKOpenClSampler.so`, `libLiteRtTopKWebGpuSampler.so`, `libOpenCL.so`,
+`libOpenCL-pixel.so`, `libvndksupport.so`, `libvulkan.so`, `libcdsprpc.so`, `libGLES_mali.so`.
+
+- `com.google.ai.edge.litert:litert-gpu:2.3.0` ships `libLiteRtClGlAccelerator.so` (arm64
+  3,253,032 B) and depends on `litert:2.3.0` (`libLiteRt.so`, arm64 5,629,696 B). VERIFIED.
+- The pinned getting-started doc says GPU needs only `uses-native-library` for `libvndksupport.so`
+  and `libOpenCL.so`, both `required="false"` (`docs/api/kotlin/getting_started.md:101-109`,
+  VERIFIED). It does not mention `litert-gpu`.
+- Y-4 (ruled): `litert-gpu:2.3.0` is added, as a second SOUP item, only if slice S2 shows on the
+  Pixel that `Backend.GPU()` fails to initialise with the AAR alone.
+
+### 3.5 16 KB alignment
+
+- `liblitertlm_jni.so` LOAD `p_align` is `0x4000` for both ABIs (VERIFIED, `readelf -lW`).
+- Current dev debug APK: `zipalign -c -P 16 -v 4` with build-tools 37.0.0 (highest at or above
+  35.0.0 under `/media/sandesh/extra-ssd/Android/Sdk/build-tools/`) reports every `lib/` entry
+  `(OK)` and `Verification successful` (VERIFIED, saved as
+  `/media/sandesh/extra-ssd/samd-slm-parity/zipalign-dev-debug.txt`). That APK came from the F1
+  tree (INFERRED from date and branch). S1 re-runs the check on the dev APK containing
+  `liblitertlm_jni.so`.
+- The Pixel uses 4 KB pages, so 16 KB is a Play requirement here, not a runtime one.
+
+### 3.6 Packaging and ABI
+
+- No file-name collision with sherpa-onnx or SQLCipher libraries (VERIFIED against the S1 APK
+  listing). No `pickFirst` needed. Symbol-level conflict between two native runtimes in one
+  process: INFERRED low risk (separate `.so` namespaces), proven in S2 by loading both.
+- `.litertlm` is never packaged in the APK (section 9), so no `noCompress` change.
+- Y-5 (ruled): keep `lib/x86_64/liblitertlm_jni.so` in dev (F1 Phase 3 uses an API 36 AVD).
+  The release ABI split stays on the housekeeping backlog.
+
+### 3.7 NPU (R4, Y-18)
+
+- Gallery 1.0.20 on the Pixel (VERIFIED, `/media/sandesh/extra-ssd/samd-slm-parity/gallery/GALLERY_REPORT.md`):
+  only "Gemma-4-E2B-it TPU" (3.3 GB) downloaded, TPU the only accelerator; BP echo exact in 1.1 s,
+  "OK" in 140.0 ms, thermal 0; no TTFT or tok/s (no stats view). Y-0: a Gallery smoke test of the
+  generic model on GPU and CPU runs separately; the S2 harness produces the real numbers.
+- The Tensor G6 artifact `gemma-4-E2B-it_Google_Tensor_G6.litertlm`, 3,313,938,293 B, exists in
+  the same repo and was not downloaded (G2 REPORT section 1). Y-18 (ruled): out of this PR; it is
+  the follow-up PR right after the generic path passes parity, with its own pin and its own
+  parity run, and adds `litert-npu-runtime-google-tensor:2.3.0`
+  (`libLiteRtCompilerPlugin_google_tensor.so` 939,376 B, `libLiteRtDispatch_GoogleTensor.so`
+  579,024 B, VERIFIED listing). Kotlin entry points `Backend.NPU(nativeLibraryDir)` and
+  `Backend.GOOGLE_TENSOR` exist (`Config.kt:158,160`, VERIFIED).
+
+---
+
+## 4. Engine design
+
+### 4.1 Contract: extend, do not fork
+
+`LocalSlmEngine` implements the existing `SlmEngine` (`generate`, `servedModelId`,
+`finishReason`). One additive member carries R3:
+
+```kotlin
+/** Who answered the generation just collected. Read after the flow completes, like servedModelId. */
+fun answeredBy(): SlmEngineIdentity?
+
+data class SlmEngineIdentity(
+    val engine: SlmEngineKind,          // REMOTE or LOCAL
+    val accelerator: String?,           // null for REMOTE; "GPU" or "CPU" for LOCAL
+    val modelId: String?,               // served model id, verbatim
+    val artifactSha256: String?,        // envelope model_sha256 (REMOTE) or verified file digest (LOCAL)
+    val runtimeVersion: String?,        // null for REMOTE; "litertlm-android 0.18.0" for LOCAL
+)
+```
+
+`servedModelId()` stays the identity gate's only input (F-6, F-7); `answeredBy()` feeds audit.
+
+Call sites touched (VERIFIED by grep of `SlmEngine` implementers and constructors):
+`domain/slm/SlmEngine.kt`; `data/remote/RemoteSlmEngine.kt` (REMOTE, from `lastResponse`);
+`domain/slm/SlmReadbackUseCase.kt` (audit, section 8); test fakes `RecordingSlmEngine`
+(`SlmReadbackUseCaseTest.kt:61`) and `RecordingEngine` (`ReportReadbackTest.kt:479`); new
+`LocalSlmEngine` (dev).
+
+Binding (R2, R3): the Hilt binding does not change. `SlmNetworkModule.Bindings` keeps binding
+`RemoteSlmEngine` in `src/main` for all flavors. `LocalSlmEngine` lives in `src/dev`, is not bound
+to `SlmEngine`, and is constructed only by the dev parity harness and its tests. So there is no
+runtime engine switch anywhere in this PR, which meets R3's "never changed mid-request" by
+construction; the later UI ruling adds an explicit pre-request choice.
+
+F-11's guard is narrowed, not deleted: exactly one flavor file,
+`app/src/dev/java/com/example/samdapp/data/slm/LocalSlmEngine.kt`, may *implement* `SlmEngine`;
+any `@Binds`/`@Provides` of `SlmEngine` outside `di/SlmNetworkModule.kt` fails, and any
+`SlmEngine` mention in `src/staging` or `src/prod` fails.
+
+### 4.2 Lifecycle
+
+- Lazy: nothing loads at app start. First `generate` (or the harness's `warmUp()`) verifies the
+  artifact (6.3), then `Engine(EngineConfig(...)).initialize()` (`Engine.kt:61`; KDoc "can take a
+  significant amount of time (e.g., 10 seconds)" :53-57, VERIFIED).
+- `EngineConfig(modelPath, backend, visionBackend = null, audioBackend = null, maxNumTokens = 2560,
+  cacheDir = context.cacheDir.path)` (`Config.kt:202-212`, VERIFIED). `maxNumTokens` is "the sum
+  of input and output tokens ... the size of the kv-cache" (`Config.kt:189-190`, VERIFIED);
+  2560 = 2048 + 512, matching G2's `max_num_tokens=2560` (G2 REPORT section 1; Y-7').
+- `ExperimentalFlags.enableBenchmark = true` before `initialize()` (`ExperimentalFlags.kt:34`,
+  passed into `nativeCreateEngine` at `Engine.kt` init args, VERIFIED), because the finish reason
+  and prompt-length backstop read `BenchmarkInfo` (5.3, 5.5).
+- Holder: `@Singleton` in the dev Hilt graph (not bound to `SlmEngine`), owning one `Engine`.
+- **One new `Conversation` per readback, closed after it, never reused** (G-1'):
+  `engine.createConversation(config)` (`Engine.kt:120`, VERIFIED) inside `generate`, `close()`
+  (`Conversation.kt:743`, VERIFIED) in `finally`. No history can accumulate.
+
+### 4.3 Threading
+
+- Dedicated single-thread dispatcher (`Executors.newSingleThreadExecutor { Thread(it, "slm-local") }
+  .asCoroutineDispatcher()`), owned by the holder. Engine init, conversation creation and close,
+  and cancellation calls run on it. `sendMessageAsync` returns a `callbackFlow`
+  (`Conversation.kt:441-470`, VERIFIED) driven by native callbacks; collection happens in the
+  caller's flow, the setup on `slm-local`.
+- Reason: native init and conversation calls block (`Engine.kt:53-57`), one thread serialises
+  native ordering, and generation stays off `Dispatchers.Default`, which ASR decode uses (F-14).
+
+### 4.4 Single-flight and cancellation
+
+- Same rule as remote: `Mutex.tryLock()`, a second call throws `SlmEngineException(UNAVAILABLE)`
+  (F-2). Per-generation state (`lastFinish`, `lastIdentity`) cleared before each call.
+- Cancellation: on flow cancellation the engine calls `Conversation.cancelProcess()`
+  (`Conversation.kt:669`, VERIFIED) and then closes the conversation. Unlike the remote path
+  (`SlmEngine.kt:194-207`), cancelling stops compute. `CancellationException` is rethrown, never
+  turned into a refusal (`SlmReadbackUseCase.kt:379-380`). Since the conversation is discarded,
+  the KDoc note that rollback of internal state is a pending feature (`Conversation.kt:668`,
+  "b/450903294") does not matter here.
+
+### 4.5 Deadline
+
+- `withTimeout(40.seconds)` around generation (init excluded), matching the service's 40 s from
+  arrival. On expiry: `cancelProcess()`, close, throw `SlmEngineException(TIMEOUT)` (maps to
+  ENGINE_TIMEOUT, F-6).
+- Init has its own bound: 60 s, then UNAVAILABLE. Y-16: the harness records cold-init time; the
+  bound is revisited if init exceeds 10 s.
+
+### 4.6 Accelerator selection (R4)
+
+- Order: `Backend.GPU()`; if `initialize()` throws, close, log, then `Backend.CPU(threadCount = 4)`
+  (`Config.kt:144-149`, VERIFIED); if that throws, UNAVAILABLE and the init latch (section 7).
+  Decided at init only; reported in every `answeredBy()`.
+- No mid-generation fallback: a GPU error during decode is ENGINE_ERROR for that readback.
+- `threadCount = 4` matches ASR's `MODEL_THREADS` (F-14). INFERRED; tune from S2.
+
+---
+
+## 5. Prompt and decoding parity (G-1', G-2', G-3', Y-7')
+
+### 5.1 Rendering: Conversation with the bundled template
+
+- Path: `Engine.createConversation(ConversationConfig(...))` and `sendMessageAsync(Message.user(prompt))`.
+  `Message.user(text)` (`Message.kt:78`, VERIFIED).
+- **The bundled template is used, never overridden.** `ConversationConfig.chatTemplate = null`;
+  `Engine.createConversation` falls back to `ExperimentalFlags.overwritePromptTemplate` when
+  `chatTemplate` is null (`Engine.kt:150,163`, VERIFIED), so the engine also asserts at init that
+  `ExperimentalFlags.overwritePromptTemplate == null`, and a test pins it.
+- Why the bundled template is right: it is 11,995 B, sha256 `02b3091a...f629`, byte-identical to
+  the repo `chat_template.jinja`; it is a different version from the service's 18,569 B template,
+  but renders a single user turn identically (G2 REPORT section 2). The artifact sha256 (6.3) pins
+  it, since the template is inside the file.
+- Server rendering vs device rendering, prompt (a): litertlm renders
+  `'<|turn>user\nReply with the single word OK.<turn|>\n<|turn>model\n'`; the server renders the
+  same with a leading `<bos>`; that text is the only difference (G2 REPORT section 2). The runtime
+  prepends BOS id 2 (INFERRED in G2 from prefill counts 16/34/39 matching the server); literal
+  `<bos>` text would tokenise as 3 ordinary tokens `[236820,46757,236813]`, so it must never be in
+  the string (G2 REPORT section 2).
+- Token ids for prompt (a) match position by position after BOS is prepended, 16 each; prompts
+  (b), (c), a Hindi string and a padded string also match (G2 REPORT section 2).
+- `systemInstruction = null`, `initialMessages = emptyList()`, `tools = emptyList()`
+  (`Config.kt:265-267`): one user turn, nothing else.
+- `thinkingConfig = ThinkingConfig(enableThinking = false, thinkingTokenBudget = 0)`
+  (`Config.kt:128-130,275`, VERIFIED; same values G2 used, G2 REPORT section 3; the artifact
+  reports "Supports Thinking: NO").
+- `channels`: proposed `emptyList()`, which disables runtime channel parsing so any channel text
+  reaches `SlmStreamSanitizer` instead of being split into `Message.channels` (`Engine.kt` channels
+  handling, "If channels is empty, channels will be disabled", VERIFIED). Not covered by a ruling:
+  YOUR CALL Y-19.
+- Output text: concatenation of `Message.contents.toString()` per emitted message
+  (`Message.kt:67,120`, VERIFIED), fed chunk by chunk to the sanitizer.
+
+**Required test (G-1'):** for every golden prompt, `conversation.renderMessageIntoString(
+Message.user(prompt))` (`Conversation.kt:712`, `@ExperimentalApi`, VERIFIED) on the device path
+equals the server rendering minus the leading `<bos>`, byte for byte. The server renderings come
+from the GPU-machine G-6 run as `golden/server-render-v1.jsonl`. Runs on the Pixel as part of the
+dev instrumented suite (slice S3). If it fails, overriding the template with the server's 18,569 B
+Jinja needs a new ruling.
+
+Trim: the server trims the prompt (G1). The device prompt starts with fixed text and ends with
+the question, which is `trim()`ed (F-4), so it carries no leading or trailing whitespace unless
+the two trims disagree. Kotlin `String.trim()` strips chars where `Char.isWhitespace()` is true;
+Jinja's `trim` is Python `str.strip()`. INFERRED: both strip U+00A0 and U+2003 and neither strips
+U+200B; not measured. S3 adds a test over leading and trailing ASCII space, tab, CRLF, U+00A0,
+U+2003 and U+200B in the question that compares the device rendering with the server rendering of
+the same input (both from the G-6 run), so any divergence is measured rather than assumed.
+Divergent whitespace is also G-5's subject (5.6).
+
+### 5.2 Sampler (G-2')
+
+`ConversationConfig.samplerConfig = SamplerConfig(topK = 1, topP = 1.0, temperature = 0.0,
+seed = 20260918)` and `ConversationConfig.maxOutputToken = 512` (`Config.kt:274,295-299`,
+VERIFIED), every field set explicitly. The JNI maps all four fields and forces sampler type TOP_P
+(`jni/litertlm.cc:246-267`, VERIFIED), matching G2's Python finding that the type is always TOP_P
+(G2 REPORT section 3). Unset fields would default to top_p 0.95 and temperature 1.0 (G2 REPORT
+section 3), which is why none is left unset. A JVM test asserts the config the engine builds,
+field by field. Seed equals the remote `SLM_REQUEST_SEED` (`RemoteSlmEngine.kt:40`, VERIFIED).
+
+Determinism: two desktop runs per prompt were identical (G2 REPORT sections 3 and 4). top_k 1 as
+the greedy mechanism is INFERRED in G2.
+
+### 5.3 Stop ids and finish reason (G-3')
+
+- Stop ids are met offline: litertlm reports BOS 2 and stop ids 1, 50, 106; the server's EOS ids
+  are 1, 106, 50; same set (G2 REPORT section 2), for artifact sha256
+  `181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c`. They come from the model
+  metadata and are read-only (G2 REPORT section 3). The sha256 check before every engine start
+  (6.3) pins them.
+- The Kotlin API returns no finish reason (no such field on `Message`, `Message.kt:35-40`,
+  VERIFIED). The engine derives it after `onDone`:
+  `getBenchmarkInfo().lastDecodeTokenCount` (`Conversation.kt:682`, `Benchmark.kt:31-38`,
+  VERIFIED) below 512 gives STOP; at or above 512 gives LENGTH; benchmark unavailable or any
+  exception gives null, which the seam refuses (existing test "a response carrying no finish
+  reason is refused as truncated"). INFERRED: a generation that ends naturally on exactly the
+  512th token is reported LENGTH and refused; that is the fail-closed direction.
+- Required device test (G-3'): golden short prompts (a) and (b) end with finish reason STOP, not
+  LENGTH (S3). (a) and (b) are G2's probe strings (G2 REPORT section 4), carry no record data, and
+  are used verbatim as engine behaviour tests; they are not members of the R8 golden record set.
+- Companion device test: a prompt asking for a long enumeration, with `maxOutputToken` lowered to
+  16 in the test only, finishes LENGTH, so the derivation is proven in both directions.
+
+### 5.4 Special tokens in output
+
+The device output goes through `SlmStreamSanitizer` (F-6) before any gate. Parity is compared
+after the sanitizer on both sides (11.5).
+
+### 5.5 Limits (Y-7')
+
+| Limit | Server | Device local | On breach |
+|---|---|---|---|
+| Question chars | n/a | 500 (F-5) | QUESTION_TOO_LONG before engine (unchanged) |
+| Prompt chars | 6000 schema | 6000 (F-5) | RECORD_TOO_LARGE before engine (unchanged) |
+| Prompt tokens after template | 2048, 8003 | engine context 2560 = 2048 + 512 | typed `SlmEngineException(PAYLOAD_REJECTED)`, the same refusal the remote path gives for 8003 (ENGINE_REJECTED_INPUT, F-18, F-6) |
+| Output tokens | 512 | `maxOutputToken = 512` | LENGTH, seam refuses OUTPUT_TRUNCATED |
+| Wall clock | 40 s | 40 s (4.5) | TIMEOUT |
+
+- The 0.18.0 Kotlin API exposes no tokenizer (VERIFIED: no tokenize `external fun` in
+  `LiteRtLmJni.kt`), so the bound is enforced by context size. The G-6 GPU-machine token-parity
+  run proves every golden prompt is 2048 tokens or fewer.
+- Required device test (Y-7'): feed an over-length prompt and assert it surfaces as a typed error
+  mapped to ENGINE_REJECTED_INPUT. **If the runtime truncates silently instead of failing, STOP
+  and report: that needs a new ruling.**
+- Proposed backstop, additive and fail-closed (YOUR CALL Y-20): after `onDone`, if
+  `getBenchmarkInfo().lastPrefillTokenCount > 2048`, discard the output and throw
+  PAYLOAD_REJECTED. It converts any silent truncation or over-length acceptance into the same
+  refusal, independent of the runtime's behaviour.
+
+### 5.6 Tokenization-divergent text (G-5, PENDING T1)
+
+G2 found ids differ for text with HTML-like tags, `<unusedN>` and whitespace runs (first
+differing position 5, 43 server tokens against 30 on litertlm), and that litertlm has 6,386
+further atomic pieces of those kinds that the service guard does not reject (G2 REPORT
+section 2). `<unusedN>` is already refused before any call on both engines (it is in
+`CONTROL_TOKENS`, F-7). HTML-like tags and whitespace runs are not.
+
+Candidate rule, not final: `buildPrompt` normalizes whitespace in record-derived fields for BOTH
+engines, and the input guard refuses any prompt containing a construct T1 shows to diverge (a
+refusal fails closed and the record stays readable). This would change prompt bytes for the remote
+engine too, so it implies a `PROMPT_TEMPLATE_VERSION` bump. The final rule comes in a later ruling.
+
+---
+
+## 6. Identity and integrity
+
+### 6.1 Local identity (G-4)
+
+- Artifact: `litert-community/gemma-4-E2B-it-litert-lm` commit
+  `b3ca0d2f076785a8f4b2219ddbd2bdb99954eae1`, file `gemma-4-E2B-it.litertlm`, 2,588,147,712 B,
+  sha256 `181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c` (equals the Hub LFS
+  hash) (G2 REPORT section 1).
+- `servedModelId()` for LOCAL returns exactly
+  `litert-community/gemma-4-E2B-it-litert-lm@b3ca0d2f076785a8f4b2219ddbd2bdb99954eae1#181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c`,
+  built from the verified digest of the file actually loaded, never from a constant. A digest
+  mismatch means init never happens, so there is no id at all.
+- Gate (G-4): `servedModelMatchesSanitizer` stays an exact string comparison, now against an
+  explicit allowlist of two exact entries: `SANITIZER_TARGET_MODEL_ID` (remote, unchanged) and the
+  local id above. No prefix, contains or case folding. The exact match is never loosened.
+- `answeredBy()` LOCAL: `modelId` the local id, `artifactSha256` the verified digest,
+  `accelerator`, `runtimeVersion = "litertlm-android 0.18.0"`.
+
+### 6.2 Vocabulary equivalence (R5, met per G-4)
+
+- G2 VERIFIED: all 24 service special tokens are present in the litertlm SentencePiece vocab at
+  identical ids, none missing (G2 REPORT section 2).
+- Device test: `CONTROL_TOKENS` covers all 24. **It fails today on four**: the G1 list contains
+  `<|image>`, `<image|>`, `<|audio>`, `<audio|>`, and `NAMED_RESERVED` (`SlmStreamSanitizer.kt:173-180`,
+  VERIFIED) carries `<|image|>`, `<|audio|>`, `<|video|>` but not those four. These are the four
+  boundary markers the sanitizer KDoc says were "not guessed" (:160-167, VERIFIED); G1 now gives
+  their spellings. Slice S6 adds them, with the test as the gate, in the same commit as the
+  allowlist entry. Not a contradiction: the ruling requires the test, and the test drives the fix.
+- The 6,386 further litertlm atomic pieces (G2 REPORT section 2) are G-5 / T1's subject, not R5's.
+
+### 6.3 Artifact sha256 before every engine start (Y-8, closes A-04 for local)
+
+- Full SHA-256 of the 2,588,147,712 B file on the `slm-local` thread before `Engine.initialize()`,
+  on every engine start (first use and after every release). Mismatch: UNAVAILABLE, reason
+  `artifact_digest_mismatch`, never loaded.
+- Cost INFERRED at a few seconds on the Pixel; the harness records the measured hash time per
+  engine start (Y-8).
+- This also pins the bundled template (5.1) and the stop ids (5.3), both inside the file.
+
+---
+
+## 7. Guards: backend-only controls on the local path
+
+| Remote control (F-18) | Purpose | Local replacement | Reason |
+|---|---|---|---|
+| Facility scope (`services/slm.py:406-409`) | Stop a caller reading another facility's case | None new | The record comes from the device's own DB via `ApprovedRecordReader` (F-8), which holds only this device's synced or created cases. INFERRED: no cross-facility data exists locally. |
+| `phi_guard` case id + 10-digit run (`adapters/slm/phi_guard.py:58-81`) | Stop identifiers leaving the backend toward the GPU host | Case-id absence kept as a prompt-construction invariant | No egress on the local path. S4 adds a JVM test that `buildPrompt` output never contains `snapshot.caseRecordId`. The digit-run rule is an egress rule and does not apply. |
+| Circuit breaker (`services/slm.py:435`) | Stop hammering a failing remote | Init-failure latch | After GPU and CPU init both fail, the engine stays UNAVAILABLE until a release resets it. Prevents a slow failing init per request. |
+| `slm_call_log` | Per-call operational record | The four device audit rows (section 8), synced | Engine, accelerator, model id, sha256, runtime, template version, prompt chars, token counts, duration, outcome. |
+| `SLM_CALL_FORWARDED` / `SLM_CALL_FAILED` | Server-origin audit | `SLM_READBACK_INVOKED` with `answeredBy()` and outcome | The server cannot see a local call. Joining remote rows to device rows needs a device request id: Y-9, deferred and filed. |
+| Auth hop (service token) | Authenticate backend to GPU | None | No network hop. |
+
+---
+
+## 8. Audit rows (R6, closes A-03)
+
+Written by `SlmReadbackUseCase`, so one code path covers both engines. `AuditLogger` is injected
+into the use case (new constructor parameter; touches `SlmReadbackUseCaseTest.kt:164` and
+`ReportReadbackTest.kt:457`, VERIFIED).
+
+| Row | When | Payload fields (`auditPayload`) |
+|---|---|---|
+| `SLM_READBACK_INPUT_REFUSED` | Any return before `engine.generate` (`SlmReadbackUseCase.kt:322-365`) | `reason`, `tier`, `template_version`, `question_chars`, `prompt_chars` (null if not built) |
+| `SLM_READBACK_INVOKED` | Exactly once per call that reached `engine.generate`, written after the flow ends so it carries the outcome | `engine`, `accelerator`, `model_id`, `artifact_sha256`, `runtime_version`, `template_version`, `tier`, `prompt_chars`, `max_output_tokens`, `finish_reason`, `engine_error`, `duration_ms`, `thermal_status` (Y-15) |
+| `SLM_READBACK_SANITIZER_ACTIVITY` | After every collected generation, including zero counts | `spans`, `characters`, `dropped_tokens`, `unknown_tokens` (`SlmSuppression`, F-7) |
+| `SLM_READBACK_OUTPUT_SUPPRESSED` | Any refusal after generation: SERVED_MODEL_MISMATCH, OUTPUT_TRUNCATED, OUTPUT_NOT_GROUNDED (:393-410) | `reason`, `engine`, `model_id` |
+
+Rules: `caseRecordId` in its column, `patientId = null`. Never the question, prompt, output, drug
+name or diagnosis (F-9). Every value is an enum name, count, id or digest. An audit write failure
+never changes the readback result (`CancellationException` rethrown, other failures logged).
+
+Sync: existing device audit outbox; actions already allowlisted (F-10), no backend change.
+
+Tests (S4): one per row per trigger class; refused-before-engine writes INPUT_REFUSED and not
+INVOKED; sentinel strings placed in question and output are absent from every payload; both
+engines through the fake (`answeredBy()` LOCAL and REMOTE); the persisted Room row is read back,
+not only the fake's call list (CLAUDE.md backend convention applied to the device); Y-1's
+unreachability test for staging and prod with the flag false.
+
+---
+
+## 9. Artifact delivery
+
+### 9.1 Dev method (API 37, debuggable dev build)
+
+Location: `/data/user/0/com.example.samdapp.dev/files/slm/181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c.litertlm`.
+Content-addressed so a wrong file cannot pass by name.
+
+Operator steps (device `adb-67041FDKX004ZY-Eggjhy._adb-tls-connect._tcp`):
+```
+SHA=181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c
+F=/media/sandesh/extra-ssd/samd-slm-parity/model/gemma-4-E2B-it.litertlm
+sha256sum "$F"                                   # must print $SHA
+adb -s <dev> push "$F" /data/local/tmp/slm.litertlm
+adb -s <dev> shell "run-as com.example.samdapp.dev mkdir -p files/slm"
+adb -s <dev> shell "cat /data/local/tmp/slm.litertlm | run-as com.example.samdapp.dev sh -c 'cat > files/slm/$SHA.litertlm'"
+adb -s <dev> shell "run-as com.example.samdapp.dev sha256sum files/slm/$SHA.litertlm"
+adb -s <dev> shell rm /data/local/tmp/slm.litertlm
+```
+INFERRED to work (`run-as` needs a debuggable package; the pipe avoids the app domain reading
+`/data/local/tmp`). Not executed yet; slice S2 runs it first and records output. The model file is
+downloaded on the GPU machine or desktop by the operator (not gated, G2 REPORT section 1) and
+copied to the SSD path above.
+
+Missing file: UNAVAILABLE, reason `artifact_missing`. Corrupt or wrong file: UNAVAILABLE, reason
+`artifact_digest_mismatch`, file left in place, never loaded.
+
+### 9.2 ASR comparison
+
+ASR weights ship as APK assets (`encoder.int8.onnx` 652,184,296 B, VERIFIED S1 listing), making
+the dev APK about 760 MB. A 2.59 GB `.litertlm` is never an APK asset (INFERRED: Play size limits
+and install cost).
+
+### 9.3 Production options (Y-10, deferred)
+
+| Option | Pin and integrity | Tradeoff |
+|---|---|---|
+| Play AI packs / asset delivery | Play-signed, versioned with the release | Needs Play; government MDM fleets may not use it |
+| MDM push to app-specific storage | Operator file + our sha256 check | Per-state MDM, no uniform path |
+| First-run download from backend/core | Our server, our sha256, resumable | 2.59 GB over rural links; endpoint, storage, a partial-download hazard |
+| Field-engineer sideload | Dev method without `run-as` | Not viable on non-debuggable builds |
+
+---
+
+## 10. Memory, thermal, residency
+
+- Desktop CPU peak RSS 1,304,748 to 1,363,720 kB (G2 REPORT section 4), well under the 2.59 GB
+  file size (INFERRED: weights memory-mapped). Phone GPU buffers untested.
+- ASR resident about 630 MB plus ORT arena (F-14). On the 16 GB Pixel (4.3 GB MemAvailable at
+  probe) both co-reside; on a 4 to 6 GB field phone that is not established (Y-12, deferred).
+- Release policy (SLM only; ASR release is the separate PR, Y-11):
+  - On `onTrimMemory(level >= TRIM_MEMORY_BACKGROUND)` and after 5 minutes idle (Y-16), close the
+    `Engine`. Reload pays hash + init again; the harness records cold-init time.
+  - A `ComponentCallbacks2` registered from the dev source set only (dev `Application` hook or an
+    `androidx.startup` initializer in the dev manifest), so staging and prod are untouched.
+  - Never release mid-generation: release takes the engine `Mutex` and defers if busy.
+- Thermal (Y-15): before a run, `PowerManager.getCurrentThermalStatus()`; at
+  `THERMAL_STATUS_SEVERE` or above, refuse with UNAVAILABLE reason `thermal`. Status recorded in
+  `SLM_READBACK_INVOKED` (`thermal_status`).
+- Field-phone capability probe (RAM, `isLowRamDevice`, OpenCL presence, free storage, Android
+  version): described only; deferred to a fleet ruling (Y-12).
+
+---
+
+## 11. Parity harness
+
+Root: `/media/sandesh/extra-ssd/samd-slm-parity/` (exists). JVM and Gradle processes run with
+`TMPDIR=/media/sandesh/extra-ssd/tmp` and `-Djava.io.tmpdir=/media/sandesh/extra-ssd/tmp`.
+
+### 11.1 Golden export (R8, Y-13, Y-17)
+
+- Dev-only JVM test `app/src/testDev/java/com/example/samdapp/slm/GoldenPromptExport.kt`, gated by
+  a system property so CI writes nothing: builds `ApprovedRecordSnapshot`s from synthetic, mock-only
+  data and calls the real `buildPrompt` (F-4). Writes `golden/prompts-v1.jsonl`:
+  `{id, template_version, prompt, prompt_sha256, question, question_script, tier, snapshot_fields}`.
+  Also writes `golden/control-tokens.txt` (the exact `CONTROL_TOKENS` list) for the comparator.
+- 120 records (Y-17). Questions in roughly equal thirds (Y-13): English, Hindi in Devanagari,
+  romanized Hindi. Record coverage, each cell at least 3: every `kernelDecision` value; diagnosis
+  null, short, long (near the 6000-char prompt bound), with numerals, with units; medications 0, 1,
+  5, 12 lines with strengths, frequencies, durations; referral yes and no; one question per
+  `ALLOWED_INTENTS` family (`SlmScopeGate.kt:103-110`) per language; 10 questions the worker gate
+  refuses, to prove they are never sent.
+- Records are generated, never hand-written; prompts come only from `buildPrompt`; no real
+  patient data (R8).
+
+### 11.2 Server run and token parity (operator, GPU machine)
+
+`scripts/slm-parity/run_server.py` (committed, reviewed, stdlib only), run by the operator:
+```
+read -rs SLM_SERVICE_TOKEN; export SLM_SERVICE_TOKEN
+python3 -I scripts/slm-parity/run_server.py --base-url <service URL> \
+  --in golden/prompts-v1.jsonl --out runs/server-bf16.jsonl
+unset SLM_SERVICE_TOKEN
+```
+Same body the backend sends (F-18). Records `text`, `finish_reason`, `model_id`, `model_sha256`,
+usage, wall time. The token never reaches me.
+
+A second operator script `scripts/slm-parity/token_parity.py` (G-6) renders each golden prompt
+with the HF tokenizer at 3e22461f and with the litertlm tokenizer (BOS prepended), writes
+`golden/server-render-v1.jsonl` (server rendering, for the 5.1 byte test) and
+`runs/token-parity.jsonl` (`{id, server_ids_len, litertlm_ids_len, first_diff}`), and fails if any
+prompt exceeds 2048 tokens (Y-7').
+
+### 11.3 Desktop run
+
+Python litert-lm 0.18.0 on the GPU machine, generic `.litertlm`, CPU, `create_conversation` with
+the bundled template (the device path, G2 REPORT section 3), thinking off, sampler and
+`max_output_tokens` as 5.2, `max_num_tokens=2560`. Writes `runs/desktop-cpu.jsonl`. G2's three
+probes (section 4) are the smoke evidence; the golden run is new.
+
+### 11.4 Pixel run
+
+- Dev-only instrumented test `app/src/androidTestDev/java/com/example/samdapp/slm/LocalSlmParityHarness.kt`.
+  Reads `prompts-v1.jsonl` from the app files dir (same `run-as` pipe), runs `LocalSlmEngine` per
+  backend (GPU, CPU), applies `SlmStreamSanitizer`, writes one line per prompt per backend:
+  `{id, backend, raw_text, sanitized_text, finish_reason, identity, hash_ms, init_ms, ttft_ms,
+  prefill_tokens, prefill_tps, decode_tokens, decode_tps, total_ms, pss_kb_peak, thermal_before,
+  thermal_after}`.
+- Run: `./gradlew :app:installDevDebug :app:installDevDebugAndroidTest`, then
+  `adb -s <dev> shell am instrument -w -e class com.example.samdapp.slm.LocalSlmParityHarness
+  com.example.samdapp.dev.test/androidx.test.runner.AndroidJUnitRunner`, then pull via
+  `run-as ... cat` to `runs/pixel-<backend>.jsonl`.
+- Calls the engine directly, not the seam. The seam is covered with the fake.
+- Performance (R7, measured first): one warm-up, then 20 consecutive generations per backend;
+  `Debug.getPss()` sampled every 250 ms; thermal before and after.
+
+### 11.5 Comparator (R7 + G-6)
+
+`tools/slm-parity/compare.py` (stdlib only, `python3 -I`). Inputs: golden file, run files,
+token-parity file; all output text post-sanitizer. Hard gates, 100 percent, deterministic:
+
+| Gate | Computation |
+|---|---|
+| Numbers | Extract `[0-9]+(?:[.,/][0-9]+)*` from the output; each must appear verbatim in the prompt's APPROVED RECORD section |
+| No control tokens | No literal from `golden/control-tokens.txt` in the output, plus the bracket shape rule |
+| No fact absent from record | Port of `outputIsGrounded` (`SlmScopeGate.kt:155-162`): no drug-shaped token outside the medication lines, no dose numeral outside the record. A cross-check test runs Kotlin and Python over one fixture file and asserts identical verdicts. Applied to every tier |
+| Correct language (Y-13) | Dominant script of the output's letters (Latin, Devanagari), computed after removing every substring copied verbatim from the record (numbers, units, drug names), must equal the question's script; romanized Hindi questions expect Latin |
+| Prompt token-id parity (G-6) | `runs/token-parity.jsonl`: every golden prompt has identical id sequences, 120 of 120 |
+
+Reported, not gated: exact-match rate vs server; chrF vs server (stdlib, character n-grams,
+n = 6, beta = 2). Disagreements go to `review/blind-sample.csv`: 30 pairs, or all disagreements if
+fewer, stratified by language, engine labels stripped, order shuffled with a fixed seed (Y-17).
+
+G2 already shows the expected shape: short constrained outputs match exactly; free-form Hindi
+output diverged in wording while carrying 128/84, 76 and 97 correctly on both (G2 REPORT
+section 4). The hard gates test exactly that property.
+
+Performance gates are set after the baseline (R7).
+
+---
+
+## 12. F1 overlap and merge order (Y-14)
+
+Files both branches touch (VERIFIED, `git diff --stat origin/master...origin/feat/local-network-permission`):
+
+| File | F1 change | This PR | Conflict |
+|---|---|---|---|
+| `domain/slm/SlmEngine.kt` | +5 (`SlmEngineError.LOCAL_NETWORK_NOT_ALLOWED`) | `answeredBy()` and types | Textual, trivial |
+| `domain/slm/SlmReadbackUseCase.kt` | +5 | audit writes, `AuditLogger` param | Textual near `engineRefusalFor` |
+| `data/remote/RemoteSlmEngine.kt` | +2 | `answeredBy()` | Low |
+| `test/.../SlmReadbackUseCaseTest.kt` | +2 | constructor, audit tests | Textual |
+| `test/.../RemoteSlmEngineTest.kt` | +1 | `answeredBy()` tests | Low |
+| `presentation/report/SlmRefusalCopy.kt`, `res/values/strings.xml`, `di/NetworkModule.kt` | F1 only | none planned | none |
+
+Semantics: F1's `LOCAL_NETWORK_NOT_ALLOWED` is remote-only; the local engine never produces it.
+F1's "SLM bodies never logged" rule has no HTTP to apply to locally; the local engine never logs
+prompt or output, enforced by a source-scan test in S2 (same shape as F1's scan guard).
+
+Merge order (ruled): F1 merges first if both are ready at once; this branch is never blocked on
+F1; whichever merges second merges master in with a merge commit, no rebase.
+
+---
+
+## 13. Risk and SOUP (all PROPOSED, AWAITING OPERATOR SIGN-OFF)
+
+### 13.1 Amendments to existing rows
+
+- **H-22** (SLM refuses nothing on its own): applies equally to the local engine; the seam's
+  controls are engine-independent; the narrowed flavor guard (4.1) keeps the local engine off the
+  product path.
+- **H-23** (reasoning channel leaks): thinking disabled on the Conversation (G-1'); the artifact
+  reports no thinking support (G2 REPORT section 3); sanitizer activity row now written (R6).
+- **H-24** (open doctor tier on unverified role): local inference has no backend attribution row;
+  replaced by the device audit row carrying `tier`.
+- **H-25** (on-device latency and memory): primary risk of this PR. Evidence: G2 desktop timings
+  and RSS (section 4), the S2 baseline; controls: release policy, thermal refusal, init latch.
+- **H-27** (unverified generated text on a clinical artifact): the parity gates are a verification
+  activity for the local engine; they make the engines comparable, not the output verified. G2
+  shows free-form divergence under greedy on both sides (section 5).
+
+### 13.2 New rows
+
+| ID | Hazard | Primary controls |
+|---|---|---|
+| H-47 | The local engine produces different clinical content from the server for the same approved record (numerics, omitted medicine, added fact) and the worker trusts it equally | R7 hard gates at 100 percent; engine named in audit; local id passes the identity gate only through its exact allowlist entry (G-4) |
+| H-48 | A substituted, corrupted or partially copied `.litertlm` is loaded, carrying a different template, vocabulary or stop ids | Full SHA-256 before every engine start (6.3); content-addressed file name; refusal on mismatch |
+| H-49 | Text the two tokenizers split differently (HTML-like tags, whitespace runs) makes the local engine see a different prompt from the server | G-5 candidate rule, PENDING T1; G-6 token-id parity gate on the golden set |
+| H-50 | Two resident models exhaust memory, the OS kills the app mid-encounter, unsaved clinical work is lost | SLM release on trim and idle; never mid-generation; PSS baseline; ASR release (Y-11 PR); fleet probe (Y-12) |
+| H-51 | Sustained generation heats the phone; readbacks time out or the worker abandons the screen | Pre-run thermal refusal at SEVERE (Y-15); 40 s deadline; thermal in audit; 20-run measurement |
+| H-52 | A GPU init failure falls back to CPU and slower or different output is not attributable | Fallback only at init; accelerator in every audit row; parity run per backend |
+| H-53 | The runtime silently truncates an over-length prompt and answers from a partial record | Context 2560; G-6 proves golden prompts fit; Y-7' device test (STOP if silent truncation); proposed prefill-count backstop (Y-20) |
+
+### 13.3 SOUP entries
+
+- **LiteRT-LM Android runtime** `com.google.ai.edge.litertlm:litertlm-android:0.18.0`, Apache-2.0,
+  AAR sha256 `706cbb8a...595f`, `liblitertlm_jni.so` arm64 22,155,680 B, tag `v0.18.0` @
+  `b2f686e2`. Transitives gson 2.14.0, kotlin-reflect 2.4.0, coroutines 1.11.0. Validation: S1
+  build, S2 on-device init per backend, S5 parity.
+- **LiteRT GPU accelerator** `litert-gpu:2.3.0` + `litert:2.3.0`: only if S2 shows GPU needs it
+  (Y-4).
+- **Gemma 4 E2B `.litertlm` artifact**: `litert-community/gemma-4-E2B-it-litert-lm` @
+  `b3ca0d2f076785a8f4b2219ddbd2bdb99954eae1`, `gemma-4-E2B-it.litertlm`, 2,588,147,712 B, sha256
+  `181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c`; not gated. Licence (G-7):
+  the model card says apache-2.0 and the repo has no LICENSE file (G2 REPORT section 1); both facts
+  recorded; confirmation against the upstream Gemma 4 terms filed for the sign-off batch.
+  Embedded template 11,995 B sha256 `02b3091a...f629` (G2 REPORT section 2). Validation: G2
+  vocabulary and stop-id facts, R7 parity.
+- **Missing remote entry**: `google/gemma-4-E2B-it` rev 3e22461f, bf16 weights sha256
+  `2db5482b20d746879bb3ef79b5203e9075a2e2b98f54ec7c2f281c1477ddc550`, served by transformers 5.5.0
+  + torch 2.4.1+cu124, chat template 18,569 B (G2 REPORT sections 1 and 2). SOUP today with no
+  entry (F-21). Added in the same record.
+
+---
+
+## 14. Build slices for STEP 2
+
+Each slice: its own commits, its tests, a mutation row per new guard (snapshot-based; an empty
+test-results dir is RED). T1 blocks nothing below except the final G-5 rule.
+
+| Slice | Content | Files | Tests | Mutation rows | Model |
+|---|---|---|---|---|---|
+| S1 | `litertlm-android:0.18.0` as `devImplementation`; dev manifest `uses-native-library` for `libvndksupport.so` and `libOpenCL.so` (`required="false"`) | `gradle/libs.versions.toml`, `app/build.gradle.kts`, `app/src/dev/AndroidManifest.xml` | `compileDevDebugKotlin`; `dependencyInsight` for `kotlin-stdlib`, `kotlin-reflect`, `gson` (reported per Y-3); APK scan: staging and prod contain no `litertlm` class or `.so`; `zipalign -c -P 16` on the dev APK | `devImplementation` to `implementation`: staging APK scan RED | Sonnet |
+| S2 | `LocalSlmEngine` (dev): hash before init, GPU then CPU at init only, init latch, dedicated dispatcher, single-flight, cancel, 40 s, overwritePromptTemplate-null assertion, no-log source scan; dev Hilt holder not bound to `SlmEngine`; narrowed flavor guard; adb delivery executed and recorded; GPU init with AAR alone recorded (Y-4) | `src/dev/.../data/slm/LocalSlmEngine.kt`, `src/dev/.../di/LocalSlmModule.kt`, `SlmEngineIsUnreachableFromPresentationTest.kt` | JVM over a fake native seam: mutex, cancel calls `cancelProcess`, timeout gives TIMEOUT, digest mismatch never inits, latch, flag assertion; device smoke via `am instrument` | skip digest check; allow mid-generation fallback; allow a second concurrent call; guard admits a second flavor file | **Opus** |
+| S3 | Conversation path per G-1', G-2', G-3', Y-7': bundled template, thinking off, one conversation per request, explicit sampler and `maxOutputToken`, context 2560, finish reason from benchmark decode count, over-length mapping; channels per Y-19; backstop per Y-20 | `LocalSlmEngine.kt` | JVM: built `ConversationConfig` and `SamplerConfig` field by field; finish derivation table. Device: `renderMessageIntoString` equals server rendering minus `<bos>` for all 120 golden prompts; trim test (ASCII, CRLF, U+00A0, U+2003, U+200B); prompts (a) and (b) finish STOP; capped long prompt finishes LENGTH; over-length prompt surfaces as ENGINE_REJECTED_INPUT (STOP and report if silent truncation) | one sampler field left default: config test RED; finish derivation always STOP: LENGTH test RED; template override set: flag test RED | Sonnet |
+| S4 | `answeredBy()` and the R6 audit rows in the seam, both engines; case-id-absence prompt test | `SlmEngine.kt`, `RemoteSlmEngine.kt`, `SlmReadbackUseCase.kt`, two fakes | per-row trigger tests; INPUT_REFUSED without INVOKED; sentinel absence; persisted Room row; Y-1 staging/prod unreachability | drop one row; question text in a payload; INVOKED written before the engine | **Opus** |
+| S5 | Parity harness: golden export (120, thirds by language), server and token-parity scripts, desktop script, Pixel instrumented harness, comparator with five hard gates and the Kotlin/Python cross-check | `testDev/.../GoldenPromptExport.kt`, `androidTestDev/.../LocalSlmParityHarness.kt`, `scripts/slm-parity/*`, `tools/slm-parity/*` | comparator fixtures per gate; Kotlin/Python grounding agreement; language-gate fixtures for all three question types | number gate ignores decimals; language gate counts copied record text | Sonnet |
+| S6 | Four missing control-token literals; `CONTROL_TOKENS` covers the 24 G1 tokens; exact local allowlist entry (G-4) | `SlmStreamSanitizer.kt`, `SlmStreamSanitizerTest.kt` | coverage test over the 24; allowlist has exactly two exact entries; prefix or case variant of either is refused | remove one of the four literals; add a prefix match | Sonnet, Opus review of the identity change |
+| S7 | SLM residency: dev-only `ComponentCallbacks2`, release on trim and 5 min idle, thermal pre-check at SEVERE | dev holder, dev initializer | trim levels release or not; release waits for a running generation; thermal refusal | release mid-generation allowed | Sonnet |
+| S8 | Controlled docs: risk rows and SOUP entries from section 13, PROPOSED | `docs/quality/risk-management-file.md`, `docs/quality/soup-validation-record.md` | none | n/a | **Opus** |
+
+Order: S1, S2, S4, S6 (no external input), then S3 and S5 (need the G-6 run for the rendering
+and token files), then S7, S8. The final G-5 rule lands after T1 as its own change.
+
+---
+
+## 15. Open items
+
+### 15.1 Findings for the operator
+
+- Four device control-token literals are missing relative to G1's 24 (`<|image>`, `<image|>`,
+  `<|audio>`, `<audio|>`), section 6.2. Fixed in S6 under G-4's coverage test.
+- `ExperimentalFlags.overwritePromptTemplate` is a process-global that silently replaces the
+  bundled template when set (`Engine.kt:150,163`); S2 asserts it is null.
+- The finish reason is derived, not reported, by the runtime (5.3).
+- G-3' names G2 probe prompts (a) and (b) as "golden short prompts", while R8 limits golden
+  prompts to `buildPrompt` output. Read here as engine behaviour tests outside the golden record
+  set (5.3); no record data is involved. Confirm at review.
+
+### 15.2 PENDING
+
+- T1 (G-5): tokenization-divergence characterization; the final rule for HTML-like tags and
+  whitespace runs.
+
+### 15.3 YOUR CALL (new at M2)
+
+- Y-19 `channels = emptyList()` on the Conversation so channel text reaches the sanitizer
+  (proposed), or leave the runtime default.
+- Y-20 Prefill-count backstop: refuse when `lastPrefillTokenCount > 2048` even if the runtime did
+  not fail (proposed, additive to Y-7').
+
+Filed by ruling (not this PR): Y-9 device request id; Y-10 production delivery; Y-11 ASR release;
+Y-12 fleet capability probe; G-7 licence confirmation; Tensor G6 follow-up (Y-18).
+
+---
+
+## 16. Rulings 2026-10-15
+
+Appended verbatim. The third batch's G-1, G-2, G-3 and Y-7 are superseded by G-1', G-2', G-3'
+and Y-7' below them; the superseded text is kept for the record.
+
+### Third batch (gate review of M1)
+
+Y-0 G2 is in. A Gallery smoke test of the generic model on GPU and CPU runs separately; the S2 harness produces the real numbers.
+Y-1 Accepted, provided the existing flag-off-in-every-flavor tests stay green and a test asserts the new audit writes are unreachable in staging and prod while SLM_READBACK_ENABLED is false.
+Y-2 litertlm-android 0.18.0.
+Y-3 Fallback order: (1) build as is and report the resolved kotlin-stdlib and kotlin-reflect versions from dependencyInsight; (2) if it fails, pin the newest litertlm-android whose Kotlin metadata is 2.3 or lower, and record it; (3) a Kotlin bump only as its own PR. Never exclude kotlin-reflect.
+Y-4 Accepted.
+Y-5 Keep x86_64 in dev (F1 Phase 3 uses an API 36 AVD). The release ABI split stays on the housekeeping backlog.
+Y-6 Superseded by G-1.
+Y-7 Count prompt tokens before generation with the engine's own tokenizer if the 0.18.0 Kotlin API exposes it (cite it); otherwise after prefill and before any decode. No character-only check. Over 2048 tokens is refused with the same refusal the remote path gives for SAMD-SLM-8003. [SUPERSEDED by Y-7']
+Y-8 Accepted. The harness records the measured hash time per engine start.
+Y-9 Deferred: it changes the backend's StrictModel request schema, and the backend is untouched in this PR. Filed.
+Y-10 Deferred.
+Y-11 Separate PR (it touches all flavors). Filed.
+Y-12 Deferred to a fleet ruling.
+Y-13 The golden questions are English, Hindi in Devanagari, and romanized Hindi, in roughly equal thirds. The "correct language" gate is deterministic: the dominant script of the output's letters, excluding substrings copied verbatim from the record (numbers, units, drug names), must match the question's script.
+Y-14 F1 merges first if both are ready at once. The on-device branch is never blocked waiting on F1. Whichever merges second merges master in with a merge commit (no rebase).
+Y-15 Refuse at THERMAL_STATUS_SEVERE and above. Record the thermal status in the audit row.
+Y-16 5 minutes idle to start. The harness records cold-init time; revisit if init exceeds 10 s.
+Y-17 120 golden records. A blind clinician sample of 30 pairs (or all disagreements if fewer), stratified by language.
+Y-18 Confirmed: the Google_Tensor_G6 artifact (3,313,938,293 B, exists per G2) is out of this PR, and is the follow-up PR right after the generic path passes parity.
+G-1 Prompt path: a LiteRT-LM Session with the template disabled, and the prompt pre-rendered by our code as '<|turn>user\n' + trimmed prompt + '<turn|>\n<|turn>model\n' with NO literal <bos> (the runtime prepends BOS id 2; literal <bos> text tokenizes as 3 ordinary tokens, G2 section 2). Cite the 0.18.0 Kotlin API for the raw-string path. If Kotlin lacks it, STOP and report (the fallback would be the Conversation API with the bundled template behind a byte-compare test, and needs a new ruling). Trimming must match the server's Jinja trim exactly: the memo states which characters each side strips, and a test covers ASCII and Unicode whitespace at both ends (U+00A0, U+2003, U+200B, CRLF). A JVM test asserts our rendering equals the server rendering minus the leading <bos> for every golden prompt. [SUPERSEDED by G-1']
+G-2 Sampler: set every field explicitly (top_k 1, top_p 1.0, temperature 0.0, seed 20260918), thinking disabled, max output 512. Never rely on defaults (unset fields default to top_p 0.95 and temperature 1.0, G2 section 3). [SUPERSEDED by G-2']
+G-3 Stop ids: the engine must report exactly {1, 50, 106} at init, or init is refused with a typed error. Test it. [SUPERSEDED by G-3']
+G-4 Identity: R5's vocabulary equivalence is met by the G2 VERIFIED fact (all 24 service special tokens at identical ids) plus a device test that CONTROL_TOKENS covers them. The local model passes the identity check only through an explicit allowlist entry (model id, HF commit b3ca0d2f076785a8f4b2219ddbd2bdb99954eae1, artifact sha256 181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c). Never loosen the exact match.
+G-5 Tokenization-divergent text (HTML-like tags, <unusedN>, whitespace runs): PENDING T1, which is a characterization now running on the GPU machine. State the candidate rule: buildPrompt normalizes whitespace in record-derived fields for BOTH engines, and the input guard refuses any prompt containing a construct T1 shows to diverge (a refusal fails closed and the record stays readable). The final rule comes in a later ruling.
+G-6 R7 gets a fifth hard gate: prompt token-id parity of 100 percent on the golden set (HF tokenizer at 3e22461f against the litertlm tokenizer with BOS prepended), computed on the GPU machine.
+G-7 License: the model card says apache-2.0 and the repo has no LICENSE file (G2 section 1). The SOUP entry records both facts. A license confirmation against the upstream Gemma 4 terms is filed for the sign-off batch.
+
+### Replacement rulings (supersede G-1, G-2, G-3 and Y-7)
+
+G-1' Prompt path: the Conversation API with the template BUNDLED in the pinned artifact (do not override it; G2 section 2 shows it renders a single user turn identically to the server, and the artifact sha256 pins it). Thinking disabled. One NEW Conversation per readback request, closed after the request, never reused: no history may accumulate. Required test: for every golden prompt, renderMessageIntoString on the device path must equal the server rendering minus the leading '<bos>', byte for byte. Overriding the template with the server's 18,569 B Jinja is allowed only if that test fails, and needs a new ruling. The Session path and a patched JNI build are rejected.
+G-2' Decoding: set every sampler field explicitly (top_k 1, top_p 1.0, temperature 0.0, seed 20260918) and maxOutputToken 512 explicitly on the Conversation. Never rely on defaults.
+G-3' Stop ids: met offline. G2 VERIFIED {1, 50, 106} for artifact sha256 181938105e...a63c, and the sha256 check before every engine start pins them. On device: a behavioural test asserts that the golden short prompts (a) and (b) end with a STOP finish reason, not LENGTH.
+Y-7' Prompt length: set the engine context to 2560 tokens (2048 prompt plus 512 output, matching G2's max_num_tokens). The GPU-machine token-parity run (G-6) proves every golden prompt is 2048 tokens or fewer. A device test feeds an over-length prompt and asserts it surfaces as a typed error mapped to the same refusal as SAMD-SLM-8003. If the runtime truncates silently instead of failing, STOP and report: that needs a new ruling.
+All other rulings from the previous batch apply unchanged: Y-0 to Y-6, Y-8 to Y-18, G-4, G-5 (PENDING T1), G-6, G-7.
