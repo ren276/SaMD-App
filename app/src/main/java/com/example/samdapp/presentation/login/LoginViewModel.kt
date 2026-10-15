@@ -1,9 +1,12 @@
 package com.example.samdapp.presentation.login
 
+import androidx.annotation.StringRes
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.samdapp.R
 import com.example.samdapp.domain.auth.AuthSession
+import com.example.samdapp.domain.auth.SignInFailureReason
 import com.example.samdapp.domain.auth.SignInResult
 import com.example.samdapp.domain.auth.UserRole
 import com.example.samdapp.presentation.common.isEmulator
@@ -23,6 +26,8 @@ data class LoginUiState(
     val pin: String = "",
     val isSubmitting: Boolean = false,
     val errorMessage: String? = null,
+    /** Set instead of [errorMessage] when the failure is ours to word (Q4): never exception text. */
+    @StringRes val errorRes: Int? = null,
 ) {
     val canSubmit: Boolean get() = name.isNotBlank() && role != null && pin.length in PIN_MIN_LENGTH..PIN_MAX_LENGTH && !isSubmitting
 }
@@ -63,13 +68,13 @@ class LoginViewModel @Inject constructor(
     private val _effects = Channel<LoginEffect>(Channel.BUFFERED)
     val effects = _effects.receiveAsFlow()
 
-    override fun onNameChange(value: String) = _uiState.update { it.copy(name = value, errorMessage = null) }
+    override fun onNameChange(value: String) = _uiState.update { it.copy(name = value, errorMessage = null, errorRes = null) }
 
-    override fun onRoleSelect(role: UserRole) = _uiState.update { it.copy(role = role, errorMessage = null) }
+    override fun onRoleSelect(role: UserRole) = _uiState.update { it.copy(role = role, errorMessage = null, errorRes = null) }
 
     override fun onPinChange(value: String) {
         if (value.length <= PIN_MAX_LENGTH && value.all { it.isDigit() }) {
-            _uiState.update { it.copy(pin = value, errorMessage = null) }
+            _uiState.update { it.copy(pin = value, errorMessage = null, errorRes = null) }
         }
     }
 
@@ -77,7 +82,7 @@ class LoginViewModel @Inject constructor(
         val current = _uiState.value
         if (!current.canSubmit) return
         viewModelScope.launch {
-            _uiState.update { it.copy(isSubmitting = true, errorMessage = null) }
+            _uiState.update { it.copy(isSubmitting = true, errorMessage = null, errorRes = null) }
             _effects.send(LoginEffect.RequestBiometricAuth(subtitle = current.name.trim()))
         }
     }
@@ -95,8 +100,17 @@ class LoginViewModel @Inject constructor(
                     // Home vs. the PIN-change screen is AppNavHost's job, driven by
                     // AuthViewModel's session + must-change-pin state, not this ViewModel's.
                     _uiState.value = LoginUiState()
-                is SignInResult.Failure ->
-                    _uiState.update { it.copy(isSubmitting = false, errorMessage = result.message, pin = "") }
+                is SignInResult.Failure -> {
+                    val res = signInFailureRes(result.reason)
+                    _uiState.update {
+                        it.copy(
+                            isSubmitting = false,
+                            errorMessage = if (res == null) result.message else null,
+                            errorRes = res,
+                            pin = "",
+                        )
+                    }
+                }
             }
         }
     }
@@ -104,4 +118,14 @@ class LoginViewModel @Inject constructor(
     fun onBiometricFailed(message: String) {
         _uiState.update { it.copy(isSubmitting = false, errorMessage = "Can't sign in — $message") }
     }
+}
+
+/** The string for a sign-in failure the app words itself, or null for a server refusal, whose own
+ *  `detail` is shown. Every transport failure lands here, so no exception text reaches the screen. */
+@StringRes
+internal fun signInFailureRes(reason: SignInFailureReason): Int? = when (reason) {
+    SignInFailureReason.SERVER -> null
+    SignInFailureReason.LOCAL_NETWORK_NOT_ALLOWED -> R.string.lnp_denied_login
+    SignInFailureReason.NO_CONNECTION -> R.string.login_failed_no_connection
+    SignInFailureReason.SECURE_CONNECTION_FAILED -> R.string.login_failed_secure_connection
 }

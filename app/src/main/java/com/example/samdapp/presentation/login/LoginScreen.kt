@@ -26,6 +26,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -97,6 +98,9 @@ internal fun LoginContent(uiState: LoginUiState, actions: LoginActions) {
 
             uiState.errorMessage?.let { message ->
                 Text(text = message, color = MaterialTheme.colorScheme.error)
+            }
+            uiState.errorRes?.let { res ->
+                Text(text = stringResource(res), color = MaterialTheme.colorScheme.error)
             }
 
             Button(

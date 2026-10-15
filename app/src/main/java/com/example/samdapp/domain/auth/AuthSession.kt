@@ -51,7 +51,38 @@ sealed interface SignInResult {
      *  session is created either way, but the caller must route to PIN-change before anything else
      *  when true. */
     data class Success(val mustChangePin: Boolean) : SignInResult
-    data class Failure(val message: String) : SignInResult
+
+    /** [message] is the server's own `detail`, shown only for [SignInFailureReason.SERVER]. For a
+     *  transport failure it is exception text (it can quote a LAN address and port, memo 4.1) and
+     *  the screen shows the curated string for [reason] instead (Q4). */
+    data class Failure(
+        val message: String,
+        val reason: SignInFailureReason = SignInFailureReason.SERVER,
+    ) : SignInResult
+}
+
+/** Why a sign-in failed, as far as the screen needs to know. */
+enum class SignInFailureReason {
+    /** The server answered and refused. */
+    SERVER,
+
+    /** The gate stopped the call: the server is on the local network and the permission is off. */
+    LOCAL_NETWORK_NOT_ALLOWED,
+
+    /** No answer: any other `IOException`. */
+    NO_CONNECTION,
+
+    /** A TLS failure. Kept apart from [NO_CONNECTION] for the kernel's reason: the advice is to
+     *  stop and escalate, not to keep trying. */
+    SECURE_CONNECTION_FAILED,
+}
+
+/** Pure, so the mapping is testable without a server. [cause] is null when the server answered. */
+fun signInFailureReasonFor(cause: java.io.IOException?): SignInFailureReason = when (cause) {
+    null -> SignInFailureReason.SERVER
+    is com.example.samdapp.domain.connectivity.LocalNetworkNotAllowedException -> SignInFailureReason.LOCAL_NETWORK_NOT_ALLOWED
+    is javax.net.ssl.SSLException -> SignInFailureReason.SECURE_CONNECTION_FAILED
+    else -> SignInFailureReason.NO_CONNECTION
 }
 
 /** Result of [AuthSession.changePin]. */
