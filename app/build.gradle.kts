@@ -412,6 +412,16 @@ tasks.withType<Test>().configureEach {
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .optional()
 
+    // LiteRtLmIsDevOnlyTest reads this file and the version catalog as text. Neither is on the
+    // test classpath, so without this an edit to either leaves the task UP-TO-DATE and the
+    // guard never runs on the change it exists to catch.
+    inputs.files(
+        layout.projectDirectory.file("build.gradle.kts"),
+        rootProject.layout.projectDirectory.file("gradle/libs.versions.toml"),
+    )
+        .withPropertyName("buildScriptsReadByLiteRtLmGuard")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+
     // ClassifierFixtureMirrorTest asserts this directory is byte-identical to
     // src/test/resources/classifier-fixtures. Without it declared, an edit to only the backend
     // copy leaves the test task UP-TO-DATE and the drift unreported, the same hole as above.
