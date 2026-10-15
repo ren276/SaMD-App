@@ -2,12 +2,15 @@ package com.example.samdapp.di
 
 import android.content.Context
 import com.example.samdapp.BuildConfig
+import com.example.samdapp.data.remote.LocalNetworkGateDns
+import com.example.samdapp.data.remote.LocalNetworkGateInterceptor
 import com.example.samdapp.data.vitalssource.HubAssignment
 import com.example.samdapp.data.vitalssource.HubIdInterceptor
 import com.example.samdapp.data.vitalssource.HubIdMismatchException
 import com.example.samdapp.data.vitalssource.NsdGatewayDns
 import com.example.samdapp.data.vitalssource.PiGatewayApi
 import com.example.samdapp.data.vitalssource.PiGatewayVitalsSource
+import com.example.samdapp.domain.connectivity.LocalNetworkGate
 import com.google.gson.Gson
 import dagger.Module
 import dagger.Provides
@@ -66,8 +69,10 @@ object PiGatewayNetworkModule {
     fun providePiGatewayOkHttpClient(
         @ApplicationContext context: Context,
         assignment: HubAssignment,
+        localNetworkGate: LocalNetworkGate,
     ): OkHttpClient = piGatewayOkHttpClient(
         expectedHubId = assignment.wifiHubId.orEmpty(),
+        gate = localNetworkGate,
         dns = NsdGatewayDns(discover = NsdGatewayDns.nsdDiscovery(context)),
     )
 
@@ -82,13 +87,17 @@ object PiGatewayNetworkModule {
      * absent — without an Android [Context] to hand. Production always gets [NsdGatewayDns]; the
      * default is only ever taken by a test pointing at a MockWebServer on loopback.
      *
-     * [HubIdInterceptor] is the one interceptor installed: every response must name
+     * [HubIdInterceptor] is the one interceptor installed besides the gate: every response must name
      * [expectedHubId] in `X-SaMDPi-Hub-Id`, errors included, or the call fails with
      * [HubIdMismatchException] before a body is read.
+     *
+     * The local-network gate goes first, so a blocked `.local` host never reaches [NsdGatewayDns]
+     * and no mDNS discovery starts (memo 11.1). [gate] has no default: a test passes an open one.
      */
-    fun piGatewayOkHttpClient(expectedHubId: String, dns: Dns = Dns.SYSTEM): OkHttpClient =
+    fun piGatewayOkHttpClient(expectedHubId: String, gate: LocalNetworkGate, dns: Dns = Dns.SYSTEM): OkHttpClient =
         OkHttpClient.Builder()
-            .dns(dns)
+            .dns(LocalNetworkGateDns(dns, gate))
+            .addInterceptor(LocalNetworkGateInterceptor(gate))
             .addInterceptor(HubIdInterceptor(expectedHubId))
             .connectTimeout(2, TimeUnit.SECONDS)
             .readTimeout(5, TimeUnit.SECONDS)

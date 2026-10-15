@@ -1,7 +1,13 @@
 package com.example.samdapp.di
 
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.example.samdapp.data.remote.BearerInterceptor
+import com.example.samdapp.data.remote.LocalNetworkGateDns
+import com.example.samdapp.data.remote.LocalNetworkGateInterceptor
 import com.example.samdapp.data.remote.RetrofitAbhaSource
 import com.example.samdapp.data.remote.RetrofitEvaluateSource
 import com.example.samdapp.data.remote.RetrofitKernelSource
@@ -14,6 +20,8 @@ import com.example.samdapp.data.remote.api.ClinicalApiService
 import com.example.samdapp.data.remote.api.KernelApiService
 import com.example.samdapp.data.remote.api.SyncPushApiService
 import com.example.samdapp.domain.abha.AbdmAbhaSource
+import com.example.samdapp.domain.connectivity.ACCESS_LOCAL_NETWORK_PERMISSION
+import com.example.samdapp.domain.connectivity.LocalNetworkGate
 import com.example.samdapp.domain.kernel.EvaluateKernelSource
 import com.example.samdapp.domain.kernel.RemoteKernelSource
 import com.google.gson.Gson
@@ -21,7 +29,9 @@ import dagger.Binds
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import okhttp3.Dns
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
@@ -85,6 +95,16 @@ object NetworkModule {
             }
         }
 
+    /** The local-network gate every client in the app is built with (memo 11.1). */
+    @Provides
+    @Singleton
+    fun provideLocalNetworkGate(@ApplicationContext context: Context): LocalNetworkGate =
+        LocalNetworkGate(Build.VERSION.SDK_INT) {
+            ContextCompat.checkSelfPermission(context, ACCESS_LOCAL_NETWORK_PERMISSION) == PackageManager.PERMISSION_GRANTED
+        }
+
+    /** The gate interceptor goes after [DevHostInterceptors], which can rewrite the host, so it
+     *  judges the address the call will really use. */
     @Provides
     @Singleton
     fun provideOkHttpClient(
@@ -92,12 +112,15 @@ object NetworkModule {
         bearerInterceptor: BearerInterceptor,
         tokenAuthenticator: TokenAuthenticator,
         @DevHostInterceptors devInterceptors: List<@JvmSuppressWildcards Interceptor>,
+        localNetworkGate: LocalNetworkGate,
     ): OkHttpClient =
         OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
+            .dns(LocalNetworkGateDns(Dns.SYSTEM, localNetworkGate))
             .apply { devInterceptors.forEach(::addInterceptor) }
+            .addInterceptor(LocalNetworkGateInterceptor(localNetworkGate))
             .addInterceptor(bearerInterceptor)
             .authenticator(tokenAuthenticator)
             .addInterceptor(loggingInterceptor)
@@ -120,12 +143,15 @@ object NetworkModule {
         bearerInterceptor: BearerInterceptor,
         tokenAuthenticator: TokenAuthenticator,
         @DevHostInterceptors devInterceptors: List<@JvmSuppressWildcards Interceptor>,
+        localNetworkGate: LocalNetworkGate,
     ): OkHttpClient =
         OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
+            .dns(LocalNetworkGateDns(Dns.SYSTEM, localNetworkGate))
             .apply { devInterceptors.forEach(::addInterceptor) }
+            .addInterceptor(LocalNetworkGateInterceptor(localNetworkGate))
             .addInterceptor(bearerInterceptor)
             .authenticator(tokenAuthenticator)
             .build()

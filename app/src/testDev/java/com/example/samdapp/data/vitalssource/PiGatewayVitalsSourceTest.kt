@@ -2,6 +2,7 @@ package com.example.samdapp.data.vitalssource
 
 import com.example.samdapp.data.remote.SyncGson
 import com.example.samdapp.di.PiGatewayNetworkModule
+import com.example.samdapp.domain.connectivity.LocalNetworkGate
 import com.example.samdapp.domain.vitalssource.AcquisitionRequest
 import com.example.samdapp.domain.vitalssource.AcquisitionResult
 import com.example.samdapp.domain.vitalssource.AcquisitionTransport
@@ -38,7 +39,7 @@ class PiGatewayVitalsSourceTest {
         server.start()
         val api = Retrofit.Builder()
             .baseUrl(server.url("/"))
-            .client(PiGatewayNetworkModule.piGatewayOkHttpClient(HUB))
+            .client(PiGatewayNetworkModule.piGatewayOkHttpClient(HUB, gate = LocalNetworkGate(sdkInt = 0) { true }))
             .addConverterFactory(GsonConverterFactory.create(SyncGson.create()))
             .build()
             .create(PiGatewayApi::class.java)
@@ -322,7 +323,7 @@ class PiGatewayVitalsSourceTest {
     fun `with no Wi-Fi hub assigned every answer is refused, even one with an empty hub header`() = runTest {
         val api = Retrofit.Builder()
             .baseUrl(server.url("/"))
-            .client(PiGatewayNetworkModule.piGatewayOkHttpClient(expectedHubId = ""))
+            .client(PiGatewayNetworkModule.piGatewayOkHttpClient(expectedHubId = "", gate = LocalNetworkGate(sdkInt = 0) { true }))
             .addConverterFactory(GsonConverterFactory.create(SyncGson.create()))
             .build()
             .create(PiGatewayApi::class.java)

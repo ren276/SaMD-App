@@ -3,6 +3,7 @@ package com.example.samdapp.data.vitalssource
 import com.example.samdapp.R
 import com.example.samdapp.data.remote.SyncGson
 import com.example.samdapp.di.PiGatewayNetworkModule
+import com.example.samdapp.domain.connectivity.LocalNetworkGate
 import com.example.samdapp.domain.model.VitalsReading
 import com.example.samdapp.domain.vitalssource.AcquisitionRequest
 import com.example.samdapp.domain.vitalssource.AcquisitionResult
@@ -224,7 +225,7 @@ class RoutingVitalsSourceTest {
         try {
             val api = Retrofit.Builder()
                 .baseUrl(server.url("/"))
-                .client(PiGatewayNetworkModule.piGatewayOkHttpClient("kernelhub1"))
+                .client(PiGatewayNetworkModule.piGatewayOkHttpClient("kernelhub1", gate = LocalNetworkGate(sdkInt = 0) { true }))
                 .addConverterFactory(GsonConverterFactory.create(SyncGson.create()))
                 .build()
                 .create(PiGatewayApi::class.java)

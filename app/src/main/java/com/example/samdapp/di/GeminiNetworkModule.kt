@@ -1,13 +1,17 @@
 package com.example.samdapp.di
 
 import com.example.samdapp.data.remote.GeminiBrandLookupSource
+import com.example.samdapp.data.remote.LocalNetworkGateDns
+import com.example.samdapp.data.remote.LocalNetworkGateInterceptor
 import com.example.samdapp.data.remote.api.GeminiApiService
+import com.example.samdapp.domain.connectivity.LocalNetworkGate
 import com.example.samdapp.domain.kernel.BrandLookupSource
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import okhttp3.Dns
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -43,8 +47,10 @@ object GeminiNetworkModule {
     @Gemini
     @Provides
     @Singleton
-    fun provideGeminiOkHttpClient(): OkHttpClient =
+    fun provideGeminiOkHttpClient(localNetworkGate: LocalNetworkGate): OkHttpClient =
         OkHttpClient.Builder()
+            .dns(LocalNetworkGateDns(Dns.SYSTEM, localNetworkGate))
+            .addInterceptor(LocalNetworkGateInterceptor(localNetworkGate))
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(12, TimeUnit.SECONDS)
             .writeTimeout(10, TimeUnit.SECONDS)
