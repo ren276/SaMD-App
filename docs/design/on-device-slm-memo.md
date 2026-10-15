@@ -1,17 +1,18 @@
 # On-device SLM engine: STEP 1 design memo
 
-Status: DESIGN, reviewed at gate M1 and updated at gate M2 with the G2 report and the operator
-rulings of 2026-10-15 (section 16). Risk and SOUP content in section 13 is PROPOSED, AWAITING
-OPERATOR SIGN-OFF.
+Status: DESIGN, reviewed at gate M1, updated at gate M2 with the G2 report, and at gate M3 with
+the T1 result and rulings batch 5 (section 16). Risk and SOUP content in section 13 is PROPOSED,
+AWAITING OPERATOR SIGN-OFF.
 Branch: `feat/on-device-slm`, worktree `/media/sandesh/extra-ssd/wt-on-device-slm`, base
 origin/master `1ce3b4aada3a3a904302039d6162266b41deb3b7` (VERIFIED, `git rev-parse HEAD`).
 Date: 2026-10-15.
 
 Tag convention: VERIFIED means a file:line in this worktree, a command plus its output, or a
 document at a pinned commit. "G2 REPORT section N" cites the GPU-machine report
-`/mnt/twotb/ondevice-parity/REPORT.md` (VERIFIED there, pasted by the operator at M2). INFERRED
-gives its reason. PENDING T1 marks the one fact still open: the tokenization-divergence
-characterization running on the GPU machine (G-5).
+`/mnt/twotb/ondevice-parity/REPORT.md` (VERIFIED there, pasted by the operator at M2). "T1" cites
+the GPU-machine `T1_REPORT.md` (VERIFIED there, summarised by the operator at M3). INFERRED gives
+its reason. PENDING FIXTURE marks the one input still to arrive: the 70-entry HTML tag piece list
+file and its sha256 (G-5 final, 5.6).
 
 LiteRT-LM citations are to tag `v0.18.0` = commit `b2f686e2ed4718fb84ec398a61dd59ca0f0aff27`,
 sources fetched into `/media/sandesh/extra-ssd/samd-slm-parity/litertlm-src-b2f686e2/`.
@@ -47,8 +48,8 @@ sources fetched into `/media/sandesh/extra-ssd/samd-slm-parity/litertlm-src-b2f6
 - A device request id joining remote `slm_call_log` rows (Y-9, deferred: it changes the backend
   StrictModel).
 - Any change to the backend proxy, the GPU service, or the remote wire contract.
-- Any change to prompt text or `PROMPT_TEMPLATE_VERSION` (`slm-readback-v1`). G-5's candidate
-  whitespace normalization would change `buildPrompt` for both engines and is a later ruling.
+- Any change to prompt text or `PROMPT_TEMPLATE_VERSION` (`slm-readback-v1`). G-5 (final) rules
+  out whitespace normalization; the only prompt-side change is a new pre-call refusal (5.6).
 
 ### 1.3 Untouched, and how that is proven
 
@@ -254,6 +255,13 @@ The JNI library also names, as strings, libraries it may `dlopen` that are not i
   only "Gemma-4-E2B-it TPU" (3.3 GB) downloaded, TPU the only accelerator; BP echo exact in 1.1 s,
   "OK" in 140.0 ms, thermal 0; no TTFT or tok/s (no stats view). Y-0: a Gallery smoke test of the
   generic model on GPU and CPU runs separately; the S2 harness produces the real numbers.
+- Generic "Gemma-4-E2B-it" smoke test (VERIFIED, same report, section "Generic build"): offers
+  GPU and CPU only; both initialised with no error and no silent fallback (reply labels "Model on
+  GPU", "Model on CPU"); BP echo exact on both; latency BP / OK: GPU 2.0 s / 304.0 ms, CPU 2.3 s /
+  527.0 ms; thermal 0. Run under Gallery sampling defaults (TopK 64, TopP 0.95, temperature 1.00),
+  so not a determinism result. GPU initialising inside Gallery says nothing about our APK's need
+  for `litert-gpu` (INFERRED: Gallery ships its own native libraries); Y-4 still decides on S2
+  evidence.
 - The Tensor G6 artifact `gemma-4-E2B-it_Google_Tensor_G6.litertlm`, 3,313,938,293 B, exists in
   the same repo and was not downloaded (G2 REPORT section 1). Y-18 (ruled): out of this PR; it is
   the follow-up PR right after the generic path passes parity, with its own pin and its own
@@ -340,6 +348,12 @@ any `@Binds`/`@Provides` of `SlmEngine` outside `di/SlmNetworkModule.kt` fails, 
   turned into a refusal (`SlmReadbackUseCase.kt:379-380`). Since the conversation is discarded,
   the KDoc note that rollback of internal state is a pending feature (`Conversation.kt:668`,
   "b/450903294") does not matter here.
+- **Emit once, after the post-run checks (Y-20).** The engine buffers the runtime's chunks
+  internally and emits a single chunk only after `onDone`, the prefill backstop (5.5) and the
+  finish derivation (5.3) have run. Any check that fails throws from the flow before the emit, so
+  no output of a refused generation reaches the seam. This matches `RemoteSlmEngine`, which also
+  emits the whole text as one chunk (`RemoteSlmEngine.kt:127`, VERIFIED) and keeps the seam's
+  sanitizer contract unchanged (it accepts any chunking, `SlmEngine.kt:40-45`, VERIFIED).
 
 ### 4.5 Deadline
 
@@ -386,10 +400,10 @@ any `@Binds`/`@Provides` of `SlmEngine` outside `di/SlmNetworkModule.kt` fails, 
 - `thinkingConfig = ThinkingConfig(enableThinking = false, thinkingTokenBudget = 0)`
   (`Config.kt:128-130,275`, VERIFIED; same values G2 used, G2 REPORT section 3; the artifact
   reports "Supports Thinking: NO").
-- `channels`: proposed `emptyList()`, which disables runtime channel parsing so any channel text
-  reaches `SlmStreamSanitizer` instead of being split into `Message.channels` (`Engine.kt` channels
-  handling, "If channels is empty, channels will be disabled", VERIFIED). Not covered by a ruling:
-  YOUR CALL Y-19.
+- `channels = emptyList()` (Y-19, approved), which disables runtime channel parsing so any
+  channel text reaches `SlmStreamSanitizer` instead of being split into `Message.channels`
+  (`Engine.kt` channels handling, "If channels is empty, channels will be disabled", VERIFIED).
+  Parity compares post-sanitizer text on both engines (11.5).
 - Output text: concatenation of `Message.contents.toString()` per emitted message
   (`Message.kt:67,120`, VERIFIED), fed chunk by chunk to the sanitizer.
 
@@ -458,28 +472,68 @@ after the sanitizer on both sides (11.5).
 | Wall clock | 40 s | 40 s (4.5) | TIMEOUT |
 
 - The 0.18.0 Kotlin API exposes no tokenizer (VERIFIED: no tokenize `external fun` in
-  `LiteRtLmJni.kt`), so the bound is enforced by context size. The G-6 GPU-machine token-parity
-  run proves every golden prompt is 2048 tokens or fewer.
-- Required device test (Y-7'): feed an over-length prompt and assert it surfaces as a typed error
-  mapped to ENGINE_REJECTED_INPUT. **If the runtime truncates silently instead of failing, STOP
-  and report: that needs a new ruling.**
-- Proposed backstop, additive and fail-closed (YOUR CALL Y-20): after `onDone`, if
-  `getBenchmarkInfo().lastPrefillTokenCount > 2048`, discard the output and throw
-  PAYLOAD_REJECTED. It converts any silent truncation or over-length acceptance into the same
-  refusal, independent of the runtime's behaviour.
+  `LiteRtLmJni.kt`), so the bound is enforced by context size plus the mandatory backstop below.
+  The G-6 GPU-machine token-parity run reports every golden prompt's server token count.
+- **The 2049 to 2560 band (Y-20, mandatory).** With context 2560, a prompt of 2049 to 2560
+  tokens fits the KV cache, so the runtime will not fail, while the server refuses it with 8003.
+  The backstop gives refusal parity in that band: after `onDone`, if
+  `getBenchmarkInfo().lastPrefillTokenCount > 2048` (`Benchmark.kt:31-38`, VERIFIED), the engine
+  discards the buffered output and throws `SlmEngineException(PAYLOAD_REJECTED)`. It throws before
+  the flow's single emit (4.4), so no output reaches the seam. If benchmark info is unavailable,
+  the engine throws the same error: the prompt length cannot be proven, so the generation is
+  refused (fail closed).
+- Required device tests (Y-7', Y-20), engine-level so they bypass the seam's 6000-char bound:
+  1. A prompt of about 2100 tokens is refused by the backstop (ENGINE_REJECTED_INPUT).
+  2. A prompt over 2560 tokens is refused, by a runtime error or by the backstop, both mapped to
+     ENGINE_REJECTED_INPUT.
+  3. Both assert the flow emitted nothing.
+  **If either produces visible output, or the runtime truncates silently and the backstop does not
+  fire, STOP and report: that needs a new ruling.**
+- Through the seam, a 6000-char prompt can exceed 2048 tokens (INFERRED: Devanagari text packs
+  fewer characters per token than English). Such a prompt is refused on both engines, so it is a
+  refusal-parity case, not a failure (11.5).
 
-### 5.6 Tokenization-divergent text (G-5, PENDING T1)
+### 5.6 Tokenization-divergent text (G-5 final, T1)
 
-G2 found ids differ for text with HTML-like tags, `<unusedN>` and whitespace runs (first
-differing position 5, 43 server tokens against 30 on litertlm), and that litertlm has 6,386
-further atomic pieces of those kinds that the service guard does not reject (G2 REPORT
-section 2). `<unusedN>` is already refused before any call on both engines (it is in
-`CONTROL_TOKENS`, F-7). HTML-like tags and whitespace runs are not.
+T1 result (VERIFIED on the GPU machine, T1): 209 synthetic probes, each standalone and embedded in
+the readback skeleton, 418 comparisons.
+- Rendered strings identical in all 418.
+- Ids diverged in 29 probes (the same 29 in both modes), only for HTML tags and `<unusedN>`
+  literals.
+- Rule, predicting all 418 with no false positive or false negative: the two tokenizers differ if
+  and only if the text contains a litertlm user-defined piece spelled `<tag>`, `</tag>` or
+  `<unusedN>`: 70 HTML tag pieces plus `<unused0>` to `<unused6226>`, 6,297 pieces.
+- No divergence for: whitespace runs, Unicode whitespace, clinical angle brackets (`BP <90`, `>=`,
+  the symbols `≤ ≥`), units, Hindi, romanized Hindi, bullets, emoji, other bracket forms, and
+  near-miss non-pieces (`<UNUSED5>`, `<unused05>`, an unclosed tag, `<unused6241>`).
+- Correction to G2 REPORT section 2: the "whitespace runs" divergence was wrong; that test string
+  also contained `<b>`.
 
-Candidate rule, not final: `buildPrompt` normalizes whitespace in record-derived fields for BOTH
-engines, and the input guard refuses any prompt containing a construct T1 shows to diverge (a
-refusal fails closed and the record stays readable). This would change prompt bytes for the remote
-engine too, so it implies a `PROMPT_TEMPLATE_VERSION` bump. The final rule comes in a later ruling.
+Final rule (G-5):
+- No whitespace normalization and no `PROMPT_TEMPLATE_VERSION` change.
+- `<unusedN>`: already refused before any call on both engines, because `RESERVED_UNUSED` is
+  exactly `<unused0>`..`<unused6226>` (`SlmStreamSanitizer.kt:142`, VERIFIED), the same range T1
+  names.
+- The 70 HTML tag pieces: the pre-call input guard, at the same point as `firstControlTokenIn`
+  (`SlmReadbackUseCase.kt:350`, both engines), also refuses any prompt containing one of them,
+  matched as exact case-sensitive substrings against a pinned list file.
+  - File: `app/src/main/resources/slm/litertlm-html-tag-pieces-v1.txt`, one piece per line,
+    transferred by the operator from the GPU machine. **sha256: PENDING FIXTURE** (recorded in this
+    memo when the file arrives, before slice S6 lands).
+  - Loaded once, lazily, by an `internal` object in `domain/slm/`. A missing or unreadable file
+    refuses every prompt (fail closed); the JVM test below makes that a build-time failure rather
+    than a field one.
+  - Test: the file has exactly 70 entries, its sha256 equals the recorded digest, every entry
+    matches `^</?[a-z0-9]+>$` (INFERRED shape from T1's `<tag>`/`</tag>` description; the test
+    fails loudly if T1's list contains another shape, which then needs a look), and the T1 near
+    misses above are not refused.
+  - Refusal: the existing `SlmRefusal.PROMPT_CONTROL_TOKENS` and its copy (no new user-facing
+    text). The `SLM_READBACK_INPUT_REFUSED` audit `reason` is `tokenizer_divergent_markup`, so it
+    is distinguishable from a control-token refusal (8).
+- Scope: the guard is in the shared seam, so the remote engine refuses these prompts too. This is
+  intended (both engines, per G-5) and unreachable in staging and prod while the flag is off (Y-1).
+- Field consequence (INFERRED): a physician who types an HTML-like tag such as `<b>` into a
+  diagnosis makes that record's readback refuse on both engines; the record itself stays readable.
 
 ---
 
@@ -528,12 +582,40 @@ engine too, so it implies a `PROMPT_TEMPLATE_VERSION` bump. The final rule comes
 
 | Remote control (F-18) | Purpose | Local replacement | Reason |
 |---|---|---|---|
-| Facility scope (`services/slm.py:406-409`) | Stop a caller reading another facility's case | None new | The record comes from the device's own DB via `ApprovedRecordReader` (F-8), which holds only this device's synced or created cases. INFERRED: no cross-facility data exists locally. |
+| Facility scope (`services/slm.py:406-409`) | Stop a caller reading another facility's case | **None exists; YOUR CALL Y-21** | F-1 finding below: the INFERRED claim of M2 is not supported by code. |
 | `phi_guard` case id + 10-digit run (`adapters/slm/phi_guard.py:58-81`) | Stop identifiers leaving the backend toward the GPU host | Case-id absence kept as a prompt-construction invariant | No egress on the local path. S4 adds a JVM test that `buildPrompt` output never contains `snapshot.caseRecordId`. The digit-run rule is an egress rule and does not apply. |
 | Circuit breaker (`services/slm.py:435`) | Stop hammering a failing remote | Init-failure latch | After GPU and CPU init both fail, the engine stays UNAVAILABLE until a release resets it. Prevents a slow failing init per request. |
 | `slm_call_log` | Per-call operational record | The four device audit rows (section 8), synced | Engine, accelerator, model id, sha256, runtime, template version, prompt chars, token counts, duration, outcome. |
 | `SLM_CALL_FORWARDED` / `SLM_CALL_FAILED` | Server-origin audit | `SLM_READBACK_INVOKED` with `answeredBy()` and outcome | The server cannot see a local call. Joining remote rows to device rows needs a device request id: Y-9, deferred and filed. |
 | Auth hop (service token) | Authenticate backend to GPU | None | No network hop. |
+
+### 7.1 F-1: facility scope of local case data (finding)
+
+The M2 claim "no cross-facility data exists locally" was INFERRED and is **not** supported by code.
+VERIFIED:
+- The case read has no facility filter: `CaseRecordRepositoryImpl.observeCaseRecord` is
+  `caseRecordDao.observeById(caseRecordId)` (`data/repository/CaseRecordRepositoryImpl.kt:61-62`),
+  and `ApprovedRecordReader` reads through it (`domain/slm/ApprovedRecordReader.kt:40`).
+- No local entity carries a facility id or an owning worker id (grep for
+  `val .*([Ff]acility|[Ww]orker|createdBy|[Oo]wner)` over `data/local/entity/*.kt` finds only
+  `DoctorEntity.facilityName` :15). `CaseRecordEntity` columns are listed at
+  `data/local/entity/CaseRecordEntity.kt:13-40`.
+- Sign-out clears tokens only, not the database: `BackendAuthSession.signOut` calls
+  `authApiService.logout` and `tokenStore.clear()` (`data/local/auth/BackendAuthSession.kt:67-73`).
+  The only database deletions are on Keystore loss and on the plaintext-to-encrypted migration
+  (`data/local/security/DatabasePassphraseProvider.kt:40,97`).
+- The backend binds a device per worker, not per facility: `touch_device` records a
+  `(device_id, worker_id)` pair and adds one for any new worker (`backend/core/app/services/auth.py:280-307`).
+  Nothing found refuses a sign-in on a phone previously used by another facility's worker.
+
+What happens today when a worker from facility B signs in on a phone holding facility A's cases
+(INFERRED from the code above; not exercised): A's case records remain in the encrypted local DB
+and are readable through every local read path that does not filter by worker or facility. On the
+**remote** SLM path, the server's facility check refuses the readback (`services/slm.py:406-409`,
+404 `ENC_CASE_NOT_FOUND`). On the **local** path no such check exists, so the local engine would
+read back facility A's approved record to the facility B worker. That is a parity regression for
+the readback feature specifically, on top of a pre-existing cross-facility exposure for the rest
+of the app's local reads. Listed as YOUR CALL Y-21 (15.3) and proposed hazard H-54 (13.2).
 
 ---
 
@@ -545,7 +627,7 @@ into the use case (new constructor parameter; touches `SlmReadbackUseCaseTest.kt
 
 | Row | When | Payload fields (`auditPayload`) |
 |---|---|---|
-| `SLM_READBACK_INPUT_REFUSED` | Any return before `engine.generate` (`SlmReadbackUseCase.kt:322-365`) | `reason`, `tier`, `template_version`, `question_chars`, `prompt_chars` (null if not built) |
+| `SLM_READBACK_INPUT_REFUSED` | Any return before `engine.generate` (`SlmReadbackUseCase.kt:322-365`) | `reason` (the `SlmRefusal` name, except `tokenizer_divergent_markup` for the G-5 guard, 5.6), `tier`, `template_version`, `question_chars`, `prompt_chars` (null if not built) |
 | `SLM_READBACK_INVOKED` | Exactly once per call that reached `engine.generate`, written after the flow ends so it carries the outcome | `engine`, `accelerator`, `model_id`, `artifact_sha256`, `runtime_version`, `template_version`, `tier`, `prompt_chars`, `max_output_tokens`, `finish_reason`, `engine_error`, `duration_ms`, `thermal_status` (Y-15) |
 | `SLM_READBACK_SANITIZER_ACTIVITY` | After every collected generation, including zero counts | `spans`, `characters`, `dropped_tokens`, `unknown_tokens` (`SlmSuppression`, F-7) |
 | `SLM_READBACK_OUTPUT_SUPPRESSED` | Any refusal after generation: SERVED_MODEL_MISMATCH, OUTPUT_TRUNCATED, OUTPUT_NOT_GROUNDED (:393-410) | `reason`, `engine`, `model_id` |
@@ -554,13 +636,33 @@ Rules: `caseRecordId` in its column, `patientId = null`. Never the question, pro
 name or diagnosis (F-9). Every value is an enum name, count, id or digest. An audit write failure
 never changes the readback result (`CancellationException` rethrown, other failures logged).
 
+**Ordering (A-1).** `SLM_READBACK_INVOKED`, and `SLM_READBACK_OUTPUT_SUPPRESSED` when it applies,
+are written before the use case returns any result to its caller, so a readback is never shown
+without its audit row. A failed audit write is logged and does not block the result (rule above);
+the ordering guarantees the write was attempted first.
+
+A-1 finding, VERIFIED from code: no chunk reaches the UI before the post-generation gates.
+- The seam collects every chunk into a local `StringBuilder` through the sanitizer
+  (`SlmReadbackUseCase.kt:372-378`); nothing is emitted while collecting.
+- The identity, finish and grounding gates run on the finished text (:393-410), and the only
+  text-bearing return is `SlmReadbackResult.Answer` after them (:417-421).
+- `invoke` is a `suspend` function returning one `SlmReadbackResult`, not a flow (:320).
+- The ViewModel sets `ReadbackState.Generating`, then replaces it with the single result
+  (`presentation/report/ReportViewModel.kt:275-287`); its comment says "There is no token trickle
+  to wait for either: the grounding gate withholds the whole generation until it completes"
+  (:273-274).
+- With 4.4's single emit, the local engine also withholds its output until its own checks pass.
+
 Sync: existing device audit outbox; actions already allowlisted (F-10), no backend change.
 
 Tests (S4): one per row per trigger class; refused-before-engine writes INPUT_REFUSED and not
 INVOKED; sentinel strings placed in question and output are absent from every payload; both
 engines through the fake (`answeredBy()` LOCAL and REMOTE); the persisted Room row is read back,
 not only the fake's call list (CLAUDE.md backend convention applied to the device); Y-1's
-unreachability test for staging and prod with the flag false.
+unreachability test for staging and prod with the flag false; A-1 ordering: a recording
+`AuditLogger` and a recording caller assert the INVOKED (and OUTPUT_SUPPRESSED) write happens
+before `invoke` returns; the G-5 guard writes INPUT_REFUSED with reason
+`tokenizer_divergent_markup` and the user-facing refusal is PROMPT_CONTROL_TOKENS.
 
 ---
 
@@ -644,7 +746,8 @@ Root: `/media/sandesh/extra-ssd/samd-slm-parity/` (exists). JVM and Gradle proce
   null, short, long (near the 6000-char prompt bound), with numerals, with units; medications 0, 1,
   5, 12 lines with strengths, frequencies, durations; referral yes and no; one question per
   `ALLOWED_INTENTS` family (`SlmScopeGate.kt:103-110`) per language; 10 questions the worker gate
-  refuses, to prove they are never sent.
+  refuses, to prove they are never sent (flagged `expected_input_refusal` by calling the real
+  `inputScopeRefusal`, so the comparator excludes them from content scoring, 11.5).
 - Records are generated, never hand-written; prompts come only from `buildPrompt`; no real
   patient data (R8).
 
@@ -692,19 +795,54 @@ probes (section 4) are the smoke evidence; the golden run is new.
 ### 11.5 Comparator (R7 + G-6)
 
 `tools/slm-parity/compare.py` (stdlib only, `python3 -I`). Inputs: golden file, run files,
-token-parity file; all output text post-sanitizer. Hard gates, 100 percent, deterministic:
+token-parity file. Semantics per C-1 (finalizes R7).
+
+**Step 1, what would be SHOWN.** For each engine and prompt, the comparator reproduces the seam:
+post-sanitizer text, then the post-generation gates in the seam's order
+(`SlmReadbackUseCase.kt:393-410`):
+1. Identity: the recorded `servedModelId` is one of the two exact allowlist entries (6.1).
+2. Finish: `finish_reason` in {STOP, STOP_SEQUENCE} (:493-494).
+3. Grounding: for non-physician tiers only, the port of `outputIsGrounded` (`SlmScopeGate.kt:155-162`).
+
+Any failure, and any engine error, makes the result `REFUSED`, which is safe. Otherwise the shown
+output is the post-sanitizer text. Golden rows whose question the seam's input gate refuses
+(`inputScopeRefusal`, `SlmScopeGate.kt:129-138`, flagged by the golden export as
+`expected_input_refusal`) are excluded from content scoring: in the product they never reach an
+engine. The Pixel harness calls the engine directly, which is why the comparator re-applies the
+seam. A Kotlin/Python agreement test over one fixture file proves the grounding and control-token
+ports give identical verdicts.
+
+**Step 2, content hard gates.** Four gates, deterministic:
 
 | Gate | Computation |
 |---|---|
-| Numbers | Extract `[0-9]+(?:[.,/][0-9]+)*` from the output; each must appear verbatim in the prompt's APPROVED RECORD section |
-| No control tokens | No literal from `golden/control-tokens.txt` in the output, plus the bracket shape rule |
-| No fact absent from record | Port of `outputIsGrounded` (`SlmScopeGate.kt:155-162`): no drug-shaped token outside the medication lines, no dose numeral outside the record. A cross-check test runs Kotlin and Python over one fixture file and asserts identical verdicts. Applied to every tier |
-| Correct language (Y-13) | Dominant script of the output's letters (Latin, Devanagari), computed after removing every substring copied verbatim from the record (numbers, units, drug names), must equal the question's script; romanized Hindi questions expect Latin |
-| Prompt token-id parity (G-6) | `runs/token-parity.jsonl`: every golden prompt has identical id sequences, 120 of 120 |
+| Numbers | Extract digit runs over ASCII digits and Devanagari digits U+0966 to U+096F (`[0-9०-९]+(?:[.,/][0-9०-९]+)*`); normalize Devanagari digits to ASCII; drop only line-leading enumeration markers matching `^\s*[0-9]+[.)]\s` (multiline); each remaining number must appear in the prompt's APPROVED RECORD section, normalized the same way. Numbers written as words are not caught (residual in H-47) |
+| No control tokens | No literal from `golden/control-tokens.txt` in the shown output, plus the bracket shape rule |
+| No fact absent from record | Port of `outputIsGrounded`: no drug-shaped token outside the medication lines, no dose numeral outside the record. Applied to every tier's shown output, including physician |
+| Correct language (Y-13) | Dominant script of the shown output's letters (Latin or Devanagari), after removing every substring copied verbatim from the record (numbers, units, drug names), equals the question's script; romanized Hindi questions expect Latin |
 
-Reported, not gated: exact-match rate vs server; chrF vs server (stdlib, character n-grams,
-n = 6, beta = 2). Disagreements go to `review/blind-sample.csv`: 30 pairs, or all disagreements if
-fewer, stratified by language, engine labels stripped, order shuffled with a fixed seed (Y-17).
+Pass criteria:
+- **LOCAL:** the four gates pass for 100 percent of the local engine's shown outputs.
+- **SERVER:** the same gates are computed and reported for the server's shown outputs. A server
+  failure is a readback-safety finding filed separately; it never relaxes a gate.
+- **Non-inferiority:** no prompt where the server's shown output passes all four gates while the
+  local shown output fails any.
+- **Refusal rates** are reported per engine. A local refusal where the server answered is reported,
+  not failed, unless the local refusal rate exceeds the server's by more than 10 percentage
+  points, which is a failure to investigate.
+
+**Step 3, prompt token-id parity (G-6), from `runs/token-parity.jsonl`.**
+- Golden prompts over 2048 server tokens are expected refusals on both engines (8003 on the
+  server, the 5.5 backstop locally) and are scored as a refusal-parity check: both must be
+  REFUSED.
+- Every other golden prompt must have identical id sequences (HF tokenizer at 3e22461f against
+  the litertlm tokenizer with BOS prepended), 100 percent.
+
+Reported, not gated: exact-match rate of shown outputs vs server; chrF vs server (stdlib,
+character n-grams, n = 6, beta = 2). Disagreements (content-gate verdicts differ, refused on one
+engine only, or shown texts not equal) go to `review/blind-sample.csv`: 30 pairs, or all
+disagreements if fewer, stratified by language, engine labels stripped, order shuffled with a
+fixed seed (Y-17).
 
 G2 already shows the expected shape: short constrained outputs match exactly; free-form Hindi
 output diverged in wording while carrying 128/84, 76 and 97 correctly on both (G2 REPORT
@@ -757,13 +895,14 @@ F1; whichever merges second merges master in with a merge commit, no rebase.
 
 | ID | Hazard | Primary controls |
 |---|---|---|
-| H-47 | The local engine produces different clinical content from the server for the same approved record (numerics, omitted medicine, added fact) and the worker trusts it equally | R7 hard gates at 100 percent; engine named in audit; local id passes the identity gate only through its exact allowlist entry (G-4) |
+| H-47 | The local engine produces different clinical content from the server for the same approved record (numerics, omitted medicine, added fact) and the worker trusts it equally | R7 hard gates at 100 percent on the local engine's shown outputs, plus non-inferiority against the server (C-1, 11.5); engine named in audit; local id passes the identity gate only through its exact allowlist entry (G-4). **Residual:** the number gate catches digits only (ASCII and Devanagari); a number written as words ("five", "पाँच") is not caught |
 | H-48 | A substituted, corrupted or partially copied `.litertlm` is loaded, carrying a different template, vocabulary or stop ids | Full SHA-256 before every engine start (6.3); content-addressed file name; refusal on mismatch |
-| H-49 | Text the two tokenizers split differently (HTML-like tags, whitespace runs) makes the local engine see a different prompt from the server | G-5 candidate rule, PENDING T1; G-6 token-id parity gate on the golden set |
+| H-49 | Text the two tokenizers split differently makes the local engine see a different prompt from the server. Per T1 this happens if and only if the text contains a litertlm user-defined piece: one of 70 HTML tag pieces (`<tag>`, `</tag>`) or `<unused0>`..`<unused6226>` | G-5 final: pre-call refusal of the 70 HTML tag pieces from a pinned 70-entry list file (5.6), `<unusedN>` already refused via `CONTROL_TOKENS`; both engines; G-6 token-id parity gate on the golden set. Whitespace removed from this row (T1 corrected G2) |
 | H-50 | Two resident models exhaust memory, the OS kills the app mid-encounter, unsaved clinical work is lost | SLM release on trim and idle; never mid-generation; PSS baseline; ASR release (Y-11 PR); fleet probe (Y-12) |
 | H-51 | Sustained generation heats the phone; readbacks time out or the worker abandons the screen | Pre-run thermal refusal at SEVERE (Y-15); 40 s deadline; thermal in audit; 20-run measurement |
 | H-52 | A GPU init failure falls back to CPU and slower or different output is not attributable | Fallback only at init; accelerator in every audit row; parity run per backend |
-| H-53 | The runtime silently truncates an over-length prompt and answers from a partial record | Context 2560; G-6 proves golden prompts fit; Y-7' device test (STOP if silent truncation); proposed prefill-count backstop (Y-20) |
+| H-53 | An over-length prompt is answered locally while the server refuses it: in the 2049 to 2560 token band the runtime accepts it, and above 2560 it may truncate silently and answer from a partial record | Context 2560; mandatory prefill-count backstop (Y-20): `lastPrefillTokenCount > 2048` discards the output and refuses before the flow emits (4.4, 5.5); missing benchmark info also refuses; device tests at about 2100 and over 2560 tokens (STOP if visible output); G-6 refusal-parity scoring |
+| H-54 | A worker from another facility signs in on a shared phone and the local engine reads back an approved record from the previous facility, which the remote path would refuse | **None today** (7.1, F-1): no facility or owner column on local case data, sign-out keeps the DB, backend binds devices per worker. Control is YOUR CALL Y-21 |
 
 ### 13.3 SOUP entries
 
@@ -790,21 +929,21 @@ F1; whichever merges second merges master in with a merge commit, no rebase.
 ## 14. Build slices for STEP 2
 
 Each slice: its own commits, its tests, a mutation row per new guard (snapshot-based; an empty
-test-results dir is RED). T1 blocks nothing below except the final G-5 rule.
+test-results dir is RED). T1 is resolved (5.6); the list file it produces gates S6.
 
 | Slice | Content | Files | Tests | Mutation rows | Model |
 |---|---|---|---|---|---|
 | S1 | `litertlm-android:0.18.0` as `devImplementation`; dev manifest `uses-native-library` for `libvndksupport.so` and `libOpenCL.so` (`required="false"`) | `gradle/libs.versions.toml`, `app/build.gradle.kts`, `app/src/dev/AndroidManifest.xml` | `compileDevDebugKotlin`; `dependencyInsight` for `kotlin-stdlib`, `kotlin-reflect`, `gson` (reported per Y-3); APK scan: staging and prod contain no `litertlm` class or `.so`; `zipalign -c -P 16` on the dev APK | `devImplementation` to `implementation`: staging APK scan RED | Sonnet |
 | S2 | `LocalSlmEngine` (dev): hash before init, GPU then CPU at init only, init latch, dedicated dispatcher, single-flight, cancel, 40 s, overwritePromptTemplate-null assertion, no-log source scan; dev Hilt holder not bound to `SlmEngine`; narrowed flavor guard; adb delivery executed and recorded; GPU init with AAR alone recorded (Y-4) | `src/dev/.../data/slm/LocalSlmEngine.kt`, `src/dev/.../di/LocalSlmModule.kt`, `SlmEngineIsUnreachableFromPresentationTest.kt` | JVM over a fake native seam: mutex, cancel calls `cancelProcess`, timeout gives TIMEOUT, digest mismatch never inits, latch, flag assertion; device smoke via `am instrument` | skip digest check; allow mid-generation fallback; allow a second concurrent call; guard admits a second flavor file | **Opus** |
-| S3 | Conversation path per G-1', G-2', G-3', Y-7': bundled template, thinking off, one conversation per request, explicit sampler and `maxOutputToken`, context 2560, finish reason from benchmark decode count, over-length mapping; channels per Y-19; backstop per Y-20 | `LocalSlmEngine.kt` | JVM: built `ConversationConfig` and `SamplerConfig` field by field; finish derivation table. Device: `renderMessageIntoString` equals server rendering minus `<bos>` for all 120 golden prompts; trim test (ASCII, CRLF, U+00A0, U+2003, U+200B); prompts (a) and (b) finish STOP; capped long prompt finishes LENGTH; over-length prompt surfaces as ENGINE_REJECTED_INPUT (STOP and report if silent truncation) | one sampler field left default: config test RED; finish derivation always STOP: LENGTH test RED; template override set: flag test RED | Sonnet |
-| S4 | `answeredBy()` and the R6 audit rows in the seam, both engines; case-id-absence prompt test | `SlmEngine.kt`, `RemoteSlmEngine.kt`, `SlmReadbackUseCase.kt`, two fakes | per-row trigger tests; INPUT_REFUSED without INVOKED; sentinel absence; persisted Room row; Y-1 staging/prod unreachability | drop one row; question text in a payload; INVOKED written before the engine | **Opus** |
-| S5 | Parity harness: golden export (120, thirds by language), server and token-parity scripts, desktop script, Pixel instrumented harness, comparator with five hard gates and the Kotlin/Python cross-check | `testDev/.../GoldenPromptExport.kt`, `androidTestDev/.../LocalSlmParityHarness.kt`, `scripts/slm-parity/*`, `tools/slm-parity/*` | comparator fixtures per gate; Kotlin/Python grounding agreement; language-gate fixtures for all three question types | number gate ignores decimals; language gate counts copied record text | Sonnet |
-| S6 | Four missing control-token literals; `CONTROL_TOKENS` covers the 24 G1 tokens; exact local allowlist entry (G-4) | `SlmStreamSanitizer.kt`, `SlmStreamSanitizerTest.kt` | coverage test over the 24; allowlist has exactly two exact entries; prefix or case variant of either is refused | remove one of the four literals; add a prefix match | Sonnet, Opus review of the identity change |
+| S3 | Conversation path per G-1', G-2', G-3', Y-7': bundled template, thinking off, one conversation per request, explicit sampler and `maxOutputToken`, context 2560, finish reason from benchmark decode count, over-length mapping; `channels = emptyList()` (Y-19); mandatory prefill backstop and single emit after post-run checks (Y-20, 4.4) | `LocalSlmEngine.kt` | JVM: built `ConversationConfig` and `SamplerConfig` field by field; finish derivation table. Device: `renderMessageIntoString` equals server rendering minus `<bos>` for all 120 golden prompts; trim test (ASCII, CRLF, U+00A0, U+2003, U+200B); prompts (a) and (b) finish STOP; capped long prompt finishes LENGTH; about 2100-token prompt refused by the backstop; over-2560-token prompt refused (runtime error or backstop); both emit nothing (STOP and report if visible output) | one sampler field left default: config test RED; finish derivation always STOP: LENGTH test RED; template override set: flag test RED; backstop threshold raised to 2560: 2100-token test RED; emit before the backstop: emit-nothing assertion RED | Sonnet |
+| S4 | `answeredBy()` and the R6 audit rows in the seam, both engines; case-id-absence prompt test | `SlmEngine.kt`, `RemoteSlmEngine.kt`, `SlmReadbackUseCase.kt`, two fakes | per-row trigger tests; INPUT_REFUSED without INVOKED; sentinel absence; persisted Room row; Y-1 staging/prod unreachability; A-1: INVOKED and OUTPUT_SUPPRESSED written before `invoke` returns | drop one row; question text in a payload; INVOKED written before the engine; INVOKED written after the return | **Opus** |
+| S5 | Parity harness: golden export (120, thirds by language), server and token-parity scripts, desktop script, Pixel instrumented harness, comparator per C-1: seam replay to SHOWN outputs, four content gates on LOCAL at 100 percent, server reported, non-inferiority, refusal-rate rule (10 points), token-id parity with over-2048 rows scored as refusal parity; Kotlin/Python cross-check | `testDev/.../GoldenPromptExport.kt`, `androidTestDev/.../LocalSlmParityHarness.kt`, `scripts/slm-parity/*`, `tools/slm-parity/*` | comparator fixtures per gate; Kotlin/Python grounding and control-token agreement; language-gate fixtures for all three question types; number-gate fixtures for Devanagari digits and enumeration markers | number gate ignores decimals; Devanagari digits not normalized; enumeration exclusion not anchored to line start; language gate counts copied record text; refusal-rate rule off by one point | Sonnet |
+| S6 | Four missing control-token literals; `CONTROL_TOKENS` covers the 24 G1 tokens; exact local allowlist entry (G-4); G-5 pre-call refusal of the 70 HTML tag pieces from the pinned list file, reusing PROMPT_CONTROL_TOKENS, audit reason `tokenizer_divergent_markup` | `SlmStreamSanitizer.kt`, `SlmStreamSanitizerTest.kt`, `SlmReadbackUseCase.kt`, new `domain/slm/TokenizerDivergentMarkup.kt`, `app/src/main/resources/slm/litertlm-html-tag-pieces-v1.txt` (PENDING FIXTURE) | coverage test over the 24; allowlist has exactly two exact entries; prefix or case variant of either is refused; list file has exactly 70 entries and the recorded sha256; a prompt with each piece is refused before any engine call; T1 near misses and clinical angle brackets are not refused; missing list refuses every prompt | remove one of the four literals; add a prefix match; case-insensitive markup match (`<B>` refused): near-miss test RED; drop one list entry: count test RED | Sonnet, Opus review of the identity change |
 | S7 | SLM residency: dev-only `ComponentCallbacks2`, release on trim and 5 min idle, thermal pre-check at SEVERE | dev holder, dev initializer | trim levels release or not; release waits for a running generation; thermal refusal | release mid-generation allowed | Sonnet |
 | S8 | Controlled docs: risk rows and SOUP entries from section 13, PROPOSED | `docs/quality/risk-management-file.md`, `docs/quality/soup-validation-record.md` | none | n/a | **Opus** |
 
-Order: S1, S2, S4, S6 (no external input), then S3 and S5 (need the G-6 run for the rendering
-and token files), then S7, S8. The final G-5 rule lands after T1 as its own change.
+Order: S1, S2, S4 (no external input); S6 once the 70-entry list file arrives; S3 and S5 once the
+G-6 run delivers the rendering and token files; then S7, S8.
 
 ---
 
@@ -817,21 +956,35 @@ and token files), then S7, S8. The final G-5 rule lands after T1 as its own chan
 - `ExperimentalFlags.overwritePromptTemplate` is a process-global that silently replaces the
   bundled template when set (`Engine.kt:150,163`); S2 asserts it is null.
 - The finish reason is derived, not reported, by the runtime (5.3).
-- G-3' names G2 probe prompts (a) and (b) as "golden short prompts", while R8 limits golden
-  prompts to `buildPrompt` output. Read here as engine behaviour tests outside the golden record
-  set (5.3); no record data is involved. Confirm at review.
+- G-3' names G2 probe prompts (a) and (b) as "golden short prompts"; confirmed by Q-ab as engine
+  behaviour tests outside the R8 golden record set (5.3).
+- A-1 (M3): no chunk reaches the UI before the post-generation gates; the seam returns one result
+  after them (8, VERIFIED `SlmReadbackUseCase.kt:320,372-421`, `ReportViewModel.kt:273-287`).
+- F-1 (M3): local case data is not facility-scoped (7.1). On a shared phone the local engine would
+  read back another facility's approved record that the remote path refuses. H-54 proposed.
+- T1 corrected G2: whitespace does not diverge (5.6). H-49 updated.
 
 ### 15.2 PENDING
 
-- T1 (G-5): tokenization-divergence characterization; the final rule for HTML-like tags and
-  whitespace runs.
+- FIXTURE (G-5 final): `litertlm-html-tag-pieces-v1.txt`, 70 entries, from the GPU machine; its
+  sha256 is recorded in 5.6 when it arrives. Gates slice S6.
 
-### 15.3 YOUR CALL (new at M2)
+### 15.3 YOUR CALL
 
-- Y-19 `channels = emptyList()` on the Conversation so channel text reaches the sanitizer
-  (proposed), or leave the runtime default.
-- Y-20 Prefill-count backstop: refuse when `lastPrefillTokenCount > 2048` even if the runtime did
-  not fail (proposed, additive to Y-7').
+Resolved at M3: Y-19 approved (`channels = emptyList()`); Y-20 approved and mandatory.
+
+- **Y-21 (F-1) Facility scope on the local path.** Today nothing scopes local case data to the
+  signed-in worker's facility (7.1). Options, for a ruling:
+  1. Product-wide: wipe local clinical data on sign-out or on a sign-in whose facility differs
+     from the last one, after the outbox is drained (data-loss risk if not drained; needs its own
+     design and hazard row).
+  2. Store `facility_id` on case records (Room migration) and filter reads by the session's
+     facility; readback and every other local read path inherit it.
+  3. Readback-only stopgap: record the facility of the session that last synced or created the
+     DB, and have the seam refuse a readback when the current session's facility differs (fails
+     closed, small, but leaves the rest of the app exposed).
+  Recommendation: 3 inside this PR as the local-path control (it restores parity with the
+  server's 404), and 1 or 2 as a separate product-wide PR with its own hazard row.
 
 Filed by ruling (not this PR): Y-9 device request id; Y-10 production delivery; Y-11 ASR release;
 Y-12 fleet capability probe; G-7 licence confirmation; Tensor G6 follow-up (Y-18).
@@ -841,7 +994,8 @@ Y-12 fleet capability probe; G-7 licence confirmation; Tensor G6 follow-up (Y-18
 ## 16. Rulings 2026-10-15
 
 Appended verbatim. The third batch's G-1, G-2, G-3 and Y-7 are superseded by G-1', G-2', G-3'
-and Y-7' below them; the superseded text is kept for the record.
+and Y-7' below them, and its G-5 candidate is superseded by batch 5's final G-5; the superseded
+text is kept for the record.
 
 ### Third batch (gate review of M1)
 
@@ -879,3 +1033,23 @@ G-2' Decoding: set every sampler field explicitly (top_k 1, top_p 1.0, temperatu
 G-3' Stop ids: met offline. G2 VERIFIED {1, 50, 106} for artifact sha256 181938105e...a63c, and the sha256 check before every engine start pins them. On device: a behavioural test asserts that the golden short prompts (a) and (b) end with a STOP finish reason, not LENGTH.
 Y-7' Prompt length: set the engine context to 2560 tokens (2048 prompt plus 512 output, matching G2's max_num_tokens). The GPU-machine token-parity run (G-6) proves every golden prompt is 2048 tokens or fewer. A device test feeds an over-length prompt and asserts it surfaces as a typed error mapped to the same refusal as SAMD-SLM-8003. If the runtime truncates silently instead of failing, STOP and report: that needs a new ruling.
 All other rulings from the previous batch apply unchanged: Y-0 to Y-6, Y-8 to Y-18, G-4, G-5 (PENDING T1), G-6, G-7.
+
+### Batch 5 (gate review of M2)
+
+T1 RESULT (VERIFIED on the GPU machine, T1_REPORT.md): 209 synthetic probes, each tested standalone and embedded in the readback skeleton, 418 comparisons. Rendered strings were identical in all 418. Ids diverged in 29 probes (the same 29 in both modes), only for HTML tags and <unusedN> literals. The rule predicted all 418 with no false positive or false negative: the two tokenizers differ if and only if the text contains a litertlm user-defined piece spelled <tag>, </tag> or <unusedN> (70 HTML tag pieces plus <unused0> to <unused6226>, 6,297 pieces). Whitespace runs, Unicode whitespace, clinical angle brackets (BP <90, >=, the symbols ≤ ≥), units, Hindi, romanized Hindi, bullets, emoji and other bracket forms did NOT diverge. Correction: the "whitespace runs" finding in G2 REPORT section 2 was wrong (that test string also contained <b>). Variants that are not pieces (<UNUSED5>, <unused05>, an unclosed tag, <unused6241>) do not diverge.
+
+RULINGS (batch 5)
+G-5 (final, replaces the candidate): no whitespace normalization and no PROMPT_TEMPLATE_VERSION change. The pre-call input guard (the same point as firstControlTokenIn, SlmReadbackUseCase.kt:350, both engines) also refuses any prompt containing one of the 70 litertlm HTML tag pieces, matched as exact case-sensitive substrings against a pinned list file. <unusedN> is already refused through CONTROL_TOKENS. The list arrives from the GPU machine as a fixture file (the operator transfers it); the memo records its sha256, and a test asserts it has exactly 70 entries and the recorded digest. The refusal reuses the existing PROMPT_CONTROL_TOKENS refusal and copy (no new user-facing text); the audit reason distinguishes it as tokenizer_divergent_markup.
+Y-19 Approved: channels = emptyList(), so channel text reaches SlmStreamSanitizer. Parity compares post-sanitizer text on both engines.
+Y-20 Approved and MANDATORY. Reason: with context 2560, a prompt of 2049 to 2560 tokens fits the context, so the runtime will not fail, while the server refuses it (8003). The backstop (lastPrefillTokenCount > 2048: discard the output and throw PAYLOAD_REJECTED) is what gives refusal parity in that band. It must throw before the flow completes, so no output reaches the seam. Tests: a prompt of about 2100 tokens is refused by the backstop; a prompt over 2560 tokens is refused (runtime error or backstop, both mapped to ENGINE_REJECTED_INPUT). STOP and report if either produces visible output.
+Q-ab Confirmed: G2 prompts (a) and (b) are engine behaviour tests outside the R8 golden record set.
+A-1 Audit ordering: SLM_READBACK_INVOKED (and OUTPUT_SUPPRESSED when it applies) is written before the use case returns any output to its caller, so a readback is never shown without its audit row. Cite from code whether any chunk reaches the UI before the post-generation gates (SlmReadbackUseCase.kt:393-410). If chunks stream to the UI before the gates, STOP and report.
+C-1 Comparator semantics (finalizes R7):
+ - Hard gates judge what would be SHOWN: each engine's output after the sanitizer and the seam's post-generation gates (identity, finish, grounding for the non-physician tier). A seam refusal counts as "refused", which is safe.
+ - The four content gates (numbers, no control tokens, no fact absent from the record, correct language) must pass for 100 percent of the LOCAL engine's shown outputs. The same gates are reported for the server's shown outputs; a server failure is a readback-safety finding filed separately, never a reason to relax a gate.
+ - Non-inferiority: no prompt where the server's shown output passes while the local shown output fails.
+ - Refusal rates are reported per engine. A local refusal where the server answered is reported, not failed, unless the local refusal rate exceeds the server's by more than 10 percentage points, which is a failure to investigate.
+ - Number gate: extract ASCII digits and Devanagari digits (U+0966 to U+096F); normalize Devanagari digits to ASCII before matching against the record; exclude only line-leading enumeration markers matching ^\s*[0-9]+[.)]\s. Numbers written as words are not caught: record that as a residual in H-47.
+ - Token parity gate (G-6): golden prompts over 2048 server tokens are expected refusals on both engines and are scored as a refusal-parity check, not a token-id failure. Every other golden prompt needs identical ids, 100 percent.
+F-1 Facility scope (section 7): the INFERRED "no cross-facility data on the device" needs proof. Cite the code that scopes local case data to the signed-in worker's facility, or list it under YOUR CALL with what happens when a worker from another facility signs in on the same phone.
+H-49 Update to the T1 result: HTML tag pieces and <unusedN> only; whitespace removed.
