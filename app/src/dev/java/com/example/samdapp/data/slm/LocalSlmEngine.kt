@@ -1,5 +1,6 @@
 package com.example.samdapp.data.slm
 
+import android.os.Build
 import android.os.PowerManager
 import com.example.samdapp.domain.slm.MAX_OUTPUT_TOKENS
 import com.example.samdapp.domain.slm.SlmEngine
@@ -25,7 +26,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.io.File
 import java.io.IOException
-import java.security.MessageDigest
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
@@ -41,11 +41,13 @@ internal const val LOCAL_SLM_PREFILL_LIMIT = 2048
 internal object LocalSlmReason {
     const val BUSY = "busy"
     const val THERMAL = "thermal"
+    const val THERMAL_UNAVAILABLE = "thermal_unavailable"
     const val MAX_OUTPUT_TOKENS_OUT_OF_RANGE = "max_output_tokens_out_of_range"
     const val PROMPT_TEMPLATE_OVERRIDE = "prompt_template_override"
     const val ARTIFACT_MISSING = "artifact_missing"
     const val ARTIFACT_UNREADABLE = "artifact_unreadable"
     const val ARTIFACT_DIGEST_MISMATCH = "artifact_digest_mismatch"
+    const val RUNTIME_CACHE_UNCLEARABLE = "runtime_cache_unclearable"
     const val INIT_FAILED = "init_failed"
     const val INIT_TIMEOUT = "init_timeout"
     const val STARTING = "starting"
@@ -73,6 +75,9 @@ internal fun finishReasonFor(decodeTokens: Int?, maxOutputTokens: Int): SlmFinis
 data class LocalSlmStart(
     val accelerator: LocalAccelerator,
     val hashMillis: Long,
+    /** What the start found in the derived runtime cache (memo 6.3, C-2). */
+    val cacheCheck: LocalSlmCacheCheck,
+    val cacheVerifyMillis: Long,
     val initMillis: Long,
     /** The GPU initialisation error, class and message, when GPU was tried and failed. */
     val gpuFailure: String?,
@@ -83,10 +88,14 @@ data class LocalSlmStart(
  * 6, 10). **Not bound to [SlmEngine]**: the product binding stays `RemoteSlmEngine` in every flavor
  * (memo 4.1); this is constructed only by the dev Hilt holder and the dev harness.
  *
- * - Start (lazy, on the first [generate] or [warmUp]): full SHA-256 of the content-addressed file,
- *   then GPU, then CPU, at start only (memo 6.3, 4.6). Both failing latches UNAVAILABLE until
- *   [release]. The start has a 60 s wall-clock bound; an abandoned start's engine is closed when it
- *   finishes.
+ * - Start (lazy, on the first [generate] or [warmUp]): refused below API 29, where no thermal
+ *   status can be read (C-4); full SHA-256 of the content-addressed file; the derived runtime cache
+ *   in its own `cacheDir/slm/<sha256>/` checked against the manifest of the last clean release and
+ *   deleted on any mismatch (C-2); then GPU, then CPU, at start only (memo 6.3, 4.6). Both failing
+ *   latches UNAVAILABLE until [release]. The start has a 60 s wall-clock bound; an abandoned start's
+ *   engine is closed when it finishes.
+ * - [release] that closes the engine normally writes the cache manifest; any other end leaves none,
+ *   so the next start discards whatever the runtime left behind.
  * - Generation: one new conversation per call, closed on every path; 40 s deadline; on cancel or
  *   timeout `cancelProcess` then close (memo 4.4, 4.5). A runtime error mid-generation is
  *   ENGINE_ERROR, never a fallback.
@@ -98,7 +107,11 @@ data class LocalSlmStart(
 class LocalSlmEngine(
     private val runtime: LocalSlmRuntime,
     private val artifactDir: File,
-    private val cacheDir: File,
+    /** The app cache directory; the runtime gets its own subdirectory of it (C-2). */
+    cacheDir: File,
+    /** `Build.VERSION.SDK_INT`; below API 29 the engine never starts (C-4). */
+    private val sdkInt: Int,
+    /** Called only at API 29 and above. */
     private val thermalStatus: () -> Int,
     /** Single thread: every runtime call runs here (memo 4.3). */
     private val dispatcher: CoroutineDispatcher,
@@ -107,6 +120,9 @@ class LocalSlmEngine(
     private val initTimeout: Duration = 60.seconds,
     private val generationTimeout: Duration = 40.seconds,
 ) : SlmEngine {
+
+    private val runtimeCacheDir = File(cacheDir, "slm/$expectedSha256")
+    private val cacheManifest = File(artifactDir, "$expectedSha256.cache-manifest.json")
 
     private class Loaded(val engine: RuntimeEngine, val servedModelId: String, val start: LocalSlmStart)
 
@@ -174,7 +190,7 @@ class LocalSlmEngine(
      */
     suspend fun release() = inFlight.withLock {
         withContext(NonCancellable) {
-            loaded?.let { closeOnSlmThread(it.engine) }
+            loaded?.let { if (closeOnSlmThread(it.engine)) writeManifestOnSlmThread() }
             starting?.let { abandon(it) }
             loaded = null
             starting = null
@@ -183,8 +199,9 @@ class LocalSlmEngine(
         }
     }
 
-    /** Memo 10, Y-15: refuse before a run at SEVERE or above. */
+    /** Memo 10, Y-15: refuse before a run at SEVERE or above, and below API 29 where it cannot be read (C-4). */
     private fun checkThermal() {
+        if (sdkInt < Build.VERSION_CODES.Q) throw unavailable(LocalSlmReason.THERMAL_UNAVAILABLE)
         if (thermalStatus() >= PowerManager.THERMAL_STATUS_SEVERE) throw unavailable(LocalSlmReason.THERMAL)
     }
 
@@ -228,11 +245,20 @@ class LocalSlmEngine(
         val hashMillis = millisSince(hashStarted)
         if (digest != expectedSha256) throw unavailable(LocalSlmReason.ARTIFACT_DIGEST_MISMATCH)
 
+        val verifyStarted = System.nanoTime()
+        val cacheCheck = try {
+            verifyRuntimeCache(runtimeCacheDir, cacheManifest)
+        } catch (e: IOException) {
+            throw unavailable(LocalSlmReason.RUNTIME_CACHE_UNCLEARABLE)
+        }
+        val cacheVerifyMillis = millisSince(verifyStarted)
+        runtimeCacheDir.mkdirs()
+
         val initStarted = System.nanoTime()
         var gpuFailure: String? = null
         for (accelerator in accelerators) {
             val engine = try {
-                runtime.createEngine(artifact.path, accelerator, cacheDir.path)
+                runtime.createEngine(artifact.path, accelerator, runtimeCacheDir.path)
             } catch (e: Throwable) {
                 // Throwable: a missing native accelerator surfaces as an Error, and it is still an
                 // init failure to fall back from, not a crash.
@@ -242,7 +268,7 @@ class LocalSlmEngine(
             return Loaded(
                 engine = engine,
                 servedModelId = localServedModelId(digest),
-                start = LocalSlmStart(accelerator, hashMillis, millisSince(initStarted), gpuFailure),
+                start = LocalSlmStart(accelerator, hashMillis, cacheCheck, cacheVerifyMillis, millisSince(initStarted), gpuFailure),
             )
         }
         throw unavailable(LocalSlmReason.INIT_FAILED)
@@ -307,31 +333,28 @@ class LocalSlmEngine(
             }
         }
 
-    private suspend fun closeOnSlmThread(closeable: AutoCloseable) =
+    /** True when the close returned normally. */
+    private suspend fun closeOnSlmThread(closeable: AutoCloseable): Boolean =
         withContext(NonCancellable + dispatcher) { closeQuietly(closeable) }
 
-    private fun closeQuietly(closeable: AutoCloseable) {
+    private fun closeQuietly(closeable: AutoCloseable): Boolean = try {
+        closeable.close()
+        true
+    } catch (e: Exception) {
+        // Nothing to do: the handle is unusable either way.
+        false
+    }
+
+    /** C-2: only after a normal close, when the runtime has nothing left to write. */
+    private suspend fun writeManifestOnSlmThread() = withContext(NonCancellable + dispatcher) {
         try {
-            closeable.close()
+            writeRuntimeCacheManifest(runtimeCacheDir, cacheManifest)
         } catch (e: Exception) {
-            // Nothing to do: the handle is unusable either way.
+            // No manifest, so the next start discards the cache and cold-starts: the safe direction.
         }
     }
 
     private fun unavailable(reason: String) = SlmEngineException(SlmEngineError.UNAVAILABLE, reason)
 
     private fun millisSince(startNanos: Long) = (System.nanoTime() - startNanos) / 1_000_000
-
-    private fun sha256Hex(file: File): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        file.inputStream().use { input ->
-            val buffer = ByteArray(1 shl 20)
-            while (true) {
-                val read = input.read(buffer)
-                if (read < 0) break
-                digest.update(buffer, 0, read)
-            }
-        }
-        return digest.digest().joinToString("") { "%02x".format(it) }
-    }
 }

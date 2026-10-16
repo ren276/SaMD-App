@@ -32,7 +32,7 @@ class LiteRtLmRuntimeConfigTest {
         assertFalse(config.thinkingConfig!!.enableThinking)
         assertEquals(0, config.thinkingConfig!!.thinkingTokenBudget)
         assertFalse(config.enableResponseFormat)
-        assertNull(config.enableSpeculativeDecoding)
+        assertEquals("C-3: pinned false, never inherited", false, config.enableSpeculativeDecoding)
     }
 
     @Test

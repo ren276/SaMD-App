@@ -64,9 +64,9 @@ internal fun engineConfig(modelPath: String, accelerator: LocalAccelerator, cach
 )
 
 /**
- * Memo 5.1 to 5.5 (G-1', G-2', Y-19): bundled template, one user turn and nothing else, thinking
- * off, channels disabled, greedy sampler with every field set. Unset sampler fields default to
- * top_p 0.95 and temperature 1.0, which is why none is left unset.
+ * Memo 5.1 to 5.5 (G-1', G-2', Y-19, C-3): bundled template, one user turn and nothing else,
+ * thinking off, channels disabled, speculative decoding off, greedy sampler with every field set.
+ * Unset sampler fields default to top_p 0.95 and temperature 1.0, which is why none is left unset.
  */
 internal fun conversationConfig(maxOutputTokens: Int) = ConversationConfig(
     systemInstruction = null,
@@ -81,7 +81,8 @@ internal fun conversationConfig(maxOutputTokens: Int) = ConversationConfig(
     maxOutputToken = maxOutputTokens,
     thinkingConfig = ThinkingConfig(enableThinking = false, thinkingTokenBudget = 0),
     enableResponseFormat = false,
-    enableSpeculativeDecoding = null,
+    // C-3: pinned, never inherited (null takes the runtime's choice).
+    enableSpeculativeDecoding = false,
     chatTemplate = null,
 )
 

@@ -1,5 +1,6 @@
 package com.example.samdapp.di
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Build
 import android.os.PowerManager
@@ -34,6 +35,8 @@ object LocalSlmModule {
  * The one construction path, shared by the holder and the dev instrumented tests. The artifact
  * lives at `filesDir/slm/<sha256>.litertlm` (memo 9.1).
  */
+// NewApi: the engine checks sdkInt and refuses below API 29 before it ever calls thermalStatus (C-4).
+@SuppressLint("NewApi")
 fun localSlmEngine(
     context: Context,
     accelerators: List<LocalAccelerator> = listOf(LocalAccelerator.GPU, LocalAccelerator.CPU),
@@ -43,11 +46,8 @@ fun localSlmEngine(
         runtime = LiteRtLmRuntime(),
         artifactDir = File(context.filesDir, "slm"),
         cacheDir = context.cacheDir,
-        // ponytail: below API 29 there is no thermal status to read, so nothing refuses; fleet ruling Y-12.
-        thermalStatus = {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) powerManager.currentThermalStatus
-            else PowerManager.THERMAL_STATUS_NONE
-        },
+        sdkInt = Build.VERSION.SDK_INT,
+        thermalStatus = { powerManager.currentThermalStatus },
         dispatcher = Executors.newSingleThreadExecutor { Thread(it, "slm-local") }.asCoroutineDispatcher(),
         accelerators = accelerators,
     )

@@ -17,6 +17,11 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.long
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -25,6 +30,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.io.IOException
 import java.security.MessageDigest
 import java.util.Collections
 import java.util.concurrent.CountDownLatch
@@ -77,12 +83,126 @@ class LocalSlmEngineTest {
     }
 
     @Test
-    fun theStartLoadsTheContentAddressedFileWithTheAppCacheDir() = runTest {
+    fun theStartLoadsTheContentAddressedFileWithItsOwnCacheDir() = runTest {
         val runtime = FakeRuntime()
         engine(runtime).collect()
 
         assertEquals(File(folder.root, "slm/${sha256(ARTIFACT)}.litertlm").path, runtime.modelPaths.single())
-        assertEquals(File(folder.root, "cache").path, runtime.cacheDirs.single())
+        assertEquals("C-2: dedicated, keyed by the artifact digest", runtimeCache().path, runtime.cacheDirs.single())
+        assertTrue("created by us before the runtime starts", runtimeCache().isDirectory)
+    }
+
+    // ---- derived runtime cache (C-2) ----
+
+    @Test
+    fun aCleanReleaseWritesAManifestOfEveryCacheFile() = runTest {
+        val engine = engine(FakeRuntime(cacheWrites = CACHE))
+        engine.collect()
+        assertTrue("no manifest while the engine is open", !manifest().exists())
+
+        engine.release()
+
+        val listed = manifestEntries()
+        assertEquals(CACHE.keys, listed.keys)
+        CACHE.forEach { (path, content) ->
+            assertEquals(content.length.toLong() to sha256(content), listed.getValue(path))
+        }
+    }
+
+    @Test
+    fun aVerifiedCacheIsHandedToTheRuntimeUntouched() = runTest {
+        cleanReleaseWithCache()
+        val runtime = FakeRuntime()
+        val engine = engine(runtime)
+
+        engine.collect()
+
+        assertEquals(LocalSlmCacheCheck.VERIFIED, engine.lastStart()!!.cacheCheck)
+        assertEquals(CACHE.keys, runtime.cacheAtCreate.single())
+        assertTrue("a verified manifest is kept", manifest().exists())
+    }
+
+    @Test
+    fun aChangedCacheFileDiscardsTheCacheAndTheManifest() = runTest {
+        cleanReleaseWithCache()
+        File(runtimeCache(), "program.bin").writeText("gpu program X") // same size, other bytes
+        assertDiscardedBeforeStart(LocalSlmCacheCheck.DISCARDED_MISMATCH)
+    }
+
+    @Test
+    fun anUnlistedCacheFileDiscardsTheCache() = runTest {
+        cleanReleaseWithCache()
+        File(runtimeCache(), "sub/extra.bin").writeText("not in the manifest")
+        assertDiscardedBeforeStart(LocalSlmCacheCheck.DISCARDED_MISMATCH)
+    }
+
+    @Test
+    fun aMissingListedCacheFileDiscardsTheCache() = runTest {
+        cleanReleaseWithCache()
+        File(runtimeCache(), "sub/weights.cache").delete()
+        assertDiscardedBeforeStart(LocalSlmCacheCheck.DISCARDED_MISMATCH)
+    }
+
+    @Test
+    fun aMalformedManifestDiscardsTheCache() = runTest {
+        cleanReleaseWithCache()
+        manifest().writeText("{\"files\": [")
+        assertDiscardedBeforeStart(LocalSlmCacheCheck.DISCARDED_MISMATCH)
+    }
+
+    @Test
+    fun aNonEmptyCacheWithNoManifestIsDiscarded() = runTest {
+        File(runtimeCache(), "left.bin").apply { parentFile!!.mkdirs() }.writeText("after a crash")
+        assertDiscardedBeforeStart(LocalSlmCacheCheck.DISCARDED_NO_MANIFEST)
+    }
+
+    @Test
+    fun anEmptyCacheWithNoManifestIsAColdStart() = runTest {
+        val engine = engine(FakeRuntime())
+        engine.collect()
+        assertEquals(LocalSlmCacheCheck.EMPTY, engine.lastStart()!!.cacheCheck)
+    }
+
+    @Test
+    fun noManifestIsWrittenWithoutANormalClose() = runTest {
+        engine(FakeRuntime(cacheWrites = CACHE, closeError = IllegalStateException("close failed"))).apply {
+            collect()
+            release()
+        }
+        assertTrue("a close that threw is not a clean release", !manifest().exists())
+
+        engine(FakeRuntime(cacheWrites = CACHE)).collect() // never released, as after a crash
+        assertTrue(!manifest().exists())
+    }
+
+    @Test
+    fun aCrashBetweenWriteAndRenameLeavesNoValidManifest() = runTest {
+        cleanReleaseWithCache()
+        assertTrue("an old manifest is present before the crash", manifest().exists())
+
+        try {
+            writeRuntimeCacheManifest(runtimeCache(), manifest()) { throw IOException("power lost") }
+            fail("the crash must propagate")
+        } catch (e: IOException) {
+            assertEquals("power lost", e.message)
+        }
+
+        assertTrue("no manifest at the target name, old or new", !manifest().exists())
+        assertDiscardedBeforeStart(LocalSlmCacheCheck.DISCARDED_NO_MANIFEST)
+    }
+
+    private suspend fun TestScope.cleanReleaseWithCache() =
+        engine(FakeRuntime(cacheWrites = CACHE)).apply { collect(); release() }
+
+    private suspend fun TestScope.assertDiscardedBeforeStart(expected: LocalSlmCacheCheck) {
+        val runtime = FakeRuntime()
+        val engine = engine(runtime)
+
+        engine.collect()
+
+        assertEquals(expected, engine.lastStart()!!.cacheCheck)
+        assertEquals("the runtime must start on an empty cache", emptySet<String>(), runtime.cacheAtCreate.single())
+        assertTrue("the manifest is deleted with the cache", !manifest().exists())
     }
 
     // ---- start: accelerators, latch, flags ----
@@ -164,6 +284,20 @@ class LocalSlmEngineTest {
             assertEquals(emptyList<LocalAccelerator>(), runtime.created)
         }
         assertEquals(listOf("hello"), engine(FakeRuntime(), thermal = PowerManager.THERMAL_STATUS_MODERATE).collect())
+    }
+
+    @Test
+    fun belowApi29TheEngineNeverStarts() = runTest {
+        var thermalReads = 0
+        listOf(26, 28).forEach { sdk ->
+            val runtime = FakeRuntime()
+            val engine = engine(runtime, sdkInt = sdk, thermalRead = { thermalReads++ })
+            assertRefused(SlmEngineError.UNAVAILABLE, LocalSlmReason.THERMAL_UNAVAILABLE) { engine.collect() }
+            assertRefused(SlmEngineError.UNAVAILABLE, LocalSlmReason.THERMAL_UNAVAILABLE) { engine.warmUp() }
+            assertEquals(emptyList<LocalAccelerator>(), runtime.created)
+        }
+        assertEquals("no thermal read below API 29", 0, thermalReads)
+        assertEquals(listOf("hello"), engine(FakeRuntime(), sdkInt = 29).collect())
     }
 
     @Test
@@ -318,7 +452,9 @@ class LocalSlmEngineTest {
         runtime: FakeRuntime,
         content: String? = ARTIFACT,
         thermal: Int = PowerManager.THERMAL_STATUS_NONE,
-    ) = engine(runtime, content, thermal, StandardTestDispatcher(testScheduler), initTimeoutMs = 60_000)
+        sdkInt: Int = 37,
+        thermalRead: () -> Unit = {},
+    ) = engine(runtime, content, thermal, StandardTestDispatcher(testScheduler), initTimeoutMs = 60_000, sdkInt, thermalRead)
 
     private fun engine(
         runtime: FakeRuntime,
@@ -326,6 +462,8 @@ class LocalSlmEngineTest {
         thermal: Int = PowerManager.THERMAL_STATUS_NONE,
         dispatcher: kotlinx.coroutines.CoroutineDispatcher,
         initTimeoutMs: Long,
+        sdkInt: Int = 37,
+        thermalRead: () -> Unit = {},
     ): LocalSlmEngine {
         val expected = sha256(ARTIFACT)
         val dir = File(folder.root, "slm").apply { mkdirs() }
@@ -335,7 +473,8 @@ class LocalSlmEngineTest {
             runtime = runtime,
             artifactDir = dir,
             cacheDir = File(folder.root, "cache"),
-            thermalStatus = { thermal },
+            sdkInt = sdkInt,
+            thermalStatus = { thermalRead(); thermal },
             dispatcher = dispatcher,
             expectedSha256 = expected,
             initTimeout = initTimeoutMs.milliseconds,
@@ -355,6 +494,18 @@ class LocalSlmEngineTest {
         }
     }
 
+    private fun runtimeCache() = File(folder.root, "cache/slm/${sha256(ARTIFACT)}")
+
+    private fun manifest() = File(folder.root, "slm/${sha256(ARTIFACT)}.cache-manifest.json")
+
+    /** Path to (size, sha256), parsed independently of the engine's reader. */
+    private fun manifestEntries(): Map<String, Pair<Long, String>> =
+        Json.parseToJsonElement(manifest().readText()).jsonObject.getValue("files").jsonArray.associate {
+            val entry = it.jsonObject
+            entry.getValue("path").jsonPrimitive.content to
+                (entry.getValue("size").jsonPrimitive.long to entry.getValue("sha256").jsonPrimitive.content)
+        }
+
     private fun sha256(text: String) =
         MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
 
@@ -365,10 +516,15 @@ class LocalSlmEngineTest {
         val templateOverride: String? = null,
         val createGate: CountDownLatch? = null,
         val send: (() -> Flow<String>)? = null,
+        /** Files the fake "runtime" writes into its cache dir at start, as the GPU program cache does. */
+        val cacheWrites: Map<String, String> = emptyMap(),
+        val closeError: Exception? = null,
     ) : LocalSlmRuntime {
         val created: MutableList<LocalAccelerator> = Collections.synchronizedList(mutableListOf())
         val modelPaths = mutableListOf<String>()
         val cacheDirs = mutableListOf<String>()
+        /** Relative paths present in the cache dir when each engine was created. */
+        val cacheAtCreate = mutableListOf<Set<String>>()
         val conversations = mutableListOf<FakeConversation>()
         val engineClosed = CountDownLatch(1)
 
@@ -378,13 +534,19 @@ class LocalSlmEngineTest {
             created += accelerator
             modelPaths += modelPath
             cacheDirs += cacheDir
+            val dir = File(cacheDir)
+            cacheAtCreate += dir.walkTopDown().filter { it.isFile }.map { it.relativeTo(dir).invariantSeparatorsPath }.toSet()
             createGate?.await()
             if (accelerator in failingAccelerators) throw IllegalStateException("$accelerator init failed")
+            cacheWrites.forEach { (path, content) -> File(dir, path).apply { parentFile!!.mkdirs() }.writeText(content) }
             return object : RuntimeEngine {
                 override fun createConversation(maxOutputTokens: Int): RuntimeConversation =
                     FakeConversation(this@FakeRuntime, maxOutputTokens).also { conversations += it }
 
-                override fun close() = engineClosed.countDown()
+                override fun close() {
+                    engineClosed.countDown()
+                    closeError?.let { throw it }
+                }
             }
         }
     }
@@ -414,5 +576,6 @@ class LocalSlmEngineTest {
 
     private companion object {
         const val ARTIFACT = "not a model, just bytes with a known digest"
+        val CACHE = mapOf("program.bin" to "gpu program A", "sub/weights.cache" to "packed weights")
     }
 }

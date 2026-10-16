@@ -19,7 +19,8 @@ import org.junit.runner.RunWith
  *
  * `-e backend gpu` (default) uses the product order, GPU then CPU, and reports whether GPU started
  * with the AAR alone (Y-4). `-e backend cpu` forces CPU. Results go to the instrumentation status
- * stream (`am instrument -r`), never to logcat.
+ * stream (`am instrument -r`), never to logcat. The closing release writes the derived-cache
+ * manifest (C-2), so a second run reports `cache_check=VERIFIED` and its verify time.
  */
 @RunWith(AndroidJUnit4::class)
 class LocalSlmSmokeTest {
@@ -43,6 +44,8 @@ class LocalSlmSmokeTest {
             val start = engine.lastStart()!!
             report("accelerator", start.accelerator)
             report("hash_ms", start.hashMillis)
+            report("cache_check", start.cacheCheck)
+            report("cache_verify_ms", start.cacheVerifyMillis)
             report("init_ms", start.initMillis)
             report("gpu_failure", start.gpuFailure)
 
