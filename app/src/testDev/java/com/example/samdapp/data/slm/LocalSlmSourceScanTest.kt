@@ -58,6 +58,31 @@ class LocalSlmSourceScanTest {
     }
 
     /**
+     * D1 (parity harness, `-e pss off` is the default): with the in-process memory sampler off the
+     * harness makes no memory call at all. Two source facts make that checkable: `Debug.` appears
+     * only inside the `PssSampler` class, and a `PssSampler` is only ever constructed under
+     * `if (pssOn)`.
+     */
+    @Test
+    fun theParityHarnessMakesNoInProcessMemoryCallUnlessPssIsOn() {
+        val file = File(SRC, "androidTestDev/java/com/example/samdapp/slm/LocalSlmParityHarness.kt")
+        assertTrue("missing ${file.path}", file.isFile)
+        val lines = file.readLines().filterNot { it.trim().startsWith("*") || it.trim().startsWith("//") || it.trim().startsWith("/*") }
+        val start = lines.indexOfFirst { "private class PssSampler" in it }
+        assertTrue("PssSampler not found: the scan would be vacuous", start >= 0)
+        val end = lines.drop(start).indexOfFirst { it == "    }" } + start
+        val outside = lines.filterIndexed { i, line -> "Debug." in line && i !in start..end }
+        assertEquals("Debug.* used outside PssSampler", emptyList<String>(), outside)
+        val constructions = lines.filter { "PssSampler()" in it }
+        assertTrue("PssSampler is never constructed, the scan would be vacuous", constructions.isNotEmpty())
+        assertEquals(
+            "PssSampler constructed without if (pssOn)",
+            emptyList<String>(),
+            constructions.filterNot { "if (pssOn)" in it },
+        )
+    }
+
+    /**
      * The local engine has no network path (on-device SLM memo 1, "no egress on the local path"):
      * nothing in the engine's package imports or names okhttp3, retrofit2, java.net or android.net.
      * The on-device offline smoke proves the behaviour; this keeps the code from regaining the

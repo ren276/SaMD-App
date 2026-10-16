@@ -24,6 +24,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -47,6 +48,17 @@ import kotlin.concurrent.thread
  *
  * `-e limit N` is a smoke mode: only the first N golden prompts, no performance batches, and
  * `-smoke` file names, so a check of the harness never overwrites a full run's results.
+ *
+ * Measurement options (D1):
+ * - `-e pss on|off` (default **off**). With `off` the harness makes no in-process memory call at
+ *   all (no `Debug.getPss()`, no sampler thread); memory is then sampled from the host with
+ *   `dumpsys meminfo`. With `on`, `Debug.getPss()` is sampled every 250 ms as before.
+ * - `-e ids g-025,g-026` runs only those golden ids, no performance batches unless `-e phase perf`.
+ * - `-e phase golden|perf|both` (default both). `-e perf_ids g-034,g-028` names the performance
+ *   prompts (otherwise the median-token and longest-within-2048 golden prompts of this run).
+ * - `-e tag NAME` adds `-NAME` to the output file names. A subset run (`limit` or `ids`) requires a
+ *   tag or is a smoke run, so it can never overwrite a full run's files.
+ * Every row records `pss` (`on` or `off`). Cold start is measured only on full runs.
  */
 @RunWith(AndroidJUnit4::class)
 class LocalSlmParityHarness {
@@ -54,20 +66,38 @@ class LocalSlmParityHarness {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = instrumentation.targetContext
 
+    /** Whether `Debug.getPss()` is sampled in-process (`-e pss on`). Off by default. */
+    private var pssOn = false
+
     @Test
     fun runsTheGoldenSetAndThePerformanceBatches() = runBlocking {
-        val backend = InstrumentationRegistry.getArguments().getString("backend")
+        val args = InstrumentationRegistry.getArguments()
+        val backend = args.getString("backend")
         assumeTrue("pass -e backend gpu|cpu to run the parity harness", backend == "gpu" || backend == "cpu")
         backend!!
         val requested = if (backend == "gpu") LocalAccelerator.GPU else LocalAccelerator.CPU
         val accelerators = if (backend == "gpu") listOf(LocalAccelerator.GPU, LocalAccelerator.CPU) else listOf(LocalAccelerator.CPU)
         val dir = File(context.filesDir, "slm-parity")
-        val limit = InstrumentationRegistry.getArguments().getString("limit")?.toInt()
+        val limit = args.getString("limit")?.toInt()
+        val ids = args.getString("ids")?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
+        val perfIds = args.getString("perf_ids")?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
+        val phase = args.getString("phase") ?: "both"
+        val tag = args.getString("tag")
+        pssOn = args.getString("pss") == "on"
+        assertTrue("phase must be golden, perf or both", phase in setOf("golden", "perf", "both"))
+        val subset = limit != null || ids != null
+        assertTrue("a subset run needs -e tag, so it cannot overwrite a full run", !subset || tag != null || limit != null)
         val all = File(dir, "prompts-v1.jsonl").readLines(Charsets.UTF_8).filter { it.isNotBlank() }
             .map { Json.parseToJsonElement(it).jsonObject }
         assertEquals("golden prompts", 120, all.size)
-        val prompts = if (limit != null) all.take(limit) else all
-        val suffix = if (limit != null) "-smoke" else ""
+        fun idOf(row: JsonObject) = row.getValue("id").jsonPrimitive.content
+        ids?.forEach { wanted -> assertTrue("unknown golden id $wanted", all.any { idOf(it) == wanted }) }
+        val prompts = when {
+            ids != null -> ids.map { wanted -> all.single { idOf(it) == wanted } }
+            limit != null -> all.take(limit)
+            else -> all
+        }
+        val suffix = (if (tag != null) "-$tag" else "") + (if (limit != null && tag == null) "-smoke" else "")
 
         fun progress(key: String, value: Any?) = instrumentation.sendStatus(0, Bundle().apply { putString("slm_$key", value.toString()) })
 
@@ -75,13 +105,16 @@ class LocalSlmParityHarness {
             File(dir, "pixel-perf-$backend$suffix.jsonl").bufferedWriter(Charsets.UTF_8).use { perfOut ->
                 fun write(out: Writer, row: JsonObject) { out.write(row.toString()); out.write("\n"); out.flush() }
 
-                // 1. Cold start, then warm start, with timings. Release writes the cache manifest.
-                File(context.cacheDir, "slm/$ARTIFACT_SHA256").deleteRecursively()
-                File(context.filesDir, "slm/$ARTIFACT_SHA256.cache-manifest.json").delete()
-                val cold = localSlmEngine(context, accelerators)
-                cold.warmUp()
-                write(perfOut, initRow(backend, "cold", cold.lastStart()!!))
-                cold.release()
+                // 1. Cold start (full runs only), then warm start, with timings. Release writes the
+                //    cache manifest.
+                if (!subset) {
+                    File(context.cacheDir, "slm/$ARTIFACT_SHA256").deleteRecursively()
+                    File(context.filesDir, "slm/$ARTIFACT_SHA256.cache-manifest.json").delete()
+                    val cold = localSlmEngine(context, accelerators)
+                    cold.warmUp()
+                    write(perfOut, initRow(backend, "cold", cold.lastStart()!!))
+                    cold.release()
+                }
                 val engine = localSlmEngine(context, accelerators)
                 engine.warmUp()
                 val warm = engine.lastStart()!!
@@ -90,10 +123,12 @@ class LocalSlmParityHarness {
                 progress("init", "cold/warm started on ${warm.accelerator}")
 
                 try {
-                    // 2. The golden set.
+                    // 2. The golden set (or the named subset).
+                    val runGolden = phase != "perf"
+                    val runPerf = phase != "golden" && limit == null && (ids == null || phase == "perf")
                     val results = mutableListOf<GoldenResult>()
-                    prompts.forEachIndexed { index, row ->
-                        val id = row.getValue("id").jsonPrimitive.content
+                    if (runGolden) prompts.forEachIndexed { index, row ->
+                        val id = idOf(row)
                         val prompt = row.getValue("prompt").jsonPrimitive.content
                         val result = generateOnce(engine, backend, id, prompt)
                         results += GoldenResult(id, result.prefillTokens, result.ok)
@@ -101,16 +136,22 @@ class LocalSlmParityHarness {
                         if ((index + 1) % 20 == 0) progress("golden", "${index + 1} of ${prompts.size}")
                     }
 
-                    // 3. Performance: the median-token golden prompt and the longest one within 2048.
-                    if (limit != null) return@runBlocking
-                    val eligible = results.filter { it.ok && (it.prefillTokens ?: 0) in 1..2048 }.sortedBy { it.prefillTokens }
-                    val median = eligible[eligible.size / 2]
-                    val longest = eligible.last()
-                    listOf("median" to median, "longest" to longest).forEach { (label, chosen) ->
-                        val prompt = prompts.single { it.getValue("id").jsonPrimitive.content == chosen.id }
-                            .getValue("prompt").jsonPrimitive.content
-                        write(perfOut, perfBatch(engine, backend, label, chosen, prompt) { write(perfOut, it) })
-                        progress("perf_$label", "${chosen.id} prefill=${chosen.prefillTokens}")
+                    // 3. Performance: named prompts, else the median-token golden prompt and the
+                    //    longest one within 2048 tokens of this run.
+                    if (!runPerf) return@runBlocking
+                    val chosen: List<Pair<String, GoldenResult>> = if (perfIds != null) {
+                        perfIds.map { wanted ->
+                            val known = results.firstOrNull { it.id == wanted }
+                            wanted to (known ?: GoldenResult(wanted, null, true))
+                        }
+                    } else {
+                        val eligible = results.filter { it.ok && (it.prefillTokens ?: 0) in 1..2048 }.sortedBy { it.prefillTokens }
+                        listOf("median" to eligible[eligible.size / 2], "longest" to eligible.last())
+                    }
+                    chosen.forEach { (label, pick) ->
+                        val prompt = all.single { idOf(it) == pick.id }.getValue("prompt").jsonPrimitive.content
+                        write(perfOut, perfBatch(engine, backend, label, pick, prompt) { write(perfOut, it) })
+                        progress("perf_$label", "${pick.id} prefill=${pick.prefillTokens}")
                     }
                 } finally {
                     engine.release()
@@ -125,7 +166,7 @@ class LocalSlmParityHarness {
     private suspend fun generateOnce(engine: LocalSlmEngine, backend: String, id: String, prompt: String): Generated {
         awaitCoolDown()
         val thermalBefore = thermal()
-        val sampler = PssSampler().also { it.start() }
+        val sampler = if (pssOn) PssSampler().also { it.start() } else null
         val sanitizer = SlmStreamSanitizer()
         val raw = StringBuilder()
         val visible = StringBuilder()
@@ -146,7 +187,7 @@ class LocalSlmParityHarness {
             errorReason = e.javaClass.simpleName
         }
         val totalMillis = SystemClock.elapsedRealtime() - started
-        val peak = sampler.stop()
+        val peak = sampler?.stop()
         val ok = errorKind == null
         val counts = engine.lastCounts()
         val identity = engine.answeredBy()
@@ -177,6 +218,7 @@ class LocalSlmParityHarness {
             put("decode_tokens", counts?.decodeTokens)
             put("decode_tps", counts?.decodeTokensPerSecond)
             put("total_ms", totalMillis)
+            put("pss", if (pssOn) "on" else "off")
             put("pss_kb_peak", peak)
             put("thermal_before", thermalBefore)
             put("thermal_after", thermal())
@@ -198,7 +240,7 @@ class LocalSlmParityHarness {
     ): JsonObject {
         generateOnce(engine, backend, chosen.id, prompt) // warm-up, not recorded
         val thermalBefore = thermal()
-        val sampler = PssSampler().also { it.start() }
+        val sampler = if (pssOn) PssSampler().also { it.start() } else null
         val totals = mutableListOf<Long>()
         var errors = 0
         repeat(20) { i ->
@@ -228,7 +270,8 @@ class LocalSlmParityHarness {
             put("total_ms_min", sorted.firstOrNull())
             put("total_ms_median", sorted.getOrNull(sorted.size / 2))
             put("total_ms_max", sorted.lastOrNull())
-            put("pss_kb_peak", sampler.stop())
+            put("pss", if (pssOn) "on" else "off")
+            put("pss_kb_peak", sampler?.stop())
             put("thermal_before", thermalBefore)
             put("thermal_after", thermal())
         }
