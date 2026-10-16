@@ -73,9 +73,10 @@ class SlmEngineIsUnreachableFromPresentationTest {
     }
 
     /**
-     * **Step 3's claim, as an assertion rather than a sentence in a memo.** The engine binds to the
-     * same remote implementation in dev, staging and prod, because that is the shipping
-     * architecture, and **no flavor source set contains an `SlmEngine` implementation of any kind**.
+     * **Step 3's claim, narrowed for the dev on-device engine (on-device SLM memo 4.1, F-11).** The
+     * engine binds to the same remote implementation in dev, staging and prod, because that is the
+     * shipping architecture. Exactly one flavor file may implement the interface: the dev
+     * `LocalSlmEngine.kt`, which nothing binds.
      *
      * The hazard is specific and it is this project's recurring one. `MockBoundaryModule` documents
      * the opposite posture for `VitalsSource` and `KernelFallbackSource`: those bind mock clinical
@@ -86,26 +87,111 @@ class SlmEngineIsUnreachableFromPresentationTest {
      * by construction, answering with whatever pin it was compiled against. H-09 and H-13 are both
      * in the register for this shape.
      *
-     * Scanning the three flavor trees rather than asserting the binding's location is deliberate: a
-     * test that only checked that `src/main/` binds the engine would pass while a flavor bound a
-     * second one over the top of it.
+     * Three rules, each with a positive control below:
+     * 1. In `src/dev`, the only file naming the interface as a whole word is [DEV_ENGINE]. Naming is
+     *    the proxy for implementing: a class cannot implement a type it does not name. The holder
+     *    module names `LocalSlmEngine`, which is not the whole word.
+     * 2. In every shipped source set, no Hilt module but [BINDING_MODULE] names the interface as a
+     *    whole word, so nothing else can `@Binds` or `@Provides` it.
+     * 3. `src/staging` and `src/prod` never name it at all, not even as a substring.
+     *
+     * Scanning the trees rather than asserting the binding's location is deliberate: a test that
+     * only checked that `src/main/` binds the engine would pass while a flavor bound a second one
+     * over the top of it. The whole `src` tree is a declared input of the unit Test tasks.
      */
     @Test
-    fun noFlavorSourceSetImplementsOrBindsTheEngine() {
-        // On-device SLM slice S2: the dev engine and its unbound holder. Narrowed properly in the
-        // next commit (memo 4.1).
-        val devEngineFiles = setOf("LocalSlmEngine.kt", "LocalSlmModule.kt")
-        val hits = FLAVORS.filter { it.isDirectory }
-            .flatMap { flavor -> scan(kotlinSourcesUnder(flavor).filterNot { it.name in devEngineFiles }, listOf("SlmEngine")) }
+    fun onlyTheDevLocalEngineImplementsTheEngineInAFlavor() {
+        assertEquals(
+            "Exactly one flavor file may implement SlmEngine: $DEV_ENGINE (memo 4.1).",
+            emptyList<String>(),
+            devImplementerViolations(sourcesUnder(DEV)),
+        )
+    }
 
+    @Test
+    fun noModuleButSlmNetworkModuleBindsOrProvidesTheEngine() {
+        val shipped = listOf(MAIN_SOURCES, DEV) + STAGING_AND_PROD
+        assertEquals(
+            "Only $BINDING_MODULE may @Binds or @Provides SlmEngine; the product binding is " +
+                "RemoteSlmEngine in every flavor (memo 4.1).",
+            emptyList<String>(),
+            bindingViolations(shipped.flatMap { sourcesUnder(it) }),
+        )
+    }
+
+    @Test
+    fun stagingAndProdNeverNameTheEngine() {
+        val hits = STAGING_AND_PROD.flatMap { flavor -> scan(kotlinSourcesUnder(flavor), listOf("SlmEngine")) }
         assertTrue(
-            "A flavor source set names SlmEngine. The engine binds to RemoteSlmEngine in " +
+            "A staging or prod source names SlmEngine. The engine binds to RemoteSlmEngine in " +
                 "src/main/ for every flavor, and a flavor-local implementation or binding would be " +
                 "a fabricated clinical narrative reachable in whichever builds ship that flavor " +
                 "(H-09, H-13). Found:\n" + hits.joinToString("\n"),
             hits.isEmpty(),
         )
     }
+
+    /** Positive controls: each rule rejects the shape it exists for, and accepts the real holder. */
+    @Test
+    fun theNarrowedRulesRejectWhatTheyExistFor() {
+        assertEquals("Rule 3 must cover both shipped flavors.", listOf("staging", "prod"), STAGING_AND_PROD.map { it.name })
+        val engine = DEV_ENGINE to "class LocalSlmEngine(...) : SlmEngine {"
+        val holder = "dev/java/com/example/samdapp/di/LocalSlmModule.kt" to
+            "@Provides @Singleton fun provide(@ApplicationContext c: Context): LocalSlmEngine = localSlmEngine(c)"
+        assertEquals(emptyList<String>(), devImplementerViolations(listOf(engine, holder)))
+        assertTrue(
+            "A second dev implementer was admitted.",
+            devImplementerViolations(
+                listOf(engine, "dev/java/com/example/samdapp/data/slm/StubSlmEngine.kt" to "class Stub : SlmEngine"),
+            ).isNotEmpty(),
+        )
+        assertTrue(
+            "A fully qualified second implementer was admitted.",
+            devImplementerViolations(
+                listOf(engine, "dev/java/x/Other.kt" to "class Other : com.example.samdapp.domain.slm.SlmEngine"),
+            ).isNotEmpty(),
+        )
+        assertTrue("A missing dev engine was accepted.", devImplementerViolations(listOf(holder)).isNotEmpty())
+
+        assertEquals(emptyList<String>(), bindingViolations(listOf(holder)))
+        assertEquals(
+            emptyList<String>(),
+            bindingViolations(listOf(BINDING_MODULE to "@Binds abstract fun b(i: RemoteSlmEngine): SlmEngine")),
+        )
+        listOf(
+            "@Binds abstract fun b(i: LocalSlmEngine): SlmEngine",
+            "@Provides fun p(e: LocalSlmEngine): SlmEngine = e",
+            "@Provides fun p(e: LocalSlmEngine): com.example.samdapp.domain.slm.SlmEngine = e",
+        ).forEach { module ->
+            assertTrue(
+                "A binding outside $BINDING_MODULE was accepted: $module",
+                bindingViolations(listOf("dev/java/com/example/samdapp/di/LocalSlmModule.kt" to module)).isNotEmpty(),
+            )
+        }
+        assertTrue(
+            "A same-named module in another source set was exempted.",
+            bindingViolations(
+                listOf("dev/java/com/example/samdapp/di/SlmNetworkModule.kt" to "@Binds abstract fun b(i: X): SlmEngine"),
+            ).isNotEmpty(),
+        )
+    }
+
+    /** Rule 1 over (path relative to the source set, text) pairs. */
+    private fun devImplementerViolations(files: List<Pair<String, String>>): List<String> {
+        val naming = files.filter { (_, text) -> WHOLE_WORD.containsMatchIn(text) }.map { it.first }
+        return if (naming == listOf(DEV_ENGINE)) emptyList() else listOf("dev files naming SlmEngine: $naming")
+    }
+
+    /** Rule 2 over (path relative to the source set, text) pairs. */
+    private fun bindingViolations(files: List<Pair<String, String>>): List<String> =
+        files.filter { (path, text) ->
+            path != BINDING_MODULE &&
+                ("@Binds" in text || "@Provides" in text) &&
+                WHOLE_WORD.containsMatchIn(text)
+        }.map { it.first }
+
+    private fun sourcesUnder(root: File): List<Pair<String, String>> =
+        kotlinSourcesUnder(root).map { it.relativeTo(MAIN_SOURCES.parentFile).invariantSeparatorsPath to it.readText() }
 
     /**
      * Non-vacuity for the flavor scan, which would otherwise pass by finding no directories at all.
@@ -180,5 +266,15 @@ class SlmEngineIsUnreachableFromPresentationTest {
         /** Sibling of [MAIN_SOURCES]: `src/main` resolves, so `src/dev` and its siblings do too. */
         val FLAVORS: List<File> =
             listOf("dev", "staging", "prod").map { File(MAIN_SOURCES.parentFile, it) }
+
+        val DEV: File = FLAVORS[0]
+        val STAGING_AND_PROD: List<File> = FLAVORS.drop(1)
+
+        /** Paths relative to `src`, so a same-named file in another source set is not exempt. */
+        const val DEV_ENGINE = "dev/java/com/example/samdapp/data/slm/LocalSlmEngine.kt"
+        const val BINDING_MODULE = "main/java/com/example/samdapp/di/SlmNetworkModule.kt"
+
+        /** `SlmEngine` as a whole word: `LocalSlmEngine` and `SlmEngineException` do not match. */
+        val WHOLE_WORD = Regex("""\bSlmEngine\b""")
     }
 }
