@@ -36,11 +36,13 @@ sources fetched into `/media/sandesh/extra-ssd/samd-slm-parity/litertlm-src-b2f6
 
 ### 1.2 Non-goals
 
-- Turning on `SLM_READBACK_ENABLED` anywhere. It stays `false` in every flavor
-  (`app/src/main/java/com/example/samdapp/config/FeatureFlags.kt:176`, VERIFIED). UI in dev is a
-  later, separate ruling (R2).
-- Any routing between engines at runtime in the product path. The product seam keeps
-  `RemoteSlmEngine` in every flavor in this PR (section 4.1).
+- Turning on `SLM_READBACK_ENABLED` in staging or prod. It stays `false` there. **Amended by
+  R-DEV (16, slice S9):** in dev only it is `true`, as a per-flavor `BuildConfig` field read by
+  `FeatureFlags.SLM_READBACK_ENABLED` (`app/build.gradle.kts`, the `dev`, `staging` and `prod`
+  blocks).
+- Any routing between engines at runtime in the product path. Staging and prod keep
+  `RemoteSlmEngine`; dev uses `LocalSlmEngine` (R-DEV). The engine is chosen statically per flavor
+  when Hilt builds the graph, never per request (section 4.1).
 - The Google Tensor G6 artifact: the follow-up PR right after the generic path passes parity
   (Y-18, section 3.7).
 - Production artifact delivery (Y-10, deferred).
@@ -55,7 +57,7 @@ sources fetched into `/media/sandesh/extra-ssd/samd-slm-parity/litertlm-src-b2f6
 
 | Thing | Guarantee | Proof in STEP 2 |
 |---|---|---|
-| staging, prod behaviour | No new class reachable; Hilt graph for `SlmEngine` unchanged; flag false | Existing `ReportReadbackTest."the flag as shipped is off in every flavor"` stays green; new test (Y-1): the R6 audit writes are unreachable in staging and prod while `SLM_READBACK_ENABLED` is false; APK scan: staging and prod contain no `liblitertlm_jni.so` and no `com.google.ai.edge.litertlm` class (slice S1) |
+| staging, prod behaviour | No new class reachable; Hilt graph resolves `SlmEngine` to `RemoteSlmEngine` and `LocalDataOwnerFacility` to UNKNOWN; flag false | `ReportReadbackTest."the flag as shipped is on in dev and off in staging and prod"` (renamed at S9 from "the flag as shipped is off in every flavor", run by every flavor's unit test task); `ReadbackFlavorGraphTest` (S9); new test (Y-1): the R6 audit writes are unreachable in staging and prod while `SLM_READBACK_ENABLED` is false; APK scan: staging and prod contain no `liblitertlm_jni.so` and no `com.google.ai.edge.litertlm` class (slice S1) |
 | `RemoteSlmEngine` request and response wire | Byte-identical JSON | `RemoteSlmEngineTest.theRequestCarriesThisBuildsPinAndTemplateAndOmitsTheDeterminismFields` stays green unchanged |
 | Backend `backend/core` | No file changes | `git diff --stat origin/master -- backend/` empty at PR time |
 | F1 files | No edits to F1-only files | Section 12 list; PR diff checked against it |
@@ -303,16 +305,23 @@ Call sites touched (VERIFIED by grep of `SlmEngine` implementers and constructor
 (`SlmReadbackUseCaseTest.kt:61`) and `RecordingEngine` (`ReportReadbackTest.kt:479`); new
 `LocalSlmEngine` (dev).
 
-Binding (R2, R3): the Hilt binding does not change. `SlmNetworkModule.Bindings` keeps binding
-`RemoteSlmEngine` in `src/main` for all flavors. `LocalSlmEngine` lives in `src/dev`, is not bound
-to `SlmEngine`, and is constructed only by the dev parity harness and its tests. So there is no
-runtime engine switch anywhere in this PR, which meets R3's "never changed mid-request" by
-construction; the later UI ruling adds an explicit pre-request choice.
+Binding (R2, R3; amended by R-DEV at S9): `SlmNetworkModule` in `src/main` is still the only
+binding of `SlmEngine`. It provides the dev override when the flavor has one and `RemoteSlmEngine`
+otherwise: `@BindsOptionalOf @DevReadbackOverride SlmEngine` plus
+`provideSlmEngine(Optional<SlmEngine>, Provider<RemoteSlmEngine>)`. The same shape provides
+`LocalDataOwnerFacility`, defaulting to `UnknownLocalDataOwnerFacility`. Only the dev
+`di/LocalSlmModule.kt` provides the two overrides (`LocalSlmEngine`, and an owner that returns the
+signed-in session's facility). Staging and prod source sets hold no readback source at all, so
+their graph resolves to the remote engine and the UNKNOWN owner. The choice is fixed per flavor
+when Hilt builds the graph and never changes per request, which meets R3 by construction.
 
 F-11's guard is narrowed, not deleted: exactly one flavor file,
 `app/src/dev/java/com/example/samdapp/data/slm/LocalSlmEngine.kt`, may *implement* `SlmEngine`;
-any `@Binds`/`@Provides` of `SlmEngine` outside `di/SlmNetworkModule.kt` fails, and any
-`SlmEngine` mention in `src/staging` or `src/prod` fails.
+any `@Binds`/`@Provides` of `SlmEngine` outside `di/SlmNetworkModule.kt` fails, except exactly the
+one line `fun provideDevReadbackEngine(engine: LocalSlmEngine): SlmEngine = engine` under
+`@Provides @DevReadbackOverride` in the dev `di/LocalSlmModule.kt` (R-DEV); and any `SlmEngine`
+mention in `src/staging` or `src/prod` fails. `ReadbackFlavorGraphTest` pins every line naming
+`DevReadbackOverride`.
 
 ### 4.2 Lifecycle
 
@@ -335,7 +344,8 @@ any `@Binds`/`@Provides` of `SlmEngine` outside `di/SlmNetworkModule.kt` fails, 
 - `ExperimentalFlags.enableBenchmark = true` before `initialize()` (`ExperimentalFlags.kt:34`,
   passed into `nativeCreateEngine` at `Engine.kt` init args, VERIFIED), because the finish reason
   and prompt-length backstop read `BenchmarkInfo` (5.3, 5.5).
-- Holder: `@Singleton` in the dev Hilt graph (not bound to `SlmEngine`), owning one `Engine`.
+- Holder: `@Singleton` in the dev Hilt graph, owning one `Engine`; since R-DEV (S9) it is also
+  the dev flavor's `SlmEngine` through the `@DevReadbackOverride` provision (4.1).
 - **One new `Conversation` per readback, closed after it, never reused** (G-1'):
   `engine.createConversation(config)` (`Engine.kt:120`, VERIFIED) inside `generate`, `close()`
   (`Conversation.kt:743`, VERIFIED) in `finally`. No history can accumulate.
@@ -629,7 +639,7 @@ name, mtime and size, not by digest (S2 finding). The artifact digest does not c
 
 | Remote control (F-18) | Purpose | Local replacement | Reason |
 |---|---|---|---|
-| Facility scope (`services/slm.py:406-409`) | Stop a caller reading another facility's case | Readback seam refuses, fail closed, unless the session's facility and the facility owning the local data are both known and equal by id (Y-21', slice S4). In this PR the owner is always UNKNOWN (`UnknownLocalDataOwnerFacility`), so every readback is refused; the marker store is deferred to the product-wide facility-scope PR | F-1 finding below: the INFERRED claim of M2 is not supported by code. |
+| Facility scope (`services/slm.py:406-409`) | Stop a caller reading another facility's case | Readback seam refuses, fail closed, unless the session's facility and the facility owning the local data are both known and equal by id (Y-21', slice S4). In staging and prod the owner is always UNKNOWN (`UnknownLocalDataOwnerFacility`), so every readback is refused; in dev only the owner is the signed-in session's facility (R-DEV, mock data only); the marker store is deferred to the product-wide facility-scope PR | F-1 finding below: the INFERRED claim of M2 is not supported by code. |
 | `phi_guard` case id + 10-digit run (`adapters/slm/phi_guard.py:58-81`) | Stop identifiers leaving the backend toward the GPU host | Case-id absence kept as a prompt-construction invariant | No egress on the local path. S4 adds a JVM test that `buildPrompt` output never contains `snapshot.caseRecordId`. The digit-run rule is an egress rule and does not apply. |
 | Circuit breaker (`services/slm.py:435`) | Stop hammering a failing remote | Init-failure latch | After GPU and CPU init both fail, the engine stays UNAVAILABLE until a release resets it. Prevents a slow failing init per request. |
 | `slm_call_log` | Per-call operational record | The four device audit rows (section 8), synced | Engine, accelerator, model id, sha256, runtime, template version, prompt chars, token counts, duration, outcome. |
@@ -681,9 +691,14 @@ migration and no sign-in change in this PR. As built in S4:
   `data/local/auth/DataStoreAuthTokenStore.kt:38`, written at :119, cleared with the session at
   :145). Read through `SessionFacilitySource`, which that store implements (`currentFacility`,
   :75-80); only while a worker is signed in; never from a token.
-- Owner: `LocalDataOwnerFacility` returns `OwningFacility.Known(id)` or `Unknown`. The only
-  implementation in this PR, `UnknownLocalDataOwnerFacility`, always returns `Unknown`, so the seam
-  refuses every readback.
+- Owner: `LocalDataOwnerFacility` returns `OwningFacility.Known(id)` or `Unknown`. In staging and
+  prod the implementation is `UnknownLocalDataOwnerFacility`, which always returns `Unknown`, so
+  the seam refuses every readback there.
+- **R-DEV (S9), dev only:** the owner is the signed-in session's facility
+  (`LocalSlmModule.provideDevLocalDataOwnerFacility`, through `SessionFacilitySource`), so the
+  check passes for any signed-in worker whose login carried a facility id and refuses when signed
+  out. Dev holds mock data only; this is not a facility scope and its KDoc says so. It does not
+  lift the dependency in 15.2 for any other flavor.
 - The check is step 0 of the seam, before the record is read, for every tier: allowed only when
   both sides are known and the ids are equal; never compared by name. Refusal reuses
   `ENGINE_REJECTED_INPUT` (the same refusal and copy the remote path gives for another facility's
@@ -1107,9 +1122,11 @@ G-6 run delivers the rendering and token files; then S7, S8.
 
 - (Resolved at S6) FIXTURE (G-5 final): the 70-entry list arrived and is recorded in 5.6.
 - Y-16' (batch 7): the default backend order, from S5 time-to-answer data including init.
-- DEPENDENCY (Y-21'): the later "enable readback UI in dev" ruling cannot be taken until the
-  product-wide facility-scope PR (HIGH, filed) provides a real `LocalDataOwnerFacility`. Until
-  then the only implementation returns UNKNOWN and the seam refuses every readback.
+- DEPENDENCY (Y-21', amended by R-DEV): enabling the readback in any non-dev flavor cannot be
+  ruled until the product-wide facility-scope PR (HIGH, filed) provides a real
+  `LocalDataOwnerFacility`. Until then staging and prod return UNKNOWN and the seam refuses every
+  readback there. R-DEV took the dev ruling only, over mock data, with the session's facility as
+  owner; it does not lift this dependency for staging or prod.
 
 ### 15.3 YOUR CALL
 
@@ -1239,3 +1256,8 @@ R9-b The comparator scores a desktop error with that substring, a server 413 wit
 
 M-1 In-process memory sampling (Debug.getPss) stalls generation (D2: median decode 16.7 tok/s off vs 7.4 on; 0 vs 4 of 10 timeouts). Memory is measured from the host only. The P2 runs (pixel-gpu.jsonl, pixel-cpu.jsonl, pixel-perf.jsonl) are void as parity inputs and kept only for the record.
 M-2 Repeatability finding: GPU greedy output for the same prompt differed across runs (the pss-on A/B rows matched neither the P2 rows nor the pss-off rows). Repeatability is now measured (step 3) and gated per backend (step 4). Add the hazard row H-55 (PROPOSED): the same approved record yields different readback text across runs on the same device and backend, with controls TBD from the step 3 data.
+
+### Ruling R-DEV (2026-10-16)
+
+OPERATOR RULING R-DEV (2026-10-16; append verbatim to memo section 16 and apply to sections 1, 4.1, 7.1 and 15, in a docs commit, AUTHORIZED):
+In the DEV flavor only: SLM_READBACK_ENABLED is true; the readback seam uses LocalSlmEngine; LocalDataOwnerFacility returns the signed-in session's facility (dev holds mock data only; the KDoc says so). In STAGING and PROD nothing changes: the flag stays false, the binding stays RemoteSlmEngine, and LocalDataOwnerFacility stays always UNKNOWN. The engine is chosen statically per flavor, never at request time (meets R3). This does not lift the dependency in memo section 15 for any non-dev flavor: those still wait for the product-wide facility-scope PR.
