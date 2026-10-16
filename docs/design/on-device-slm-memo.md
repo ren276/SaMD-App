@@ -369,17 +369,26 @@ any `@Binds`/`@Provides` of `SlmEngine` outside `di/SlmNetworkModule.kt` fails, 
 
 ### 4.5 Deadline
 
-- `withTimeout(40.seconds)` around generation (init excluded), matching the service's 40 s from
-  arrival. On expiry: `cancelProcess()`, close, throw `SlmEngineException(TIMEOUT)` (maps to
-  ENGINE_TIMEOUT, F-6).
+- `withTimeout(60.seconds)` around generation (init excluded). **V-2 (batch 11):** the local deadline
+  is 60 s, not the server's 40 s, because the device decodes slower than the server's GPU (CPU about
+  9.9 tok/s) and 6 CPU answers timed out at 40 s in the v2 run. The server stays at 40 s. On expiry:
+  `cancelProcess()`, close, throw `SlmEngineException(TIMEOUT)` (maps to ENGINE_TIMEOUT, F-6).
 - Init has its own bound: 60 s, then UNAVAILABLE. Y-16: the harness records cold-init time; the
   bound is revisited if init exceeds 10 s.
 
 ### 4.6 Accelerator selection (R4)
 
-- Order: `Backend.GPU()`; if `initialize()` throws, close, log, then `Backend.CPU(threadCount = 4)`
-  (`Config.kt:144-149`, VERIFIED); if that throws, UNAVAILABLE and the init latch (section 7).
-  Decided at init only; reported in every `answeredBy()`.
+- **V-1 (batch 11): CPU only.** The engine selects `Backend.CPU(threadCount = 4)`
+  (`Config.kt:144-149`, VERIFIED) and nothing else; if that fails to initialise it is UNAVAILABLE and
+  the init latch (section 7) holds. GPU greedy output is not repeatable (9 of 30 byte-identical on
+  a repeat, against CPU 28 of 28 comparable) and GPU decode throttles under sustained load (16.7 to
+  about 8.7 tok/s, thermal status 2). The GPU code path stays, unselected: the engine refuses to be
+  constructed with a GPU entry unless the caller opts in for investigation (the parity harness
+  does; nothing else does), and a test asserts the default never selects GPU. Re-enabling GPU needs
+  a determinism investigation and its own parity run. The Tensor G6 NPU follow-up (Y-18) must
+  measure repeatability first. Decided at init only; reported in every `answeredBy()`.
+- *Superseded by V-1, kept for the record:* the earlier order was `Backend.GPU()` first, then CPU on
+  an init failure.
 - **The default order is not final (Y-16', batch 7).** It is decided from S5 time-to-answer data,
   including init, over the golden prompts. Measured so far (S2): GPU cold init 30,640 ms, warm
   7,663 ms; CPU init 2,355 ms; probe (b) total GPU 1,671 ms vs CPU 1,882 ms.
@@ -932,6 +941,18 @@ ids are too long` at `max_num_tokens` 2560 before any prefill (recorded as `outc
 
 ### 11.5 Comparator (R7 + G-6)
 
+**Verdict (V-0, batch 11).** On the v2 runs: prompt path PASS (token-id and rendering parity 120 of
+120; trim 28 of 28 on desktop and on device); refusal parity PASS (H3, H4); content gates FAIL,
+attributable to the language gate on Devanagari questions (server 22 of 34 fail, GPU 31 of 34, CPU
+29 of 31) and one slash-format number case. Recorded as is in the PR. **V-3:** the number gate also
+accepts each part of a value joined by `/` (for example `148/92` contributes `148` and `92`; the
+whole stays matchable). **V-4:** the language gate stays a hard gate as a RELEASE gate for any
+non-dev enablement; its fix is a follow-up PR (prompt template `slm-readback-v2`, an instruction to
+answer in the language and script of the question, a `PROMPT_TEMPLATE_VERSION` bump and re-runs of
+G-6, the server run and the local runs). **V-5:** the R7 hard gates gate enablement outside dev, not
+the merge of this dev-only PR. From batch 11 the gated local run is CPU (`pixel-cpu-v3`); the GPU run
+is reported only and labelled "not selected".
+
 `tools/slm-parity/compare.py` (stdlib only, `python3 -I`). Inputs: golden file, run files,
 token-parity file. Semantics per C-1 (finalizes R7).
 
@@ -1043,7 +1064,7 @@ F1; whichever merges second merges master in with a merge commit, no rebase.
 | H-52 | A GPU init failure falls back to CPU and slower or different output is not attributable | Fallback only at init; accelerator in every audit row, plus the boolean `gpu_init_failed` in `SLM_READBACK_INVOKED` (C-7, never error text); parity run per backend; default backend order decided from S5 time-to-answer data including init (Y-16') |
 | H-53 | An over-length prompt is answered locally while the server refuses it: in the 2049 to 2560 token band the runtime accepts it, and above 2560 it may truncate silently and answer from a partial record | Context 2560; mandatory prefill-count backstop (Y-20): `lastPrefillTokenCount > 2048` discards the output and refuses before the flow emits (4.4, 5.5); missing benchmark info also refuses; device tests at about 2100 and over 2560 tokens (STOP if visible output); G-6 refusal-parity scoring; the runtime's own input-too-long error maps to the same refusal (R9-a, G6: all 6 designed prompts rejected before prefill, 413 on the server) |
 | H-54 | A worker from another facility signs in on a shared phone and the local engine reads back an approved record from the previous facility, which the remote path would refuse | Y-21' (batch 6 Option 3, as superseded at S4; slice S4): the readback seam, for both engines and every tier, refuses fail closed unless the signed-in session's facility and the facility owning the local data are both known and equal by id, never by name. In this PR the owner is always UNKNOWN, so every readback is refused (`facility_scope`); the marker store is deferred to the product-wide facility-scope PR. **Residual:** the rest of the app's local reads stay unscoped (7.1, F-1); that exposure is a separate HIGH PR with its own hazard row (wipe on a different-facility sign-in only after the outbox has fully drained; block that sign-in, never wipe, while it has not) |
-| H-55 | PROPOSED (M-2). The same approved record yields different readback text across runs on the same device and backend (observed on GPU: the pss-on A/B rows matched neither the earlier rows nor the pss-off rows), so a text a worker saw cannot be reproduced for review | Controls TBD from the repeatability data (section 11.4, per-backend identical-of-30); candidates: audit the digest of every shown readback text, keep deterministic decode a measured property per backend, refuse or flag a readback whose repeat differs. **Measured (S5b v2 repeats, 30 ids each):** GPU 9 byte-identical of 30 (21 differ, first differing offsets 12 to 589 characters); CPU 28 identical of the 28 comparable (2 not comparable because a run timed out). So the nondeterminism is a property of the GPU backend here, not of the model or the sampler settings |
+| H-55 | PROPOSED (M-2). The same approved record yields different readback text across runs on the same device and backend (observed on GPU: the pss-on A/B rows matched neither the earlier rows nor the pss-off rows), so a text a worker saw cannot be reproduced for review | Controls TBD from the repeatability data (section 11.4, per-backend identical-of-30); candidates: audit the digest of every shown readback text, keep deterministic decode a measured property per backend, refuse or flag a readback whose repeat differs. **Control chosen (V-1, batch 11): CPU only.** **Measured (S5b v2 repeats, 30 ids each):** GPU 9 byte-identical of 30 (21 differ, first differing offsets 12 to 589 characters); CPU 28 identical of the 28 comparable (2 not comparable because a run timed out). So the nondeterminism is a property of the GPU backend here, not of the model or the sampler settings |
 
 ### 13.3 SOUP entries
 
@@ -1114,7 +1135,12 @@ G-6 run delivers the rendering and token files; then S7, S8.
 ### 15.2 PENDING
 
 - (Resolved at S6) FIXTURE (G-5 final): the 70-entry list arrived and is recorded in 5.6.
-- Y-16' (batch 7): the default backend order, from S5 time-to-answer data including init.
+- (Resolved at batch 11) Y-16': the backend is CPU only (V-1).
+- RELEASE GATE (V-4): language of the answer on Devanagari questions; fix is the `slm-readback-v2`
+  template follow-up PR, with re-runs of G-6, the server run and the local runs.
+- FILED (V-4): the server's own 22 of 34 Devanagari-answer failures, as a readback-quality finding.
+- FOLLOW-UP (V-1): GPU re-enablement needs a determinism investigation and its own parity run; the
+  Tensor G6 NPU follow-up must measure repeatability first.
 - DEPENDENCY (Y-21'): the later "enable readback UI in dev" ruling cannot be taken until the
   product-wide facility-scope PR (HIGH, filed) provides a real `LocalDataOwnerFacility`. Until
   then the only implementation returns UNKNOWN and the seam refuses every readback.
@@ -1247,3 +1273,12 @@ R9-b The comparator scores a desktop error with that substring, a server 413 wit
 
 M-1 In-process memory sampling (Debug.getPss) stalls generation (D2: median decode 16.7 tok/s off vs 7.4 on; 0 vs 4 of 10 timeouts). Memory is measured from the host only. The P2 runs (pixel-gpu.jsonl, pixel-cpu.jsonl, pixel-perf.jsonl) are void as parity inputs and kept only for the record.
 M-2 Repeatability finding: GPU greedy output for the same prompt differed across runs (the pss-on A/B rows matched neither the P2 rows nor the pss-off rows). Repeatability is now measured (step 3) and gated per backend (step 4). Add the hazard row H-55 (PROPOSED): the same approved record yields different readback text across runs on the same device and backend, with controls TBD from the step 3 data.
+
+### Batch 11 (operator verdict on P3)
+
+V-0 Verdict: prompt path PASS (token-id and rendering parity 120 of 120; trim 28 of 28 on desktop and on device); refusal parity PASS (H3, H4); content gates FAIL, attributable to the language gate on Devanagari questions (server 22 of 34 fail, GPU 31 of 34, CPU 29 of 31) and one slash-format number case. Recorded as is in the PR.
+V-1 Accelerator: CPU is the only backend the engine selects in this PR, because GPU greedy output is not repeatable (9 of 30 identical, against CPU 28 of 28 comparable) and GPU decode throttles under sustained load (16.7 to about 8.7 tok/s, thermal status 2). The GPU code path stays, unselected, with a test that the engine never selects it. Re-enabling it needs a determinism investigation and its own parity run. H-55 control: CPU only. The Tensor G6 NPU follow-up must measure repeatability first.
+V-2 Local generation deadline 60 s (the server stays at 40 s); the init bound stays 60 s. Rationale: the device decodes slower than the server's GPU (CPU about 9.9 tok/s); 6 CPU answers timed out at 40 s.
+V-3 Number gate: a record value joined by '/' (for example 148/92) also contributes each part as a matchable number; the whole stays matchable. Nothing else in the gate changes.
+V-4 Language: the language gate stays a hard gate, as a RELEASE gate for any non-dev enablement. Its fix is a follow-up PR: prompt template slm-readback-v2 adding an instruction to answer in the language and script of the QUESTION, with a PROMPT_TEMPLATE_VERSION bump and re-runs of G-6, the server run and the local runs. The server's own 22 of 34 failure is filed as a readback-quality finding.
+V-5 The R7 hard gates gate enablement outside dev, not the merge of this dev-only PR. The PR body states the verdict and every failing gate verbatim.
