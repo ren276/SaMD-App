@@ -15,7 +15,7 @@
 | Detailed design | code + KDoc; formal doc TODO | partial |
 | Risk management file | `docs/quality/risk-management-file.md` | started |
 | Verification & validation records | TODO (see roadmap #4: tests + CI) | **open** |
-| SOUP validation record (on-device ASR: sherpa-onnx, ONNX Runtime, Parakeet int8) | `docs/quality/soup-validation-record.md` | **PROPOSED, awaiting operator sign-off** (2026-09-02, PR 4b) - covers the five model-companion components that the generated SBOM cannot see |
+| SOUP validation record (on-device ASR: sherpa-onnx, ONNX Runtime, Parakeet int8) | `docs/quality/soup-validation-record.md` | **PROPOSED, awaiting operator sign-off** (2026-09-02, PR 4b) - covers the five model-companion components that the generated SBOM cannot see. Section 6, on-device SLM (LiteRT-LM 0.18.0, Gemma 4 E2B artifact, the remote model as served; dev flavor only): **PROPOSED, AWAITING OPERATOR SIGN-OFF. NOT APPROVED** (2026-10-16, slice S8) |
 | Usability engineering file (IEC 62366) | TODO | open |
 | Cybersecurity / threat model | partial (SQLCipher, Keystore); doc TODO | partial |
 | Release records | TODO | open |
