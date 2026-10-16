@@ -293,6 +293,9 @@ data class SlmEngineIdentity(
 ```
 
 `servedModelId()` stays the identity gate's only input (F-6, F-7); `answeredBy()` feeds audit.
+A second additive member, `runConditions(): SlmRunConditions?` (thermal status and the boolean
+`gpu_init_failed`, C-7), carries device conditions for the `SLM_READBACK_INVOKED` row only; conditions
+are not identity, so it stays apart from `SlmEngineIdentity` (batch 8). Remote returns null.
 
 Call sites touched (VERIFIED by grep of `SlmEngine` implementers and constructors):
 `domain/slm/SlmEngine.kt`; `data/remote/RemoteSlmEngine.kt` (REMOTE, from `lastResponse`);
@@ -614,7 +617,7 @@ name, mtime and size, not by digest (S2 finding). The artifact digest does not c
 
 | Remote control (F-18) | Purpose | Local replacement | Reason |
 |---|---|---|---|
-| Facility scope (`services/slm.py:406-409`) | Stop a caller reading another facility's case | Readback seam refuses, fail closed, when the session's facility differs from the facility recorded as owning the local data, or either is unknown (Y-21 Option 3, slice S4) | F-1 finding below: the INFERRED claim of M2 is not supported by code. |
+| Facility scope (`services/slm.py:406-409`) | Stop a caller reading another facility's case | Readback seam refuses, fail closed, unless the session's facility and the facility owning the local data are both known and equal by id (Y-21', slice S4). In this PR the owner is always UNKNOWN (`UnknownLocalDataOwnerFacility`), so every readback is refused; the marker store is deferred to the product-wide facility-scope PR | F-1 finding below: the INFERRED claim of M2 is not supported by code. |
 | `phi_guard` case id + 10-digit run (`adapters/slm/phi_guard.py:58-81`) | Stop identifiers leaving the backend toward the GPU host | Case-id absence kept as a prompt-construction invariant | No egress on the local path. S4 adds a JVM test that `buildPrompt` output never contains `snapshot.caseRecordId`. The digit-run rule is an egress rule and does not apply. |
 | Circuit breaker (`services/slm.py:435`) | Stop hammering a failing remote | Init-failure latch | After GPU and CPU init both fail, the engine stays UNAVAILABLE until a release resets it. Prevents a slow failing init per request. |
 | `slm_call_log` | Per-call operational record | The four device audit rows (section 8), synced | Engine, accelerator, model id, sha256, runtime, template version, prompt chars, token counts, duration, outcome. |
@@ -691,6 +694,8 @@ into the use case (new constructor parameter; touches `SlmReadbackUseCaseTest.kt
 | `SLM_READBACK_SANITIZER_ACTIVITY` | After every collected generation, including zero counts | `spans`, `characters`, `dropped_tokens`, `unknown_tokens` (`SlmSuppression`, F-7) |
 | `SLM_READBACK_OUTPUT_SUPPRESSED` | Any refusal after generation: SERVED_MODEL_MISMATCH, OUTPUT_TRUNCATED, OUTPUT_NOT_GROUNDED (:393-410) | `reason`, `engine`, `model_id` |
 
+`engine_error` (batch 8) is an `SlmEngineError` enum name, `CANCELLED` (the collector was cancelled while the engine ran) or `UNCLASSIFIED` (a throwable that is not an `SlmEngineException`); never exception text. Facility-scope refusals (Y-21') are `INPUT_REFUSED` with `reason` `facility_scope`, written before the record is read, so `prompt_chars` is null.
+
 Rules: `caseRecordId` in its column, `patientId = null`. Never the question, prompt, output, drug
 name or diagnosis (F-9). Every value is an enum name, count, id or digest. An audit write failure
 never changes the readback result (`CancellationException` rethrown, other failures logged).
@@ -739,6 +744,7 @@ F=/media/sandesh/extra-ssd/samd-slm-parity/model/gemma-4-E2B-it.litertlm
 sha256sum "$F"                                   # must print $SHA
 adb -s <dev> push "$F" /data/local/tmp/slm.litertlm
 adb -s <dev> shell "run-as com.example.samdapp.dev mkdir -p files/slm"
+adb -s <dev> shell "run-as com.example.samdapp.dev chmod 700 files/slm"   # batch 8
 adb -s <dev> shell "cat /data/local/tmp/slm.litertlm | run-as com.example.samdapp.dev sh -c 'cat > files/slm/$SHA.litertlm'"
 adb -s <dev> shell "run-as com.example.samdapp.dev sha256sum files/slm/$SHA.litertlm"
 adb -s <dev> shell "run-as com.example.samdapp.dev chmod 600 files/slm/$SHA.litertlm"   # C-5, batch 7
@@ -964,7 +970,7 @@ F1; whichever merges second merges master in with a merge commit, no rebase.
 | H-51 | Sustained generation heats the phone; readbacks time out or the worker abandons the screen | Pre-run thermal refusal at SEVERE (Y-15); 40 s deadline; thermal in audit; 20-run measurement |
 | H-52 | A GPU init failure falls back to CPU and slower or different output is not attributable | Fallback only at init; accelerator in every audit row, plus the boolean `gpu_init_failed` in `SLM_READBACK_INVOKED` (C-7, never error text); parity run per backend; default backend order decided from S5 time-to-answer data including init (Y-16') |
 | H-53 | An over-length prompt is answered locally while the server refuses it: in the 2049 to 2560 token band the runtime accepts it, and above 2560 it may truncate silently and answer from a partial record | Context 2560; mandatory prefill-count backstop (Y-20): `lastPrefillTokenCount > 2048` discards the output and refuses before the flow emits (4.4, 5.5); missing benchmark info also refuses; device tests at about 2100 and over 2560 tokens (STOP if visible output); G-6 refusal-parity scoring |
-| H-54 | A worker from another facility signs in on a shared phone and the local engine reads back an approved record from the previous facility, which the remote path would refuse | Y-21 Option 3 (batch 6, slice S4): the readback seam, for both engines, refuses fail closed when the signed-in session's facility differs from the facility recorded as owning the local data, or when either is unknown. **Residual:** the rest of the app's local reads stay unscoped (7.1, F-1); that exposure is a separate HIGH PR with its own hazard row (wipe on a different-facility sign-in only after the outbox has fully drained; block that sign-in, never wipe, while it has not) |
+| H-54 | A worker from another facility signs in on a shared phone and the local engine reads back an approved record from the previous facility, which the remote path would refuse | Y-21' (batch 6 Option 3, as superseded at S4; slice S4): the readback seam, for both engines and every tier, refuses fail closed unless the signed-in session's facility and the facility owning the local data are both known and equal by id, never by name. In this PR the owner is always UNKNOWN, so every readback is refused (`facility_scope`); the marker store is deferred to the product-wide facility-scope PR. **Residual:** the rest of the app's local reads stay unscoped (7.1, F-1); that exposure is a separate HIGH PR with its own hazard row (wipe on a different-facility sign-in only after the outbox has fully drained; block that sign-in, never wipe, while it has not) |
 
 ### 13.3 SOUP entries
 
@@ -1150,3 +1156,11 @@ No schema change, no migration, and no change to the sign-in path in this PR. Im
 Keep the session-facility lookup you found (cite it). Implement the comparison logic fully: same facility allowed; different facility refused; either side unknown refused; compare by facility id, never by name. Test it with a fake LocalDataOwnerFacility, so the logic is ready for the real store.
 Mutation rows: allow when the owner is UNKNOWN; compare by name instead of id; skip the check for the physician tier.
 The marker store (where it lives, the migration, when the claim runs, and the wipe-after-drain policy) moves to the product-wide facility-scope PR (HIGH, filed), which needs its own Opus memo. Record a dependency in memo section 15: the later "enable readback UI in dev" ruling cannot be taken until that PR provides a real LocalDataOwnerFacility.
+
+### Batch 8 (gate review of S4)
+
+- runConditions() accepted as a second SlmEngine member (conditions are not identity).
+- engine_error values CANCELLED and UNCLASSIFIED accepted; UNCLASSIFIED carries the enum name only, never exception text.
+- Facility check running first (every request refused as facility_scope while the owner is UNKNOWN) accepted.
+- Memo 9.1 adds: adb shell "run-as com.example.samdapp.dev chmod 700 files/slm" after creating the directory.
+- currentFacility() gets a direct androidTest now (it is new src/main code in every flavor).
