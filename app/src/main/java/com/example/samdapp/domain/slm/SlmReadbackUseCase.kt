@@ -385,6 +385,15 @@ class SlmReadbackUseCase @Inject constructor(
         if (firstControlTokenIn(prompt) != null) {
             return audit.inputRefused(SlmRefusal.PROMPT_CONTROL_TOKENS, question, prompt)
         }
+        //     G-5 final: text the two tokenizers split differently (one of the 70 litertlm HTML tag
+        //     pieces) would make the local engine see another prompt than the server. Same refusal
+        //     and copy as the control tokens, told apart only in the audit reason. Both engines.
+        if (firstDivergentMarkupIn(prompt) != null) {
+            return audit.inputRefused(
+                SlmRefusal.PROMPT_CONTROL_TOKENS, question, prompt,
+                auditReason = TOKENIZER_DIVERGENT_MARKUP_AUDIT_REASON,
+            )
+        }
 
         // 3. Prompt budget: refuse rather than truncate.
         if (prompt.length > MAX_PROMPT_CHARS) {

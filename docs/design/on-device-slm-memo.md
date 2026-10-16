@@ -11,8 +11,8 @@ Tag convention: VERIFIED means a file:line in this worktree, a command plus its 
 document at a pinned commit. "G2 REPORT section N" cites the GPU-machine report
 `/mnt/twotb/ondevice-parity/REPORT.md` (VERIFIED there, pasted by the operator at M2). "T1" cites
 the GPU-machine `T1_REPORT.md` (VERIFIED there, summarised by the operator at M3). INFERRED gives
-its reason. PENDING FIXTURE marks the one input still to arrive: the 70-entry HTML tag piece list
-file and its sha256 (G-5 final, 5.6).
+its reason. The one input that was PENDING FIXTURE, the 70-entry HTML tag piece list file and its
+sha256, arrived and is recorded in 5.6 (G-5 final).
 
 LiteRT-LM citations are to tag `v0.18.0` = commit `b2f686e2ed4718fb84ec398a61dd59ca0f0aff27`,
 sources fetched into `/media/sandesh/extra-ssd/samd-slm-parity/litertlm-src-b2f686e2/`.
@@ -535,16 +535,17 @@ Final rule (G-5):
 - The 70 HTML tag pieces: the pre-call input guard, at the same point as `firstControlTokenIn`
   (`SlmReadbackUseCase.kt:350`, both engines), also refuses any prompt containing one of them,
   matched as exact case-sensitive substrings against a pinned list file.
-  - File: `app/src/main/resources/slm/litertlm-html-tag-pieces-v1.txt`, one piece per line,
-    transferred by the operator from the GPU machine. **sha256: PENDING FIXTURE** (recorded in this
-    memo when the file arrives, before slice S6 lands).
-  - Loaded once, lazily, by an `internal` object in `domain/slm/`. A missing or unreadable file
-    refuses every prompt (fail closed); the JVM test below makes that a build-time failure rather
-    than a field one.
-  - Test: the file has exactly 70 entries, its sha256 equals the recorded digest, every entry
-    matches `^</?[a-z0-9]+>$` (INFERRED shape from T1's `<tag>`/`</tag>` description; the test
-    fails loudly if T1's list contains another shape, which then needs a look), and the T1 near
-    misses above are not refused.
+  - As built in S6 (the step instruction supersedes the earlier "main resource, loaded lazily"
+    design): the GPU machine's G4 file is committed byte for byte as the test fixture
+    `app/src/test/resources/slm/litertlm_html_tag_pieces.txt`, 70 entries and no trailing newline.
+    **sha256: `32261808c5e6e679d350f03c4894590ab22fbfe95841f6118016d6013ee07554`**, confirmed by the
+    operator against the GPU machine's G4 value. The runtime list is the Kotlin constant set
+    `TOKENIZER_DIVERGENT_MARKUP` in `domain/slm/TokenizerDivergentMarkup.kt` (`src/main`, both
+    engines), so there is no file to be missing at run time and nothing to fail open.
+    `<mask>` and every `<unusedN>` are absent from it on purpose: `CONTROL_TOKENS` already refuses them.
+  - Test (`TokenizerDivergentMarkupTest`): the fixture's sha256 equals the digest above, it has
+    exactly 70 entries, and the Kotlin set equals it exactly; matching is case-sensitive; the T1
+    near misses and clinical angle brackets are not refused (seam test).
   - Refusal: the existing `SlmRefusal.PROMPT_CONTROL_TOKENS` and its copy (no new user-facing
     text). The `SLM_READBACK_INPUT_REFUSED` audit `reason` is `tokenizer_divergent_markup`, so it
     is distinguishable from a control-token refusal (8).
@@ -1040,8 +1041,7 @@ G-6 run delivers the rendering and token files; then S7, S8.
 
 ### 15.2 PENDING
 
-- FIXTURE (G-5 final): `litertlm-html-tag-pieces-v1.txt`, 70 entries, from the GPU machine; its
-  sha256 is recorded in 5.6 when it arrives. Gates slice S6.
+- (Resolved at S6) FIXTURE (G-5 final): the 70-entry list arrived and is recorded in 5.6.
 - Y-16' (batch 7): the default backend order, from S5 time-to-answer data including init.
 - DEPENDENCY (Y-21'): the later "enable readback UI in dev" ruling cannot be taken until the
   product-wide facility-scope PR (HIGH, filed) provides a real `LocalDataOwnerFacility`. Until

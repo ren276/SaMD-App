@@ -155,16 +155,12 @@ private val RESERVED_UNUSED: List<String> = (0..6226).map { "<unused$it>" }
  * `<turn|>` 106), the tool blocks, the escape token `<|"|>`, and the media placeholders
  * (`<|image|>` 258880, `<|audio|>` 258881, `<|video|>` 258884).
  *
- * **Known incompleteness, and why it is safe.** The artifact declares 24 added special tokens. Four
- * of them are the image and audio boundary markers (begin/end of image, begin/end of audio); their
- * exact spellings were **not** carried in the PR-1 handoff and are therefore **not guessed here**.
- * Writing a plausible-looking literal into a safety control's match set on the strength of a naming
- * convention is the failure this whole PR exists to prevent. Those four are covered anyway, by the
- * fail-closed catch-all in [SlmStreamSanitizer]: a bracketed construct that satisfies
- * [isControlTokenShaped] and is absent from this set is suppressed and counted in
- * [SlmSuppression.unknownTokens]. Completing the set is a one-line change once the spellings are
- * read out of `tokenizer.json`, and until then a non-zero `unknownTokens` on a multimodal
- * generation is the expected, visible consequence.
+ * **Complete against the service (S6).** The artifact declares 24 added special tokens; the four
+ * image and audio boundary markers (`<|image>`, `<image|>`, `<|audio>`, `<audio|>`) were left out
+ * of PR-1 because their spellings were not carried in the handoff and were not guessed. G1 now
+ * gives them, and `ServiceSpecialTokensTest` asserts every one of the 24 against an independent
+ * fixture. The fail-closed catch-all in [SlmStreamSanitizer] still covers anything else shaped like
+ * a control token.
  *
  * Five literals from the previous set are **removed**, not retained: `<start_of_turn>`,
  * `<end_of_turn>`, `<start_of_image>`, `<end_of_image>` and `<image_soft_token>` do not exist in
@@ -177,6 +173,9 @@ private val NAMED_RESERVED: List<String> = listOf(
     "<|tool>", "<tool|>", "<|tool_call>", "<tool_call|>", "<|tool_response>", "<tool_response|>",
     "<|\"|>",
     "<|image|>", "<|audio|>", "<|video|>",
+    // The four image and audio boundary markers, spelled as in the service's 24 special tokens
+    // (G1 report; fixture service_special_tokens.txt). S6 completed the set.
+    "<|image>", "<image|>", "<|audio>", "<audio|>",
 )
 
 /**

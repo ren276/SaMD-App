@@ -550,7 +550,8 @@ class SlmStreamSanitizerTest {
      * `<unused0>..<unused6226>`, 6,227 tokens across six disjoint id blocks (6-45, 53-97, 99,
      * 102-104, 256001-258879, 258885-262143), not MedGemma's `..<unused6241>` across two. The size
      * assertion moved from `6242 + 11` to `6227 + 21` and pins both halves of the set, so adding a
-     * literal without reading it out of the tokenizer turns this red.
+     * literal without reading it out of the tokenizer turns this red. S6 added the four image and
+     * audio boundary markers from the service's list (`ServiceSpecialTokensTest`): `6227 + 25`.
      */
     @Test
     fun `the reserved range covers the verified vocabulary in full and stops where it stops`() {
@@ -560,7 +561,7 @@ class SlmStreamSanitizerTest {
 
         assertFalse("the range runs past this artifact's vocabulary", "<unused6227>" in CONTROL_TOKENS)
         assertFalse("the MedGemma-era range end is still in the set", "<unused6241>" in CONTROL_TOKENS)
-        assertEquals("the matched set is not the verified size", 6227 + 21, CONTROL_TOKENS.size)
+        assertEquals("the matched set is not the verified size", 6227 + 25, CONTROL_TOKENS.size)
     }
 
     /**

@@ -1567,6 +1567,67 @@ class SlmReadbackUseCaseTest {
         assertEquals(listOf("main/java/com/example/samdapp/domain/slm/FacilityScope.kt"), implementers)
     }
 
+    // -------------------------------------- tokenizer-divergent markup (G-5 final, slice S6)
+
+    @Test
+    fun `a litertlm html tag piece is refused before the engine, with its own audit reason`() = runTest {
+        listOf(
+            "What is the dose <b>" to "question",
+            "Explain it </div> please" to "question",
+        ).forEach { (question, where) ->
+            val engine = RecordingSlmEngine(output = groundedOutput)
+            val audit = FakeAuditLogger()
+
+            val result = useCase(session(UserRole.DOCTOR), engine, audit = audit)("case-1", question)
+
+            assertEquals("$where", SlmReadbackResult.Refused(SlmRefusal.PROMPT_CONTROL_TOKENS), result)
+            assertEquals(0, engine.callCount)
+            val row = audit.logged.single()
+            assertEquals(AuditAction.SLM_READBACK_INPUT_REFUSED.value, row.action)
+            assertEquals("tokenizer_divergent_markup", row.fields()["reason"])
+            assertTrue("the prompt was built", row.fields()["prompt_chars"]!!.toInt() > 0)
+            assertFalse("the question text must not reach the row", row.payload.contains("<b>"))
+        }
+    }
+
+    @Test
+    fun `a piece inside the record is refused too, for every tier`() = runTest {
+        UserRole.entries.forEach { role ->
+            val engine = RecordingSlmEngine(output = groundedOutput)
+            val audit = FakeAuditLogger()
+
+            val result = useCase(
+                session(role), engine, audit = audit,
+                prescription = prescription(KernelDecision.AGREE).copy(diagnosis = "Pharyngitis <i>see note</i>"),
+            )("case-1", "Explain what the doctor prescribed in plain language")
+
+            assertEquals("$role", SlmReadbackResult.Refused(SlmRefusal.PROMPT_CONTROL_TOKENS), result)
+            assertEquals(0, engine.callCount)
+            assertEquals("tokenizer_divergent_markup", audit.logged.single().fields()["reason"])
+        }
+    }
+
+    @Test
+    fun `clinical angle brackets and a different case are not refused`() = runTest {
+        listOf("BP <90 explain the record", "Is SpO2 >=95% in the record", "<5 years, summarise", "Summarise <B> the record").forEach { question ->
+            val engine = RecordingSlmEngine(output = groundedOutput)
+
+            val result = useCase(session(UserRole.DOCTOR), engine)("case-1", question)
+
+            assertTrue("$question: $result", result is SlmReadbackResult.Answer)
+            assertEquals(question, 1, engine.callCount)
+        }
+    }
+
+    @Test
+    fun `a control token still wins over a piece and keeps its own audit reason`() = runTest {
+        val audit = FakeAuditLogger()
+
+        useCase(session(UserRole.DOCTOR), RecordingSlmEngine(), audit = audit)("case-1", "dose <b> <|channel>")
+
+        assertEquals("PROMPT_CONTROL_TOKENS", audit.logged.single().fields()["reason"])
+    }
+
     private fun assembleNothing() = AssembleReportUseCase(
         caseRecordRepository = FakeCaseRecordRepository(emptyList()),
         patientRepository = FakePatientRepository(),
