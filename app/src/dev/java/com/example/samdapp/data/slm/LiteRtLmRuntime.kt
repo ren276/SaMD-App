@@ -122,7 +122,15 @@ private class LiteRtConversation(private val conversation: Conversation) : Runti
     override fun cancelProcess() = conversation.cancelProcess()
 
     override fun counts(): LocalSlmCounts? = try {
-        conversation.getBenchmarkInfo().let { LocalSlmCounts(it.lastPrefillTokenCount, it.lastDecodeTokenCount) }
+        conversation.getBenchmarkInfo().let {
+            LocalSlmCounts(
+                prefillTokens = it.lastPrefillTokenCount,
+                decodeTokens = it.lastDecodeTokenCount,
+                prefillTokensPerSecond = it.lastPrefillTokensPerSecond,
+                decodeTokensPerSecond = it.lastDecodeTokensPerSecond,
+                timeToFirstTokenSeconds = it.timeToFirstTokenInSecond,
+            )
+        }
     } catch (e: Exception) {
         null
     }

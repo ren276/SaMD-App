@@ -9,7 +9,14 @@ enum class LocalAccelerator { GPU, CPU }
  * Token counts the runtime reports for the generation just run: `BenchmarkInfo.lastPrefillTokenCount`
  * and `lastDecodeTokenCount` (memo 5.3, 5.5). The finish reason and the Y-20 backstop read these.
  */
-data class LocalSlmCounts(val prefillTokens: Int, val decodeTokens: Int)
+data class LocalSlmCounts(
+    val prefillTokens: Int,
+    val decodeTokens: Int,
+    /** Measurements for the dev parity harness only; nothing in the engine reads them. */
+    val prefillTokensPerSecond: Double? = null,
+    val decodeTokensPerSecond: Double? = null,
+    val timeToFirstTokenSeconds: Double? = null,
+)
 
 /**
  * The thin seam between the dev local engine and the LiteRT-LM runtime, so the engine's lifecycle,
