@@ -45,10 +45,12 @@ private object Keys {
  *  split out. Also the [SessionFacilitySource]: the facility keys are written by [saveLogin] from
  *  the backend's login response and cleared with the session. */
 @Singleton
-class DataStoreAuthTokenStore @Inject constructor(
-    @ApplicationContext context: Context,
+class DataStoreAuthTokenStore internal constructor(
+    private val dataStore: DataStore<Preferences>,
 ) : AuthTokenStore, SessionFacilitySource {
-    private val dataStore = context.authDataStore
+
+    @Inject
+    constructor(@ApplicationContext context: Context) : this(context.authDataStore)
 
     override val session: Flow<UserSession?> =
         dataStore.data

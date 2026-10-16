@@ -1389,6 +1389,35 @@ class SlmReadbackUseCaseTest {
         }
     }
 
+    /** Memo 8: INVOKED is written after the flow ends, so it carries the outcome. */
+    @Test
+    fun `INVOKED is written after the engine has finished, never before it`() = runTest {
+        val events = mutableListOf<String>()
+        val engine = object : SlmEngine {
+            override fun generate(caseRecordId: String, prompt: String, maxOutputTokens: Int): Flow<String> = flow {
+                events += "generate-start"
+                emit(groundedOutput)
+                events += "generate-end"
+            }
+            override fun servedModelId(): String? = SANITIZER_TARGET_MODEL_ID
+            override fun finishReason(): SlmFinishReason? = SlmFinishReason.STOP
+            override fun answeredBy(): SlmEngineIdentity? = REMOTE_IDENTITY.also { events += "answeredBy-read" }
+            override fun runConditions(): SlmRunConditions? = null
+        }
+        val audit = object : AuditLogger {
+            override suspend fun log(action: AuditAction, patientId: String?, caseRecordId: String?, payload: String) {
+                events += action.value
+            }
+        }
+
+        useCase(session(UserRole.ASHA_WORKER), engine, audit = audit)("case-1", "Explain what the doctor prescribed in plain language")
+
+        assertEquals(
+            listOf("generate-start", "generate-end", "answeredBy-read", AuditAction.SLM_READBACK_INVOKED.value),
+            events.take(4),
+        )
+    }
+
     @Test
     fun `a failing audit write never changes the readback result`() = runTest {
         val broken = object : AuditLogger {
