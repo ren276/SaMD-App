@@ -56,6 +56,19 @@ leading `<bos>` is the only BOS). litertlm side: the bundled template via
 that is **not** over 2048 server tokens has different ids or a different rendering. Prompts over
 2048 tokens are expected refusals on both engines (C-1), scored as such by the comparator.
 
+### Trim probes (G-1' trim rule)
+
+`golden/trim-probes-v1.jsonl` (28 prompts: the question with ASCII space, tab, CRLF, U+00A0, U+2003,
+U+200B, U+0085, U+001F or U+FEFF at the start, the end or both, built the way the seam builds
+them) goes through the same script. A rendering mismatch on a probe is a measurement, not a bug in
+the script, so expect exit code 1 if the two trims differ; the output files are written first.
+
+```
+python3 -I scripts/slm-parity/token_parity.py --in golden/trim-probes-v1.jsonl \
+    --hf-cache-dir <HF cache> --model <gemma-4-E2B-it.litertlm> \
+    --render-out golden/server-render-trim-v1.jsonl --out runs/token-parity-trim.jsonl
+```
+
 ## 3. Desktop reference run (`desktop_run.py`, litert-lm 0.18.0)
 
 ```

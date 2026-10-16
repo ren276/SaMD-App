@@ -870,6 +870,13 @@ with the HF tokenizer at 3e22461f and with the litertlm tokenizer (BOS prepended
 `runs/token-parity.jsonl` (`{id, server_ids_len, litertlm_ids_len, first_diff}`), and fails if any
 prompt exceeds 2048 tokens (Y-7').
 
+**Trim probes (S3, batch 9).** The second gated mode of `GoldenPromptExport` writes
+`golden/trim-probes-v1.jsonl`, 28 prompts built exactly as the seam builds them (Kotlin `trim()` on
+the question, then `buildPrompt`). The operator renders them on the GPU machine with
+`token_parity.py` (README) into `server-render-trim-v1.jsonl` and `runs/token-parity-trim.jsonl`;
+a difference between Kotlin `trim()` and the template's Python strip would show as a rendering
+mismatch there.
+
 ### 11.3 Desktop run
 
 Python litert-lm 0.18.0 on the GPU machine, generic `.litertlm`, CPU, `create_conversation` with

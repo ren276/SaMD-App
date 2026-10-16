@@ -259,6 +259,47 @@ internal object GoldenPromptGenerator {
         shuffled(List(COUNT) { values[it % values.size] }, salt)
 }
 
+/**
+ * Trim probes (G-1' trim rule, memo 5.1): questions carrying one whitespace-like character at the
+ * start, the end, or both. The seam trims the question with Kotlin's `trim()` before it builds the
+ * prompt, and the server's template trims the whole prompt with Python's `strip()`; the two differ
+ * on some characters (U+0085 and U+001F are the interesting ones). These prompts are built the way
+ * the seam builds them, so a GPU-machine render shows the real difference, if any.
+ */
+internal object TrimProbeGenerator {
+
+    val PROBE_CHARS: List<Pair<String, String>> = listOf(
+        "ascii-space" to " ", "tab" to "\t", "crlf" to "\r\n", "u00a0" to "\u00A0", "u2003" to "\u2003",
+        "u200b" to "\u200B", "u0085" to "\u0085", "u001f" to "\u001F", "ufeff" to "\uFEFF",
+    )
+    const val BASE_QUESTION = "Explain the prescription in plain language"
+
+    class Probe(val id: String, val label: String, val position: String, val rawQuestion: String, val prompt: String, val snapshot: ApprovedRecordSnapshot)
+
+    fun generate(): List<Probe> {
+        val snapshot = ApprovedRecordSnapshot(
+            caseRecordId = "trim-probe",
+            kernelDecision = KernelDecision.AGREE,
+            diagnosis = "Acute viral pharyngitis",
+            medicationLines = listOf("Paracetamol - 500 mg | oral | three times a day | 3 days | 9"),
+            suggestsReferral = false,
+        )
+        val cases = buildList {
+            add(Triple("none", "none", BASE_QUESTION))
+            PROBE_CHARS.forEach { (label, c) ->
+                add(Triple(label, "leading", c + BASE_QUESTION))
+                add(Triple(label, "trailing", BASE_QUESTION + c))
+                add(Triple(label, "both", c + BASE_QUESTION + c))
+            }
+        }
+        return cases.mapIndexed { i, (label, position, raw) ->
+            // What the seam does with the question before it builds the prompt (SlmReadbackUseCase).
+            val prompt = buildPrompt(SlmInvocation(snapshot, raw.trim()))
+            Probe("t-%02d".format(i), label, position, raw, prompt, snapshot)
+        }
+    }
+}
+
 /** Script of the dominant letters of [text]: Devanagari block against ASCII Latin letters. */
 internal fun dominantScript(text: String): String {
     val deva = text.count { it.code in 0x0900..0x097F && it.isLetter() }
@@ -421,6 +462,57 @@ class GoldenPromptExport {
         }
         assertEquals(CONTROL_TOKENS.size, File(out, "control-tokens.txt").readLines().size)
         assertEquals(70, File(out, "html-tag-pieces.txt").readText().split('\n').size)
+    }
+
+    @Test
+    fun theTrimProbesCoverEveryCharacterAtEveryPositionAndAreBuiltLikeTheSeam() {
+        val probes = TrimProbeGenerator.generate()
+
+        assertEquals(
+            listOf("ascii-space", "tab", "crlf", "u00a0", "u2003", "u200b", "u0085", "u001f", "ufeff"),
+            TrimProbeGenerator.PROBE_CHARS.map { it.first },
+        )
+        assertEquals(1 + 9 * 3, probes.size)
+        assertEquals(probes.size, probes.map { it.id }.toSet().size)
+        probes.forEach { p ->
+            assertEquals(p.id, buildPrompt(SlmInvocation(p.snapshot, p.rawQuestion.trim())), p.prompt)
+            assertEquals(p.id, null, firstControlTokenIn(p.prompt))
+            assertEquals(p.id, null, firstDivergentMarkupIn(p.prompt))
+        }
+        // What Kotlin's trim() removes is gone from the prompt; what it keeps is still there. The
+        // probes only measure something if both kinds exist.
+        val none = probes.single { it.label == "none" }.prompt
+        fun trailing(label: String) = probes.single { it.label == label && it.position == "trailing" }.prompt
+        listOf("ascii-space", "tab", "crlf", "u00a0", "u2003").forEach { assertEquals(it, none, trailing(it)) }
+        listOf("u200b", "ufeff").forEach { assertTrue(it, trailing(it) != none) }
+    }
+
+    @Test
+    fun exportsTheTrimProbesWhenAskedTo() {
+        val dir = System.getenv("SAMD_GOLDEN_EXPORT_DIR")
+        assumeTrue("SAMD_GOLDEN_EXPORT_DIR is not set; nothing is written", !dir.isNullOrBlank())
+        val out = File(dir!!).apply { mkdirs() }
+        val probes = TrimProbeGenerator.generate()
+
+        val lines = probes.map { p ->
+            buildJsonObject {
+                put("id", p.id)
+                put("template_version", PROMPT_TEMPLATE_VERSION)
+                put("prompt", p.prompt)
+                put("prompt_sha256", sha256(p.prompt))
+                put("probe_char", p.label)
+                put("probe_position", p.position)
+                put("raw_question_code_points", JsonArray(p.rawQuestion.codePoints().toArray().map { JsonPrimitive(it) }))
+            }.toString()
+        }
+        File(out, "trim-probes-v1.jsonl").writeText(lines.joinToString("\n", postfix = "\n"), Charsets.UTF_8)
+
+        val back = File(out, "trim-probes-v1.jsonl").readLines(Charsets.UTF_8).map { Json.parseToJsonElement(it).jsonObject }
+        assertEquals(probes.size, back.size)
+        back.forEachIndexed { i, o ->
+            assertEquals(probes[i].prompt, o.getValue("prompt").jsonPrimitive.content)
+            assertEquals(sha256(probes[i].prompt), o.getValue("prompt_sha256").jsonPrimitive.content)
+        }
     }
 
     private fun cellsOf(r: GoldenRecord): List<String> = coverageCells(listOf(r)).keys.toList()
