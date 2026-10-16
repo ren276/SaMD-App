@@ -25,8 +25,8 @@ annotation class SlmReadbackEnabled
  * between a shipped build and a clinical generation path, and the claim that has to hold is not
  * "the button is not drawn" but "the use case has no reachable caller".
  *
- * **A `const val` cannot be moved at runtime, so a guard that reads it inline cannot be tested from
- * both sides.** A test written against the shipped `false` passes identically whether the guard
+ * **A build constant cannot be moved at runtime, so a guard that reads it inline cannot be tested
+ * from both sides.** A test written against the shipped `false` passes identically whether the guard
  * checks the flag, checks something else, or is `if (false)`. It reports the property satisfied
  * while proving nothing about the thing it names, which is this project's characteristic bug and is
  * exactly what the eleven-instance standing rule is about. MEASURED, not hypothetical: the first

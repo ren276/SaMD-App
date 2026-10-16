@@ -1565,9 +1565,12 @@ class SlmReadbackUseCaseTest {
         assertEquals(0, engine.callCount)
     }
 
-    /** The shipped binding in this PR (Y-21'): no owner store exists, so every readback refuses. */
+    /**
+     * The staging and prod owner (Y-21'): no owner store exists, so every readback refuses. The one
+     * other implementation is the dev override (R-DEV), and it lives in `src/dev` only.
+     */
     @Test
-    fun `the only owner implementation in this PR is UNKNOWN and refuses a fully eligible readback`() = runTest {
+    fun `the staging and prod owner is UNKNOWN and refuses a fully eligible readback, and only dev has another`() = runTest {
         assertEquals(OwningFacility.Unknown, UnknownLocalDataOwnerFacility().owningFacility())
         val engine = RecordingSlmEngine(output = groundedOutput)
         val result = useCase(session(UserRole.DOCTOR), engine, owner = UnknownLocalDataOwnerFacility().owningFacility())("case-1", tethered)
@@ -1580,7 +1583,13 @@ class SlmReadbackUseCaseTest {
             // A class or object declaring the supertype, not a parameter or a return type.
             .filter { Regex("""(\)|\bobject)\s*:\s*LocalDataOwnerFacility\s*\{""").containsMatchIn(it.readText()) }
             .map { it.relativeTo(src).invariantSeparatorsPath }
-        assertEquals(listOf("main/java/com/example/samdapp/domain/slm/FacilityScope.kt"), implementers)
+        assertEquals(
+            listOf(
+                "dev/java/com/example/samdapp/di/LocalSlmModule.kt",
+                "main/java/com/example/samdapp/domain/slm/FacilityScope.kt",
+            ),
+            implementers.sorted(),
+        )
     }
 
     // -------------------------------------- tokenizer-divergent markup (G-5 final, slice S6)

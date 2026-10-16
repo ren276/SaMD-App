@@ -174,6 +174,9 @@ android {
             buildConfigField("boolean", "PI_GATEWAY_BASE_URL_OVERRIDDEN", "${piBaseUrlOverride.isNotEmpty()}")
             // FLAG_SECURE off in dev so investor/demo screen recordings work; staging/prod enforce it.
             buildConfigField("boolean", "SCREEN_SECURITY_ENABLED", "false")
+            // R-DEV: the SLM read-back is on in dev only, over the on-device engine and mock data.
+            // Staging and prod keep it off (memo 16).
+            buildConfigField("boolean", "SLM_READBACK_ENABLED", "true")
             // samd.dev.kernelFallback=none binds the always-null kernel fallback staging and prod
             // use, so the honest UNAVAILABLE card and Retry can be exercised live on a dev build.
             // Absent keeps the mock scenario source. Any other value fails the build here, at
@@ -194,6 +197,7 @@ android {
             buildConfigField("String", "ENVIRONMENT", "\"staging\"")
             buildConfigField("boolean", "PI_GATEWAY_ENABLED", "false")
             buildConfigField("boolean", "SCREEN_SECURITY_ENABLED", "true")
+            buildConfigField("boolean", "SLM_READBACK_ENABLED", "false")
         }
         create("prod") {
             dimension = "environment"
@@ -201,6 +205,7 @@ android {
             buildConfigField("String", "ENVIRONMENT", "\"prod\"")
             buildConfigField("boolean", "PI_GATEWAY_ENABLED", "false")
             buildConfigField("boolean", "SCREEN_SECURITY_ENABLED", "true")
+            buildConfigField("boolean", "SLM_READBACK_ENABLED", "false")
         }
     }
 
