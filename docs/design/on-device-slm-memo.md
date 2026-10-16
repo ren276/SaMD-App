@@ -507,6 +507,14 @@ after the sanitizer on both sides (11.5).
   3. Both assert the flow emitted nothing.
   **If either produces visible output, or the runtime truncates silently and the backstop does not
   fire, STOP and report: that needs a new ruling.**
+- **Runtime input-too-long (R9-a, batch 9).** G6 showed the runtime rejects an over-context prompt
+  itself: `INVALID_ARGUMENT: Input token ids are too long ... 5666 >= 2560`, before any prefill,
+  for all 6 designed prompts. That failure maps to `PAYLOAD_REJECTED` (`ENGINE_REJECTED_INPUT`,
+  the same refusal as the remote path's 8003), by status code if the 0.18.0 Kotlin exception
+  exposes one and otherwise by the exact pinned substring `Input token ids are too long`, guarded
+  by an on-device test so a runtime change to the text fails the test. Every other send error
+  stays `ENGINE_ERROR`. Both are refusals. The golden set has no prompt in the 2049 to 2560 band;
+  the device backstop test (S3) covers it.
 - Through the seam, a 6000-char prompt can exceed 2048 tokens (INFERRED: Devanagari text packs
   fewer characters per token than English). Such a prompt is refused on both engines, so it is a
   refusal-parity case, not a failure (11.5).
@@ -869,6 +877,12 @@ the bundled template (the device path, G2 REPORT section 3), thinking off, sampl
 `max_output_tokens` as 5.2, `max_num_tokens=2560`. Writes `runs/desktop-cpu.jsonl`. G2's three
 probes (section 4) are the smoke evidence; the golden run is new.
 
+**G6 result (VERIFIED on the GPU machine, `G6_REPORT.md`, batch 9).** Token-id and rendering parity
+120 of 120; the 6 designed prompts are over 2048 tokens (maximum 5666); the server returned 413
+`SAMD-SLM-8003` for all 6; the desktop runtime rejected all 6 with `INVALID_ARGUMENT: Input token
+ids are too long` at `max_num_tokens` 2560 before any prefill (recorded as `outcome` `error`, not
+`refused_prefill`); the other 114 finished STOP on both. Median prompt 124.5 tokens, minimum 87.
+
 ### 11.4 Pixel run
 
 - Dev-only instrumented test `app/src/androidTestDev/java/com/example/samdapp/slm/LocalSlmParityHarness.kt`.
@@ -897,7 +911,9 @@ post-sanitizer text, then the post-generation gates in the seam's order
 2. Finish: `finish_reason` in {STOP, STOP_SEQUENCE} (:493-494).
 3. Grounding: for non-physician tiers only, the port of `outputIsGrounded` (`SlmScopeGate.kt:155-162`).
 
-Any failure, and any engine error, makes the result `REFUSED`, which is safe. Otherwise the shown
+Any failure, and any engine error, makes the result `REFUSED`, which is safe. Per R9-b a desktop
+error containing `Input token ids are too long`, a server 413 `SAMD-SLM-8003` and a device
+`PAYLOAD_REJECTED` are all `REFUSED` (refusal parity), never content. Otherwise the shown
 output is the post-sanitizer text. Golden rows whose question the seam's input gate refuses
 (`inputScopeRefusal`, `SlmScopeGate.kt:129-138`, flagged by the golden export as
 `expected_input_refusal`) are excluded from content scoring: in the product they never reach an
@@ -994,7 +1010,7 @@ F1; whichever merges second merges master in with a merge commit, no rebase.
 | H-50 | Two resident models exhaust memory, the OS kills the app mid-encounter, unsaved clinical work is lost | SLM release on trim and idle; never mid-generation; PSS baseline; ASR release (Y-11 PR); fleet probe (Y-12) |
 | H-51 | Sustained generation heats the phone; readbacks time out or the worker abandons the screen | Pre-run thermal refusal at SEVERE (Y-15); 40 s deadline; thermal in audit; 20-run measurement |
 | H-52 | A GPU init failure falls back to CPU and slower or different output is not attributable | Fallback only at init; accelerator in every audit row, plus the boolean `gpu_init_failed` in `SLM_READBACK_INVOKED` (C-7, never error text); parity run per backend; default backend order decided from S5 time-to-answer data including init (Y-16') |
-| H-53 | An over-length prompt is answered locally while the server refuses it: in the 2049 to 2560 token band the runtime accepts it, and above 2560 it may truncate silently and answer from a partial record | Context 2560; mandatory prefill-count backstop (Y-20): `lastPrefillTokenCount > 2048` discards the output and refuses before the flow emits (4.4, 5.5); missing benchmark info also refuses; device tests at about 2100 and over 2560 tokens (STOP if visible output); G-6 refusal-parity scoring |
+| H-53 | An over-length prompt is answered locally while the server refuses it: in the 2049 to 2560 token band the runtime accepts it, and above 2560 it may truncate silently and answer from a partial record | Context 2560; mandatory prefill-count backstop (Y-20): `lastPrefillTokenCount > 2048` discards the output and refuses before the flow emits (4.4, 5.5); missing benchmark info also refuses; device tests at about 2100 and over 2560 tokens (STOP if visible output); G-6 refusal-parity scoring; the runtime's own input-too-long error maps to the same refusal (R9-a, G6: all 6 designed prompts rejected before prefill, 413 on the server) |
 | H-54 | A worker from another facility signs in on a shared phone and the local engine reads back an approved record from the previous facility, which the remote path would refuse | Y-21' (batch 6 Option 3, as superseded at S4; slice S4): the readback seam, for both engines and every tier, refuses fail closed unless the signed-in session's facility and the facility owning the local data are both known and equal by id, never by name. In this PR the owner is always UNKNOWN, so every readback is refused (`facility_scope`); the marker store is deferred to the product-wide facility-scope PR. **Residual:** the rest of the app's local reads stay unscoped (7.1, F-1); that exposure is a separate HIGH PR with its own hazard row (wipe on a different-facility sign-in only after the outbox has fully drained; block that sign-in, never wipe, while it has not) |
 
 ### 13.3 SOUP entries
@@ -1188,3 +1204,9 @@ The marker store (where it lives, the migration, when the claim runs, and the wi
 - Facility check running first (every request refused as facility_scope while the owner is UNKNOWN) accepted.
 - Memo 9.1 adds: adb shell "run-as com.example.samdapp.dev chmod 700 files/slm" after creating the directory.
 - currentFacility() gets a direct androidTest now (it is new src/main code in every flavor).
+
+### Batch 9 (G-6 result and S3)
+
+G6 facts (VERIFIED on the GPU machine, G6_REPORT.md): token-id and rendering parity 120 of 120; the 6 designed prompts are over 2048 tokens (maximum 5666); the server returned 413 SAMD-SLM-8003 for all 6; the desktop runtime rejected all 6 with INVALID_ARGUMENT "Input token ids are too long" at max_num_tokens 2560, before any prefill; the 114 others finished STOP on both. The golden set has no prompt in the 2049 to 2560 band; the device backstop test covers it.
+R9-a The runtime's input-too-long failure maps to PAYLOAD_REJECTED (ENGINE_REJECTED_INPUT, the same refusal as the remote path's 8003). Match on a status code if the 0.18.0 Kotlin exception exposes one (cite it). If it exposes only a message, match the exact pinned substring "Input token ids are too long", guarded by an on-device test, so a runtime change that alters the text fails the test. Every other send error stays ENGINE_ERROR. Both outcomes are refusals.
+R9-b The comparator scores a desktop error with that substring, a server 413 with SAMD-SLM-8003, and a device PAYLOAD_REJECTED all as REFUSED (refusal parity), never as content.
