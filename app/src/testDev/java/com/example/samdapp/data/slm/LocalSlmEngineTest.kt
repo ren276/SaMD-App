@@ -304,6 +304,45 @@ class LocalSlmEngineTest {
     }
 
     @Test
+    fun theRuntimesInputTooLongErrorIsThePayloadRefusalAndEmitsNothing() = runTest {
+        val real = "Status Code: 3. Message: INVALID_ARGUMENT: Input token ids are too long. Exceeding the maximum number of tokens allowed: 5666 >= 2560."
+        listOf<Throwable>(
+            RuntimeException(real),
+            IllegalStateException("wrapped", RuntimeException(real)),
+        ).forEach { failure ->
+            val runtime = FakeRuntime(sendError = failure as Exception)
+            val engine = engine(runtime)
+            val emitted = mutableListOf<String>()
+
+            assertRefused(SlmEngineError.PAYLOAD_REJECTED, LocalSlmReason.INPUT_TOO_LONG) {
+                engine.generate("case", "prompt", 512).collect { emitted += it }
+            }
+            assertEquals(emptyList<String>(), emitted)
+            assertNull(engine.finishReason())
+            assertEquals("no fallback to another accelerator", listOf(LocalAccelerator.GPU), runtime.created)
+        }
+    }
+
+    @Test
+    fun anyOtherSendErrorStaysEngineErrorIncludingATextThatIsNotTheExactPin() = runTest {
+        listOf(
+            "decode failed",
+            "Status Code: 13. Message: INTERNAL: kernel failed",
+            "input token ids are too long",
+            "Input token ids are too",
+            "Input token ids are  too long",
+        ).forEach { text ->
+            val engine = engine(FakeRuntime(sendError = RuntimeException(text)))
+            assertRefused(SlmEngineError.ENGINE_ERROR, "generation_failed (RuntimeException)") { engine.collect() }
+        }
+        assertEquals(false, isInputTooLong(RuntimeException(null as String?)))
+        // The walk is bounded: the text six causes deep is not found.
+        var deep: Throwable = RuntimeException(LOCAL_SLM_INPUT_TOO_LONG_TEXT)
+        repeat(6) { deep = RuntimeException("layer", deep) }
+        assertEquals(false, isInputTooLong(deep))
+    }
+
+    @Test
     fun aPromptTemplateOverrideRefusesTheStart() = runTest {
         val runtime = FakeRuntime(templateOverride = "{{ messages }}")
         val engine = engine(runtime)

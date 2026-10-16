@@ -61,6 +61,26 @@ internal object LocalSlmReason {
     const val GENERATION_FAILED = "generation_failed"
     const val GENERATION_TIMEOUT = "generation_timeout"
     const val PREFILL_OVER_LIMIT_OR_UNREADABLE = "prefill_over_limit_or_unreadable"
+    const val INPUT_TOO_LONG = "input_too_long"
+}
+
+/**
+ * R9-a (memo 5.5): the exact message text of the runtime's input-too-long failure, pinned. The
+ * 0.18.0 Kotlin API carries no structured status code for it (`Conversation.kt:656` builds
+ * `LiteRtLmJniException("Status Code: $statusCode. Message: $message")`), so the text is the only
+ * handle. Exact and case-sensitive; the on-device over-context test fails if a runtime change alters
+ * it, and until then the failure falls back to ENGINE_ERROR, which is also a refusal.
+ */
+internal const val LOCAL_SLM_INPUT_TOO_LONG_TEXT = "Input token ids are too long"
+
+/** True when [error], or a cause up to five deep, carries [LOCAL_SLM_INPUT_TOO_LONG_TEXT]. */
+internal fun isInputTooLong(error: Throwable): Boolean {
+    var current: Throwable? = error
+    repeat(5) {
+        if (current?.message?.contains(LOCAL_SLM_INPUT_TOO_LONG_TEXT) == true) return true
+        current = current?.cause
+    }
+    return false
 }
 
 /** Memo 6.1: built from the digest of the file actually loaded, never from a constant. */
@@ -337,6 +357,11 @@ class LocalSlmEngine(
                 cancelOnSlmThread(conversation)
                 throw e
             } catch (e: Exception) {
+                // R9-a: the runtime refuses an over-context prompt itself, before any prefill. That
+                // is the same refusal the remote path gives for 8003, so it maps to PAYLOAD_REJECTED.
+                if (isInputTooLong(e)) {
+                    throw SlmEngineException(SlmEngineError.PAYLOAD_REJECTED, LocalSlmReason.INPUT_TOO_LONG)
+                }
                 // No cause attached: a runtime message is not ours to vouch for. No fallback either:
                 // the accelerator is chosen at start only (memo 4.6).
                 throw SlmEngineException(
