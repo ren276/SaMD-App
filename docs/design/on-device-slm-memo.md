@@ -317,9 +317,18 @@ any `@Binds`/`@Provides` of `SlmEngine` outside `di/SlmNetworkModule.kt` fails, 
   artifact (6.3), then `Engine(EngineConfig(...)).initialize()` (`Engine.kt:61`; KDoc "can take a
   significant amount of time (e.g., 10 seconds)" :53-57, VERIFIED).
 - `EngineConfig(modelPath, backend, visionBackend = null, audioBackend = null, maxNumTokens = 2560,
-  cacheDir = context.cacheDir.path)` (`Config.kt:202-212`, VERIFIED). `maxNumTokens` is "the sum
+  cacheDir = <cacheDir>/slm/<artifact sha256>/)` (`Config.kt:202-212`, VERIFIED). `maxNumTokens` is "the sum
   of input and output tokens ... the size of the kv-cache" (`Config.kt:189-190`, VERIFIED);
   2560 = 2048 + 512, matching G2's `max_num_tokens=2560` (G2 REPORT section 1; Y-7').
+- **Derived cache directory (C-2, batch 7).** The runtime's cacheDir is a dedicated directory
+  created by us, `cacheDir/slm/<artifact sha256>/`, not the app `cacheDir` itself, so its whole
+  content is the runtime's and can be integrity-pinned and deleted as a unit (6.3).
+- **Speculative decoding pinned (C-3, batch 7).** `ConversationConfig.enableSpeculativeDecoding =
+  false` explicitly, never null (null inherits the runtime's choice). `automaticToolCalling = false`
+  approved. The desktop golden run (S5) pins the same.
+- **API floor (C-4, batch 7).** Below API 29 (`Build.VERSION_CODES.Q`, where
+  `PowerManager.getCurrentThermalStatus()` first exists) the local engine refuses to start:
+  UNAVAILABLE, reason `thermal_unavailable`. No start without a readable thermal status (10).
 - `ExperimentalFlags.enableBenchmark = true` before `initialize()` (`ExperimentalFlags.kt:34`,
   passed into `nativeCreateEngine` at `Engine.kt` init args, VERIFIED), because the finish reason
   and prompt-length backstop read `BenchmarkInfo` (5.3, 5.5).
@@ -368,6 +377,12 @@ any `@Binds`/`@Provides` of `SlmEngine` outside `di/SlmNetworkModule.kt` fails, 
 - Order: `Backend.GPU()`; if `initialize()` throws, close, log, then `Backend.CPU(threadCount = 4)`
   (`Config.kt:144-149`, VERIFIED); if that throws, UNAVAILABLE and the init latch (section 7).
   Decided at init only; reported in every `answeredBy()`.
+- **The default order is not final (Y-16', batch 7).** It is decided from S5 time-to-answer data,
+  including init, over the golden prompts. Measured so far (S2): GPU cold init 30,640 ms, warm
+  7,663 ms; CPU init 2,355 ms; probe (b) total GPU 1,671 ms vs CPU 1,882 ms.
+- **GPU init failure in the audit (C-7, batch 7).** A GPU init failure that fell back to CPU
+  reaches the audit only as the boolean `gpu_init_failed` in the `SLM_READBACK_INVOKED` payload
+  (8), never as error text.
 - No mid-generation fallback: a GPU error during decode is ENGINE_ERROR for that readback.
 - `threadCount = 4` matches ASR's `MODEL_THREADS` (F-14). INFERRED; tune from S2.
 
@@ -576,6 +591,23 @@ Final rule (G-5):
   engine start (Y-8).
 - This also pins the bundled template (5.1) and the stop ids (5.3), both inside the file.
 
+**Derived runtime cache integrity (C-2, batch 7; extends H-48).** The runtime writes derived
+files (the GPU program cache, about 1.6 GB at S2) into its cacheDir and keys them by
+name, mtime and size, not by digest (S2 finding). The artifact digest does not cover them, so:
+- The engine cacheDir is `cacheDir/slm/<artifact sha256>/`, dedicated, created by us (4.2).
+- At every clean release (engine closed normally) the engine writes a manifest of every file in
+  that directory (relative path, size, sha256) to `filesDir/slm/<artifact sha256>.cache-manifest.json`,
+  atomically: a temp file, then rename. A crash between the write and the rename leaves no valid
+  manifest.
+- At every engine start, before `initialize()`: if a manifest exists, every listed file is verified
+  (size and sha256) and no unlisted file may exist; on any mismatch the cache directory and the
+  manifest are deleted, then cold init. If the cache directory is non-empty and no manifest exists,
+  the directory is deleted, then cold init.
+- The verify time is measured per start; over 3,000 ms is reported to the operator (YOUR CALL).
+- Threat model: corruption (a crash mid-write, storage faults), not an attacker with app-private
+  write access. Such an attacker can replace the manifest too; the artifact digest gate is the
+  control against substitution of the model itself.
+
 ---
 
 ## 7. Guards: backend-only controls on the local path
@@ -637,7 +669,7 @@ into the use case (new constructor parameter; touches `SlmReadbackUseCaseTest.kt
 | Row | When | Payload fields (`auditPayload`) |
 |---|---|---|
 | `SLM_READBACK_INPUT_REFUSED` | Any return before `engine.generate` (`SlmReadbackUseCase.kt:322-365`) | `reason` (the `SlmRefusal` name, except `tokenizer_divergent_markup` for the G-5 guard, 5.6), `tier`, `template_version`, `question_chars`, `prompt_chars` (null if not built) |
-| `SLM_READBACK_INVOKED` | Exactly once per call that reached `engine.generate`, written after the flow ends so it carries the outcome | `engine`, `accelerator`, `model_id`, `artifact_sha256`, `runtime_version`, `template_version`, `tier`, `prompt_chars`, `max_output_tokens`, `finish_reason`, `engine_error`, `duration_ms`, `thermal_status` (Y-15) |
+| `SLM_READBACK_INVOKED` | Exactly once per call that reached `engine.generate`, written after the flow ends so it carries the outcome | `engine`, `accelerator`, `model_id`, `artifact_sha256`, `runtime_version`, `template_version`, `tier`, `prompt_chars`, `max_output_tokens`, `finish_reason`, `engine_error`, `duration_ms`, `thermal_status` (Y-15), `gpu_init_failed` (C-7, boolean, never error text) |
 | `SLM_READBACK_SANITIZER_ACTIVITY` | After every collected generation, including zero counts | `spans`, `characters`, `dropped_tokens`, `unknown_tokens` (`SlmSuppression`, F-7) |
 | `SLM_READBACK_OUTPUT_SUPPRESSED` | Any refusal after generation: SERVED_MODEL_MISMATCH, OUTPUT_TRUNCATED, OUTPUT_NOT_GROUNDED (:393-410) | `reason`, `engine`, `model_id` |
 
@@ -691,6 +723,7 @@ adb -s <dev> push "$F" /data/local/tmp/slm.litertlm
 adb -s <dev> shell "run-as com.example.samdapp.dev mkdir -p files/slm"
 adb -s <dev> shell "cat /data/local/tmp/slm.litertlm | run-as com.example.samdapp.dev sh -c 'cat > files/slm/$SHA.litertlm'"
 adb -s <dev> shell "run-as com.example.samdapp.dev sha256sum files/slm/$SHA.litertlm"
+adb -s <dev> shell "run-as com.example.samdapp.dev chmod 600 files/slm/$SHA.litertlm"   # C-5, batch 7
 adb -s <dev> shell rm /data/local/tmp/slm.litertlm
 ```
 INFERRED to work (`run-as` needs a debuggable package; the pipe avoids the app domain reading
@@ -733,6 +766,8 @@ and install cost).
 - Thermal (Y-15): before a run, `PowerManager.getCurrentThermalStatus()`; at
   `THERMAL_STATUS_SEVERE` or above, refuse with UNAVAILABLE reason `thermal`. Status recorded in
   `SLM_READBACK_INVOKED` (`thermal_status`).
+- Below API 29 the status cannot be read, so the local engine refuses to start: UNAVAILABLE,
+  reason `thermal_unavailable` (C-4, batch 7). It never treats an unreadable status as NONE.
 - Field-phone capability probe (RAM, `isLowRamDevice`, OpenCL presence, free storage, Android
   version): described only; deferred to a fleet ruling (Y-12).
 
@@ -905,11 +940,11 @@ F1; whichever merges second merges master in with a merge commit, no rebase.
 | ID | Hazard | Primary controls |
 |---|---|---|
 | H-47 | The local engine produces different clinical content from the server for the same approved record (numerics, omitted medicine, added fact) and the worker trusts it equally | R7 hard gates at 100 percent on the local engine's shown outputs, plus non-inferiority against the server (C-1, 11.5); engine named in audit; local id passes the identity gate only through its exact allowlist entry (G-4). **Residual:** the number gate catches digits only (ASCII and Devanagari); a number written as words ("five", "पाँच") is not caught |
-| H-48 | A substituted, corrupted or partially copied `.litertlm` is loaded, carrying a different template, vocabulary or stop ids | Full SHA-256 before every engine start (6.3); content-addressed file name; refusal on mismatch |
+| H-48 | A substituted, corrupted or partially copied `.litertlm` is loaded, carrying a different template, vocabulary or stop ids; or a corrupted derived runtime cache (crash mid-write, storage fault) is loaded beside a good artifact | Full SHA-256 before every engine start (6.3); content-addressed file name; refusal on mismatch; file mode 600 after delivery (9.1, C-5). Derived cache (C-2): dedicated `cacheDir/slm/<sha256>/`, manifest of every file (path, size, sha256) written atomically at clean release, verified before every start, any mismatch, unlisted file or missing manifest over a non-empty directory deletes the cache and cold-inits. **Residual:** the manifest is not a defence against an attacker with app-private write access (threat model, 6.3) |
 | H-49 | Text the two tokenizers split differently makes the local engine see a different prompt from the server. Per T1 this happens if and only if the text contains a litertlm user-defined piece: one of 70 HTML tag pieces (`<tag>`, `</tag>`) or `<unused0>`..`<unused6226>` | G-5 final: pre-call refusal of the 70 HTML tag pieces from a pinned 70-entry list file (5.6), `<unusedN>` already refused via `CONTROL_TOKENS`; both engines; G-6 token-id parity gate on the golden set. Whitespace removed from this row (T1 corrected G2) |
 | H-50 | Two resident models exhaust memory, the OS kills the app mid-encounter, unsaved clinical work is lost | SLM release on trim and idle; never mid-generation; PSS baseline; ASR release (Y-11 PR); fleet probe (Y-12) |
 | H-51 | Sustained generation heats the phone; readbacks time out or the worker abandons the screen | Pre-run thermal refusal at SEVERE (Y-15); 40 s deadline; thermal in audit; 20-run measurement |
-| H-52 | A GPU init failure falls back to CPU and slower or different output is not attributable | Fallback only at init; accelerator in every audit row; parity run per backend |
+| H-52 | A GPU init failure falls back to CPU and slower or different output is not attributable | Fallback only at init; accelerator in every audit row, plus the boolean `gpu_init_failed` in `SLM_READBACK_INVOKED` (C-7, never error text); parity run per backend; default backend order decided from S5 time-to-answer data including init (Y-16') |
 | H-53 | An over-length prompt is answered locally while the server refuses it: in the 2049 to 2560 token band the runtime accepts it, and above 2560 it may truncate silently and answer from a partial record | Context 2560; mandatory prefill-count backstop (Y-20): `lastPrefillTokenCount > 2048` discards the output and refuses before the flow emits (4.4, 5.5); missing benchmark info also refuses; device tests at about 2100 and over 2560 tokens (STOP if visible output); G-6 refusal-parity scoring |
 | H-54 | A worker from another facility signs in on a shared phone and the local engine reads back an approved record from the previous facility, which the remote path would refuse | Y-21 Option 3 (batch 6, slice S4): the readback seam, for both engines, refuses fail closed when the signed-in session's facility differs from the facility recorded as owning the local data, or when either is unknown. **Residual:** the rest of the app's local reads stay unscoped (7.1, F-1); that exposure is a separate HIGH PR with its own hazard row (wipe on a different-facility sign-in only after the outbox has fully drained; block that sign-in, never wipe, while it has not) |
 
@@ -972,11 +1007,18 @@ G-6 run delivers the rendering and token files; then S7, S8.
 - F-1 (M3): local case data is not facility-scoped (7.1). On a shared phone the local engine would
   read back another facility's approved record that the remote path refuses. H-54 proposed.
 - T1 corrected G2: whitespace does not diverge (5.6). H-49 updated.
+- S2 (batch 7): the runtime's derived cache is keyed by name, mtime and size, not digest, so the
+  artifact digest does not cover it. C-2 adds the manifest (6.3).
+- C-6 (batch 7): the mutant "served id from the constant" is equivalent, not a missed guard. The
+  digest gate refuses any file whose digest differs from the constant, so the id built from the
+  verified digest and the id built from the constant are identical on every path that reaches
+  init. Documented here; no mutation row.
 
 ### 15.2 PENDING
 
 - FIXTURE (G-5 final): `litertlm-html-tag-pieces-v1.txt`, 70 entries, from the GPU machine; its
   sha256 is recorded in 5.6 when it arrives. Gates slice S6.
+- Y-16' (batch 7): the default backend order, from S5 time-to-answer data including init.
 
 ### 15.3 YOUR CALL
 
@@ -1069,3 +1111,13 @@ H-49 Update to the T1 result: HTML tag pieces and <unusedN> only; whitespace rem
 Y-21 Option 3 in this PR: the readback seam (both engines) refuses, fail closed, when the signed-in session's facility differs from the facility recorded as owning the local data, or when either is unknown. The implementation lands in S4 (Opus). The product-wide fix (local clinical data visible across facilities on a shared phone, on every screen) is a separate HIGH PR with its own hazard row, leaning to: wipe local clinical data on a different-facility sign-in only after the outbox has fully drained, and block that sign-in, never wipe, while it has not.
 S1-L Accepted: dev resolves kotlin-stdlib 2.4.0, kotlin-reflect 2.4.0 and gson 2.14.0 while prod resolves 2.3.21, absent and 2.10.1. Prod stays tested on its own classpath at every hash. Filed: align gson and Kotlin deliberately, each in its own PR, before LiteRT-LM leaves dev.
 R-S2 Re-slice: S2 implements the full engine including the conversation configuration of sections 5.1 to 5.5 (generate() cannot exist without it), with JVM tests. S3 becomes device-side verification only (byte-compare against the G-6 server renderings, the trim test, the over-length tests at about 2100 and over 2560 tokens), run once the G-6 files exist.
+
+### Batch 7 (S2 follow-ups, 2026-10-16)
+
+Y-16' The default backend order is decided from S5 time-to-answer data, including init, over the golden prompts. Measured so far: GPU cold init 30,640 ms, warm 7,663 ms; CPU init 2,355 ms; (b) total GPU 1,671 ms vs CPU 1,882 ms.
+C-2 Derived runtime cache integrity (extends H-48): the engine cacheDir is cacheDir/slm/<artifact sha256>/ (dedicated, created by us). At every clean release (engine closed normally) write a manifest of every file in that directory (relative path, size, sha256) to filesDir/slm/<artifact sha256>.cache-manifest.json, atomically (temp file then rename). At every engine start, before initialize: if a manifest exists, verify every listed file and that no unlisted file exists; on any mismatch delete the cache directory and the manifest, then cold-init. If the cache directory is non-empty and no manifest exists, delete the directory and cold-init. Measure the verify time per start; if it exceeds 3,000 ms, report it under YOUR CALL. Threat model stated in the memo: corruption (crash mid-write, storage faults), not an attacker with app-private write access.
+C-3 enableSpeculativeDecoding pinned explicitly to false (never inherit). automaticToolCalling = false approved. The desktop golden run (S5) pins the same.
+C-4 Below API 29 the local engine refuses to start: UNAVAILABLE, reason thermal_unavailable.
+C-5 Memo 9.1 gains: adb shell "run-as com.example.samdapp.dev chmod 600 files/slm/<sha>.litertlm" after the copy.
+C-6 The equivalent mutant "served id from the constant" is documented as equivalent (the digest gate makes the two behaviours identical); no row.
+C-7 The GPU init failure reaches the audit as the boolean gpu_init_failed in the SLM_READBACK_INVOKED payload, never error text.
