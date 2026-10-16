@@ -823,6 +823,16 @@ and install cost).
   - A `ComponentCallbacks2` registered from the dev source set only (dev `Application` hook or an
     `androidx.startup` initializer in the dev manifest), so staging and prod are untouched.
   - Never release mid-generation: release takes the engine `Mutex` and defers if busy.
+  - **As built (S7).** `LocalSlmEngine` arms a 5 minute timer when a generation or a start ends;
+    new work cancels it, and an activity counter stops a timer that expires just as work begins from
+    releasing right after it. `onTrimMemory(level)` releases at `TRIM_MEMORY_BACKGROUND` (40) and
+    above; `onLowMemory` always releases. `LocalSlmComponentCallbacks` (dev source set) is
+    registered with the application context when the engine is first built, so nothing is
+    registered, and nothing is loaded, before the first generation. A release waits for the engine
+    `Mutex` (a running generation finishes whole first) and, when it closes a loaded engine
+    cleanly, writes the cache manifest (C-2). The next `generate` verifies the artifact and the
+    cache again and starts the runtime again. The thermal pre-check is unchanged. A source scan
+    test fails if any source set but dev references the callbacks.
 - Thermal (Y-15): before a run, `PowerManager.getCurrentThermalStatus()`; at
   `THERMAL_STATUS_SEVERE` or above, refuse with UNAVAILABLE reason `thermal`. Status recorded in
   `SLM_READBACK_INVOKED` (`thermal_status`).
@@ -1139,6 +1149,14 @@ G-6 run delivers the rendering and token files; then S7, S8.
   after them (8, VERIFIED `SlmReadbackUseCase.kt:320,372-421`, `ReportViewModel.kt:273-287`).
 - F-1 (M3): local case data is not facility-scoped (7.1). On a shared phone the local engine would
   read back another facility's approved record that the remote path refuses. H-54 proposed.
+- S9 finding: nothing called `LocalSlmEngine.release()`, so the model stayed resident for the life
+  of the process. Closed at S7 (10).
+- g-037 (v3 CPU re-run): decoded the full 512 tokens and finished LENGTH (42.1 s), where the server
+  answered in 13 tokens, so the seam refuses it as `gate_finish`. A repetition loop is suspected
+  (INFERRED: the text was not read under the no-text rule). A brevity and stop instruction is folded
+  into the `slm-readback-v2` template follow-up (V-4).
+- The blind clinician review of `review-v3/blind-sample.csv` (server against CPU) is required before
+  any non-dev enablement. It is not done in this PR.
 - T1 corrected G2: whitespace does not diverge (5.6). H-49 updated.
 - S2 (batch 7): the runtime's derived cache is keyed by name, mtime and size, not digest, so the
   artifact digest does not cover it. C-2 adds the manifest (6.3).
