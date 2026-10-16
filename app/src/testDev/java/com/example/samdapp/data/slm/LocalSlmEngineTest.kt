@@ -13,6 +13,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.toList
@@ -42,6 +43,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * [LocalSlmEngine] over a fake [LocalSlmRuntime] (on-device SLM memo 4 to 6, 10; slice S2). The
@@ -232,7 +234,7 @@ class LocalSlmEngineTest {
         assertEquals(
             SlmEngineIdentity(
                 engine = SlmEngineKind.LOCAL,
-                accelerator = "GPU",
+                accelerator = "CPU",
                 modelId = localServedModelId(sha256(ARTIFACT)),
                 artifactSha256 = sha256(ARTIFACT),
                 runtimeVersion = "litertlm-android 0.18.0",
@@ -241,7 +243,7 @@ class LocalSlmEngineTest {
         )
         assertEquals(SlmRunConditions(PowerManager.THERMAL_STATUS_MODERATE, gpuInitFailed = false), engine.runConditions())
 
-        val fellBack = engine(FakeRuntime(failingAccelerators = setOf(LocalAccelerator.GPU)))
+        val fellBack = engine(FakeRuntime(failingAccelerators = setOf(LocalAccelerator.GPU)), accelerators = GPU_FIRST)
         fellBack.collect()
         assertEquals("CPU", fellBack.answeredBy()!!.accelerator)
         assertEquals("C-7: a boolean", true, fellBack.runConditions()!!.gpuInitFailed)
@@ -267,9 +269,9 @@ class LocalSlmEngineTest {
     // ---- start: accelerators, latch, flags ----
 
     @Test
-    fun gpuFailingAtStartFallsBackToCpu() = runTest {
+    fun anInvestigatedGpuFailingAtStartFallsBackToCpu() = runTest {
         val runtime = FakeRuntime(failingAccelerators = setOf(LocalAccelerator.GPU))
-        val engine = engine(runtime)
+        val engine = engine(runtime, accelerators = GPU_FIRST)
 
         assertEquals(listOf("hello"), engine.collect())
         assertEquals(listOf(LocalAccelerator.GPU, LocalAccelerator.CPU), runtime.created)
@@ -280,16 +282,16 @@ class LocalSlmEngineTest {
 
     @Test
     fun bothAcceleratorsFailingLatchesUnavailableUntilRelease() = runTest {
-        val runtime = FakeRuntime(failingAccelerators = setOf(LocalAccelerator.GPU, LocalAccelerator.CPU))
+        val runtime = FakeRuntime(failingAccelerators = setOf(LocalAccelerator.CPU))
         val engine = engine(runtime)
 
         assertRefused(SlmEngineError.UNAVAILABLE, LocalSlmReason.INIT_FAILED) { engine.collect() }
         assertRefused(SlmEngineError.UNAVAILABLE, LocalSlmReason.INIT_FAILED) { engine.collect() }
-        assertEquals("The latch must stop a second slow start", 2, runtime.created.size)
+        assertEquals("The latch must stop a second slow start", listOf(LocalAccelerator.CPU), runtime.created)
 
         engine.release()
         assertRefused(SlmEngineError.UNAVAILABLE, LocalSlmReason.INIT_FAILED) { engine.collect() }
-        assertEquals("Release clears the latch", 4, runtime.created.size)
+        assertEquals("Release clears the latch", listOf(LocalAccelerator.CPU, LocalAccelerator.CPU), runtime.created)
     }
 
     @Test
@@ -299,8 +301,8 @@ class LocalSlmEngineTest {
 
         assertRefused(SlmEngineError.ENGINE_ERROR, "generation_failed (IllegalStateException)") { engine.collect() }
         assertRefused(SlmEngineError.ENGINE_ERROR, "generation_failed (IllegalStateException)") { engine.collect() }
-        assertEquals(listOf(LocalAccelerator.GPU), runtime.created)
-        assertEquals(LocalAccelerator.GPU, engine.lastStart()!!.accelerator)
+        assertEquals(listOf(LocalAccelerator.CPU), runtime.created)
+        assertEquals(LocalAccelerator.CPU, engine.lastStart()!!.accelerator)
     }
 
     @Test
@@ -319,7 +321,7 @@ class LocalSlmEngineTest {
             }
             assertEquals(emptyList<String>(), emitted)
             assertNull(engine.finishReason())
-            assertEquals("no fallback to another accelerator", listOf(LocalAccelerator.GPU), runtime.created)
+            assertEquals("no fallback to another accelerator", listOf(LocalAccelerator.CPU), runtime.created)
         }
     }
 
@@ -440,14 +442,72 @@ class LocalSlmEngineTest {
     }
 
     @Test
-    fun generationPastFortySecondsIsTimeoutAndCancelsThenCloses() = runTest {
+    fun generationPastSixtySecondsIsTimeoutAndCancelsThenCloses() = runTest {
         val runtime = FakeRuntime(send = { flow { awaitCancellation() } })
         val engine = engine(runtime)
 
         assertRefused(SlmEngineError.TIMEOUT, LocalSlmReason.GENERATION_TIMEOUT) { engine.collect() }
-        assertEquals(40_000L, testScheduler.currentTime)
+        assertEquals("V-2: 60 s, not the server's 40 s", 60_000L, testScheduler.currentTime)
         assertEquals(listOf("send", "cancelProcess", "close"), runtime.conversations.single().events)
         assertNull(engine.finishReason())
+    }
+
+    @Test
+    fun aGenerationTakingFiftyNineSecondsCompletesWhichTheOldDeadlineWouldHaveRefused() = runTest {
+        val runtime = FakeRuntime(send = { flow { delay(59_000); emit("slow but done") } })
+        val engine = engine(runtime)
+
+        assertEquals(listOf("slow but done"), engine.collect())
+        assertEquals(59_000L, testScheduler.currentTime)
+        assertEquals(SlmFinishReason.STOP, engine.finishReason())
+    }
+
+    @Test
+    fun theLocalDeadlineConstantIsSixtySeconds() {
+        assertEquals(60.seconds, LOCAL_SLM_GENERATION_DEADLINE)
+    }
+
+    // ---- V-1: CPU only ----
+
+    @Test
+    fun theDefaultSelectsCpuAndNeverGpu() = runTest {
+        assertEquals(listOf(LocalAccelerator.CPU), LOCAL_SLM_DEFAULT_ACCELERATORS)
+        val runtime = FakeRuntime()
+        val engine = engine(runtime)
+
+        engine.collect()
+
+        assertEquals(listOf(LocalAccelerator.CPU), runtime.created)
+        assertEquals("CPU", engine.answeredBy()!!.accelerator)
+        assertEquals(false, engine.runConditions()!!.gpuInitFailed)
+    }
+
+    @Test
+    fun aCpuInitFailureDoesNotFallBackToGpu() = runTest {
+        val runtime = FakeRuntime(failingAccelerators = setOf(LocalAccelerator.CPU))
+        val engine = engine(runtime)
+
+        assertRefused(SlmEngineError.UNAVAILABLE, LocalSlmReason.INIT_FAILED) { engine.collect() }
+        assertEquals(listOf(LocalAccelerator.CPU), runtime.created)
+    }
+
+    @Test
+    fun theGpuCannotBeConstructedWithoutTheInvestigationOptIn() {
+        val dir = File(folder.root, "slm").apply { mkdirs() }
+        val build = { gpu: Boolean ->
+            LocalSlmEngine(
+                runtime = FakeRuntime(), artifactDir = dir, cacheDir = File(folder.root, "cache"), sdkInt = 37,
+                thermalStatus = { 0 }, dispatcher = kotlinx.coroutines.Dispatchers.Unconfined,
+                accelerators = listOf(LocalAccelerator.GPU, LocalAccelerator.CPU), allowUnselectedGpu = gpu,
+            )
+        }
+        try {
+            build(false)
+            fail("a GPU entry was accepted without the opt-in")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message!!.contains("not selected"))
+        }
+        build(true) // investigation only
     }
 
     @Test
@@ -552,7 +612,9 @@ class LocalSlmEngineTest {
         thermal: Int = PowerManager.THERMAL_STATUS_NONE,
         sdkInt: Int = 37,
         thermalRead: () -> Unit = {},
-    ) = engine(runtime, content, thermal, StandardTestDispatcher(testScheduler), initTimeoutMs = 60_000, sdkInt, thermalRead)
+        accelerators: List<LocalAccelerator>? = null,
+        generationTimeout: kotlin.time.Duration? = null,
+    ) = engine(runtime, content, thermal, StandardTestDispatcher(testScheduler), initTimeoutMs = 60_000, sdkInt, thermalRead, accelerators, generationTimeout)
 
     private fun engine(
         runtime: FakeRuntime,
@@ -562,6 +624,8 @@ class LocalSlmEngineTest {
         initTimeoutMs: Long,
         sdkInt: Int = 37,
         thermalRead: () -> Unit = {},
+        accelerators: List<LocalAccelerator>? = null,
+        generationTimeout: kotlin.time.Duration? = null,
     ): LocalSlmEngine {
         val expected = sha256(ARTIFACT)
         val dir = File(folder.root, "slm").apply { mkdirs() }
@@ -574,8 +638,11 @@ class LocalSlmEngineTest {
             sdkInt = sdkInt,
             thermalStatus = { thermalRead(); thermal },
             dispatcher = dispatcher,
+            accelerators = accelerators ?: LOCAL_SLM_DEFAULT_ACCELERATORS,
+            allowUnselectedGpu = accelerators?.contains(LocalAccelerator.GPU) == true,
             expectedSha256 = expected,
             initTimeout = initTimeoutMs.milliseconds,
+            generationTimeout = generationTimeout ?: LOCAL_SLM_GENERATION_DEADLINE,
         )
     }
 
@@ -673,6 +740,7 @@ class LocalSlmEngineTest {
     }
 
     private companion object {
+        val GPU_FIRST = listOf(LocalAccelerator.GPU, LocalAccelerator.CPU)
         const val ARTIFACT = "not a model, just bytes with a known digest"
         val CACHE = mapOf("program.bin" to "gpu program A", "sub/weights.cache" to "packed weights")
     }

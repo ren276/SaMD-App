@@ -28,8 +28,8 @@ import java.io.File
 
 /**
  * The over-length and cap cases of memo 5.5 and 14 slice S3 (Y-7', Y-20, R9-a), at the engine
- * level so the seam's 6000-character bound does not hide them, on the product accelerator order
- * (GPU first). If any case below produces visible output the test fails: STOP and report, that
+ * level so the seam's 6000-character bound does not hide them, on the selected backend (CPU only,
+ * V-1). If any case below produces visible output the test fails: STOP and report, that
  * needs a new ruling. Results go to the status stream as counts only, never text.
  */
 @RunWith(AndroidJUnit4::class)

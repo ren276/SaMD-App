@@ -17,8 +17,9 @@ import org.junit.runner.RunWith
  * Device smoke for the dev on-device engine (on-device SLM memo 14, slice S2): one engine start on
  * the requested backend, then G2's probes (a) and (b). Mock text only.
  *
- * `-e backend gpu` (default) uses the product order, GPU then CPU, and reports whether GPU started
- * with the AAR alone (Y-4). `-e backend cpu` forces CPU. Results go to the instrumentation status
+ * `-e backend cpu` (default) is the selected backend (V-1). `-e backend gpu` is an investigation of
+ * the unselected GPU path (GPU, then CPU if it fails to start) and opts in explicitly. Results go to
+ * the instrumentation status
  * stream (`am instrument -r`), never to logcat. The closing release writes the derived-cache
  * manifest (C-2), so a second run reports `cache_check=VERIFIED` and its verify time.
  */
@@ -28,13 +29,13 @@ class LocalSlmSmokeTest {
     @Test
     fun startsAndAnswersTheTwoProbes() = runBlocking {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
-        val backend = InstrumentationRegistry.getArguments().getString("backend", "gpu")
+        val backend = InstrumentationRegistry.getArguments().getString("backend", "cpu")
         val accelerators = when (backend) {
             "gpu" -> listOf(LocalAccelerator.GPU, LocalAccelerator.CPU)
             "cpu" -> listOf(LocalAccelerator.CPU)
             else -> error("backend must be gpu or cpu, got $backend")
         }
-        val engine = localSlmEngine(instrumentation.targetContext, accelerators)
+        val engine = localSlmEngine(instrumentation.targetContext, accelerators, investigateGpu = backend == "gpu")
         fun report(key: String, value: Any?) =
             instrumentation.sendStatus(0, Bundle().apply { putString("slm_$key", value.toString()) })
 

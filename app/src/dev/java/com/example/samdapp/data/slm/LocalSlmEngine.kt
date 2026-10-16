@@ -40,6 +40,19 @@ internal const val LOCAL_SLM_ARTIFACT_SHA256 = "181938105e0eefd105961417e8da7590
 /** `answeredBy().runtimeVersion` for LOCAL (memo 4.1, 6.1). */
 internal const val LOCAL_SLM_RUNTIME_VERSION = "litertlm-android 0.18.0"
 
+/**
+ * V-1 (memo 4.6, batch 11): the only backend the engine selects is CPU. GPU greedy output is not
+ * repeatable on the device (9 of 30 identical on a repeat, against CPU 28 of 28 comparable) and GPU
+ * decode throttles under sustained load. The GPU code path stays, unselected.
+ */
+internal val LOCAL_SLM_DEFAULT_ACCELERATORS: List<LocalAccelerator> = listOf(LocalAccelerator.CPU)
+
+/**
+ * V-2 (memo 4.5, batch 11): the local generation deadline is 60 s, not the server's 40 s, because the
+ * device decodes slower than the server's GPU (CPU about 9.9 tok/s) and 6 CPU answers timed out at 40 s.
+ */
+internal val LOCAL_SLM_GENERATION_DEADLINE: Duration = 60.seconds
+
 /** The server's prompt cap (SAMD-SLM-8003). The Y-20 backstop refuses above it. */
 internal const val LOCAL_SLM_PREFILL_LIMIT = 2048
 
@@ -117,12 +130,12 @@ data class LocalSlmStart(
  * - Start (lazy, on the first [generate] or [warmUp]): refused below API 29, where no thermal
  *   status can be read (C-4); full SHA-256 of the content-addressed file; the derived runtime cache
  *   in its own `cacheDir/slm/<sha256>/` checked against the manifest of the last clean release and
- *   deleted on any mismatch (C-2); then GPU, then CPU, at start only (memo 6.3, 4.6). Both failing
+ *   deleted on any mismatch (C-2); then the CPU backend, at start only (memo 6.3, 4.6, V-1). A failing
  *   latches UNAVAILABLE until [release]. The start has a 60 s wall-clock bound; an abandoned start's
  *   engine is closed when it finishes.
  * - [release] that closes the engine normally writes the cache manifest; any other end leaves none,
  *   so the next start discards whatever the runtime left behind.
- * - Generation: one new conversation per call, closed on every path; 40 s deadline; on cancel or
+ * - Generation: one new conversation per call, closed on every path; 60 s deadline (V-2); on cancel or
  *   timeout `cancelProcess` then close (memo 4.4, 4.5). A runtime error mid-generation is
  *   ENGINE_ERROR, never a fallback.
  * - Output is buffered and emitted as ONE chunk only after the Y-20 backstop and the finish
@@ -141,11 +154,23 @@ class LocalSlmEngine(
     private val thermalStatus: () -> Int,
     /** Single thread: every runtime call runs here (memo 4.3). */
     private val dispatcher: CoroutineDispatcher,
-    private val accelerators: List<LocalAccelerator> = listOf(LocalAccelerator.GPU, LocalAccelerator.CPU),
+    private val accelerators: List<LocalAccelerator> = LOCAL_SLM_DEFAULT_ACCELERATORS,
+    /**
+     * Opt-in for investigating the unselected GPU path (the parity harness passes it for a GPU run,
+     * nothing else does). Without it a GPU entry in [accelerators] is refused at construction.
+     */
+    allowUnselectedGpu: Boolean = false,
     private val expectedSha256: String = LOCAL_SLM_ARTIFACT_SHA256,
     private val initTimeout: Duration = 60.seconds,
-    private val generationTimeout: Duration = 40.seconds,
+    private val generationTimeout: Duration = LOCAL_SLM_GENERATION_DEADLINE,
 ) : SlmEngine {
+
+    init {
+        require(accelerators.isNotEmpty()) { "no accelerator to start on" }
+        require(allowUnselectedGpu || LocalAccelerator.GPU !in accelerators) {
+            "the GPU backend is not selected (V-1); it can only be constructed for investigation"
+        }
+    }
 
     private val runtimeCacheDir = File(cacheDir, "slm/$expectedSha256")
     private val cacheManifest = File(artifactDir, "$expectedSha256.cache-manifest.json")

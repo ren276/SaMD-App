@@ -110,12 +110,12 @@ class LocalSlmParityHarness {
                 if (!subset) {
                     File(context.cacheDir, "slm/$ARTIFACT_SHA256").deleteRecursively()
                     File(context.filesDir, "slm/$ARTIFACT_SHA256.cache-manifest.json").delete()
-                    val cold = localSlmEngine(context, accelerators)
+                    val cold = localSlmEngine(context, accelerators, investigateGpu = backend == "gpu")
                     cold.warmUp()
                     write(perfOut, initRow(backend, "cold", cold.lastStart()!!))
                     cold.release()
                 }
-                val engine = localSlmEngine(context, accelerators)
+                val engine = localSlmEngine(context, accelerators, investigateGpu = backend == "gpu")
                 engine.warmUp()
                 val warm = engine.lastStart()!!
                 write(perfOut, initRow(backend, "warm", warm))

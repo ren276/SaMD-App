@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.PowerManager
 import com.example.samdapp.data.slm.LiteRtLmRuntime
 import com.example.samdapp.data.slm.LocalAccelerator
+import com.example.samdapp.data.slm.LOCAL_SLM_DEFAULT_ACCELERATORS
 import com.example.samdapp.data.slm.LocalSlmEngine
 import dagger.Module
 import dagger.Provides
@@ -39,7 +40,9 @@ object LocalSlmModule {
 @SuppressLint("NewApi")
 fun localSlmEngine(
     context: Context,
-    accelerators: List<LocalAccelerator> = listOf(LocalAccelerator.GPU, LocalAccelerator.CPU),
+    accelerators: List<LocalAccelerator> = LOCAL_SLM_DEFAULT_ACCELERATORS,
+    /** Only the parity harness and the GPU smoke pass true: the GPU backend is not selected (V-1). */
+    investigateGpu: Boolean = false,
 ): LocalSlmEngine {
     val powerManager = context.getSystemService(PowerManager::class.java)
     return LocalSlmEngine(
@@ -50,5 +53,6 @@ fun localSlmEngine(
         thermalStatus = { powerManager.currentThermalStatus },
         dispatcher = Executors.newSingleThreadExecutor { Thread(it, "slm-local") }.asCoroutineDispatcher(),
         accelerators = accelerators,
+        allowUnselectedGpu = investigateGpu,
     )
 }
