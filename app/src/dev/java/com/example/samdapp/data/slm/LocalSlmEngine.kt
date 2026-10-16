@@ -6,7 +6,10 @@ import com.example.samdapp.domain.slm.MAX_OUTPUT_TOKENS
 import com.example.samdapp.domain.slm.SlmEngine
 import com.example.samdapp.domain.slm.SlmEngineError
 import com.example.samdapp.domain.slm.SlmEngineException
+import com.example.samdapp.domain.slm.SlmEngineIdentity
+import com.example.samdapp.domain.slm.SlmEngineKind
 import com.example.samdapp.domain.slm.SlmFinishReason
+import com.example.samdapp.domain.slm.SlmRunConditions
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -33,6 +36,9 @@ import kotlin.time.Duration.Companion.seconds
 internal const val LOCAL_SLM_REPO = "litert-community/gemma-4-E2B-it-litert-lm"
 internal const val LOCAL_SLM_COMMIT = "b3ca0d2f076785a8f4b2219ddbd2bdb99954eae1"
 internal const val LOCAL_SLM_ARTIFACT_SHA256 = "181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c"
+
+/** `answeredBy().runtimeVersion` for LOCAL (memo 4.1, 6.1). */
+internal const val LOCAL_SLM_RUNTIME_VERSION = "litertlm-android 0.18.0"
 
 /** The server's prompt cap (SAMD-SLM-8003). The Y-20 backstop refuses above it. */
 internal const val LOCAL_SLM_PREFILL_LIMIT = 2048
@@ -124,7 +130,9 @@ class LocalSlmEngine(
     private val runtimeCacheDir = File(cacheDir, "slm/$expectedSha256")
     private val cacheManifest = File(artifactDir, "$expectedSha256.cache-manifest.json")
 
-    private class Loaded(val engine: RuntimeEngine, val servedModelId: String, val start: LocalSlmStart)
+    private class Loaded(val engine: RuntimeEngine, val digest: String, val start: LocalSlmStart) {
+        val servedModelId = localServedModelId(digest)
+    }
 
     /** One generation or start at a time; [Mutex.tryLock] refuses, it never queues (same rule as remote, F-2). */
     private val inFlight = Mutex()
@@ -142,6 +150,8 @@ class LocalSlmEngine(
     @Volatile private var lastFinish: SlmFinishReason? = null
     @Volatile private var lastCounts: LocalSlmCounts? = null
     @Volatile private var lastStart: LocalSlmStart? = null
+    @Volatile private var lastIdentity: SlmEngineIdentity? = null
+    @Volatile private var lastConditions: SlmRunConditions? = null
 
     override fun generate(caseRecordId: String, prompt: String, maxOutputTokens: Int): Flow<String> = flow {
         if (!inFlight.tryLock()) throw unavailable(LocalSlmReason.BUSY)
@@ -149,12 +159,24 @@ class LocalSlmEngine(
             lastServedModelId = null
             lastFinish = null
             lastCounts = null
+            lastIdentity = null
+            lastConditions = null
             // The context is 2048 + 512 (memo 5.5); a larger cap would eat the prompt budget.
             if (maxOutputTokens !in 1..MAX_OUTPUT_TOKENS) {
                 throw SlmEngineException(SlmEngineError.PAYLOAD_REJECTED, LocalSlmReason.MAX_OUTPUT_TOKENS_OUT_OF_RANGE)
             }
-            checkThermal()
+            val thermal = checkThermal()
+            lastConditions = SlmRunConditions(thermalStatus = thermal, gpuInitFailed = null)
             val ready = engineReady()
+            // From the start that produced this engine, so a failure after it still says who ran.
+            lastIdentity = SlmEngineIdentity(
+                engine = SlmEngineKind.LOCAL,
+                accelerator = ready.start.accelerator.name,
+                modelId = ready.servedModelId,
+                artifactSha256 = ready.digest,
+                runtimeVersion = LOCAL_SLM_RUNTIME_VERSION,
+            )
+            lastConditions = SlmRunConditions(thermalStatus = thermal, gpuInitFailed = ready.start.gpuFailure != null)
             val text = run(ready, prompt, maxOutputTokens)
             lastServedModelId = ready.servedModelId
             emit(text)
@@ -166,6 +188,10 @@ class LocalSlmEngine(
     override fun servedModelId(): String? = lastServedModelId
 
     override fun finishReason(): SlmFinishReason? = lastFinish
+
+    override fun answeredBy(): SlmEngineIdentity? = lastIdentity
+
+    override fun runConditions(): SlmRunConditions? = lastConditions
 
     /** Counts of the generation just collected, for the dev harness. */
     fun lastCounts(): LocalSlmCounts? = lastCounts
@@ -199,10 +225,18 @@ class LocalSlmEngine(
         }
     }
 
-    /** Memo 10, Y-15: refuse before a run at SEVERE or above, and below API 29 where it cannot be read (C-4). */
-    private fun checkThermal() {
+    /**
+     * Memo 10, Y-15: refuse before a run at SEVERE or above, and below API 29 where it cannot be
+     * read (C-4). Returns the status read, which the audit row records.
+     */
+    private fun checkThermal(): Int {
         if (sdkInt < Build.VERSION_CODES.Q) throw unavailable(LocalSlmReason.THERMAL_UNAVAILABLE)
-        if (thermalStatus() >= PowerManager.THERMAL_STATUS_SEVERE) throw unavailable(LocalSlmReason.THERMAL)
+        val status = thermalStatus()
+        if (status >= PowerManager.THERMAL_STATUS_SEVERE) {
+            lastConditions = SlmRunConditions(thermalStatus = status, gpuInitFailed = null)
+            throw unavailable(LocalSlmReason.THERMAL)
+        }
+        return status
     }
 
     /** Caller holds [inFlight]. */
@@ -267,7 +301,7 @@ class LocalSlmEngine(
             }
             return Loaded(
                 engine = engine,
-                servedModelId = localServedModelId(digest),
+                digest = digest,
                 start = LocalSlmStart(accelerator, hashMillis, cacheCheck, cacheVerifyMillis, millisSince(initStarted), gpuFailure),
             )
         }

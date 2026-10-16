@@ -3,6 +3,9 @@ package com.example.samdapp.data.slm
 import android.os.PowerManager
 import com.example.samdapp.domain.slm.SlmEngineError
 import com.example.samdapp.domain.slm.SlmEngineException
+import com.example.samdapp.domain.slm.SlmEngineIdentity
+import com.example.samdapp.domain.slm.SlmEngineKind
+import com.example.samdapp.domain.slm.SlmRunConditions
 import com.example.samdapp.domain.slm.SlmFinishReason
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -203,6 +206,51 @@ class LocalSlmEngineTest {
         assertEquals(expected, engine.lastStart()!!.cacheCheck)
         assertEquals("the runtime must start on an empty cache", emptySet<String>(), runtime.cacheAtCreate.single())
         assertTrue("the manifest is deleted with the cache", !manifest().exists())
+    }
+
+    // ---- answeredBy and run conditions (memo 4.1, 8; C-7) ----
+
+    @Test
+    fun answeredByIsTheLocalStartAndRunConditionsCarryThermalAndGpuFallback() = runTest {
+        val engine = engine(FakeRuntime(), thermal = PowerManager.THERMAL_STATUS_MODERATE)
+        assertNull(engine.answeredBy())
+        assertNull(engine.runConditions())
+
+        engine.collect()
+
+        assertEquals(
+            SlmEngineIdentity(
+                engine = SlmEngineKind.LOCAL,
+                accelerator = "GPU",
+                modelId = localServedModelId(sha256(ARTIFACT)),
+                artifactSha256 = sha256(ARTIFACT),
+                runtimeVersion = "litertlm-android 0.18.0",
+            ),
+            engine.answeredBy(),
+        )
+        assertEquals(SlmRunConditions(PowerManager.THERMAL_STATUS_MODERATE, gpuInitFailed = false), engine.runConditions())
+
+        val fellBack = engine(FakeRuntime(failingAccelerators = setOf(LocalAccelerator.GPU)))
+        fellBack.collect()
+        assertEquals("CPU", fellBack.answeredBy()!!.accelerator)
+        assertEquals("C-7: a boolean", true, fellBack.runConditions()!!.gpuInitFailed)
+    }
+
+    @Test
+    fun aFailureAfterTheStartStillSaysWhoRanAndARefusedStartSaysNobody() = runTest {
+        val midRun = engine(FakeRuntime(sendError = IllegalStateException("decode failed")))
+        assertRefused(SlmEngineError.ENGINE_ERROR, "generation_failed (IllegalStateException)") { midRun.collect() }
+        assertEquals(SlmEngineKind.LOCAL, midRun.answeredBy()!!.engine)
+
+        val hot = engine(FakeRuntime(), thermal = PowerManager.THERMAL_STATUS_SEVERE)
+        assertRefused(SlmEngineError.UNAVAILABLE, LocalSlmReason.THERMAL) { hot.collect() }
+        assertNull(hot.answeredBy())
+        assertEquals("the refusing status is recorded", SlmRunConditions(PowerManager.THERMAL_STATUS_SEVERE, null), hot.runConditions())
+
+        val wrongFile = engine(FakeRuntime(), content = "wrong bytes")
+        assertRefused(SlmEngineError.UNAVAILABLE, LocalSlmReason.ARTIFACT_DIGEST_MISMATCH) { wrongFile.collect() }
+        assertNull(wrongFile.answeredBy())
+        assertNull(wrongFile.runConditions()!!.gpuInitFailed)
     }
 
     // ---- start: accelerators, latch, flags ----

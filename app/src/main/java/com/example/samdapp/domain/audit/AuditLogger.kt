@@ -172,9 +172,9 @@ enum class AuditAction(val value: String) {
      *  `failedCount`, so a split commit is silent permanent loss of exactly the rows that prove
      *  clinical narrative left the device.
      *
-     *  **Not emitted yet.** The seam's audit stage is not built; these land now so that the
-     *  vocabulary agreement is already in place when it is, same reasoning the `VOICE_FIELD_*`
-     *  values were added ahead of their caller.
+     *  **Emitted by `SlmReadbackUseCase` only** (on-device SLM memo 8, slice S4), for both
+     *  engines; the field list per row is that memo's table. They landed ahead of their caller so
+     *  the vocabulary agreement was in place first, same reasoning as the `VOICE_FIELD_*` values.
      *
      *  Payload is measured metadata only, on every one of them: case id, tier, model id and
      *  version, prompt-template version, token counts, latency, refusal reason code, suppression

@@ -14,6 +14,9 @@ import com.example.samdapp.domain.slm.MAX_QUESTION_CHARS
 import com.example.samdapp.domain.slm.SlmEngine
 import com.example.samdapp.domain.slm.SlmEngineError
 import com.example.samdapp.domain.slm.SlmEngineException
+import com.example.samdapp.domain.slm.SlmEngineIdentity
+import com.example.samdapp.domain.slm.SlmEngineKind
+import com.example.samdapp.domain.slm.SlmRunConditions
 import com.example.samdapp.domain.slm.SlmFinishReason
 import com.example.samdapp.domain.slm.SlmReadbackUseCase
 import com.example.samdapp.domain.slm.SlmRefusal
@@ -145,6 +148,32 @@ class ReportReadbackTest {
         advanceUntilIdle()
         assertTrue(enabled.uiState.value.showReadbackSheet)
         assertEquals("the flag, and only the flag, is what closed the path", 1, enabledEngine.callCount)
+    }
+
+    /**
+     * Y-1 (on-device SLM memo 16): the readback audit writes are unreachable while the flag is off.
+     * This file is in `src/test`, so it runs in the staging and prod unit test tasks as well as dev.
+     * One logger serves the ViewModel and the seam, so no SLM row can hide in a second one.
+     */
+    @Test
+    fun `with the flag off no readback audit row is ever written`() = runTest(dispatcher) {
+        fun slmRows(audit: FakeAuditLogger) = audit.logged.map { it.action }.filter { it.startsWith("slm_readback_") }
+        suspend fun drive(viewModel: ReportViewModel) {
+            advanceUntilIdle()
+            viewModel.onOpenReadback()
+            viewModel.onReadbackQuestionChange("What are the medicines?")
+            viewModel.onAskReadback()
+            advanceUntilIdle()
+        }
+
+        val off = FakeAuditLogger()
+        drive(viewModel(engine = RecordingEngine(output = GROUNDED), flagEnabled = false, audit = off))
+        assertEquals("an SLM audit row was written with the flag off", emptyList<String>(), slmRows(off))
+
+        // Non-vacuity: the identical sequence with only the flag changed does write the rows.
+        val on = FakeAuditLogger()
+        drive(viewModel(engine = RecordingEngine(output = GROUNDED), flagEnabled = true, audit = on))
+        assertEquals(listOf("slm_readback_invoked", "slm_readback_sanitizer_activity"), slmRows(on))
     }
 
     @Test
@@ -423,7 +452,11 @@ class ReportReadbackTest {
      * flag's own effect is proved separately, above, from both sides of the predicate and from the
      * real constant.
      */
-    private suspend fun viewModel(engine: SlmEngine, flagEnabled: Boolean = false): ReportViewModel {
+    private suspend fun viewModel(
+        engine: SlmEngine,
+        flagEnabled: Boolean = false,
+        audit: FakeAuditLogger = FakeAuditLogger(),
+    ): ReportViewModel {
         val caseRecords = FakeCaseRecordRepository(listOf(CASE))
         val patients = FakePatientRepository().apply { register(testPatient(id = "p1", fullName = "Anita Kumari")) }
         val prescriptions = FakePrescriptionRepository().apply { save(PRESCRIPTION) }
@@ -452,7 +485,7 @@ class ReportReadbackTest {
             // lazy injection that makes this file possible is what lets that be an assertion.
             pdfExporter = dagger.Lazy { error("PDF export must not be reached from the read-back path") },
             createReferralUseCase = CreateReferralUseCase(FakeReferralRepository()),
-            auditLogger = FakeAuditLogger(),
+            auditLogger = audit,
             authSession = authSession,
             slmReadbackUseCase = SlmReadbackUseCase(
                 authSession = authSession,
@@ -462,6 +495,7 @@ class ReportReadbackTest {
                     assembleReportUseCase = assemble,
                 ),
                 engine = engine,
+                auditLogger = audit,
             ),
             // The whole reason FeatureFlagModule exists. A `const val` cannot be moved at runtime,
             // so a guard that read it inline could only ever be exercised on the shipped `false`,
@@ -494,6 +528,14 @@ class ReportReadbackTest {
 
         override fun servedModelId(): String? = com.example.samdapp.domain.slm.SANITIZER_TARGET_MODEL_ID
         override fun finishReason(): SlmFinishReason? = finishReason
+        override fun answeredBy(): SlmEngineIdentity? = SlmEngineIdentity(
+            engine = SlmEngineKind.REMOTE,
+            accelerator = null,
+            modelId = com.example.samdapp.domain.slm.SANITIZER_TARGET_MODEL_ID,
+            artifactSha256 = "remote-digest",
+            runtimeVersion = null,
+        )
+        override fun runConditions(): SlmRunConditions? = null
     }
 
     private companion object {

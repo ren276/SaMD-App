@@ -250,4 +250,39 @@ interface SlmEngine {
      * generation returns 200.
      */
     fun finishReason(): SlmFinishReason?
+
+    /** Who answered the generation just collected. Read after the flow completes, like servedModelId. */
+    fun answeredBy(): SlmEngineIdentity?
+
+    /**
+     * Device conditions of the generation just collected, for the `SLM_READBACK_INVOKED` audit row
+     * only (on-device SLM memo 8, 10; Y-15, C-7). Read after the flow ends, like [answeredBy];
+     * cleared before each call. Null when the engine has none to report: the remote engine runs on
+     * the server, so neither field applies to it.
+     *
+     * Kept apart from [SlmEngineIdentity], whose fields memo 4.1 fixes; gates never read this.
+     */
+    fun runConditions(): SlmRunConditions?
 }
+
+/** Which kind of engine answered (on-device SLM memo 4.1). */
+enum class SlmEngineKind { REMOTE, LOCAL }
+
+/**
+ * Who answered a generation (on-device SLM memo 4.1, R3). Feeds audit only; [SlmEngine.servedModelId]
+ * stays the identity gate's only input.
+ */
+data class SlmEngineIdentity(
+    val engine: SlmEngineKind,          // REMOTE or LOCAL
+    val accelerator: String?,           // null for REMOTE; "GPU" or "CPU" for LOCAL
+    val modelId: String?,               // served model id, verbatim
+    val artifactSha256: String?,        // envelope model_sha256 (REMOTE) or verified file digest (LOCAL)
+    val runtimeVersion: String?,        // null for REMOTE; "litertlm-android 0.18.0" for LOCAL
+)
+
+/**
+ * See [SlmEngine.runConditions]. [thermalStatus] is the `PowerManager` thermal status read before
+ * the run, null when it was not read; [gpuInitFailed] is true when the engine start tried GPU and
+ * fell back, null when no start completed. A boolean, never the error text (C-7).
+ */
+data class SlmRunConditions(val thermalStatus: Int?, val gpuInitFailed: Boolean?)

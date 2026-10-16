@@ -1,12 +1,18 @@
 package com.example.samdapp.domain.slm
 
+import com.example.samdapp.domain.audit.AuditAction
+import com.example.samdapp.domain.audit.AuditLogger
+import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.auth.AuthSession
 import com.example.samdapp.domain.auth.CadreTier
 import com.example.samdapp.domain.auth.UserSession
 import com.example.samdapp.domain.auth.toCadreTier
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
+import java.util.logging.Logger
 import javax.inject.Inject
 
 /**
@@ -32,8 +38,8 @@ internal data class SlmInvocation(
  * Why a readback was refused. Every one is a typed refusal rather than a truncated or empty
  * prompt (§4.4) and every one is a first-class UI state rather than an error toast (§5.6).
  *
- * The reason code is what a later stage's audit row carries. The question text and the generated
- * text never are (§9.4).
+ * The reason code is what the audit row carries (`reason`, on-device SLM memo 8). The question
+ * text and the generated text never are (§9.4).
  */
 enum class SlmRefusal {
     /** Empty or whitespace-only question. Harness F5: an empty input to this model produced
@@ -294,8 +300,13 @@ sealed interface SlmReadbackResult {
  * 7c. Completeness (PR-2) - [SlmEngine.finishReason] against [COMPLETE_FINISH_REASONS]. Tier-blind.
  *    The grounding gate cannot catch truncation, so the envelope is the only place it is visible.
  * 8. Output scope gate (§5.4), WORKER tier. Suppress whole or pass whole, never edit.
- * 9. Audit (§9.4) - *later stage*; needs new `AuditAction` values and the backend enum mirror in
- *    the same commit, so it is deliberately not started here.
+ * 9. Audit (§9.4; on-device SLM memo 8, slice S4). One code path for both engines:
+ *    `SLM_READBACK_INPUT_REFUSED` for every return before the engine; for a call that reached it,
+ *    `SLM_READBACK_INVOKED` once, `SLM_READBACK_SANITIZER_ACTIVITY` after a collected generation,
+ *    and `SLM_READBACK_OUTPUT_SUPPRESSED` for a post-generation refusal. Metadata only: enum
+ *    names, counts, ids, digests, booleans; the case id in its column, never the question, the
+ *    prompt or the output. Every row is written before [invoke] returns (A-1), and a failed write
+ *    is logged and never changes the result.
  *
  * **What a `PHYSICIAN`-tier viewer gets.** The input scope gate is bypassed: §5.3 grants open
  * querying, and D4 fixed that. The output *grounding* gate is bypassed too, and that is not an
@@ -304,7 +315,7 @@ sealed interface SlmReadbackResult {
  * the back door. The output-side controls §5.3 does give the doctor tier are the sanitizer (§6.1),
  * the hedge-preservation prohibition (§6.2), single-turn (§7) and audit (§9.4). Of those, only
  * single-turn, the no-editing rule and (since stage 3a) the sanitizer exist at this stage; all
- * three apply to every tier here. Audit arrives with its stage. The sanitizer being tier-blind is
+ * three apply to every tier here, and so does audit (S4). The sanitizer being tier-blind is
  * deliberate: the reasoning channel is not an answer for a physician either.
  *
  * **H-06 caveat, same as every other tier gate in this app.** This makes reaching the open tier
@@ -315,24 +326,32 @@ class SlmReadbackUseCase @Inject constructor(
     private val authSession: AuthSession,
     private val approvedRecordReader: ApprovedRecordReader,
     private val engine: SlmEngine,
+    private val auditLogger: AuditLogger,
 ) {
 
     suspend operator fun invoke(caseRecordId: String, question: String): SlmReadbackResult {
+        // The live session, read once: the tier gate (step 4) and every audit row use the same
+        // value. Fail-closed: no session is a worker.
+        val session = authSession.currentUser().first()
+        val audit = ReadbackAudit(caseRecordId, session?.role?.toCadreTier())
+
         // 1. Hard rejects that need no record. Cheapest first, and before anything is assembled.
-        if (question.isBlank()) return SlmReadbackResult.Refused(SlmRefusal.EMPTY_QUESTION)
+        if (question.isBlank()) return audit.inputRefused(SlmRefusal.EMPTY_QUESTION, question, prompt = null)
         if (question.length > MAX_QUESTION_CHARS) {
-            return SlmReadbackResult.Refused(SlmRefusal.QUESTION_TOO_LONG)
+            return audit.inputRefused(SlmRefusal.QUESTION_TOO_LONG, question, prompt = null)
         }
 
         // 2. The record. Approval, resolvability and PHI exclusion are the reader's guarantees.
         val snapshot = when (val record = approvedRecordReader(caseRecordId)) {
             is ApprovedRecordResult.Available -> record.snapshot
-            is ApprovedRecordResult.Refused -> return SlmReadbackResult.Refused(
+            is ApprovedRecordResult.Refused -> return audit.inputRefused(
                 when (record.reason) {
                     SnapshotRefusal.NOT_APPROVED -> SlmRefusal.NOT_APPROVED
                     SnapshotRefusal.CASE_UNRESOLVABLE -> SlmRefusal.CASE_UNRESOLVABLE
                     SnapshotRefusal.ASSEMBLY_FAILED -> SlmRefusal.ASSEMBLY_FAILED
                 },
+                question,
+                prompt = null,
             )
         }
 
@@ -348,20 +367,20 @@ class SlmReadbackUseCase @Inject constructor(
         //     editing either on its way to a readback of an already-approved record is worse than
         //     declining to produce one. The set is SlmStreamSanitizer's, not a second list.
         if (firstControlTokenIn(prompt) != null) {
-            return SlmReadbackResult.Refused(SlmRefusal.PROMPT_CONTROL_TOKENS)
+            return audit.inputRefused(SlmRefusal.PROMPT_CONTROL_TOKENS, question, prompt)
         }
 
         // 3. Prompt budget: refuse rather than truncate.
         if (prompt.length > MAX_PROMPT_CHARS) {
-            return SlmReadbackResult.Refused(SlmRefusal.RECORD_TOO_LARGE)
+            return audit.inputRefused(SlmRefusal.RECORD_TOO_LARGE, question, prompt)
         }
 
-        // 4. Tier, from the live session. Fail-closed: no session is a worker.
-        val openTier = authSession.currentUser().first().isOpenSlmTier()
+        // 4. Tier, from the live session read above. Fail-closed: no session is a worker.
+        val openTier = session.isOpenSlmTier()
 
         // 5. Input scope gate. Returning here means the engine is never touched.
         if (!openTier) {
-            inputScopeRefusal(invocation)?.let { return SlmReadbackResult.Refused(it) }
+            inputScopeRefusal(invocation)?.let { return audit.inputRefused(it, question, prompt) }
         }
 
         // 6 and 7. The engine, still an unbound interface, collected through the sanitizer. The
@@ -369,19 +388,27 @@ class SlmReadbackUseCase @Inject constructor(
         //    is no point between them where an unsanitized chunk exists as displayable text.
         //    A mid-stream engine failure discards what was already sanitized - a partial readback
         //    presented as an answer is the substitute output §9.2 forbids.
+        //    The INVOKED row is written on every way out of here, cancellation included (under
+        //    NonCancellable): the engine was reached, and on the remote path the server's GPU keeps
+        //    working after a cancel.
         val sanitizer = SlmStreamSanitizer()
         val visible = StringBuilder()
+        val started = System.nanoTime()
         try {
             engine.generate(caseRecordId, prompt, MAX_OUTPUT_TOKENS).collect { chunk ->
                 visible.append(sanitizer.accept(chunk))
             }
             visible.append(sanitizer.finish())
         } catch (e: CancellationException) {
+            withContext(NonCancellable) { audit.invoked(prompt, ENGINE_ERROR_CANCELLED, started) }
             throw e
         } catch (t: Throwable) {
+            audit.invoked(prompt, (t as? SlmEngineException)?.error?.name ?: ENGINE_ERROR_UNCLASSIFIED, started)
             return SlmReadbackResult.Refused(engineRefusalFor(t))
         }
         val generated = visible.toString()
+        audit.invoked(prompt, engineError = null, started)
+        audit.sanitizerActivity(sanitizer.suppression)
 
         // 7b. Model identity. The sanitizer's vocabulary and channel grammar belong to exactly one
         //     artifact, so a generation from a different one has passed through a gate calibrated
@@ -391,7 +418,7 @@ class SlmReadbackUseCase @Inject constructor(
         //     for the same reason the sanitizer is: a foreign control grammar is not an answer for
         //     a physician either.
         if (!servedModelMatchesSanitizer(engine.servedModelId())) {
-            return SlmReadbackResult.Refused(SlmRefusal.SERVED_MODEL_MISMATCH)
+            return audit.outputSuppressed(SlmRefusal.SERVED_MODEL_MISMATCH)
         }
 
         // 7c. Completeness. Checked here for the same reason as 7b and with more urgency: a
@@ -400,27 +427,107 @@ class SlmReadbackUseCase @Inject constructor(
         //     numeral. The envelope is the only place it is visible. Tier-blind: half a dosing
         //     instruction is not an answer for a physician either.
         if (engine.finishReason() !in COMPLETE_FINISH_REASONS) {
-            return SlmReadbackResult.Refused(SlmRefusal.OUTPUT_TRUNCATED)
+            return audit.outputSuppressed(SlmRefusal.OUTPUT_TRUNCATED)
         }
 
         // 8. Output scope gate, over the sanitized text: it must judge what will be displayed,
         //    not what the model emitted. Whole or nothing; the text below is never rewritten.
         if (!openTier && !outputIsGrounded(generated, snapshot)) {
-            return SlmReadbackResult.Refused(SlmRefusal.OUTPUT_NOT_GROUNDED)
+            return audit.outputSuppressed(SlmRefusal.OUTPUT_NOT_GROUNDED)
         }
 
-        // 9. Audit seam (§9.4, later stage): an invocation row, an input-refusal row, an
-        //    output-suppression row and a sanitizer row, each with measured metadata only, and the
-        //    backend enum mirror updated in the same commit. The sanitizer row's payload is
-        //    already computed and carried on the answer below; only the recording is missing.
-
+        // 9. Audit: every row this readback owes was written above, before this return (A-1).
         return SlmReadbackResult.Answer(
             text = generated,
             promptTemplateVersion = PROMPT_TEMPLATE_VERSION,
             suppression = sanitizer.suppression,
         )
     }
+
+    /**
+     * The four readback audit rows (on-device SLM memo 8). Each method is called before the
+     * result it accompanies is returned, which is the A-1 ordering. Payload values are enum
+     * names, counts, ids, digests and booleans; the question and the prompt are passed in only to
+     * be measured, and their text never reaches a payload.
+     */
+    private inner class ReadbackAudit(private val caseRecordId: String, private val tier: CadreTier?) {
+
+        suspend fun inputRefused(reason: SlmRefusal, question: String, prompt: String?): SlmReadbackResult.Refused {
+            write(
+                AuditAction.SLM_READBACK_INPUT_REFUSED,
+                "reason" to reason.name,
+                "tier" to tier?.name,
+                "template_version" to PROMPT_TEMPLATE_VERSION,
+                "question_chars" to question.length.toString(),
+                "prompt_chars" to prompt?.length?.toString(),
+            )
+            return SlmReadbackResult.Refused(reason)
+        }
+
+        /** After the flow ended, so it carries the outcome. [engineError] null means it completed. */
+        suspend fun invoked(prompt: String, engineError: String?, startedNanos: Long) {
+            val identity = engine.answeredBy()
+            val conditions = engine.runConditions()
+            write(
+                AuditAction.SLM_READBACK_INVOKED,
+                "engine" to identity?.engine?.name,
+                "accelerator" to identity?.accelerator,
+                "model_id" to identity?.modelId,
+                "artifact_sha256" to identity?.artifactSha256,
+                "runtime_version" to identity?.runtimeVersion,
+                "template_version" to PROMPT_TEMPLATE_VERSION,
+                "tier" to tier?.name,
+                "prompt_chars" to prompt.length.toString(),
+                "max_output_tokens" to MAX_OUTPUT_TOKENS.toString(),
+                "finish_reason" to engine.finishReason()?.name,
+                "engine_error" to engineError,
+                "duration_ms" to ((System.nanoTime() - startedNanos) / 1_000_000).toString(),
+                "thermal_status" to conditions?.thermalStatus?.toString(),
+                "gpu_init_failed" to conditions?.gpuInitFailed?.toString(),
+            )
+        }
+
+        suspend fun sanitizerActivity(suppression: SlmSuppression) = write(
+            AuditAction.SLM_READBACK_SANITIZER_ACTIVITY,
+            "spans" to suppression.spans.toString(),
+            "characters" to suppression.characters.toString(),
+            "dropped_tokens" to suppression.droppedTokens.toString(),
+            "unknown_tokens" to suppression.unknownTokens.toString(),
+        )
+
+        suspend fun outputSuppressed(reason: SlmRefusal): SlmReadbackResult.Refused {
+            val identity = engine.answeredBy()
+            write(
+                AuditAction.SLM_READBACK_OUTPUT_SUPPRESSED,
+                "reason" to reason.name,
+                "engine" to identity?.engine?.name,
+                "model_id" to identity?.modelId,
+            )
+            return SlmReadbackResult.Refused(reason)
+        }
+
+        /** A failed write is logged by class name only and never changes the readback result. */
+        private suspend fun write(action: AuditAction, vararg fields: Pair<String, String?>) {
+            try {
+                auditLogger.log(action = action, patientId = null, caseRecordId = caseRecordId, payload = auditPayload(*fields))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logger.warning("Could not record ${action.value} (${e.javaClass.simpleName})")
+            }
+        }
+    }
+
+    private companion object {
+        val logger: Logger = Logger.getLogger("SlmReadback")
+    }
 }
+
+/** `engine_error` for a readback cancelled while the engine ran (not an [SlmEngineError]). */
+internal const val ENGINE_ERROR_CANCELLED = "CANCELLED"
+
+/** `engine_error` for a throwable that is not an [SlmEngineException] (refused as ENGINE_FAILED). */
+internal const val ENGINE_ERROR_UNCLASSIFIED = "UNCLASSIFIED"
 
 /**
  * Prompt template version (§9.2). Bump it whenever the template text below changes, for the same

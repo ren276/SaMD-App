@@ -8,6 +8,9 @@ import com.example.samdapp.data.remote.dto.SlmReadbackResponseDto
 import com.example.samdapp.domain.slm.SlmEngine
 import com.example.samdapp.domain.slm.SlmEngineError
 import com.example.samdapp.domain.slm.SlmEngineException
+import com.example.samdapp.domain.slm.SlmEngineIdentity
+import com.example.samdapp.domain.slm.SlmEngineKind
+import com.example.samdapp.domain.slm.SlmRunConditions
 import com.example.samdapp.domain.slm.SlmFinishReason
 import com.example.samdapp.domain.slm.PROMPT_TEMPLATE_VERSION
 import com.example.samdapp.domain.slm.SANITIZER_TARGET_MODEL_ID
@@ -156,6 +159,23 @@ class RemoteSlmEngine @Inject constructor(
      *  "the service did not say whether the answer is complete" and "the answer is not complete"
      *  are the same thing from a worker's side. Never synthesised from the `200`. */
     override fun finishReason(): SlmFinishReason? = finishReasonOf(lastResponse?.finishReason)
+
+    /** What the envelope carried, verbatim, for audit (on-device SLM memo 4.1). Null before a
+     *  response arrived, so a failed or cancelled call reports no identity rather than the last
+     *  one's. Unlike [servedModelId] this does not withhold a half identity: audit records what
+     *  the server said, and the gate is still [servedModelId]. */
+    override fun answeredBy(): SlmEngineIdentity? = lastResponse?.let {
+        SlmEngineIdentity(
+            engine = SlmEngineKind.REMOTE,
+            accelerator = null,
+            modelId = it.modelId,
+            artifactSha256 = it.modelSha256,
+            runtimeVersion = null,
+        )
+    }
+
+    /** The generation ran on the server; no device condition applies to it. */
+    override fun runConditions(): SlmRunConditions? = null
 
     private suspend fun post(
         caseRecordId: String,
