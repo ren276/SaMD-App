@@ -92,7 +92,8 @@ class SlmReadbackAuditPersistenceTest {
         val answered = seam(FakeEngine("$GROUNDED $OUTPUT_SENTINEL", REMOTE, SANITIZER_TARGET_MODEL_ID))(caseId, "Summarise the record $QUESTION_SENTINEL")
         assertTrue("$answered", answered is SlmReadbackResult.Answer)
 
-        // 2. LOCAL kind: the identity gate refuses a local id until S6, so INVOKED, SANITIZER, OUTPUT_SUPPRESSED.
+        // 2. LOCAL kind with a digest other than the pinned file's: not on the allowlist, so
+        //    INVOKED, SANITIZER, OUTPUT_SUPPRESSED.
         val suppressed = seam(FakeEngine(OUTPUT_SENTINEL, LOCAL, LOCAL.modelId, SlmRunConditions(1, true)))(caseId, "Summarise the record $QUESTION_SENTINEL")
         assertEquals(SlmReadbackResult.Refused(SlmRefusal.SERVED_MODEL_MISMATCH), suppressed)
 
@@ -240,10 +241,11 @@ class SlmReadbackAuditPersistenceTest {
         )
         const val GROUNDED = "The doctor approved Amoxicillin 500 mg by mouth, three times a day, for 5 days, 15 in total."
         val REMOTE = SlmEngineIdentity(SlmEngineKind.REMOTE, null, SANITIZER_TARGET_MODEL_ID, "2db5482b20d746879bb3ef79b5203e9075a2e2b98f54ec7c2f281c1477ddc550", null)
+        // A digest that is not the pinned file's, so the identity gate refuses it (G-4).
         val LOCAL = SlmEngineIdentity(
             SlmEngineKind.LOCAL, "GPU",
-            "litert-community/gemma-4-E2B-it-litert-lm@b3ca0d2f076785a8f4b2219ddbd2bdb99954eae1#181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c",
-            "181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c", "litertlm-android 0.18.0",
+            "litert-community/gemma-4-E2B-it-litert-lm@b3ca0d2f076785a8f4b2219ddbd2bdb99954eae1#" + "0".repeat(64),
+            "0".repeat(64), "litertlm-android 0.18.0",
         )
     }
 }

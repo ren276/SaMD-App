@@ -1,11 +1,13 @@
 package com.example.samdapp.data.slm
 
 import android.os.PowerManager
+import com.example.samdapp.domain.slm.LOCAL_SERVED_MODEL_ID
 import com.example.samdapp.domain.slm.SlmEngineError
 import com.example.samdapp.domain.slm.SlmEngineException
 import com.example.samdapp.domain.slm.SlmEngineIdentity
 import com.example.samdapp.domain.slm.SlmEngineKind
 import com.example.samdapp.domain.slm.SlmRunConditions
+import com.example.samdapp.domain.slm.servedModelMatchesSanitizer
 import com.example.samdapp.domain.slm.SlmFinishReason
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -83,6 +85,15 @@ class LocalSlmEngineTest {
             "litert-community/gemma-4-E2B-it-litert-lm@b3ca0d2f076785a8f4b2219ddbd2bdb99954eae1#" + sha256(ARTIFACT),
             engine.servedModelId(),
         )
+    }
+
+    @Test
+    fun theIdTheEngineServesIsExactlyTheSeamsAllowlistEntry() {
+        // Two independent sources: the engine builds the id from the digest it verified, the seam
+        // holds the id as a literal (memo 6.1, G-4). They must agree for the pinned artifact.
+        assertEquals(LOCAL_SERVED_MODEL_ID, localServedModelId(LOCAL_SLM_ARTIFACT_SHA256))
+        assertTrue(servedModelMatchesSanitizer(localServedModelId(LOCAL_SLM_ARTIFACT_SHA256)))
+        assertTrue("another digest must not pass the seam", !servedModelMatchesSanitizer(localServedModelId(sha256(ARTIFACT))))
     }
 
     @Test

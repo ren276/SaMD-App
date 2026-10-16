@@ -1215,7 +1215,7 @@ class SlmReadbackUseCaseTest {
 
         val result = useCase(session(UserRole.DOCTOR), engine, audit = audit)("case-1", "Summarise the record")
 
-        // Until S6 adds the local allowlist entry, the identity gate refuses a local id: suppressed.
+        // A local id with a digest other than the pinned file's is not on the allowlist: suppressed.
         assertEquals(SlmReadbackResult.Refused(SlmRefusal.SERVED_MODEL_MISMATCH), result)
         val invoked = audit.logged.first { it.action == AuditAction.SLM_READBACK_INVOKED.value }.fields()
         assertEquals("LOCAL", invoked["engine"])
@@ -1232,6 +1232,22 @@ class SlmReadbackUseCaseTest {
             mapOf("reason" to "SERVED_MODEL_MISMATCH", "engine" to "LOCAL", "model_id" to local.modelId),
             suppressed.fields(),
         )
+    }
+
+    @Test
+    fun `the pinned local model id passes the identity gate and is audited as LOCAL`() = runTest {
+        val local = SlmEngineIdentity(
+            engine = SlmEngineKind.LOCAL, accelerator = "GPU", modelId = LOCAL_SERVED_MODEL_ID,
+            artifactSha256 = LOCAL_SERVED_MODEL_ID.substringAfter('#'), runtimeVersion = "litertlm-android 0.18.0",
+        )
+        val audit = FakeAuditLogger()
+
+        val result = useCase(session(UserRole.ASHA_WORKER), RecordingSlmEngine(output = groundedOutput, servedModelId = local.modelId, identity = local), audit = audit)(
+            "case-1", "Explain what the doctor prescribed in plain language",
+        )
+
+        assertTrue("$result", result is SlmReadbackResult.Answer)
+        assertEquals("LOCAL", audit.logged.first().fields()["engine"])
     }
 
     @Test

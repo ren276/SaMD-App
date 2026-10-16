@@ -612,6 +612,44 @@ class SlmStreamSanitizerTest {
             .forEach { assertFalse("a non-matching served identity was accepted: ${it ?: "null"}", servedModelMatchesSanitizer(it)) }
     }
 
+    /** G-4 (on-device SLM memo 6.1, slice S6): exactly two exact entries, the remote pin and the local id. */
+    @Test
+    fun `the identity allowlist has exactly two exact entries and accepts both`() {
+        assertEquals(
+            setOf(
+                "google/gemma-4-E2B-it",
+                "litert-community/gemma-4-E2B-it-litert-lm@b3ca0d2f076785a8f4b2219ddbd2bdb99954eae1" +
+                    "#181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c",
+            ),
+            SERVED_MODEL_ALLOWLIST,
+        )
+        assertEquals(2, SERVED_MODEL_ALLOWLIST.size)
+        SERVED_MODEL_ALLOWLIST.forEach { assertTrue(it, servedModelMatchesSanitizer(it)) }
+    }
+
+    @Test
+    fun `a prefix, a suffix, a case variant or another digest of either entry is refused`() {
+        SERVED_MODEL_ALLOWLIST.forEach { entry ->
+            listOf(
+                entry.dropLast(1),
+                entry + "x",
+                entry + "\n",
+                " $entry",
+                entry.substringBefore('#').substringBefore('@'),
+                entry.uppercase(),
+                entry.lowercase().takeIf { it != entry },
+                entry.replaceFirst('e', 'E').takeIf { it != entry },
+                entry.dropLast(1) + (if (entry.last() == 'a') 'b' else 'a'),
+            ).filterNotNull().filter { it != entry }.forEach {
+                assertFalse("accepted a variant of $entry: '$it'", servedModelMatchesSanitizer(it))
+            }
+        }
+        val local = SERVED_MODEL_ALLOWLIST.single { '#' in it }
+        assertFalse(servedModelMatchesSanitizer(local.substringBefore('#') + "#" + "0".repeat(64)))
+        assertFalse(servedModelMatchesSanitizer(local.replace("b3ca0d2f", "b3ca0d2e")))
+        assertFalse(servedModelMatchesSanitizer(SANITIZER_TARGET_MODEL_ID + "#" + "0".repeat(64)))
+    }
+
     /**
      * No hook to add meaning-level filtering. The sanitizer takes no predicate, no pattern and no
      * lambda anywhere in its API or its state, so there is no argument a caller could pass to make

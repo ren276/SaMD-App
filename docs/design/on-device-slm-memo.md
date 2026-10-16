@@ -571,6 +571,9 @@ Final rule (G-5):
 - Gate (G-4): `servedModelMatchesSanitizer` stays an exact string comparison, now against an
   explicit allowlist of two exact entries: `SANITIZER_TARGET_MODEL_ID` (remote, unchanged) and the
   local id above. No prefix, contains or case folding. The exact match is never loosened.
+  As built (S6): `SERVED_MODEL_ALLOWLIST` in `SlmStreamSanitizer.kt`, holding `SANITIZER_TARGET_MODEL_ID`
+  and the literal `LOCAL_SERVED_MODEL_ID`; `LocalSlmEngineTest` checks that the id the engine builds
+  from the verified digest equals that literal.
 - `answeredBy()` LOCAL: `modelId` the local id, `artifactSha256` the verified digest,
   `accelerator`, `runtimeVersion = "litertlm-android 0.18.0"`.
 

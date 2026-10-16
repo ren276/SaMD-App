@@ -82,11 +82,29 @@ internal const val SANITIZER_TOKENIZER_SHA256 =
  * state, and it is indistinguishable from a server that has silently been pointed at a different
  * artifact. Fail-closed is the only reading of an absent identity that is worth anything.
  *
- * Comparison is exact. Not a prefix, not a contains, not case-insensitive: a vocabulary is a
- * property of one artifact at one revision, and `gemma-4-E2B-it` is not `gemma-4-E2B-it-something`.
+ * Comparison is exact, against [SERVED_MODEL_ALLOWLIST]. Not a prefix, not a contains, not
+ * case-insensitive: a vocabulary is a property of one artifact at one revision, and
+ * `gemma-4-E2B-it` is not `gemma-4-E2B-it-something`.
  */
 internal fun servedModelMatchesSanitizer(servedModelId: String?): Boolean =
-    servedModelId != null && servedModelId.isNotBlank() && servedModelId == SANITIZER_TARGET_MODEL_ID
+    servedModelId != null && servedModelId.isNotBlank() && servedModelId in SERVED_MODEL_ALLOWLIST
+
+/**
+ * The local engine's served id (on-device SLM memo 6.1, G-4): the pinned Hugging Face repository,
+ * the commit, and the sha256 of the `.litertlm` file, verified before every engine start. The
+ * vocabulary equivalence with [SANITIZER_TARGET_MODEL_ID] is the G2 fact that all 24 service
+ * special tokens are present at identical ids (memo 6.2). A different digest is a different file
+ * and is not this id.
+ */
+internal const val LOCAL_SERVED_MODEL_ID =
+    "litert-community/gemma-4-E2B-it-litert-lm@b3ca0d2f076785a8f4b2219ddbd2bdb99954eae1" +
+        "#181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c"
+
+/**
+ * **Exactly two entries (G-4)**, never a pattern: the remote artifact this sanitizer was verified
+ * against and the one pinned local artifact. A third needs its own ruling.
+ */
+internal val SERVED_MODEL_ALLOWLIST: Set<String> = setOf(SANITIZER_TARGET_MODEL_ID, LOCAL_SERVED_MODEL_ID)
 
 /**
  * The reasoning channel's delimiters in `google/gemma-4-E2B-it`, ids 100 and 101.
