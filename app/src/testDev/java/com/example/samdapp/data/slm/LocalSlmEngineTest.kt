@@ -1,6 +1,8 @@
 package com.example.samdapp.data.slm
 
+import android.content.ComponentCallbacks2
 import android.os.PowerManager
+import com.example.samdapp.di.LocalSlmComponentCallbacks
 import com.example.samdapp.domain.slm.LOCAL_SERVED_MODEL_ID
 import com.example.samdapp.domain.slm.SlmEngineError
 import com.example.samdapp.domain.slm.SlmEngineException
@@ -467,6 +469,146 @@ class LocalSlmEngineTest {
         assertEquals(60.seconds, LOCAL_SLM_GENERATION_DEADLINE)
     }
 
+    // ---- S7: idle and memory-pressure release (memo 10, Y-16) ----
+
+    @Test
+    fun anIdleEngineIsReleasedAfterFiveMinutesAndTheCacheManifestIsWritten() = runTest {
+        val runtime = FakeRuntime(cacheWrites = CACHE)
+        val engine = engine(runtime)
+        engine.collect()
+
+        testScheduler.advanceTimeBy(299_999)
+        testScheduler.runCurrent()
+        assertEquals("not yet idle for five minutes", 0, runtime.closes.get())
+        assertTrue("no manifest while the engine is open", !manifest().exists())
+
+        testScheduler.advanceTimeBy(1)
+        testScheduler.runCurrent()
+
+        assertEquals(1, runtime.closes.get())
+        assertEquals("C-2: a clean release writes the manifest", CACHE.keys, manifestEntries().keys)
+    }
+
+    @Test
+    fun activityResetsTheIdleTimer() = runTest {
+        val runtime = FakeRuntime()
+        val engine = engine(runtime)
+        engine.collect()
+        testScheduler.advanceTimeBy(240_000)
+        engine.collect()
+
+        testScheduler.advanceTimeBy(240_000) // 480 s: past the first timer's 300 s, before the reset one's 540 s
+        testScheduler.runCurrent()
+        assertEquals(0, runtime.closes.get())
+        assertEquals("one start only", 1, runtime.created.size)
+
+        testScheduler.advanceTimeBy(59_999)
+        testScheduler.runCurrent()
+        assertEquals(0, runtime.closes.get())
+        testScheduler.advanceTimeBy(1)
+        testScheduler.runCurrent()
+        assertEquals(1, runtime.closes.get())
+    }
+
+    @Test
+    fun theIdleTimerStartsWhenTheGenerationEndsNotWhenItBegins() = runTest {
+        val runtime = FakeRuntime(send = { flow { delay(59_000); emit("slow") } })
+        val engine = engine(runtime)
+        engine.collect() // 59 s of virtual time
+
+        testScheduler.advanceTimeBy(299_999)
+        testScheduler.runCurrent()
+        assertEquals(0, runtime.closes.get())
+        testScheduler.advanceTimeBy(1)
+        testScheduler.runCurrent()
+        assertEquals(1, runtime.closes.get())
+    }
+
+    @Test
+    fun trimAtBackgroundAndAboveReleasesAndBelowItDoesNot() = runTest {
+        listOf(
+            ComponentCallbacks2.TRIM_MEMORY_RUNNING_MODERATE to false,
+            ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW to false,
+            ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL to false,
+            ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN to false,
+            ComponentCallbacks2.TRIM_MEMORY_BACKGROUND to true,
+            ComponentCallbacks2.TRIM_MEMORY_MODERATE to true,
+            ComponentCallbacks2.TRIM_MEMORY_COMPLETE to true,
+        ).forEach { (level, releases) ->
+            val runtime = FakeRuntime()
+            val engine = engine(runtime)
+            engine.collect()
+
+            engine.onTrimMemory(level)
+            testScheduler.runCurrent()
+
+            assertEquals("level $level", if (releases) 1 else 0, runtime.closes.get())
+        }
+    }
+
+    @Test
+    fun aReleaseDuringAGenerationWaitsForItAndNeverInterruptsIt() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val runtime = FakeRuntime(send = { flow { gate.await(); emit("the whole answer") } })
+        val engine = engine(runtime)
+        val answers = mutableListOf<String>()
+        val generation = launch { answers += engine.collect() }
+        testScheduler.runCurrent()
+
+        engine.onTrimMemory(ComponentCallbacks2.TRIM_MEMORY_COMPLETE)
+        val explicit = launch { engine.release() }
+        testScheduler.runCurrent()
+        assertEquals("no close while a generation runs", 0, runtime.closes.get())
+        assertEquals("the conversation is untouched", listOf("send"), runtime.conversations.single().events)
+        assertTrue(generation.isActive)
+
+        gate.complete(Unit)
+        generation.join()
+        explicit.join()
+        testScheduler.runCurrent()
+
+        assertEquals("the generation finished whole", listOf("the whole answer"), answers)
+        assertEquals(SlmFinishReason.STOP, engine.finishReason())
+        assertEquals("then the deferred release ran", 1, runtime.closes.get())
+    }
+
+    @Test
+    fun theNextGenerationAfterAReleaseReVerifiesTheArtifactAndTheCacheAndStartsAgain() = runTest {
+        val runtime = FakeRuntime(cacheWrites = CACHE)
+        val engine = engine(runtime)
+        engine.collect()
+        engine.release()
+        val artifact = File(folder.root, "slm/${sha256(ARTIFACT)}.litertlm")
+
+        artifact.writeText("tampered while released")
+        assertRefused(SlmEngineError.UNAVAILABLE, LocalSlmReason.ARTIFACT_DIGEST_MISMATCH) { engine.collect() }
+        assertEquals("a changed file never starts the runtime", 1, runtime.created.size)
+
+        artifact.writeText(ARTIFACT)
+        assertEquals(listOf("hello"), engine.collect())
+        assertEquals("a second start", 2, runtime.created.size)
+        assertEquals("the manifest of the clean release was verified", LocalSlmCacheCheck.VERIFIED, engine.lastStart()!!.cacheCheck)
+        assertTrue(engine.lastStart()!!.hashMillis >= 0)
+    }
+
+    @Test
+    fun theMemoryCallbacksForwardTrimAndLowMemoryToTheEngine() = runTest {
+        listOf<Pair<(LocalSlmComponentCallbacks) -> Unit, Boolean>>(
+            { c: LocalSlmComponentCallbacks -> c.onTrimMemory(ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) } to false,
+            { c: LocalSlmComponentCallbacks -> c.onTrimMemory(ComponentCallbacks2.TRIM_MEMORY_BACKGROUND) } to true,
+            { c: LocalSlmComponentCallbacks -> c.onLowMemory() } to true,
+        ).forEach { (event, releases) ->
+            val runtime = FakeRuntime()
+            val engine = engine(runtime)
+            engine.collect()
+
+            event(LocalSlmComponentCallbacks(engine))
+            testScheduler.runCurrent()
+
+            assertEquals(if (releases) 1 else 0, runtime.closes.get())
+        }
+    }
+
     // ---- V-1: CPU only ----
 
     @Test
@@ -614,7 +756,8 @@ class LocalSlmEngineTest {
         thermalRead: () -> Unit = {},
         accelerators: List<LocalAccelerator>? = null,
         generationTimeout: kotlin.time.Duration? = null,
-    ) = engine(runtime, content, thermal, StandardTestDispatcher(testScheduler), initTimeoutMs = 60_000, sdkInt, thermalRead, accelerators, generationTimeout)
+        idleRelease: kotlin.time.Duration? = null,
+    ) = engine(runtime, content, thermal, StandardTestDispatcher(testScheduler), initTimeoutMs = 60_000, sdkInt, thermalRead, accelerators, generationTimeout, idleRelease)
 
     private fun engine(
         runtime: FakeRuntime,
@@ -626,6 +769,7 @@ class LocalSlmEngineTest {
         thermalRead: () -> Unit = {},
         accelerators: List<LocalAccelerator>? = null,
         generationTimeout: kotlin.time.Duration? = null,
+        idleRelease: kotlin.time.Duration? = null,
     ): LocalSlmEngine {
         val expected = sha256(ARTIFACT)
         val dir = File(folder.root, "slm").apply { mkdirs() }
@@ -643,6 +787,7 @@ class LocalSlmEngineTest {
             expectedSha256 = expected,
             initTimeout = initTimeoutMs.milliseconds,
             generationTimeout = generationTimeout ?: LOCAL_SLM_GENERATION_DEADLINE,
+            idleReleaseAfter = idleRelease ?: LOCAL_SLM_IDLE_RELEASE,
         )
     }
 
@@ -692,6 +837,8 @@ class LocalSlmEngineTest {
         val cacheAtCreate = mutableListOf<Set<String>>()
         val conversations = mutableListOf<FakeConversation>()
         val engineClosed = CountDownLatch(1)
+        /** How many times an engine handle was closed. */
+        val closes = java.util.concurrent.atomic.AtomicInteger()
 
         override fun promptTemplateOverride(): String? = templateOverride
 
@@ -709,6 +856,7 @@ class LocalSlmEngineTest {
                     FakeConversation(this@FakeRuntime, maxOutputTokens).also { conversations += it }
 
                 override fun close() {
+                    closes.incrementAndGet()
                     engineClosed.countDown()
                     closeError?.let { throw it }
                 }

@@ -120,6 +120,20 @@ class LocalSlmSourceScanTest {
         ).forEach { line -> assertEquals("False alarm: $line", emptyList<String>(), networkedReferences(line)) }
     }
 
+    /**
+     * S7 (memo 10): the memory-pressure callbacks are registered from the dev source set only. A
+     * registration of the local engine's callbacks in main, staging or prod would put the local
+     * engine on a shipped build's path.
+     */
+    @Test
+    fun theLocalEngineCallbacksAreRegisteredFromTheDevSourceSetOnly() {
+        val users = SOURCE_SETS.flatMap { set -> kotlinFiles(File(SRC, set)).map { set to it } }
+            .filter { (_, file) -> "LocalSlmComponentCallbacks" in file.readText() }
+            .map { (set, file) -> "$set/${file.name}" }
+            .sorted()
+        assertEquals(listOf("dev/LocalSlmModule.kt"), users)
+    }
+
     private fun networkedReferences(text: String): List<String> =
         text.lines().filterNot { line ->
             val trimmed = line.trim()

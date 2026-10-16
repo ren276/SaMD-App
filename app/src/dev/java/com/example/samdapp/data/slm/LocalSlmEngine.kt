@@ -1,5 +1,6 @@
 package com.example.samdapp.data.slm
 
+import android.content.ComponentCallbacks2
 import android.os.Build
 import android.os.PowerManager
 import com.example.samdapp.domain.slm.MAX_OUTPUT_TOKENS
@@ -17,8 +18,10 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
@@ -30,6 +33,7 @@ import kotlinx.coroutines.withTimeout
 import java.io.File
 import java.io.IOException
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
 /** The pinned artifact (memo 6.1, G-4). */
@@ -52,6 +56,12 @@ internal val LOCAL_SLM_DEFAULT_ACCELERATORS: List<LocalAccelerator> = listOf(Loc
  * device decodes slower than the server's GPU (CPU about 9.9 tok/s) and 6 CPU answers timed out at 40 s.
  */
 internal val LOCAL_SLM_GENERATION_DEADLINE: Duration = 60.seconds
+
+/** Y-16 (memo 10): the engine is closed after this long without a generation or a start. */
+internal val LOCAL_SLM_IDLE_RELEASE: Duration = 5.minutes
+
+/** Memo 10: at this trim level and above the engine is released (`TRIM_MEMORY_BACKGROUND`). */
+internal const val LOCAL_SLM_TRIM_RELEASE_LEVEL: Int = ComponentCallbacks2.TRIM_MEMORY_BACKGROUND
 
 /** The server's prompt cap (SAMD-SLM-8003). The Y-20 backstop refuses above it. */
 internal const val LOCAL_SLM_PREFILL_LIMIT = 2048
@@ -163,6 +173,8 @@ class LocalSlmEngine(
     private val expectedSha256: String = LOCAL_SLM_ARTIFACT_SHA256,
     private val initTimeout: Duration = 60.seconds,
     private val generationTimeout: Duration = LOCAL_SLM_GENERATION_DEADLINE,
+    /** Idle time after which the engine is released (S7, Y-16). */
+    private val idleReleaseAfter: Duration = LOCAL_SLM_IDLE_RELEASE,
 ) : SlmEngine {
 
     init {
@@ -185,6 +197,13 @@ class LocalSlmEngine(
     /** Owns engine starts, so a start that outlives its caller's deadline can still be closed. */
     private val startScope = CoroutineScope(SupervisorJob() + dispatcher)
 
+    /**
+     * Counts generations and starts. An idle release fires only if nothing began since the timer was
+     * set, so a timer that expires just as a generation begins does not release right after it.
+     */
+    @Volatile private var activityEpoch = 0L
+    private var idleJob: Job? = null
+
     // Guarded by inFlight.
     private var loaded: Loaded? = null
     private var starting: Deferred<Loaded>? = null
@@ -200,6 +219,7 @@ class LocalSlmEngine(
 
     override fun generate(caseRecordId: String, prompt: String, maxOutputTokens: Int): Flow<String> = flow {
         if (!inFlight.tryLock()) throw unavailable(LocalSlmReason.BUSY)
+        markActive()
         try {
             lastServedModelId = null
             lastFinish = null
@@ -226,6 +246,7 @@ class LocalSlmEngine(
             lastServedModelId = ready.servedModelId
             emit(text)
         } finally {
+            scheduleIdleRelease()
             inFlight.unlock()
         }
     }
@@ -247,26 +268,60 @@ class LocalSlmEngine(
     /** Starts the engine without generating (the harness's warm-up, memo 4.2). */
     suspend fun warmUp() {
         if (!inFlight.tryLock()) throw unavailable(LocalSlmReason.BUSY)
+        markActive()
         try {
             checkThermal()
             engineReady()
         } finally {
+            scheduleIdleRelease()
             inFlight.unlock()
         }
     }
 
     /**
-     * Closes the engine and clears the init latch. Waits for a running generation rather than
-     * interrupting it (memo 10).
+     * Closes the engine and clears the init latch. Takes the engine mutex, so it waits for a running
+     * generation rather than interrupting it (memo 10); a release while idle writes the cache
+     * manifest (C-2).
      */
-    suspend fun release() = inFlight.withLock {
-        withContext(NonCancellable) {
-            loaded?.let { if (closeOnSlmThread(it.engine)) writeManifestOnSlmThread() }
-            starting?.let { abandon(it) }
-            loaded = null
-            starting = null
-            latchedReason = null
-            lastStart = null
+    suspend fun release() {
+        idleJob?.cancel()
+        idleJob = null
+        inFlight.withLock { releaseLocked() }
+    }
+
+    /**
+     * Memory pressure (S7, memo 10): at [LOCAL_SLM_TRIM_RELEASE_LEVEL] and above, release. The release
+     * waits behind a running generation, so this never interrupts one.
+     */
+    fun onTrimMemory(level: Int) {
+        if (level >= LOCAL_SLM_TRIM_RELEASE_LEVEL) startScope.launch { release() }
+    }
+
+    /** Caller holds [inFlight]. */
+    private suspend fun releaseLocked() = withContext(NonCancellable) {
+        loaded?.let { if (closeOnSlmThread(it.engine)) writeManifestOnSlmThread() }
+        starting?.let { abandon(it) }
+        loaded = null
+        starting = null
+        latchedReason = null
+        lastStart = null
+    }
+
+    /** Called with [inFlight] held, when a generation or a start begins. */
+    private fun markActive() {
+        activityEpoch++
+        idleJob?.cancel()
+        idleJob = null
+    }
+
+    /** Called with [inFlight] held, when a generation or a start ends: arms the idle release. */
+    private fun scheduleIdleRelease() {
+        if (idleReleaseAfter == Duration.INFINITE) return
+        val epoch = activityEpoch
+        idleJob?.cancel()
+        idleJob = startScope.launch {
+            delay(idleReleaseAfter)
+            inFlight.withLock { if (activityEpoch == epoch) releaseLocked() }
         }
     }
 

@@ -1,7 +1,9 @@
 package com.example.samdapp.di
 
 import android.annotation.SuppressLint
+import android.content.ComponentCallbacks2
 import android.content.Context
+import android.content.res.Configuration
 import android.os.Build
 import android.os.PowerManager
 import com.example.samdapp.data.slm.LiteRtLmRuntime
@@ -34,9 +36,15 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object LocalSlmModule {
 
+    /**
+     * Built on first injection; the memory-pressure callbacks are registered then (S7, memo 10),
+     * from the dev source set only. Nothing is loaded before the first generation, so there is
+     * nothing to release before the engine exists.
+     */
     @Provides
     @Singleton
-    fun provideLocalSlmEngine(@ApplicationContext context: Context): LocalSlmEngine = localSlmEngine(context)
+    fun provideLocalSlmEngine(@ApplicationContext context: Context): LocalSlmEngine =
+        localSlmEngine(context).also { context.applicationContext.registerComponentCallbacks(LocalSlmComponentCallbacks(it)) }
 
     @Provides @DevReadbackOverride
     fun provideDevReadbackEngine(engine: LocalSlmEngine): SlmEngine = engine
@@ -78,4 +86,18 @@ fun localSlmEngine(
         accelerators = accelerators,
         allowUnselectedGpu = investigateGpu,
     )
+}
+
+/**
+ * Releases the local engine under memory pressure (S7, memo 10, Y-16): `onTrimMemory` at
+ * `TRIM_MEMORY_BACKGROUND` and above, and `onLowMemory`. The engine defers the release behind a
+ * running generation.
+ */
+class LocalSlmComponentCallbacks(private val engine: LocalSlmEngine) : ComponentCallbacks2 {
+
+    override fun onTrimMemory(level: Int) = engine.onTrimMemory(level)
+
+    override fun onLowMemory() = engine.onTrimMemory(ComponentCallbacks2.TRIM_MEMORY_COMPLETE)
+
+    override fun onConfigurationChanged(newConfig: Configuration) = Unit
 }
