@@ -5,6 +5,7 @@ import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.audit.auditPayload
 import com.example.samdapp.domain.auth.AuthSession
 import com.example.samdapp.domain.auth.CadreTier
+import com.example.samdapp.domain.auth.SessionFacilitySource
 import com.example.samdapp.domain.auth.UserSession
 import com.example.samdapp.domain.auth.toCadreTier
 import kotlinx.coroutines.CancellationException
@@ -282,6 +283,11 @@ sealed interface SlmReadbackResult {
  * them yet, so the shape of the pipeline is fixed now and a later stage fills a slot rather than
  * re-cutting the flow:
  *
+ * 0. Facility scope (on-device SLM memo 7.1, Y-21'), before anything else and for every tier: the
+ *    signed-in session's facility must equal the facility owning the local data, by id, both
+ *    known. Otherwise the same refusal the remote path gives for another facility's case
+ *    ([SlmRefusal.ENGINE_REJECTED_INPUT], the backend's 404), audited as `facility_scope`. The
+ *    owner store does not exist yet, so today this refuses every request.
  * 1. Input hard rejects (§4.4) - empty question, oversized question.
  * 2. Snapshot via [ApprovedRecordReader] (§4.2) - approval, resolvability and PHI exclusion are
  *    that reader's guarantees, restated here as typed refusals rather than re-implemented.
@@ -327,6 +333,8 @@ class SlmReadbackUseCase @Inject constructor(
     private val approvedRecordReader: ApprovedRecordReader,
     private val engine: SlmEngine,
     private val auditLogger: AuditLogger,
+    private val sessionFacility: SessionFacilitySource,
+    private val dataOwnerFacility: LocalDataOwnerFacility,
 ) {
 
     suspend operator fun invoke(caseRecordId: String, question: String): SlmReadbackResult {
@@ -334,6 +342,14 @@ class SlmReadbackUseCase @Inject constructor(
         // value. Fail-closed: no session is a worker.
         val session = authSession.currentUser().first()
         val audit = ReadbackAudit(caseRecordId, session?.role?.toCadreTier())
+
+        // 0. Facility scope (Y-21'). First, so another facility's record is never even assembled,
+        //    and tier-blind: the server's facility check does not exempt physicians either.
+        if (!inFacilityScope()) {
+            return audit.inputRefused(
+                SlmRefusal.ENGINE_REJECTED_INPUT, question, prompt = null, auditReason = FACILITY_SCOPE_AUDIT_REASON,
+            )
+        }
 
         // 1. Hard rejects that need no record. Cheapest first, and before anything is assembled.
         if (question.isBlank()) return audit.inputRefused(SlmRefusal.EMPTY_QUESTION, question, prompt = null)
@@ -444,6 +460,15 @@ class SlmReadbackUseCase @Inject constructor(
         )
     }
 
+    /** A source that throws is an unknown facility, and unknown refuses. */
+    private suspend fun inFacilityScope(): Boolean = try {
+        facilityScopeAllows(sessionFacility.currentFacility(), dataOwnerFacility.owningFacility())
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        false
+    }
+
     /**
      * The four readback audit rows (on-device SLM memo 8). Each method is called before the
      * result it accompanies is returned, which is the A-1 ordering. Payload values are enum
@@ -452,10 +477,16 @@ class SlmReadbackUseCase @Inject constructor(
      */
     private inner class ReadbackAudit(private val caseRecordId: String, private val tier: CadreTier?) {
 
-        suspend fun inputRefused(reason: SlmRefusal, question: String, prompt: String?): SlmReadbackResult.Refused {
+        /** [auditReason] distinguishes a refusal that reuses another one's copy (facility scope). */
+        suspend fun inputRefused(
+            reason: SlmRefusal,
+            question: String,
+            prompt: String?,
+            auditReason: String = reason.name,
+        ): SlmReadbackResult.Refused {
             write(
                 AuditAction.SLM_READBACK_INPUT_REFUSED,
-                "reason" to reason.name,
+                "reason" to auditReason,
                 "tier" to tier?.name,
                 "template_version" to PROMPT_TEMPLATE_VERSION,
                 "question_chars" to question.length.toString(),

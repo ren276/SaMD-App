@@ -18,6 +18,8 @@ import com.example.samdapp.data.repository.PrescriptionRepositoryImpl
 import com.example.samdapp.data.repository.VitalsRepositoryImpl
 import com.example.samdapp.domain.auth.AuthSession
 import com.example.samdapp.domain.auth.ChangePinResult
+import com.example.samdapp.domain.auth.SessionFacility
+import com.example.samdapp.domain.auth.SessionFacilitySource
 import com.example.samdapp.domain.auth.SignInResult
 import com.example.samdapp.domain.auth.UserRole
 import com.example.samdapp.domain.auth.UserSession
@@ -28,6 +30,8 @@ import com.example.samdapp.domain.model.Prescription
 import com.example.samdapp.domain.model.SyncState
 import com.example.samdapp.domain.report.ReportFormatter
 import com.example.samdapp.domain.slm.ApprovedRecordReader
+import com.example.samdapp.domain.slm.LocalDataOwnerFacility
+import com.example.samdapp.domain.slm.OwningFacility
 import com.example.samdapp.domain.slm.SANITIZER_TARGET_MODEL_ID
 import com.example.samdapp.domain.slm.SlmEngine
 import com.example.samdapp.domain.slm.SlmEngineIdentity
@@ -187,6 +191,13 @@ class SlmReadbackAuditPersistenceTest {
             approvedRecordReader = ApprovedRecordReader(auth, caseRecords, assemble),
             engine = engine,
             auditLogger = RoomAuditLogger(db.auditLogDao(), auth),
+            sessionFacility = object : SessionFacilitySource {
+                override suspend fun currentFacility() = SessionFacility("fac-1", "PHC Mock")
+            },
+            // A known, matching owner: the production binding is always UNKNOWN in this PR (Y-21').
+            dataOwnerFacility = object : LocalDataOwnerFacility {
+                override suspend fun owningFacility(): OwningFacility = OwningFacility.Known("fac-1")
+            },
         )
     }
 

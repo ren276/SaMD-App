@@ -1,7 +1,11 @@
 package com.example.samdapp.presentation.report
 
 import com.example.samdapp.config.FeatureFlags
+import com.example.samdapp.domain.auth.SessionFacility
+import com.example.samdapp.domain.auth.SessionFacilitySource
 import com.example.samdapp.domain.auth.UserRole
+import com.example.samdapp.domain.slm.LocalDataOwnerFacility
+import com.example.samdapp.domain.slm.OwningFacility
 import com.example.samdapp.domain.auth.UserSession
 import com.example.samdapp.domain.model.CaseRecord
 import com.example.samdapp.domain.model.CaseStatus
@@ -496,6 +500,13 @@ class ReportReadbackTest {
                 ),
                 engine = engine,
                 auditLogger = audit,
+                // Same facility on both sides: this file is about the surface, not the scope check.
+                sessionFacility = object : SessionFacilitySource {
+                    override suspend fun currentFacility() = SessionFacility("fac-1", "PHC Rampur")
+                },
+                dataOwnerFacility = object : LocalDataOwnerFacility {
+                    override suspend fun owningFacility(): OwningFacility = OwningFacility.Known("fac-1")
+                },
             ),
             // The whole reason FeatureFlagModule exists. A `const val` cannot be moved at runtime,
             // so a guard that read it inline could only ever be exercised on the shipped `false`,

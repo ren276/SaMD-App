@@ -658,6 +658,24 @@ separate HIGH PR with its own hazard row, leaning to: wipe local clinical data o
 different-facility sign-in only after the outbox has fully drained, and block that sign-in, never
 wipe, while it has not.
 
+**Ruling Y-21' (S4, supersedes the Step 3 storage design; verbatim in 16).** No schema change, no
+migration and no sign-in change in this PR. As built in S4:
+- Session facility: `worker.facility_id` of the backend login response (`LoginResponseDto.worker`,
+  `data/remote/dto/AuthDtos.kt:17,27`), stored by `BackendAuthSession.signIn`
+  (`data/local/auth/BackendAuthSession.kt:45`) into `DataStoreAuthTokenStore` (`FACILITY_ID`,
+  `data/local/auth/DataStoreAuthTokenStore.kt:38`, written at :119, cleared with the session at
+  :145). Read through `SessionFacilitySource`, which that store implements (`currentFacility`,
+  :75-80); only while a worker is signed in; never from a token.
+- Owner: `LocalDataOwnerFacility` returns `OwningFacility.Known(id)` or `Unknown`. The only
+  implementation in this PR, `UnknownLocalDataOwnerFacility`, always returns `Unknown`, so the seam
+  refuses every readback.
+- The check is step 0 of the seam, before the record is read, for every tier: allowed only when
+  both sides are known and the ids are equal; never compared by name. Refusal reuses
+  `ENGINE_REJECTED_INPUT` (the same refusal and copy the remote path gives for another facility's
+  case, the backend's 404) with `INPUT_REFUSED` reason `facility_scope`.
+- The marker store (where it lives, the migration, when the claim runs, the wipe-after-drain
+  policy) moves to the product-wide facility-scope PR (HIGH, filed), with its own Opus memo.
+
 ---
 
 ## 8. Audit rows (R6, closes A-03)
@@ -980,7 +998,7 @@ test-results dir is RED). T1 is resolved (5.6); the list file it produces gates 
 | S1 | `litertlm-android:0.18.0` as `devImplementation`; dev manifest `uses-native-library` for `libvndksupport.so` and `libOpenCL.so` (`required="false"`) | `gradle/libs.versions.toml`, `app/build.gradle.kts`, `app/src/dev/AndroidManifest.xml` | `compileDevDebugKotlin`; `dependencyInsight` for `kotlin-stdlib`, `kotlin-reflect`, `gson` (reported per Y-3); APK scan: staging and prod contain no `litertlm` class or `.so`; `zipalign -c -P 16` on the dev APK | `devImplementation` to `implementation`: staging APK scan RED | Sonnet |
 | S2 | `LocalSlmEngine` (dev), the full engine (R-S2, batch 6): hash before init, GPU then CPU at init only, init latch, dedicated dispatcher, single-flight, cancel, 40 s, overwritePromptTemplate-null assertion, thermal pre-check, no-log source scan; the conversation configuration of 5.1 to 5.5 (bundled template, thinking off, one conversation per request, explicit sampler and `maxOutputToken`, context 2560, `channels = emptyList()`, finish reason from benchmark decode count, mandatory prefill backstop and single emit after post-run checks); a thin seam over the runtime so JVM tests run on a fake; dev Hilt holder not bound to `SlmEngine`; narrowed flavor guard; adb delivery executed and recorded; device smoke per backend; GPU init with AAR alone recorded (Y-4) | `src/dev/.../data/slm/LocalSlmEngine.kt`, the runtime seam and its adapter, `src/dev/.../di/LocalSlmModule.kt`, `SlmEngineIsUnreachableFromPresentationTest.kt` | JVM over a fake native seam: mutex, cancel calls `cancelProcess` then close, timeout gives TIMEOUT, digest mismatch never inits, missing file, GPU-fail-then-CPU, latch, flag assertion, thermal refusal, one conversation per call closed on every path; built `ConversationConfig` and `SamplerConfig` field by field; finish derivation table; backstop (2049 refused, 2048 allowed, unreadable refused); single emission after checks; no-log scan. Device smoke via `am instrument`: prompts (a) and (b) per backend | skip digest check; allow mid-generation fallback; allow a second concurrent call; one sampler field left default; finish derivation always STOP; backstop removed; guard admits a second flavor file | **Opus** |
 | S3 | Device-side verification only (R-S2, batch 6), run once the G-6 files exist | `androidTestDev` only | Device: `renderMessageIntoString` equals server rendering minus `<bos>` for all 120 golden prompts; trim test (ASCII, CRLF, U+00A0, U+2003, U+200B); capped long prompt finishes LENGTH; about 2100-token prompt refused by the backstop; over-2560-token prompt refused (runtime error or backstop); both emit nothing (STOP and report if visible output) | n/a (device verification of S2 guards) | Sonnet |
-| S4 | `answeredBy()` and the R6 audit rows in the seam, both engines; case-id-absence prompt test; Y-21 Option 3 facility check in the readback seam, both engines (batch 6) | `SlmEngine.kt`, `RemoteSlmEngine.kt`, `SlmReadbackUseCase.kt`, two fakes | per-row trigger tests; INPUT_REFUSED without INVOKED; sentinel absence; persisted Room row; Y-1 staging/prod unreachability; A-1: INVOKED and OUTPUT_SUPPRESSED written before `invoke` returns; facility differs, session facility unknown, owning facility unknown: each refused before any engine call | drop one row; question text in a payload; INVOKED written before the engine; INVOKED written after the return; facility check skipped when either side is unknown | **Opus** |
+| S4 | `answeredBy()` and the R6 audit rows in the seam, both engines; case-id-absence prompt test; Y-21' fail-closed facility check in the readback seam, both engines, against `LocalDataOwnerFacility` (UNKNOWN only in this PR: every readback refused) | `SlmEngine.kt`, `RemoteSlmEngine.kt`, `SlmReadbackUseCase.kt`, `FacilityScope.kt`, `DataStoreAuthTokenStore.kt` (session facility read), `RepositoryModule.kt`, two fakes | per-row trigger tests; INPUT_REFUSED without INVOKED; sentinel absence; persisted Room row; Y-1 staging/prod unreachability; A-1: INVOKED and OUTPUT_SUPPRESSED written before `invoke` returns; same facility allowed; facility differs, session facility unknown, owner unknown: each refused before any engine call, every tier; compared by id | drop one row; question text in a payload; INVOKED written after the return; OUTPUT_SUPPRESSED skipped on a grounding refusal; allow when the owner is UNKNOWN; compare by name instead of id; skip the check for the physician tier | **Opus** |
 | S5 | Parity harness: golden export (120, thirds by language), server and token-parity scripts, desktop script, Pixel instrumented harness, comparator per C-1: seam replay to SHOWN outputs, four content gates on LOCAL at 100 percent, server reported, non-inferiority, refusal-rate rule (10 points), token-id parity with over-2048 rows scored as refusal parity; Kotlin/Python cross-check | `testDev/.../GoldenPromptExport.kt`, `androidTestDev/.../LocalSlmParityHarness.kt`, `scripts/slm-parity/*`, `tools/slm-parity/*` | comparator fixtures per gate; Kotlin/Python grounding and control-token agreement; language-gate fixtures for all three question types; number-gate fixtures for Devanagari digits and enumeration markers | number gate ignores decimals; Devanagari digits not normalized; enumeration exclusion not anchored to line start; language gate counts copied record text; refusal-rate rule off by one point | Sonnet |
 | S6 | Four missing control-token literals; `CONTROL_TOKENS` covers the 24 G1 tokens; exact local allowlist entry (G-4); G-5 pre-call refusal of the 70 HTML tag pieces from the pinned list file, reusing PROMPT_CONTROL_TOKENS, audit reason `tokenizer_divergent_markup` | `SlmStreamSanitizer.kt`, `SlmStreamSanitizerTest.kt`, `SlmReadbackUseCase.kt`, new `domain/slm/TokenizerDivergentMarkup.kt`, `app/src/main/resources/slm/litertlm-html-tag-pieces-v1.txt` (PENDING FIXTURE) | coverage test over the 24; allowlist has exactly two exact entries; prefix or case variant of either is refused; list file has exactly 70 entries and the recorded sha256; a prompt with each piece is refused before any engine call; T1 near misses and clinical angle brackets are not refused; missing list refuses every prompt | remove one of the four literals; add a prefix match; case-insensitive markup match (`<B>` refused): near-miss test RED; drop one list entry: count test RED | Sonnet, Opus review of the identity change |
 | S7 | SLM residency: dev-only `ComponentCallbacks2`, release on trim and 5 min idle, thermal pre-check at SEVERE | dev holder, dev initializer | trim levels release or not; release waits for a running generation; thermal refusal | release mid-generation allowed | Sonnet |
@@ -1019,6 +1037,9 @@ G-6 run delivers the rendering and token files; then S7, S8.
 - FIXTURE (G-5 final): `litertlm-html-tag-pieces-v1.txt`, 70 entries, from the GPU machine; its
   sha256 is recorded in 5.6 when it arrives. Gates slice S6.
 - Y-16' (batch 7): the default backend order, from S5 time-to-answer data including init.
+- DEPENDENCY (Y-21'): the later "enable readback UI in dev" ruling cannot be taken until the
+  product-wide facility-scope PR (HIGH, filed) provides a real `LocalDataOwnerFacility`. Until
+  then the only implementation returns UNKNOWN and the seam refuses every readback.
 
 ### 15.3 YOUR CALL
 
@@ -1121,3 +1142,11 @@ C-4 Below API 29 the local engine refuses to start: UNAVAILABLE, reason thermal_
 C-5 Memo 9.1 gains: adb shell "run-as com.example.samdapp.dev chmod 600 files/slm/<sha>.litertlm" after the copy.
 C-6 The equivalent mutant "served id from the constant" is documented as equivalent (the digest gate makes the two behaviours identical); no row.
 C-7 The GPU init failure reaches the audit as the boolean gpu_init_failed in the SLM_READBACK_INVOKED payload, never error text.
+
+### Ruling Y-21' (gate review at S4, 2026-10-16)
+
+Ruling Y-21' (supersedes the Step 3 storage design; record it verbatim in memo section 16 and update 7.1 and 14):
+No schema change, no migration, and no change to the sign-in path in this PR. Implement the Y-21 check in the seam against a small interface, LocalDataOwnerFacility, returning the owning facility id or UNKNOWN. The only implementation in this PR always returns UNKNOWN, so the readback seam refuses every request (fail closed, INPUT_REFUSED reason facility_scope, existing refusal copy, no new strings). This is acceptable because SLM_READBACK_ENABLED is false in every flavor and the parity harness calls LocalSlmEngine directly, not the seam.
+Keep the session-facility lookup you found (cite it). Implement the comparison logic fully: same facility allowed; different facility refused; either side unknown refused; compare by facility id, never by name. Test it with a fake LocalDataOwnerFacility, so the logic is ready for the real store.
+Mutation rows: allow when the owner is UNKNOWN; compare by name instead of id; skip the check for the physician tier.
+The marker store (where it lives, the migration, when the claim runs, and the wipe-after-drain policy) moves to the product-wide facility-scope PR (HIGH, filed), which needs its own Opus memo. Record a dependency in memo section 15: the later "enable readback UI in dev" ruling cannot be taken until that PR provides a real LocalDataOwnerFacility.

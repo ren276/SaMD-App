@@ -2,6 +2,8 @@ package com.example.samdapp.domain.slm
 
 import com.example.samdapp.domain.audit.AuditAction
 import com.example.samdapp.domain.audit.AuditLogger
+import com.example.samdapp.domain.auth.SessionFacility
+import com.example.samdapp.domain.auth.SessionFacilitySource
 import com.example.samdapp.domain.auth.UserRole
 import com.example.samdapp.domain.auth.UserSession
 import com.example.samdapp.domain.model.CaseRecord
@@ -168,6 +170,8 @@ class SlmReadbackUseCaseTest {
         patient: Patient? = hotPatient,
         prescription: Prescription? = prescription(KernelDecision.AGREE),
         audit: AuditLogger = FakeAuditLogger(),
+        sessionFacility: SessionFacility? = FACILITY_1,
+        owner: OwningFacility = OwningFacility.Known(FACILITY_1.facilityId),
     ): SlmReadbackUseCase {
         val caseRecords = FakeCaseRecordRepository(cases)
         val patients = FakePatientRepository()
@@ -199,6 +203,12 @@ class SlmReadbackUseCaseTest {
             ),
             engine = engine,
             auditLogger = audit,
+            sessionFacility = object : SessionFacilitySource {
+                override suspend fun currentFacility(): SessionFacility? = sessionFacility
+            },
+            dataOwnerFacility = object : LocalDataOwnerFacility {
+                override suspend fun owningFacility(): OwningFacility = owner
+            },
         )
     }
 
@@ -1433,12 +1443,123 @@ class SlmReadbackUseCaseTest {
         assertEquals(listOf("main/java/com/example/samdapp/domain/slm/SlmReadbackUseCase.kt"), writers)
     }
 
+    // ------------------------------------------- facility scope (Y-21', on-device SLM memo 7.1)
+
+    private val tethered = "Explain what the doctor prescribed in plain language"
+
+    @Test
+    fun `the same facility on both sides reaches the engine`() = runTest {
+        listOf(UserRole.ASHA_WORKER, UserRole.DOCTOR).forEach { role ->
+            val engine = RecordingSlmEngine(output = groundedOutput)
+            val result = useCase(session(role), engine)("case-1", tethered)
+            assertTrue("$role: $result", result is SlmReadbackResult.Answer)
+            assertEquals(1, engine.callCount)
+        }
+    }
+
+    @Test
+    fun `every out-of-scope facility pairing is refused before the engine, for every tier`() = runTest {
+        val pairings = listOf(
+            "different facility" to (FACILITY_1 to OwningFacility.Known("fac-2")),
+            "owner unknown" to (FACILITY_1 to OwningFacility.Unknown),
+            "session facility unknown" to (null to OwningFacility.Known("fac-1")),
+            "both unknown" to (null to OwningFacility.Unknown),
+            "blank owner id" to (FACILITY_1 to OwningFacility.Known("")),
+        )
+        UserRole.entries.forEach { role ->
+            pairings.forEach { (label, pairing) ->
+                val (sessionFacility, owner) = pairing
+                val engine = RecordingSlmEngine(output = groundedOutput)
+                val audit = FakeAuditLogger()
+
+                val result = useCase(session(role), engine, audit = audit, sessionFacility = sessionFacility, owner = owner)(
+                    "case-1", tethered,
+                )
+
+                assertEquals("$role, $label", SlmReadbackResult.Refused(SlmRefusal.ENGINE_REJECTED_INPUT), result)
+                assertEquals("$role, $label: the engine was reached", 0, engine.callCount)
+                val row = audit.logged.single()
+                assertEquals(AuditAction.SLM_READBACK_INPUT_REFUSED.value, row.action)
+                assertEquals("facility_scope", row.fields()["reason"])
+                assertEquals(null, row.fields()["prompt_chars"])
+            }
+        }
+    }
+
+    @Test
+    fun `facilities are compared by id, never by name`() = runTest {
+        val sameIdOtherName = SessionFacility(facilityId = "fac-1", facilityName = "Renamed PHC")
+        val allowed = useCase(session(UserRole.ASHA_WORKER), RecordingSlmEngine(output = groundedOutput), sessionFacility = sameIdOtherName)(
+            "case-1", tethered,
+        )
+        assertTrue("same id, different name must pass: $allowed", allowed is SlmReadbackResult.Answer)
+
+        val nameLooksLikeOwnerId = SessionFacility(facilityId = "fac-2", facilityName = "fac-1")
+        val refused = useCase(session(UserRole.ASHA_WORKER), RecordingSlmEngine(output = groundedOutput), sessionFacility = nameLooksLikeOwnerId)(
+            "case-1", tethered,
+        )
+        assertEquals(SlmReadbackResult.Refused(SlmRefusal.ENGINE_REJECTED_INPUT), refused)
+    }
+
+    @Test
+    fun `a facility source that throws refuses`() = runTest {
+        val engine = RecordingSlmEngine(output = groundedOutput)
+        val seam = SlmReadbackUseCase(
+            authSession = FakeAuthSession(session(UserRole.DOCTOR)),
+            approvedRecordReader = ApprovedRecordReader(FakeAuthSession(null), FakeCaseRecordRepository(emptyList()), assembleNothing()),
+            engine = engine,
+            auditLogger = FakeAuditLogger(),
+            sessionFacility = object : SessionFacilitySource {
+                override suspend fun currentFacility(): SessionFacility? = throw IllegalStateException("datastore")
+            },
+            dataOwnerFacility = object : LocalDataOwnerFacility {
+                override suspend fun owningFacility(): OwningFacility = OwningFacility.Known("fac-1")
+            },
+        )
+        assertEquals(SlmReadbackResult.Refused(SlmRefusal.ENGINE_REJECTED_INPUT), seam("case-1", tethered))
+        assertEquals(0, engine.callCount)
+    }
+
+    /** The shipped binding in this PR (Y-21'): no owner store exists, so every readback refuses. */
+    @Test
+    fun `the only owner implementation in this PR is UNKNOWN and refuses a fully eligible readback`() = runTest {
+        assertEquals(OwningFacility.Unknown, UnknownLocalDataOwnerFacility().owningFacility())
+        val engine = RecordingSlmEngine(output = groundedOutput)
+        val result = useCase(session(UserRole.DOCTOR), engine, owner = UnknownLocalDataOwnerFacility().owningFacility())("case-1", tethered)
+        assertEquals(SlmReadbackResult.Refused(SlmRefusal.ENGINE_REJECTED_INPUT), result)
+        assertEquals(0, engine.callCount)
+
+        val src = listOf(java.io.File("src"), java.io.File("app/src")).first { java.io.File(it, "main").isDirectory }
+        val implementers = listOf("main", "dev", "staging", "prod")
+            .flatMap { java.io.File(src, it).walkTopDown().filter { f -> f.isFile && f.extension == "kt" }.toList() }
+            // A class or object declaring the supertype, not a parameter or a return type.
+            .filter { Regex("""(\)|\bobject)\s*:\s*LocalDataOwnerFacility\s*\{""").containsMatchIn(it.readText()) }
+            .map { it.relativeTo(src).invariantSeparatorsPath }
+        assertEquals(listOf("main/java/com/example/samdapp/domain/slm/FacilityScope.kt"), implementers)
+    }
+
+    private fun assembleNothing() = AssembleReportUseCase(
+        caseRecordRepository = FakeCaseRecordRepository(emptyList()),
+        patientRepository = FakePatientRepository(),
+        encounterRepository = FakeEncounterRepository(),
+        abhaProfileRepository = FakeAbhaProfileRepository(),
+        consultationRepository = FakeConsultationRepository(),
+        ailmentRepository = FakeAilmentRepository(),
+        vitalsRepository = FakeVitalsRepository(),
+        prescriptionRepository = FakePrescriptionRepository(),
+        kernelReportRepository = FakeKernelReportRepository(),
+        evaluateReportRepository = FakeEvaluateReportRepository(),
+        doctorRepository = FakeDoctorRepository(),
+        reportFormatter = ReportFormatter(),
+    )
+
     private fun FakeAuditLogger.Entry.fields(): Map<String, String?> =
         Json.parseToJsonElement(payload).jsonObject.mapValues { (_, value) ->
             if (value is JsonNull) null else value.jsonPrimitive.content
         }
 
     private companion object {
+        val FACILITY_1 = SessionFacility(facilityId = "fac-1", facilityName = "PHC Rampur")
         val REMOTE_IDENTITY = SlmEngineIdentity(
             engine = SlmEngineKind.REMOTE,
             accelerator = null,

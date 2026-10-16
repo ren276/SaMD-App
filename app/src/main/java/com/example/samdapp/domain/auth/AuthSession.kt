@@ -85,3 +85,17 @@ interface AuthSession {
 
     suspend fun signOut()
 }
+
+/**
+ * The facility the backend assigned the signed-in worker: `worker.facility_id` and
+ * `worker.facility_name` of the login response (api-contract.md §2.2, `LoginResponseDto.worker`),
+ * exactly as [com.example.samdapp.data.local.auth.BackendAuthSession.signIn] stored them. Never
+ * parsed out of a token. Scope decisions compare [facilityId]; [facilityName] is display text.
+ */
+data class SessionFacility(val facilityId: String, val facilityName: String)
+
+/** Read side of [SessionFacility] (on-device SLM memo 7.1, Y-21'). */
+interface SessionFacilitySource {
+    /** Null when signed out, or when the stored login carries no facility id. */
+    suspend fun currentFacility(): SessionFacility?
+}
