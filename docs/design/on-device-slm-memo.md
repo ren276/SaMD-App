@@ -804,12 +804,21 @@ and install cost).
   `SLM_READBACK_INVOKED` (`thermal_status`).
 - Below API 29 the status cannot be read, so the local engine refuses to start: UNAVAILABLE,
   reason `thermal_unavailable` (C-4, batch 7). It never treats an unreadable status as NONE.
-- **Memory is measured from the host only (M-1, batch 10).** `Debug.getPss()` sampled in-process
-  every 250 ms stalls generation: on the same ten golden ids on GPU the median decode rate was
-  16.7 tok/s with sampling off and 7.4 tok/s with it on, and 0 against 4 of 10 prompts hit the
-  40 s deadline (D2). The parity harness defaults to `-e pss off`, makes no in-process memory call
-  in that mode (guarded by a source-scan test), and memory is sampled with
-  `adb shell dumpsys meminfo com.example.samdapp.dev` every 60 s.
+- **Memory is measured from the host only (M-1, batch 10).** In-process `Debug.getPss()` sampling
+  every 250 ms slows generation. Evidence that holds: the first runs (P2, pss on) against the v2 runs
+  (pss off) gave a median decode rate of 5.4 against 9.9 tok/s on CPU (steady temperature, thermal
+  status 1 throughout) and 10.1 against 16.7 tok/s on GPU over the first 20 to 30 prompts. The D2
+  A/B (16.7 against 7.4 tok/s, 0 against 4 of 10 timeouts) is order-confounded on its own: pss off
+  ran first on a rested phone. The harness defaults to `-e pss off`, makes no in-process memory
+  call in that mode (guarded by a source-scan test), and memory is sampled with
+  `adb shell dumpsys meminfo com.example.samdapp.dev` every 60 s. The v2 GPU run's rate did not
+  change when the host sampler was stopped mid-run, so the host sampler is not the cause of the
+  decline described next. Peak PSS in v2: GPU 3.26 GB, CPU 2.21 GB.
+- **Sustained GPU load throttles (S5b).** In the v2 GPU run the median decode rate was 16.7 tok/s
+  over the first 30 prompts and 9.0, 8.7 and 8.2 tok/s over the next three blocks of 30, with thermal
+  status reaching 2 on 26 prompts (battery 34.9 to 41.2 C, phone on USB charge). The CPU run held
+  9.4 to 10.2 tok/s with thermal status 1 throughout. Timings from a long back-to-back batch are
+  therefore a throttled worst case; a single readback on a rested phone runs near 16 tok/s on GPU.
 - Field-phone capability probe (RAM, `isLowRamDevice`, OpenCL presence, free storage, Android
   version): described only; deferred to a fleet ruling (Y-12).
 
@@ -1030,12 +1039,11 @@ F1; whichever merges second merges master in with a merge commit, no rebase.
 | H-48 | A substituted, corrupted or partially copied `.litertlm` is loaded, carrying a different template, vocabulary or stop ids; or a corrupted derived runtime cache (crash mid-write, storage fault) is loaded beside a good artifact | Full SHA-256 before every engine start (6.3); content-addressed file name; refusal on mismatch; file mode 600 after delivery (9.1, C-5). Derived cache (C-2): dedicated `cacheDir/slm/<sha256>/`, manifest of every file (path, size, sha256) written atomically at clean release, verified before every start, any mismatch, unlisted file or missing manifest over a non-empty directory deletes the cache and cold-inits. **Residual:** the manifest is not a defence against an attacker with app-private write access (threat model, 6.3) |
 | H-49 | Text the two tokenizers split differently makes the local engine see a different prompt from the server. Per T1 this happens if and only if the text contains a litertlm user-defined piece: one of 70 HTML tag pieces (`<tag>`, `</tag>`) or `<unused0>`..`<unused6226>` | G-5 final: pre-call refusal of the 70 HTML tag pieces from a pinned 70-entry list file (5.6), `<unusedN>` already refused via `CONTROL_TOKENS`; both engines; G-6 token-id parity gate on the golden set. Whitespace removed from this row (T1 corrected G2) |
 | H-50 | Two resident models exhaust memory, the OS kills the app mid-encounter, unsaved clinical work is lost | SLM release on trim and idle; never mid-generation; PSS baseline; ASR release (Y-11 PR); fleet probe (Y-12) |
-| H-51 | Sustained generation heats the phone; readbacks time out or the worker abandons the screen | Pre-run thermal refusal at SEVERE (Y-15); 40 s deadline; thermal in audit; 20-run measurement |
+| H-51 | Sustained generation heats the phone; readbacks time out or the worker abandons the screen | Pre-run thermal refusal at SEVERE (Y-15); 40 s deadline; thermal in audit; 20-run measurement. **Measured (S5b):** GPU decode rate halves after about 30 consecutive prompts (section 10), and 1 of 120 GPU prompts and 6 of 120 CPU prompts reached the 40 s deadline |
 | H-52 | A GPU init failure falls back to CPU and slower or different output is not attributable | Fallback only at init; accelerator in every audit row, plus the boolean `gpu_init_failed` in `SLM_READBACK_INVOKED` (C-7, never error text); parity run per backend; default backend order decided from S5 time-to-answer data including init (Y-16') |
 | H-53 | An over-length prompt is answered locally while the server refuses it: in the 2049 to 2560 token band the runtime accepts it, and above 2560 it may truncate silently and answer from a partial record | Context 2560; mandatory prefill-count backstop (Y-20): `lastPrefillTokenCount > 2048` discards the output and refuses before the flow emits (4.4, 5.5); missing benchmark info also refuses; device tests at about 2100 and over 2560 tokens (STOP if visible output); G-6 refusal-parity scoring; the runtime's own input-too-long error maps to the same refusal (R9-a, G6: all 6 designed prompts rejected before prefill, 413 on the server) |
 | H-54 | A worker from another facility signs in on a shared phone and the local engine reads back an approved record from the previous facility, which the remote path would refuse | Y-21' (batch 6 Option 3, as superseded at S4; slice S4): the readback seam, for both engines and every tier, refuses fail closed unless the signed-in session's facility and the facility owning the local data are both known and equal by id, never by name. In this PR the owner is always UNKNOWN, so every readback is refused (`facility_scope`); the marker store is deferred to the product-wide facility-scope PR. **Residual:** the rest of the app's local reads stay unscoped (7.1, F-1); that exposure is a separate HIGH PR with its own hazard row (wipe on a different-facility sign-in only after the outbox has fully drained; block that sign-in, never wipe, while it has not) |
-
-| H-55 | PROPOSED (M-2). The same approved record yields different readback text across runs on the same device and backend (observed on GPU: the pss-on A/B rows matched neither the earlier rows nor the pss-off rows), so a text a worker saw cannot be reproduced for review | Controls TBD from the repeatability data (section 11.4, per-backend identical-of-30); candidates: audit the digest of every shown readback text, keep deterministic decode a measured property per backend, refuse or flag a readback whose repeat differs |
+| H-55 | PROPOSED (M-2). The same approved record yields different readback text across runs on the same device and backend (observed on GPU: the pss-on A/B rows matched neither the earlier rows nor the pss-off rows), so a text a worker saw cannot be reproduced for review | Controls TBD from the repeatability data (section 11.4, per-backend identical-of-30); candidates: audit the digest of every shown readback text, keep deterministic decode a measured property per backend, refuse or flag a readback whose repeat differs. **Measured (S5b v2 repeats, 30 ids each):** GPU 9 byte-identical of 30 (21 differ, first differing offsets 12 to 589 characters); CPU 28 identical of the 28 comparable (2 not comparable because a run timed out). So the nondeterminism is a property of the GPU backend here, not of the model or the sampler settings |
 
 ### 13.3 SOUP entries
 
