@@ -1,6 +1,8 @@
 package com.example.samdapp.presentation.report
 
+import com.example.samdapp.BuildConfig
 import com.example.samdapp.config.FeatureFlags
+import com.example.samdapp.di.FeatureFlagModule
 import com.example.samdapp.domain.auth.SessionFacility
 import com.example.samdapp.domain.auth.SessionFacilitySource
 import com.example.samdapp.domain.auth.UserRole
@@ -89,16 +91,22 @@ class ReportReadbackTest {
     // ------------------------------------------------ the flag, proved from both sides
 
     @Test
-    fun `the flag as shipped is off in every flavor`() {
-        // The literal claim, on the real constant. Everything below tests the predicate; this is
-        // the one assertion that tests what is actually compiled into the app, and it is what makes
-        // "the flag builds the surface, it does not turn it on" checkable rather than asserted.
-        assertFalse(
-            "SLM_READBACK_ENABLED must stay false. Turning it on is not a flag change: the " +
-                "generation service does not exist in this repository, has never run end to end " +
-                "on real hardware, and six hazard items covering this path are unsigned.",
+    fun `the flag as shipped is on in dev and off in staging and prod`() {
+        // The literal claim, on the real constant and on what Hilt is handed, in whichever flavor
+        // this task compiled. Everything below tests the predicate; this is the one assertion that
+        // tests what is actually compiled into the app. Each flavor's unit test task runs it, so
+        // dev proves the true side and staging and prod the false side (ruling R-DEV, memo 16).
+        assertTrue("Unknown flavor ${BuildConfig.FLAVOR}", BuildConfig.FLAVOR in setOf("dev", "staging", "prod"))
+        val expected = BuildConfig.FLAVOR == "dev"
+        assertEquals(
+            "SLM_READBACK_ENABLED must be true in dev only. In staging and prod turning it on is " +
+                "not a flag change: the generation service does not exist in this repository, has " +
+                "never run end to end on real hardware, six hazard items covering this path are " +
+                "unsigned, and local data is not facility-scoped (memo 15). Flavor: ${BuildConfig.FLAVOR}",
+            expected,
             FeatureFlags.SLM_READBACK_ENABLED,
         )
+        assertEquals(expected, FeatureFlagModule.provideSlmReadbackEnabled())
     }
 
     @Test
@@ -451,7 +459,7 @@ class ReportReadbackTest {
 
     /**
      * The ViewModel over the real seam. [flagEnabled] cannot move `FeatureFlags`, which is a
-     * `const val`, so the tests that need the surface open call the actions directly: `canOpenReadback`
+     * build constant, so the tests that need the surface open call the actions directly: `canOpenReadback`
      * gates `onOpenReadback` only, and every other action is reachable once the sheet is open. The
      * flag's own effect is proved separately, above, from both sides of the predicate and from the
      * real constant.

@@ -34,8 +34,6 @@ import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.repository.AuditLogRepository
 import com.example.samdapp.domain.auth.AuthSession
 import com.example.samdapp.domain.auth.SessionFacilitySource
-import com.example.samdapp.domain.slm.LocalDataOwnerFacility
-import com.example.samdapp.domain.slm.UnknownLocalDataOwnerFacility
 import com.example.samdapp.domain.sync.SyncStatus
 import com.example.samdapp.domain.repository.AbhaProfileRepository
 import com.example.samdapp.domain.repository.AilmentRepository
@@ -114,11 +112,6 @@ abstract class RepositoryModule {
     /** The signed-in session's facility, from the stored login response (Y-21'). */
     @Binds
     abstract fun bindSessionFacilitySource(impl: DataStoreAuthTokenStore): SessionFacilitySource
-
-    /** Always UNKNOWN in this PR, so SLM readback refuses (Y-21'); the real store is the
-     *  product-wide facility-scope PR's. */
-    @Binds
-    abstract fun bindLocalDataOwnerFacility(impl: UnknownLocalDataOwnerFacility): LocalDataOwnerFacility
 
     @Binds @Singleton
     abstract fun bindAbhaProfileRepository(impl: AbhaProfileRepositoryImpl): AbhaProfileRepository

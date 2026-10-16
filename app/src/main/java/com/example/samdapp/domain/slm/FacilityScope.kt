@@ -20,9 +20,9 @@ interface LocalDataOwnerFacility {
 }
 
 /**
- * The only implementation in this PR, and it always answers [OwningFacility.Unknown], so the
- * readback seam refuses every request. Acceptable only because `SLM_READBACK_ENABLED` is false in
- * every flavor and the parity harness calls the local engine directly, not the seam (Y-21').
+ * The staging and prod owner, and it always answers [OwningFacility.Unknown], so the readback seam
+ * refuses every request there (Y-21'). Dev overrides it with the session's facility over mock data
+ * (R-DEV, `LocalSlmModule`); no other flavor may until the product-wide facility-scope PR.
  */
 class UnknownLocalDataOwnerFacility @Inject constructor() : LocalDataOwnerFacility {
     override suspend fun owningFacility(): OwningFacility = OwningFacility.Unknown
