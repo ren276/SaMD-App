@@ -57,6 +57,50 @@ class LocalSlmSourceScanTest {
         assertEquals(listOf("dev/java/com/example/samdapp/data/slm/LiteRtLmRuntime.kt"), naming)
     }
 
+    /**
+     * The local engine has no network path (on-device SLM memo 1, "no egress on the local path"):
+     * nothing in the engine's package imports or names okhttp3, retrofit2, java.net or android.net.
+     * The on-device offline smoke proves the behaviour; this keeps the code from regaining the
+     * capability unnoticed. Comments are ignored, code is not.
+     */
+    @Test
+    fun theLocalEngineSourcesNameNothingNetworked() {
+        val files = kotlinFiles(ENGINE_PACKAGE)
+        assertTrue(
+            "Scan is vacuous: ${files.map { it.name }}",
+            files.map { it.name }.containsAll(listOf("LocalSlmEngine.kt", "LiteRtLmRuntime.kt")),
+        )
+        val hits = files.flatMap { file -> networkedReferences(file.readText()).map { "${file.name}: $it" } }
+        assertEquals("The local engine must not name a network API", emptyList<String>(), hits)
+    }
+
+    @Test
+    fun theNetworkScannerFindsEveryFormAndIgnoresComments() {
+        listOf(
+            "import okhttp3.OkHttpClient",
+            "import retrofit2.Retrofit",
+            "import java.net.URL",
+            "import android.net.ConnectivityManager",
+            "val url = java.net.URL(text)",
+            "val client = okhttp3.OkHttpClient()",
+            "import android.net.Uri",
+        ).forEach { line -> assertEquals("Not caught: $line", 1, networkedReferences(line).size) }
+        listOf(
+            "import java.nio.file.Files",
+            "import javax.net.ssl.SSLContext.Companion",
+            "// import java.net.URL is forbidden here",
+            " * uses okhttp3 only in the remote engine",
+            "/* android.net */",
+            "val internet = 1",
+        ).forEach { line -> assertEquals("False alarm: $line", emptyList<String>(), networkedReferences(line)) }
+    }
+
+    private fun networkedReferences(text: String): List<String> =
+        text.lines().filterNot { line ->
+            val trimmed = line.trim()
+            trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*")
+        }.filter { line -> NETWORKED.containsMatchIn(line) }
+
     private fun kotlinFiles(root: File): List<File> =
         root.walkTopDown().filter { it.isFile && it.extension == "kt" }.sortedBy { it.path }.toList()
 
@@ -68,6 +112,7 @@ class LocalSlmSourceScanTest {
         val ENGINE_PACKAGE = File(SRC, "dev/java/com/example/samdapp/data/slm")
         val SOURCE_SETS = listOf("main", "dev", "staging", "prod")
         const val LITERTLM = "com.google.ai.edge.litertlm"
+        val NETWORKED = Regex("""(?<![\w.])(okhttp3|retrofit2|java\.net|android\.net)\b""")
         val LOGGING = listOf(
             Regex("""\bLog\.[a-zA-Z]+\("""),
             Regex("""\bTimber\b"""),
