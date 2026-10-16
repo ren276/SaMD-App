@@ -823,6 +823,27 @@ Root: `/media/sandesh/extra-ssd/samd-slm-parity/` (exists). JVM and Gradle proce
 - Records are generated, never hand-written; prompts come only from `buildPrompt`; no real
   patient data (R8).
 
+**As built (S5a).** The export is gated by the environment variable `SAMD_GOLDEN_EXPORT_DIR`, not
+a system property (Gradle does not treat it as an input, so run with `--rerun`). The generator is
+`GoldenPromptGenerator` in the same file, seed 20260918, and the in-memory coverage and gate tests
+run in every dev build. Extra fields in `prompts-v1.jsonl`: `question_language` (`en`, `hi-Deva`,
+`hi-Latn`), `expected_input_refusal_reason`, `designed_over_2048_tokens`, `cells`. Facts the real
+gate produced rather than assumed:
+- The worker-tier input gate is English-only (`ALLOWED_INTENTS`): a pure Devanagari question from a
+  worker-tier user is refused as `OUT_OF_SCOPE_INTENT`. So Devanagari records are at the physician
+  tier, except the three deliberate worker-tier refusals; romanized Hindi worker questions pass by
+  carrying English intent words. A fleet that asks in Hindi would be refused at the worker tier;
+  filed as a finding, not changed here.
+- A REJECT record read by a worker carries no medication lines (H-17), modelled in the generator.
+- The 10 refused questions are 4 English, 3 romanized Hindi and 3 Devanagari, each refused by the
+  real `inputScopeRefusal`; no other worker-tier question is.
+- The designed over-2048-token records are 6 runs of single spaced digits near the 6000-character
+  bound (each digit word is at least one token, so about 2,500 digits cannot fit 2048 tokens); the
+  real token counts come from `token_parity.py`.
+The GPU-machine scripts are in `scripts/slm-parity/` with a README; their stdlib-testable parts
+have unit tests (`test_slm_parity.py`). The litert-lm and transformers calls were checked against the
+pinned sources (LiteRT-LM `v0.18.0`, transformers `v5.5.0`) but not run on the main machine.
+
 ### 11.2 Server run and token parity (operator, GPU machine)
 
 `scripts/slm-parity/run_server.py` (committed, reviewed, stdlib only), run by the operator:

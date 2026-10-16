@@ -146,6 +146,38 @@ class SlmReadbackAuditPersistenceTest {
         assertEquals("is ibuprofen safe with lisinopril $QUESTION_SENTINEL".length.toString(), input["question_chars"])
     }
 
+    /**
+     * G-4: the pinned local artifact passes the identity gate. The id and digest below are written
+     * out here, not read from the code under test, so a drifted constant in the seam fails this.
+     * The persisted rows are INVOKED (LOCAL, the pinned id and digest) and SANITIZER_ACTIVITY, and
+     * no OUTPUT_SUPPRESSED row.
+     */
+    @Test
+    fun thePinnedLocalIdentityPassesTheGateWithNoSuppressionRowPersisted() = runBlocking {
+        val caseId = seedApprovedCase()
+
+        val result = seam(FakeEngine(GROUNDED, PINNED_LOCAL, PINNED_LOCAL.modelId, SlmRunConditions(2, false)))(caseId, "Summarise the record $QUESTION_SENTINEL")
+
+        assertTrue("$result", result is SlmReadbackResult.Answer)
+        val rows = db.auditLogDao().observeAll().first().filter { it.action.startsWith("slm_readback_") }
+        assertEquals(
+            listOf("slm_readback_invoked", "slm_readback_sanitizer_activity"),
+            rows.map { it.action }.sorted(),
+        )
+        assertFalse("a suppression row was persisted", rows.any { it.action == "slm_readback_output_suppressed" })
+        rows.forEach { assertEquals(caseId, it.caseRecordId) }
+        val invoked = fields(rows.single { it.action == "slm_readback_invoked" }.payload)
+        assertEquals("LOCAL", invoked["engine"])
+        assertEquals("GPU", invoked["accelerator"])
+        assertEquals(PINNED_ID, invoked["model_id"])
+        assertEquals(PINNED_DIGEST, invoked["artifact_sha256"])
+        assertEquals("litertlm-android 0.18.0", invoked["runtime_version"])
+        assertEquals("STOP", invoked["finish_reason"])
+        assertEquals(null, invoked["engine_error"])
+        assertEquals("2", invoked["thermal_status"])
+        assertEquals("false", invoked["gpu_init_failed"])
+    }
+
     private fun fields(payload: String): Map<String, String?> =
         Json.parseToJsonElement(payload).jsonObject.mapValues { (_, v) -> if (v is JsonNull) null else v.jsonPrimitive.content }
 
@@ -241,6 +273,10 @@ class SlmReadbackAuditPersistenceTest {
         )
         const val GROUNDED = "The doctor approved Amoxicillin 500 mg by mouth, three times a day, for 5 days, 15 in total."
         val REMOTE = SlmEngineIdentity(SlmEngineKind.REMOTE, null, SANITIZER_TARGET_MODEL_ID, "2db5482b20d746879bb3ef79b5203e9075a2e2b98f54ec7c2f281c1477ddc550", null)
+        const val PINNED_DIGEST = "181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c"
+        const val PINNED_ID = "litert-community/gemma-4-E2B-it-litert-lm@b3ca0d2f076785a8f4b2219ddbd2bdb99954eae1#$PINNED_DIGEST"
+        val PINNED_LOCAL = SlmEngineIdentity(SlmEngineKind.LOCAL, "GPU", PINNED_ID, PINNED_DIGEST, "litertlm-android 0.18.0")
+
         // A digest that is not the pinned file's, so the identity gate refuses it (G-4).
         val LOCAL = SlmEngineIdentity(
             SlmEngineKind.LOCAL, "GPU",
