@@ -5,8 +5,11 @@ SHOWN: each engine's output after the sanitizer and an emulation of the seam's p
 (finish STOP, served-model identity, grounding for the non-physician tiers). It then applies four
 deterministic content gates to every shown output and the hard gates below.
 
+From batch 11 (V-1) the gated local run is the CPU run; a GPU run, if given, is reported only and
+labelled "not selected".
+
 Hard gates (exit code 1 if any fails):
-  H1 content: the four gates pass for 100 percent of every LOCAL run's shown outputs
+  H1 content: the four gates pass for 100 percent of every gated LOCAL run's shown outputs
   H2 non-inferiority: no prompt where the server's shown output passes all four gates while a
      LOCAL shown output fails any
   H3 refusal parity (R9-b): the over-2048-token prompts are REFUSED on all four runs
@@ -16,7 +19,7 @@ Reported, not gated: server and desktop gate results (server failures are readba
 findings), exact-match rate and chrF against the server, per-backend repeatability.
 
 The report holds counts, ids and verdicts only: no prompt, question or output text. The blind
-review sample (30 server versus pixel-gpu pairs) is the one file that carries text, and it is for
+review sample (30 server versus pixel-cpu pairs) is the one file that carries text, and it is for
 clinician review only.
 """
 
@@ -188,8 +191,16 @@ def record_section(prompt):
     return prompt[start:end]
 
 
+def slash_parts(number):
+    """V-3: a value joined by '/' (148/92) also contributes each part. Only '/' splits; the whole stays."""
+    return number.split("/") if "/" in number else []
+
+
 def numbers_gate(output, section):
-    allowed = set(numbers_in(section))
+    record = numbers_in(section)
+    allowed = set(record)
+    for n in record:
+        allowed.update(slash_parts(n))
     return [n for n in numbers_in(output) if n not in allowed]
 
 
@@ -414,7 +425,7 @@ def repeatability(base_rows, rep_rows):
     return {"n": len(rep_rows), "identical": identical, "differing": differing, "not_comparable": sorted(not_comparable)}
 
 
-def blind_sample(server, other, golden, excluded, per_language=10):
+def blind_sample(server, other, golden, excluded, other_label="pixel-cpu", per_language=10):
     """Disagreements where both engines SHOWN, stratified by language, A/B order randomised, shuffled."""
     rng = random.Random(SEED)
     candidates = {}
@@ -436,7 +447,7 @@ def blind_sample(server, other, golden, excluded, per_language=10):
             "row": k, "language": golden[i]["question_language"], "question": golden[i]["question"],
             "record": record_section(golden[i]["prompt"]), "answer_A": a, "answer_B": b,
         })
-        key.append({"row": k, "id": i, "A_is": "server" if server_first else "pixel-gpu", "B_is": "pixel-gpu" if server_first else "server"})
+        key.append({"row": k, "id": i, "A_is": "server" if server_first else other_label, "B_is": other_label if server_first else "server"})
     return rows, key
 
 
@@ -565,10 +576,13 @@ def run(args):
 
     server = server_results(read_jsonl(args.server), golden, control_tokens)
     desktop = desktop_results(read_jsonl(args.desktop), golden, control_tokens, over_2048)
-    gpu_rows, cpu_rows = read_jsonl(args.gpu), read_jsonl(args.cpu)
-    gpu, cpu = local_results(gpu_rows, golden), local_results(cpu_rows, golden)
-    runs = {"server": server, "desktop": desktop, "pixel-gpu": gpu, "pixel-cpu": cpu}
-    local_names = ["pixel-gpu", "pixel-cpu"]
+    cpu_rows = read_jsonl(args.cpu)
+    cpu = local_results(cpu_rows, golden)
+    gpu = local_results(read_jsonl(args.gpu), golden) if args.gpu else None
+    runs = {"server": server, "desktop": desktop, "pixel-cpu": cpu}
+    if gpu is not None:
+        runs["pixel-gpu (not selected)"] = gpu
+    local_names = ["pixel-cpu"]
 
     gate_results = {name: gate_runs(res, golden, excluded, control_tokens) for name, res in runs.items()}
     violations = {n: non_inferiority_violations(gate_results["server"], runs[n], gate_results[n]) for n in local_names}
@@ -582,27 +596,29 @@ def run(args):
         gates.append((f"H1 content gates 100% ({n})", not bad, f"{len(gate_results[n]) - len(bad)}/{len(gate_results[n])} shown outputs pass all four"))
     for n in local_names:
         gates.append((f"H2 non-inferiority ({n})", not violations[n], f"{len(violations[n])} violating prompts"))
-    gates.append(("H3 refusal parity (over-2048 prompts refused on all four runs)", all(not v for v in parity.values()), f"{len(over_2048)} prompts; not refused: " + "; ".join(f"{k} {len(v)}" for k, v in parity.items())))
+    gated_parity = {k: v for k, v in parity.items() if "not selected" not in k}
+    gates.append(("H3 refusal parity (over-2048 prompts refused on server, desktop and the gated local run)", all(not v for v in gated_parity.values()), f"{len(over_2048)} prompts; not refused: " + "; ".join(f"{k} {len(v)}" for k, v in parity.items())))
     for n in local_names:
         rate = refusal_rate(runs[n], excluded)[2]
         gates.append((f"H4 refusal rate gap <= {MAX_REFUSAL_GAP_POINTS:.0f} points ({n})", rate - server_rate <= MAX_REFUSAL_GAP_POINTS, f"{rate:.1f}% against the server's {server_rate:.1f}% = {rate - server_rate:+.1f} points"))
     gates.append(("H5 token parity (prompts not over 2048 tokens)", not tp_failures, f"{len(tp_failures)} failures of {sum(1 for r in token_parity if not r['over_2048'])}"))
 
     repeat = {}
-    if args.gpu_rep:
-        repeat["pixel-gpu"] = repeatability(gpu_rows, read_jsonl(args.gpu_rep))
-    if args.cpu_rep:
-        repeat["pixel-cpu"] = repeatability(cpu_rows, read_jsonl(args.cpu_rep))
+    pair_files = []
+    for spec in args.repeat or []:
+        name, base_path, rep_path = spec.split(",")
+        repeat[name] = repeatability(read_jsonl(base_path), read_jsonl(rep_path))
+        pair_files += [base_path, rep_path]
 
-    inputs = [(os.path.basename(p), sha256_file(p)) for p in (
-        args.golden, args.control_tokens, args.token_parity, args.server, args.desktop, args.gpu, args.cpu,
-        *[p for p in (args.gpu_rep, args.cpu_rep) if p],
-    )]
+    inputs = [(os.path.basename(p), sha256_file(p)) for p in dict.fromkeys((
+        args.golden, args.control_tokens, args.token_parity, args.server, args.desktop,
+        *([args.gpu] if args.gpu else []), args.cpu, *pair_files,
+    ))]
     ctx = {
         "gates": gates, "total": len(golden), "excluded": excluded, "runs": runs, "gate_results": gate_results,
         "local_names": local_names, "violations": violations, "over_2048": over_2048, "parity": parity,
         "token_parity": token_parity, "tp_failures": tp_failures,
-        "similarity": {n: similarity_to_server(server, runs[n], excluded) for n in ("pixel-gpu", "pixel-cpu", "desktop")},
+        "similarity": {n: similarity_to_server(server, runs[n], excluded) for n in runs if n != "server"},
         "repeat": repeat, "inputs": inputs,
     }
     report = build_report(ctx)
@@ -612,7 +628,7 @@ def run(args):
 
     if args.review_dir:
         os.makedirs(args.review_dir, exist_ok=True)
-        rows, key = blind_sample(server, gpu, golden, excluded)
+        rows, key = blind_sample(server, cpu, golden, excluded)
         with open(os.path.join(args.review_dir, "blind-sample.csv"), "w", encoding="utf-8", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=["row", "language", "question", "record", "answer_A", "answer_B"])
             writer.writeheader()
@@ -631,10 +647,10 @@ def main(argv=None):
     p.add_argument("--token-parity", required=True)
     p.add_argument("--server", required=True)
     p.add_argument("--desktop", required=True)
-    p.add_argument("--gpu", required=True)
-    p.add_argument("--cpu", required=True)
-    p.add_argument("--gpu-rep")
-    p.add_argument("--cpu-rep")
+    p.add_argument("--gpu", help="the GPU run: reported only, labelled 'not selected' (V-1)")
+    p.add_argument("--cpu", required=True, help="the gated local run")
+    p.add_argument("--repeat", action="append", metavar="NAME,BASE,REPEAT",
+                   help="repeatability pair: a label, the first run's file, the repeat's file (repeatable)")
     p.add_argument("--report", required=True)
     p.add_argument("--review-dir")
     return run(p.parse_args(argv))

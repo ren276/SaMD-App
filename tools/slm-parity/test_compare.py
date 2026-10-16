@@ -8,6 +8,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import compare as c  # noqa: E402
+import merge_rerun  # noqa: E402
 
 FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "app", "src", "test", "resources", "slm", "grounding-fixture-v1.json")
 
@@ -81,6 +82,23 @@ class NumbersGate(unittest.TestCase):
         self.assertEqual([], c.numbers_gate("1. Take it\n2) Rest\n  3. Drink water", self.section))
         self.assertEqual(["7"], c.numbers_gate("Take 7 tablets", self.section))
         self.assertEqual(["9"], c.numbers_gate("1. Take it\nthen 9 times", self.section))
+
+    def test_a_slash_joined_record_value_also_contributes_its_parts(self):
+        # V-3: the record has 128/84; "128 over 84" is faithful, the whole stays matchable.
+        self.assertEqual([], c.numbers_gate("BP 128 over 84, that is 128/84.", self.section))
+        self.assertEqual([], c.numbers_gate("Systolic 128.", self.section))
+
+    def test_slash_parts_do_not_launder_other_numbers(self):
+        self.assertEqual(["129"], c.numbers_gate("BP 129 over 84", self.section))
+        self.assertEqual(["128/85"], c.numbers_gate("BP 128/85", self.section))
+        self.assertEqual(["84/128"], c.numbers_gate("84/128", self.section))
+        self.assertEqual(["128/84/90"], c.numbers_gate("128/84/90", self.section))
+
+    def test_only_a_slash_splits_a_record_value(self):
+        section = "APPROVED RECORD\n- Syrup 1.5 mg | 2,5 days"
+        self.assertEqual(["5"], c.numbers_gate("5", section))
+        self.assertEqual(["1"], c.numbers_gate("1", section))
+        self.assertEqual([], c.numbers_gate("1.5 and 2,5", section))
 
     def test_decimals_and_slashes_are_single_numbers(self):
         self.assertEqual(["1.5"], c.numbers_gate("Take 1.5 tablets", self.section))
@@ -270,12 +288,50 @@ class Metrics(unittest.TestCase):
             a_is_server = k["A_is"] == "server"
             self.assertEqual("server" in r["answer_A"], a_is_server)
             self.assertEqual("server" in r["answer_B"], not a_is_server)
-        self.assertEqual({"server", "pixel-gpu"}, {k["A_is"] for k in key} | {k["B_is"] for k in key})
+        self.assertEqual({"server", "pixel-cpu"}, {k["A_is"] for k in key} | {k["B_is"] for k in key})
         # fewer disagreements than the quota: all of them, and identical texts are not disagreements
         small = {"x": c.Result("SHOWN", "same"), "y": c.Result("SHOWN", "one")}
         small_other = {"x": c.Result("SHOWN", "same"), "y": c.Result("SHOWN", "two")}
         rows, _ = c.blind_sample(small, small_other, {"x": golden_row("x"), "y": golden_row("y")}, set())
         self.assertEqual(1, len(rows))
+
+
+class MergeRerun(unittest.TestCase):
+    def test_replaces_only_the_named_rows_keeps_order_and_records_them(self):
+        base = [{"id": "a", "outcome": "ok", "t": 1}, {"id": "b", "outcome": "error", "error_kind": "TIMEOUT"}, {"id": "c", "outcome": "ok", "t": 3}]
+        rerun = [{"id": "b", "outcome": "ok", "t": 2}]
+        merged, replaced = merge_rerun.merge(base, rerun, "rerun.jsonl")
+        self.assertEqual(["a", "b", "c"], [r["id"] for r in merged])
+        self.assertEqual({"id": "b", "outcome": "ok", "t": 2, "replaced_from": "rerun.jsonl"}, merged[1])
+        self.assertEqual(base[0], merged[0])
+        self.assertEqual(base[2], merged[2])
+        self.assertEqual([("b", "error:TIMEOUT", "ok")], replaced)
+
+    def test_an_unknown_or_duplicate_rerun_id_is_an_error(self):
+        base = [{"id": "a", "outcome": "ok"}]
+        with self.assertRaises(ValueError):
+            merge_rerun.merge(base, [{"id": "z", "outcome": "ok"}], "r")
+        with self.assertRaises(ValueError):
+            merge_rerun.merge(base, [{"id": "a", "outcome": "ok"}, {"id": "a", "outcome": "ok"}], "r")
+
+    def test_the_cli_writes_the_file_and_the_record(self):
+        with tempfile.TemporaryDirectory() as d:
+            def w(name, rows):
+                path = os.path.join(d, name)
+                with open(path, "w", encoding="utf-8") as handle:
+                    handle.write("".join(json.dumps(r) + "\n" for r in rows))
+                return path
+            base = w("base.jsonl", [{"id": "a", "outcome": "ok"}, {"id": "b", "outcome": "error", "error_kind": "TIMEOUT"}])
+            rerun = w("rerun.jsonl", [{"id": "b", "outcome": "ok"}])
+            out, record = os.path.join(d, "out.jsonl"), os.path.join(d, "rec.txt")
+            self.assertEqual(0, merge_rerun.main(["--base", base, "--rerun", rerun, "--out", out, "--record", record]))
+            with open(record, encoding="utf-8") as handle:
+                text = handle.read()
+            self.assertIn("merged 1 of 2 rows", text)
+            self.assertIn("b: base error:TIMEOUT -> re-run ok", text)
+            self.assertEqual(3, text.count("sha256"))
+            with open(out, encoding="utf-8") as handle:
+                self.assertEqual(2, len(handle.readlines()))
 
 
 class EndToEnd(unittest.TestCase):
@@ -328,7 +384,8 @@ class EndToEnd(unittest.TestCase):
         report = os.path.join(directory, "REPORT.md")
         argv = ["--golden", p["golden"], "--control-tokens", p["tokens"], "--token-parity", p["token_parity"], "--server", p["server"],
                 "--desktop", p["desktop"], "--gpu", p["gpu"], "--cpu", p["cpu"], "--report", report,
-                "--review-dir", os.path.join(directory, "review"), *extra]
+                "--review-dir", os.path.join(directory, "review"),
+                "--repeat", f"pixel-cpu,{p['cpu']},{p['cpu']}", *extra]
         code = c.main(argv)
         with open(report, encoding="utf-8") as handle:
             return code, handle.read()
@@ -348,8 +405,11 @@ class EndToEnd(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             code, report = self.run_tool(d, f"{self.SENTINEL_O} 999 mg")
             self.assertEqual(1, code)
-            self.assertIn("| H1 content gates 100% (pixel-gpu) | FAIL", report)
-            self.assertIn("| H2 non-inferiority (pixel-gpu) | FAIL", report)
+            self.assertIn("| H1 content gates 100% (pixel-cpu) | FAIL", report)
+            self.assertIn("| H2 non-inferiority (pixel-cpu) | FAIL", report)
+            # V-1: the GPU run is reported, never gated.
+            self.assertNotIn("(pixel-gpu", report.split("## Outcomes")[0])
+            self.assertIn("pixel-gpu (not selected)", report)
             self.assertNotIn(self.SENTINEL_O, report)
 
 
