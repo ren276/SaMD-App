@@ -804,6 +804,12 @@ and install cost).
   `SLM_READBACK_INVOKED` (`thermal_status`).
 - Below API 29 the status cannot be read, so the local engine refuses to start: UNAVAILABLE,
   reason `thermal_unavailable` (C-4, batch 7). It never treats an unreadable status as NONE.
+- **Memory is measured from the host only (M-1, batch 10).** `Debug.getPss()` sampled in-process
+  every 250 ms stalls generation: on the same ten golden ids on GPU the median decode rate was
+  16.7 tok/s with sampling off and 7.4 tok/s with it on, and 0 against 4 of 10 prompts hit the
+  40 s deadline (D2). The parity harness defaults to `-e pss off`, makes no in-process memory call
+  in that mode (guarded by a source-scan test), and memory is sampled with
+  `adb shell dumpsys meminfo com.example.samdapp.dev` every 60 s.
 - Field-phone capability probe (RAM, `isLowRamDevice`, OpenCL presence, free storage, Android
   version): described only; deferred to a fleet ruling (Y-12).
 
@@ -904,7 +910,16 @@ ids are too long` at `max_num_tokens` 2560 before any prefill (recorded as `outc
   `run-as ... cat` to `runs/pixel-<backend>.jsonl`.
 - Calls the engine directly, not the seam. The seam is covered with the fake.
 - Performance (R7, measured first): one warm-up, then 20 consecutive generations per backend;
-  `Debug.getPss()` sampled every 250 ms; thermal before and after.
+  thermal before and after. Memory is sampled from the host only (M-1, section 10); the in-process
+  `Debug.getPss()` sampling of the first runs is void. The perf batches (D4) are parked and run
+  unattended before the PR.
+- **Repeatability (M-2, batch 10).** 30 golden ids (10 per language, spread over the decision and
+  medication cells) are run a second time per backend; the report gives how many have
+  byte-identical sanitized text to the first run and, for each that differs, the first differing
+  offset and both token counts. Reported, not yet a hard gate; the operator rules from the data.
+- **Void runs (M-1).** `runs/pixel-gpu.jsonl`, `pixel-cpu.jsonl` and `pixel-perf.jsonl` are void as
+  parity inputs and kept only for the record; the inputs are `pixel-gpu-v2.jsonl` and
+  `pixel-cpu-v2.jsonl`.
 
 ### 11.5 Comparator (R7 + G-6)
 
@@ -1019,6 +1034,8 @@ F1; whichever merges second merges master in with a merge commit, no rebase.
 | H-52 | A GPU init failure falls back to CPU and slower or different output is not attributable | Fallback only at init; accelerator in every audit row, plus the boolean `gpu_init_failed` in `SLM_READBACK_INVOKED` (C-7, never error text); parity run per backend; default backend order decided from S5 time-to-answer data including init (Y-16') |
 | H-53 | An over-length prompt is answered locally while the server refuses it: in the 2049 to 2560 token band the runtime accepts it, and above 2560 it may truncate silently and answer from a partial record | Context 2560; mandatory prefill-count backstop (Y-20): `lastPrefillTokenCount > 2048` discards the output and refuses before the flow emits (4.4, 5.5); missing benchmark info also refuses; device tests at about 2100 and over 2560 tokens (STOP if visible output); G-6 refusal-parity scoring; the runtime's own input-too-long error maps to the same refusal (R9-a, G6: all 6 designed prompts rejected before prefill, 413 on the server) |
 | H-54 | A worker from another facility signs in on a shared phone and the local engine reads back an approved record from the previous facility, which the remote path would refuse | Y-21' (batch 6 Option 3, as superseded at S4; slice S4): the readback seam, for both engines and every tier, refuses fail closed unless the signed-in session's facility and the facility owning the local data are both known and equal by id, never by name. In this PR the owner is always UNKNOWN, so every readback is refused (`facility_scope`); the marker store is deferred to the product-wide facility-scope PR. **Residual:** the rest of the app's local reads stay unscoped (7.1, F-1); that exposure is a separate HIGH PR with its own hazard row (wipe on a different-facility sign-in only after the outbox has fully drained; block that sign-in, never wipe, while it has not) |
+
+| H-55 | PROPOSED (M-2). The same approved record yields different readback text across runs on the same device and backend (observed on GPU: the pss-on A/B rows matched neither the earlier rows nor the pss-off rows), so a text a worker saw cannot be reproduced for review | Controls TBD from the repeatability data (section 11.4, per-backend identical-of-30); candidates: audit the digest of every shown readback text, keep deterministic decode a measured property per backend, refuse or flag a readback whose repeat differs |
 
 ### 13.3 SOUP entries
 
@@ -1217,3 +1234,8 @@ The marker store (where it lives, the migration, when the claim runs, and the wi
 G6 facts (VERIFIED on the GPU machine, G6_REPORT.md): token-id and rendering parity 120 of 120; the 6 designed prompts are over 2048 tokens (maximum 5666); the server returned 413 SAMD-SLM-8003 for all 6; the desktop runtime rejected all 6 with INVALID_ARGUMENT "Input token ids are too long" at max_num_tokens 2560, before any prefill; the 114 others finished STOP on both. The golden set has no prompt in the 2049 to 2560 band; the device backstop test covers it.
 R9-a The runtime's input-too-long failure maps to PAYLOAD_REJECTED (ENGINE_REJECTED_INPUT, the same refusal as the remote path's 8003). Match on a status code if the 0.18.0 Kotlin exception exposes one (cite it). If it exposes only a message, match the exact pinned substring "Input token ids are too long", guarded by an on-device test, so a runtime change that alters the text fails the test. Every other send error stays ENGINE_ERROR. Both outcomes are refusals.
 R9-b The comparator scores a desktop error with that substring, a server 413 with SAMD-SLM-8003, and a device PAYLOAD_REJECTED all as REFUSED (refusal parity), never as content.
+
+### Batch 10 (D2 result and repeatability)
+
+M-1 In-process memory sampling (Debug.getPss) stalls generation (D2: median decode 16.7 tok/s off vs 7.4 on; 0 vs 4 of 10 timeouts). Memory is measured from the host only. The P2 runs (pixel-gpu.jsonl, pixel-cpu.jsonl, pixel-perf.jsonl) are void as parity inputs and kept only for the record.
+M-2 Repeatability finding: GPU greedy output for the same prompt differed across runs (the pss-on A/B rows matched neither the P2 rows nor the pss-off rows). Repeatability is now measured (step 3) and gated per backend (step 4). Add the hazard row H-55 (PROPOSED): the same approved record yields different readback text across runs on the same device and backend, with controls TBD from the step 3 data.
