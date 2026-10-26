@@ -1,5 +1,9 @@
 package com.example.samdapp.domain.slm
 
+import com.example.samdapp.domain.audit.AuditAction
+import com.example.samdapp.domain.audit.AuditLogger
+import com.example.samdapp.domain.auth.SessionFacility
+import com.example.samdapp.domain.auth.SessionFacilitySource
 import com.example.samdapp.domain.auth.UserRole
 import com.example.samdapp.domain.auth.UserSession
 import com.example.samdapp.domain.model.CaseRecord
@@ -12,6 +16,7 @@ import com.example.samdapp.domain.report.ReportFormatter
 import com.example.samdapp.domain.usecase.AssembleReportUseCase
 import com.example.samdapp.testutil.FakeAbhaProfileRepository
 import com.example.samdapp.testutil.FakeAilmentRepository
+import com.example.samdapp.testutil.FakeAuditLogger
 import com.example.samdapp.testutil.FakeAuthSession
 import com.example.samdapp.testutil.FakeCaseRecordRepository
 import com.example.samdapp.testutil.FakeConsultationRepository
@@ -27,7 +32,12 @@ import com.example.samdapp.testutil.testPatient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -76,6 +86,9 @@ class SlmReadbackUseCaseTest {
          * should exercise the gate it is about, not trip the completeness check on the way there.
          */
         private val finishReason: SlmFinishReason? = SlmFinishReason.STOP,
+        /** Who answered (memo 4.1): REMOTE with the pinned id unless a test runs the LOCAL kind. */
+        private val identity: SlmEngineIdentity? = REMOTE_IDENTITY,
+        private val conditions: SlmRunConditions? = null,
     ) : SlmEngine {
         var callCount = 0
             private set
@@ -101,6 +114,10 @@ class SlmReadbackUseCaseTest {
         override fun servedModelId(): String? = servedModelId
 
         override fun finishReason(): SlmFinishReason? = finishReason
+
+        override fun answeredBy(): SlmEngineIdentity? = identity
+
+        override fun runConditions(): SlmRunConditions? = conditions
     }
 
     private val nameCanary = "Anita Kumari"
@@ -152,6 +169,9 @@ class SlmReadbackUseCaseTest {
         cases: List<CaseRecord> = listOf(caseRecord),
         patient: Patient? = hotPatient,
         prescription: Prescription? = prescription(KernelDecision.AGREE),
+        audit: AuditLogger = FakeAuditLogger(),
+        sessionFacility: SessionFacility? = FACILITY_1,
+        owner: OwningFacility = OwningFacility.Known(FACILITY_1.facilityId),
     ): SlmReadbackUseCase {
         val caseRecords = FakeCaseRecordRepository(cases)
         val patients = FakePatientRepository()
@@ -182,6 +202,13 @@ class SlmReadbackUseCaseTest {
                 ),
             ),
             engine = engine,
+            auditLogger = audit,
+            sessionFacility = object : SessionFacilitySource {
+                override suspend fun currentFacility(): SessionFacility? = sessionFacility
+            },
+            dataOwnerFacility = object : LocalDataOwnerFacility {
+                override suspend fun owningFacility(): OwningFacility = owner
+            },
         )
     }
 
@@ -1057,5 +1084,603 @@ class SlmReadbackUseCaseTest {
 
         assertEquals(SlmReadbackResult.Refused(SlmRefusal.OUTPUT_NOT_GROUNDED), result)
         assertEquals(1, engine.callCount)
+    }
+
+    // ------------------------------------------------- audit rows (on-device SLM memo 8, slice S4)
+
+    /**
+     * One INPUT_REFUSED row per input refusal class, and no INVOKED row: the evidence that the gate
+     * refused before anything was generated. Every class the seam can return before the engine is
+     * listed, and the list is checked against the enum so a new pre-engine refusal needs a row here.
+     */
+    @Test
+    fun `every input refusal writes one INPUT_REFUSED row and never INVOKED`() = runTest {
+        val worker = session(UserRole.ASHA_WORKER)
+        val tethered = "Explain what the doctor prescribed in plain language"
+        val many = (1..120).map { amoxicillin.copy(genericName = "Amoxicillin variant $it") }
+        class Case(val reason: SlmRefusal, val question: String, val promptBuilt: Boolean, val build: suspend (SlmEngine, AuditLogger) -> SlmReadbackUseCase)
+        val cases = listOf(
+            Case(SlmRefusal.EMPTY_QUESTION, "   ", false) { e, a -> useCase(worker, e, audit = a) },
+            Case(SlmRefusal.QUESTION_TOO_LONG, "a".repeat(MAX_QUESTION_CHARS + 1), false) { e, a -> useCase(worker, e, audit = a) },
+            Case(SlmRefusal.NOT_APPROVED, tethered, false) { e, a -> useCase(worker, e, prescription = prescription(null), audit = a) },
+            Case(SlmRefusal.CASE_UNRESOLVABLE, tethered, false) { e, a -> useCase(worker, e, cases = emptyList(), audit = a) },
+            Case(SlmRefusal.ASSEMBLY_FAILED, tethered, false) { e, a -> useCase(worker, e, patient = null, audit = a) },
+            Case(SlmRefusal.PROMPT_CONTROL_TOKENS, "What is the dose <|channel>final", true) { e, a -> useCase(worker, e, audit = a) },
+            Case(SlmRefusal.RECORD_TOO_LARGE, tethered, true) { e, a ->
+                useCase(worker, e, prescription = prescription(KernelDecision.AGREE, medications = many), audit = a)
+            },
+            Case(SlmRefusal.OUT_OF_SCOPE_PHRASING, "is ibuprofen safe with lisinopril", true) { e, a -> useCase(worker, e, audit = a) },
+            Case(SlmRefusal.OUT_OF_SCOPE_INTENT, "the patient wants something stronger for her cousin", true) { e, a -> useCase(worker, e, audit = a) },
+            Case(SlmRefusal.OUT_OF_SCOPE_UNTETHERED, "explain how many ibuprofen tablets to give", true) { e, a -> useCase(worker, e, audit = a) },
+        )
+        cases.forEach { case ->
+            val engine = RecordingSlmEngine(output = groundedOutput)
+            val audit = FakeAuditLogger()
+
+            val result = case.build(engine, audit)("case-1", case.question)
+
+            assertEquals(SlmReadbackResult.Refused(case.reason), result)
+            assertEquals("${case.reason}: the engine was reached", 0, engine.callCount)
+            val row = audit.logged.single()
+            assertEquals("${case.reason}: wrong row", AuditAction.SLM_READBACK_INPUT_REFUSED.value, row.action)
+            assertEquals("case-1", row.caseRecordId)
+            assertEquals(null, row.patientId)
+            val fields = row.fields()
+            assertEquals(setOf("reason", "tier", "template_version", "question_chars", "prompt_chars"), fields.keys)
+            assertEquals(case.reason.name, fields["reason"])
+            assertEquals("COMMUNITY", fields["tier"])
+            assertEquals(PROMPT_TEMPLATE_VERSION, fields["template_version"])
+            assertEquals(case.question.length.toString(), fields["question_chars"])
+            if (case.promptBuilt) {
+                assertTrue("${case.reason}: prompt_chars ${fields["prompt_chars"]}", fields["prompt_chars"]!!.toInt() > 0)
+            } else {
+                assertEquals("${case.reason}: no prompt was built", null, fields["prompt_chars"])
+            }
+        }
+        val postGeneration = setOf(
+            SlmRefusal.OUTPUT_NOT_GROUNDED, SlmRefusal.OUTPUT_TRUNCATED, SlmRefusal.SERVED_MODEL_MISMATCH,
+        )
+        val engineFailures = SlmEngineError.entries.map { engineRefusalFor(SlmEngineException(it)) }.toSet()
+        assertEquals(
+            "a refusal class has no INPUT_REFUSED case above",
+            // PROMPT_CONTROL_TOKENS is both: the local pre-call guard, and the service's 8016.
+            SlmRefusal.entries.toSet() - postGeneration - engineFailures + SlmRefusal.PROMPT_CONTROL_TOKENS,
+            cases.map { it.reason }.toSet(),
+        )
+    }
+
+    @Test
+    fun `a completed remote generation writes INVOKED then SANITIZER_ACTIVITY, with its metadata`() = runTest {
+        val engine = RecordingSlmEngine(output = groundedOutput)
+        val audit = FakeAuditLogger()
+
+        val result = useCase(session(UserRole.ASHA_WORKER), engine, audit = audit)(
+            "case-1", "Explain what the doctor prescribed in plain language",
+        )
+
+        assertTrue(result is SlmReadbackResult.Answer)
+        assertEquals(
+            listOf(AuditAction.SLM_READBACK_INVOKED.value, AuditAction.SLM_READBACK_SANITIZER_ACTIVITY.value),
+            audit.logged.map { it.action },
+        )
+        audit.logged.forEach {
+            assertEquals("case-1", it.caseRecordId)
+            assertEquals(null, it.patientId)
+        }
+        val invoked = audit.logged[0].fields()
+        assertEquals(
+            setOf(
+                "engine", "accelerator", "model_id", "artifact_sha256", "runtime_version", "template_version",
+                "tier", "prompt_chars", "max_output_tokens", "finish_reason", "engine_error", "duration_ms",
+                "thermal_status", "gpu_init_failed",
+            ),
+            invoked.keys,
+        )
+        assertEquals("REMOTE", invoked["engine"])
+        assertEquals(null, invoked["accelerator"])
+        assertEquals(SANITIZER_TARGET_MODEL_ID, invoked["model_id"])
+        assertEquals(REMOTE_IDENTITY.artifactSha256, invoked["artifact_sha256"])
+        assertEquals(null, invoked["runtime_version"])
+        assertEquals(PROMPT_TEMPLATE_VERSION, invoked["template_version"])
+        assertEquals("COMMUNITY", invoked["tier"])
+        assertEquals(engine.prompts.single().length.toString(), invoked["prompt_chars"])
+        assertEquals("512", invoked["max_output_tokens"])
+        assertEquals("STOP", invoked["finish_reason"])
+        assertEquals(null, invoked["engine_error"])
+        assertTrue("duration_ms ${invoked["duration_ms"]}", invoked["duration_ms"]!!.toLong() >= 0)
+        assertEquals(null, invoked["thermal_status"])
+        assertEquals(null, invoked["gpu_init_failed"])
+        assertEquals(
+            mapOf("spans" to "0", "characters" to "0", "dropped_tokens" to "0", "unknown_tokens" to "0"),
+            audit.logged[1].fields(),
+        )
+    }
+
+    @Test
+    fun `a local generation records the local identity, accelerator and device conditions`() = runTest {
+        val local = SlmEngineIdentity(
+            engine = SlmEngineKind.LOCAL,
+            accelerator = "CPU",
+            modelId = "litert-community/gemma-4-E2B-it-litert-lm@b3ca0d2f076785a8f4b2219ddbd2bdb99954eae1#" + "1".repeat(64),
+            artifactSha256 = "1".repeat(64),
+            runtimeVersion = "litertlm-android 0.18.0",
+        )
+        val engine = RecordingSlmEngine(
+            output = groundedOutput,
+            servedModelId = local.modelId,
+            identity = local,
+            conditions = SlmRunConditions(thermalStatus = 2, gpuInitFailed = true),
+        )
+        val audit = FakeAuditLogger()
+
+        val result = useCase(session(UserRole.DOCTOR), engine, audit = audit)("case-1", "Summarise the record")
+
+        // A local id with a digest other than the pinned file's is not on the allowlist: suppressed.
+        assertEquals(SlmReadbackResult.Refused(SlmRefusal.SERVED_MODEL_MISMATCH), result)
+        val invoked = audit.logged.first { it.action == AuditAction.SLM_READBACK_INVOKED.value }.fields()
+        assertEquals("LOCAL", invoked["engine"])
+        assertEquals("CPU", invoked["accelerator"])
+        assertEquals(local.modelId, invoked["model_id"])
+        assertEquals(local.artifactSha256, invoked["artifact_sha256"])
+        assertEquals("litertlm-android 0.18.0", invoked["runtime_version"])
+        assertEquals("PHYSICIAN", invoked["tier"])
+        assertEquals("2", invoked["thermal_status"])
+        assertEquals("C-7: a boolean, never error text", "true", invoked["gpu_init_failed"])
+        val suppressed = audit.logged.last()
+        assertEquals(AuditAction.SLM_READBACK_OUTPUT_SUPPRESSED.value, suppressed.action)
+        assertEquals(
+            mapOf("reason" to "SERVED_MODEL_MISMATCH", "engine" to "LOCAL", "model_id" to local.modelId),
+            suppressed.fields(),
+        )
+    }
+
+    @Test
+    fun `the pinned local model id passes the identity gate and is audited as LOCAL`() = runTest {
+        val local = SlmEngineIdentity(
+            engine = SlmEngineKind.LOCAL, accelerator = "GPU", modelId = LOCAL_SERVED_MODEL_ID,
+            artifactSha256 = LOCAL_SERVED_MODEL_ID.substringAfter('#'), runtimeVersion = "litertlm-android 0.18.0",
+        )
+        val audit = FakeAuditLogger()
+
+        val result = useCase(session(UserRole.ASHA_WORKER), RecordingSlmEngine(output = groundedOutput, servedModelId = local.modelId, identity = local), audit = audit)(
+            "case-1", "Explain what the doctor prescribed in plain language",
+        )
+
+        assertTrue("$result", result is SlmReadbackResult.Answer)
+        assertEquals("LOCAL", audit.logged.first().fields()["engine"])
+    }
+
+    @Test
+    fun `an engine failure writes INVOKED with its error class and nothing else`() = runTest {
+        val failures = SlmEngineError.entries.map { SlmEngineException(it) to it.name } +
+            (IllegalStateException("untyped") to ENGINE_ERROR_UNCLASSIFIED)
+        failures.forEach { (failure, expected) ->
+            val engine = RecordingSlmEngine(failure = failure, finishReason = null, identity = null)
+            val audit = FakeAuditLogger()
+
+            val result = useCase(session(UserRole.ASHA_WORKER), engine, audit = audit)(
+                "case-1", "Explain what the doctor prescribed in plain language",
+            )
+
+            assertEquals(SlmReadbackResult.Refused(engineRefusalFor(failure)), result)
+            assertEquals("$expected: rows", listOf(AuditAction.SLM_READBACK_INVOKED.value), audit.logged.map { it.action })
+            val invoked = audit.logged.single().fields()
+            assertEquals(expected, invoked["engine_error"])
+            assertEquals(null, invoked["finish_reason"])
+            assertEquals(null, invoked["engine"])
+        }
+    }
+
+    @Test
+    fun `a cancelled generation still writes INVOKED, then the cancellation propagates`() = runTest {
+        val engine = RecordingSlmEngine(failure = CancellationException("collector went away"))
+        val audit = FakeAuditLogger()
+
+        val thrown = runCatching {
+            useCase(session(UserRole.ASHA_WORKER), engine, audit = audit)(
+                "case-1", "Explain what the doctor prescribed in plain language",
+            )
+        }.exceptionOrNull()
+
+        assertTrue("cancellation was swallowed: $thrown", thrown is CancellationException)
+        assertEquals(listOf(AuditAction.SLM_READBACK_INVOKED.value), audit.logged.map { it.action })
+        assertEquals(ENGINE_ERROR_CANCELLED, audit.logged.single().fields()["engine_error"])
+    }
+
+    @Test
+    fun `the sanitizer row carries the counts of what was removed`() = runTest {
+        val span = "${CHANNEL_OPEN}thought: the worker might be after ibuprofen instead$CHANNEL_CLOSE"
+        val engine = RecordingSlmEngine(
+            chunks = listOf("The doctor approved Amoxicillin 500 mg by mouth, ", span, "three times a day, for 5 days, 15 in total."),
+        )
+        val audit = FakeAuditLogger()
+
+        val answer = useCase(session(UserRole.ASHA_WORKER), engine, audit = audit)(
+            "case-1", "Explain what the doctor prescribed in plain language",
+        ) as SlmReadbackResult.Answer
+
+        val rows = audit.logged.filter { it.action == AuditAction.SLM_READBACK_SANITIZER_ACTIVITY.value }
+        assertEquals("one sanitizer row", 1, rows.size)
+        val row = rows[0].fields()
+        assertEquals("1", row["spans"])
+        assertEquals(span.length.toString(), row["characters"])
+        assertEquals(answer.suppression.droppedTokens.toString(), row["dropped_tokens"])
+        assertEquals(answer.suppression.unknownTokens.toString(), row["unknown_tokens"])
+    }
+
+    @Test
+    fun `every post-generation refusal writes OUTPUT_SUPPRESSED with its reason`() = runTest {
+        class Case(val reason: SlmRefusal, val engine: RecordingSlmEngine, val role: UserRole)
+        listOf(
+            Case(SlmRefusal.SERVED_MODEL_MISMATCH, RecordingSlmEngine(output = groundedOutput, servedModelId = "some/other-model"), UserRole.ASHA_WORKER),
+            Case(SlmRefusal.OUTPUT_TRUNCATED, RecordingSlmEngine(output = groundedOutput, finishReason = SlmFinishReason.LENGTH), UserRole.ASHA_WORKER),
+            Case(SlmRefusal.OUTPUT_NOT_GROUNDED, RecordingSlmEngine(output = "Give ibuprofen 400 mg twice a day."), UserRole.ASHA_WORKER),
+        ).forEach { case ->
+            val audit = FakeAuditLogger()
+
+            val result = useCase(session(case.role), case.engine, audit = audit)(
+                "case-1", "Explain what the doctor prescribed in plain language",
+            )
+
+            assertEquals(SlmReadbackResult.Refused(case.reason), result)
+            assertEquals(
+                "${case.reason}: rows",
+                listOf(
+                    AuditAction.SLM_READBACK_INVOKED.value,
+                    AuditAction.SLM_READBACK_SANITIZER_ACTIVITY.value,
+                    AuditAction.SLM_READBACK_OUTPUT_SUPPRESSED.value,
+                ),
+                audit.logged.map { it.action },
+            )
+            assertEquals(
+                mapOf("reason" to case.reason.name, "engine" to "REMOTE", "model_id" to SANITIZER_TARGET_MODEL_ID),
+                audit.logged.last().fields(),
+            )
+        }
+    }
+
+    /**
+     * F-9: never the question, the prompt, the output, a drug name or the diagnosis. Sentinels sit
+     * in the question and in the output, on an answered, a suppressed and an input-refused path,
+     * and no payload and no column of any row may carry them.
+     */
+    @Test
+    fun `no question, output, drug or diagnosis text reaches any audit row`() = runTest {
+        val q = "QSENTINEL7"
+        val o = "OSENTINEL7"
+        val audit = FakeAuditLogger()
+        // Answered: the open tier, so the question and output pass every gate.
+        useCase(session(UserRole.DOCTOR), RecordingSlmEngine(output = "$groundedOutput $o"), audit = audit)(
+            "case-1", "Summarise the record $q",
+        ).let { assertTrue(it is SlmReadbackResult.Answer) }
+        // Suppressed: a worker, and an ungrounded output carrying the sentinel.
+        useCase(session(UserRole.ASHA_WORKER), RecordingSlmEngine(output = "Give ibuprofen 400 mg. $o"), audit = audit)(
+            "case-1", "Explain what the doctor prescribed in plain language",
+        ).let { assertEquals(SlmReadbackResult.Refused(SlmRefusal.OUTPUT_NOT_GROUNDED), it) }
+        // Input refused, with the sentinel in the refused question.
+        useCase(session(UserRole.ASHA_WORKER), RecordingSlmEngine(), audit = audit)(
+            "case-1", "is ibuprofen safe with lisinopril $q",
+        ).let { assertTrue(it is SlmReadbackResult.Refused) }
+
+        assertEquals(6, audit.logged.size)
+        val forbidden = listOf(q, o, "Amoxicillin", "ibuprofen", "Acute bacterial pharyngitis", "Summarise", "APPROVED RECORD")
+        audit.logged.forEach { row ->
+            val text = listOf(row.payload, row.caseRecordId, row.patientId).joinToString("|")
+            forbidden.forEach { assertFalse("${row.action} carries '$it': $text", text.contains(it, ignoreCase = true)) }
+        }
+    }
+
+    /**
+     * A-1: INVOKED, and OUTPUT_SUPPRESSED when it applies, are written before invoke returns. The
+     * logger holds each write open until released, so a seam that returned first would complete
+     * while the write is still pending.
+     */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test
+    fun `the audit rows are written before the result is returned`() = runTest {
+        listOf(
+            groundedOutput to AuditAction.SLM_READBACK_INVOKED,
+            "Give ibuprofen 400 mg twice a day." to AuditAction.SLM_READBACK_OUTPUT_SUPPRESSED,
+        ).forEach { (output, held) ->
+            val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val events = mutableListOf<String>()
+            val audit = object : AuditLogger {
+                override suspend fun log(action: AuditAction, patientId: String?, caseRecordId: String?, payload: String) {
+                    if (action == held) release.await()
+                    events += action.value
+                }
+            }
+            val seam = useCase(session(UserRole.ASHA_WORKER), RecordingSlmEngine(output = output), audit = audit)
+
+            val pending = async {
+                seam("case-1", "Explain what the doctor prescribed in plain language").also { events += "returned" }
+            }
+            testScheduler.runCurrent()
+            assertFalse("${held.value}: the result was returned while its audit write was pending", pending.isCompleted)
+
+            release.complete(Unit)
+            pending.await()
+            assertEquals("returned", events.last())
+            assertTrue(held.value in events)
+        }
+    }
+
+    /** Memo 8: INVOKED is written after the flow ends, so it carries the outcome. */
+    @Test
+    fun `INVOKED is written after the engine has finished, never before it`() = runTest {
+        val events = mutableListOf<String>()
+        val engine = object : SlmEngine {
+            override fun generate(caseRecordId: String, prompt: String, maxOutputTokens: Int): Flow<String> = flow {
+                events += "generate-start"
+                emit(groundedOutput)
+                events += "generate-end"
+            }
+            override fun servedModelId(): String? = SANITIZER_TARGET_MODEL_ID
+            override fun finishReason(): SlmFinishReason? = SlmFinishReason.STOP
+            override fun answeredBy(): SlmEngineIdentity? = REMOTE_IDENTITY.also { events += "answeredBy-read" }
+            override fun runConditions(): SlmRunConditions? = null
+        }
+        val audit = object : AuditLogger {
+            override suspend fun log(action: AuditAction, patientId: String?, caseRecordId: String?, payload: String) {
+                events += action.value
+            }
+        }
+
+        useCase(session(UserRole.ASHA_WORKER), engine, audit = audit)("case-1", "Explain what the doctor prescribed in plain language")
+
+        assertEquals(
+            listOf("generate-start", "generate-end", "answeredBy-read", AuditAction.SLM_READBACK_INVOKED.value),
+            events.take(4),
+        )
+    }
+
+    @Test
+    fun `a failing audit write never changes the readback result`() = runTest {
+        val broken = object : AuditLogger {
+            override suspend fun log(action: AuditAction, patientId: String?, caseRecordId: String?, payload: String) {
+                throw IllegalStateException("disk full")
+            }
+        }
+        val answered = useCase(session(UserRole.ASHA_WORKER), RecordingSlmEngine(output = groundedOutput), audit = broken)(
+            "case-1", "Explain what the doctor prescribed in plain language",
+        )
+        assertEquals(groundedOutput, (answered as SlmReadbackResult.Answer).text)
+        val refused = useCase(session(UserRole.ASHA_WORKER), RecordingSlmEngine(), audit = broken)("case-1", " ")
+        assertEquals(SlmReadbackResult.Refused(SlmRefusal.EMPTY_QUESTION), refused)
+
+        val cancelling = object : AuditLogger {
+            override suspend fun log(action: AuditAction, patientId: String?, caseRecordId: String?, payload: String) {
+                throw CancellationException("scope gone")
+            }
+        }
+        val thrown = runCatching {
+            useCase(session(UserRole.ASHA_WORKER), RecordingSlmEngine(), audit = cancelling)("case-1", " ")
+        }.exceptionOrNull()
+        assertTrue("a cancellation from the logger was swallowed: $thrown", thrown is CancellationException)
+    }
+
+    /** Memo 7: the case-id-absence invariant the backend's phi_guard enforces, kept on the device path. */
+    @Test
+    fun `the prompt never carries the case record id`() = runTest {
+        val id = "case-7f3a9c41"
+        val snapshot = ApprovedRecordSnapshot(
+            caseRecordId = id, kernelDecision = KernelDecision.AGREE, diagnosis = "Acute bacterial pharyngitis",
+            medicationLines = listOf(amoxicillinLine), suggestsReferral = true,
+        )
+        listOf("Explain the record", "What is case $id about", "").forEach { question ->
+            val prompt = buildPrompt(SlmInvocation(snapshot, question))
+            val withoutQuestion = prompt.removeSuffix(question)
+            assertFalse("the prompt body carries the case id: $prompt", withoutQuestion.contains(id))
+        }
+        val engine = RecordingSlmEngine(output = groundedOutput)
+        useCase(session(UserRole.ASHA_WORKER), engine)("case-1", "Explain what the doctor prescribed in plain language")
+        assertFalse(engine.prompts.single().contains("case-1"))
+    }
+
+    /** Y-1's other half: the seam is the only writer of these four actions in any shipped source set. */
+    @Test
+    fun `only the seam writes the readback audit actions`() {
+        val src = listOf(java.io.File("src"), java.io.File("app/src")).first { java.io.File(it, "main").isDirectory }
+        val writers = listOf("main", "dev", "staging", "prod")
+            .flatMap { java.io.File(src, it).walkTopDown().filter { f -> f.isFile && f.extension == "kt" }.toList() }
+            .filter { Regex("""AuditAction\.SLM_READBACK_""").containsMatchIn(it.readText()) }
+            .map { it.relativeTo(src).invariantSeparatorsPath }
+        assertEquals(listOf("main/java/com/example/samdapp/domain/slm/SlmReadbackUseCase.kt"), writers)
+    }
+
+    // ------------------------------------------- facility scope (Y-21', on-device SLM memo 7.1)
+
+    private val tethered = "Explain what the doctor prescribed in plain language"
+
+    @Test
+    fun `the same facility on both sides reaches the engine`() = runTest {
+        listOf(UserRole.ASHA_WORKER, UserRole.DOCTOR).forEach { role ->
+            val engine = RecordingSlmEngine(output = groundedOutput)
+            val result = useCase(session(role), engine)("case-1", tethered)
+            assertTrue("$role: $result", result is SlmReadbackResult.Answer)
+            assertEquals(1, engine.callCount)
+        }
+    }
+
+    @Test
+    fun `every out-of-scope facility pairing is refused before the engine, for every tier`() = runTest {
+        val pairings = listOf(
+            "different facility" to (FACILITY_1 to OwningFacility.Known("fac-2")),
+            "owner unknown" to (FACILITY_1 to OwningFacility.Unknown),
+            "session facility unknown" to (null to OwningFacility.Known("fac-1")),
+            "both unknown" to (null to OwningFacility.Unknown),
+            "blank owner id" to (FACILITY_1 to OwningFacility.Known("")),
+        )
+        UserRole.entries.forEach { role ->
+            pairings.forEach { (label, pairing) ->
+                val (sessionFacility, owner) = pairing
+                val engine = RecordingSlmEngine(output = groundedOutput)
+                val audit = FakeAuditLogger()
+
+                val result = useCase(session(role), engine, audit = audit, sessionFacility = sessionFacility, owner = owner)(
+                    "case-1", tethered,
+                )
+
+                assertEquals("$role, $label", SlmReadbackResult.Refused(SlmRefusal.ENGINE_REJECTED_INPUT), result)
+                assertEquals("$role, $label: the engine was reached", 0, engine.callCount)
+                val row = audit.logged.single()
+                assertEquals(AuditAction.SLM_READBACK_INPUT_REFUSED.value, row.action)
+                assertEquals("facility_scope", row.fields()["reason"])
+                assertEquals(null, row.fields()["prompt_chars"])
+            }
+        }
+    }
+
+    @Test
+    fun `facilities are compared by id, never by name`() = runTest {
+        val sameIdOtherName = SessionFacility(facilityId = "fac-1", facilityName = "Renamed PHC")
+        val allowed = useCase(session(UserRole.ASHA_WORKER), RecordingSlmEngine(output = groundedOutput), sessionFacility = sameIdOtherName)(
+            "case-1", tethered,
+        )
+        assertTrue("same id, different name must pass: $allowed", allowed is SlmReadbackResult.Answer)
+
+        val nameLooksLikeOwnerId = SessionFacility(facilityId = "fac-2", facilityName = "fac-1")
+        val refused = useCase(session(UserRole.ASHA_WORKER), RecordingSlmEngine(output = groundedOutput), sessionFacility = nameLooksLikeOwnerId)(
+            "case-1", tethered,
+        )
+        assertEquals(SlmReadbackResult.Refused(SlmRefusal.ENGINE_REJECTED_INPUT), refused)
+    }
+
+    @Test
+    fun `a facility source that throws refuses`() = runTest {
+        val engine = RecordingSlmEngine(output = groundedOutput)
+        val seam = SlmReadbackUseCase(
+            authSession = FakeAuthSession(session(UserRole.DOCTOR)),
+            approvedRecordReader = ApprovedRecordReader(FakeAuthSession(null), FakeCaseRecordRepository(emptyList()), assembleNothing()),
+            engine = engine,
+            auditLogger = FakeAuditLogger(),
+            sessionFacility = object : SessionFacilitySource {
+                override suspend fun currentFacility(): SessionFacility? = throw IllegalStateException("datastore")
+            },
+            dataOwnerFacility = object : LocalDataOwnerFacility {
+                override suspend fun owningFacility(): OwningFacility = OwningFacility.Known("fac-1")
+            },
+        )
+        assertEquals(SlmReadbackResult.Refused(SlmRefusal.ENGINE_REJECTED_INPUT), seam("case-1", tethered))
+        assertEquals(0, engine.callCount)
+    }
+
+    /**
+     * The staging and prod owner (Y-21'): no owner store exists, so every readback refuses. The one
+     * other implementation is the dev override (R-DEV), and it lives in `src/dev` only.
+     */
+    @Test
+    fun `the staging and prod owner is UNKNOWN and refuses a fully eligible readback, and only dev has another`() = runTest {
+        assertEquals(OwningFacility.Unknown, UnknownLocalDataOwnerFacility().owningFacility())
+        val engine = RecordingSlmEngine(output = groundedOutput)
+        val result = useCase(session(UserRole.DOCTOR), engine, owner = UnknownLocalDataOwnerFacility().owningFacility())("case-1", tethered)
+        assertEquals(SlmReadbackResult.Refused(SlmRefusal.ENGINE_REJECTED_INPUT), result)
+        assertEquals(0, engine.callCount)
+
+        val src = listOf(java.io.File("src"), java.io.File("app/src")).first { java.io.File(it, "main").isDirectory }
+        val implementers = listOf("main", "dev", "staging", "prod")
+            .flatMap { java.io.File(src, it).walkTopDown().filter { f -> f.isFile && f.extension == "kt" }.toList() }
+            // A class or object declaring the supertype, not a parameter or a return type.
+            .filter { Regex("""(\)|\bobject)\s*:\s*LocalDataOwnerFacility\s*\{""").containsMatchIn(it.readText()) }
+            .map { it.relativeTo(src).invariantSeparatorsPath }
+        assertEquals(
+            listOf(
+                "dev/java/com/example/samdapp/di/LocalSlmModule.kt",
+                "main/java/com/example/samdapp/domain/slm/FacilityScope.kt",
+            ),
+            implementers.sorted(),
+        )
+    }
+
+    // -------------------------------------- tokenizer-divergent markup (G-5 final, slice S6)
+
+    @Test
+    fun `a litertlm html tag piece is refused before the engine, with its own audit reason`() = runTest {
+        listOf(
+            "What is the dose <b>" to "question",
+            "Explain it </div> please" to "question",
+        ).forEach { (question, where) ->
+            val engine = RecordingSlmEngine(output = groundedOutput)
+            val audit = FakeAuditLogger()
+
+            val result = useCase(session(UserRole.DOCTOR), engine, audit = audit)("case-1", question)
+
+            assertEquals("$where", SlmReadbackResult.Refused(SlmRefusal.PROMPT_CONTROL_TOKENS), result)
+            assertEquals(0, engine.callCount)
+            val row = audit.logged.single()
+            assertEquals(AuditAction.SLM_READBACK_INPUT_REFUSED.value, row.action)
+            assertEquals("tokenizer_divergent_markup", row.fields()["reason"])
+            assertTrue("the prompt was built", row.fields()["prompt_chars"]!!.toInt() > 0)
+            assertFalse("the question text must not reach the row", row.payload.contains("<b>"))
+        }
+    }
+
+    @Test
+    fun `a piece inside the record is refused too, for every tier`() = runTest {
+        UserRole.entries.forEach { role ->
+            val engine = RecordingSlmEngine(output = groundedOutput)
+            val audit = FakeAuditLogger()
+
+            val result = useCase(
+                session(role), engine, audit = audit,
+                prescription = prescription(KernelDecision.AGREE).copy(diagnosis = "Pharyngitis <i>see note</i>"),
+            )("case-1", "Explain what the doctor prescribed in plain language")
+
+            assertEquals("$role", SlmReadbackResult.Refused(SlmRefusal.PROMPT_CONTROL_TOKENS), result)
+            assertEquals(0, engine.callCount)
+            assertEquals("tokenizer_divergent_markup", audit.logged.single().fields()["reason"])
+        }
+    }
+
+    @Test
+    fun `clinical angle brackets and a different case are not refused`() = runTest {
+        listOf("BP <90 explain the record", "Is SpO2 >=95% in the record", "<5 years, summarise", "Summarise <B> the record").forEach { question ->
+            val engine = RecordingSlmEngine(output = groundedOutput)
+
+            val result = useCase(session(UserRole.DOCTOR), engine)("case-1", question)
+
+            assertTrue("$question: $result", result is SlmReadbackResult.Answer)
+            assertEquals(question, 1, engine.callCount)
+        }
+    }
+
+    @Test
+    fun `a control token still wins over a piece and keeps its own audit reason`() = runTest {
+        val audit = FakeAuditLogger()
+
+        useCase(session(UserRole.DOCTOR), RecordingSlmEngine(), audit = audit)("case-1", "dose <b> <|channel>")
+
+        assertEquals("PROMPT_CONTROL_TOKENS", audit.logged.single().fields()["reason"])
+    }
+
+    private fun assembleNothing() = AssembleReportUseCase(
+        caseRecordRepository = FakeCaseRecordRepository(emptyList()),
+        patientRepository = FakePatientRepository(),
+        encounterRepository = FakeEncounterRepository(),
+        abhaProfileRepository = FakeAbhaProfileRepository(),
+        consultationRepository = FakeConsultationRepository(),
+        ailmentRepository = FakeAilmentRepository(),
+        vitalsRepository = FakeVitalsRepository(),
+        prescriptionRepository = FakePrescriptionRepository(),
+        kernelReportRepository = FakeKernelReportRepository(),
+        evaluateReportRepository = FakeEvaluateReportRepository(),
+        doctorRepository = FakeDoctorRepository(),
+        reportFormatter = ReportFormatter(),
+    )
+
+    private fun FakeAuditLogger.Entry.fields(): Map<String, String?> =
+        Json.parseToJsonElement(payload).jsonObject.mapValues { (_, value) ->
+            if (value is JsonNull) null else value.jsonPrimitive.content
+        }
+
+    private companion object {
+        val FACILITY_1 = SessionFacility(facilityId = "fac-1", facilityName = "PHC Rampur")
+        val REMOTE_IDENTITY = SlmEngineIdentity(
+            engine = SlmEngineKind.REMOTE,
+            accelerator = null,
+            modelId = SANITIZER_TARGET_MODEL_ID,
+            artifactSha256 = "2db5482b20d746879bb3ef79b5203e9075a2e2b98f54ec7c2f281c1477ddc550",
+            runtimeVersion = null,
+        )
     }
 }

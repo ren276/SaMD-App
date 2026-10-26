@@ -23,6 +23,12 @@
     <uses-feature android:name="android.software.companion_device_setup" android:required="false" />
 
     <application android:usesCleartextTraffic="true">
+        <!-- LiteRT-LM GPU/NPU delegates dlopen vendor libraries; Android 12+ requires them declared.
+             Optional, so a device without them still installs (on-device SLM memo 3.4;
+             LiteRT-LM getting_started.md:101-109 at v0.18.0). Dev only. -->
+        <uses-native-library android:name="libvndksupport.so" android:required="false" />
+        <uses-native-library android:name="libOpenCL.so" android:required="false" />
+
         <receiver
             android:name=".receiver.DevServerReceiver"
             android:exported="true"

@@ -550,7 +550,8 @@ class SlmStreamSanitizerTest {
      * `<unused0>..<unused6226>`, 6,227 tokens across six disjoint id blocks (6-45, 53-97, 99,
      * 102-104, 256001-258879, 258885-262143), not MedGemma's `..<unused6241>` across two. The size
      * assertion moved from `6242 + 11` to `6227 + 21` and pins both halves of the set, so adding a
-     * literal without reading it out of the tokenizer turns this red.
+     * literal without reading it out of the tokenizer turns this red. S6 added the four image and
+     * audio boundary markers from the service's list (`ServiceSpecialTokensTest`): `6227 + 25`.
      */
     @Test
     fun `the reserved range covers the verified vocabulary in full and stops where it stops`() {
@@ -560,7 +561,7 @@ class SlmStreamSanitizerTest {
 
         assertFalse("the range runs past this artifact's vocabulary", "<unused6227>" in CONTROL_TOKENS)
         assertFalse("the MedGemma-era range end is still in the set", "<unused6241>" in CONTROL_TOKENS)
-        assertEquals("the matched set is not the verified size", 6227 + 21, CONTROL_TOKENS.size)
+        assertEquals("the matched set is not the verified size", 6227 + 25, CONTROL_TOKENS.size)
     }
 
     /**
@@ -609,6 +610,44 @@ class SlmStreamSanitizerTest {
 
         listOf(null, "", "   ", "google/medgemma-1.5-4b-it", "gemma-4-E2B-it", "google/gemma-4-E2B-it-v2", "GOOGLE/GEMMA-4-E2B-IT")
             .forEach { assertFalse("a non-matching served identity was accepted: ${it ?: "null"}", servedModelMatchesSanitizer(it)) }
+    }
+
+    /** G-4 (on-device SLM memo 6.1, slice S6): exactly two exact entries, the remote pin and the local id. */
+    @Test
+    fun `the identity allowlist has exactly two exact entries and accepts both`() {
+        assertEquals(
+            setOf(
+                "google/gemma-4-E2B-it",
+                "litert-community/gemma-4-E2B-it-litert-lm@b3ca0d2f076785a8f4b2219ddbd2bdb99954eae1" +
+                    "#181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c",
+            ),
+            SERVED_MODEL_ALLOWLIST,
+        )
+        assertEquals(2, SERVED_MODEL_ALLOWLIST.size)
+        SERVED_MODEL_ALLOWLIST.forEach { assertTrue(it, servedModelMatchesSanitizer(it)) }
+    }
+
+    @Test
+    fun `a prefix, a suffix, a case variant or another digest of either entry is refused`() {
+        SERVED_MODEL_ALLOWLIST.forEach { entry ->
+            listOf(
+                entry.dropLast(1),
+                entry + "x",
+                entry + "\n",
+                " $entry",
+                entry.substringBefore('#').substringBefore('@'),
+                entry.uppercase(),
+                entry.lowercase().takeIf { it != entry },
+                entry.replaceFirst('e', 'E').takeIf { it != entry },
+                entry.dropLast(1) + (if (entry.last() == 'a') 'b' else 'a'),
+            ).filterNotNull().filter { it != entry }.forEach {
+                assertFalse("accepted a variant of $entry: '$it'", servedModelMatchesSanitizer(it))
+            }
+        }
+        val local = SERVED_MODEL_ALLOWLIST.single { '#' in it }
+        assertFalse(servedModelMatchesSanitizer(local.substringBefore('#') + "#" + "0".repeat(64)))
+        assertFalse(servedModelMatchesSanitizer(local.replace("b3ca0d2f", "b3ca0d2e")))
+        assertFalse(servedModelMatchesSanitizer(SANITIZER_TARGET_MODEL_ID + "#" + "0".repeat(64)))
     }
 
     /**

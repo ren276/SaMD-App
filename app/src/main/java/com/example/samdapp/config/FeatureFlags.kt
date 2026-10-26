@@ -156,22 +156,17 @@ object FeatureFlags {
      *  caller and nothing on the generation path runs. Same shape as the `VOICE_*` flags: the
      *  binding exists in every flavor and the surface is what this gates.
      *
-     *  **A `const val`, off in every flavor, not a `BuildConfig` field.** That is the majority
-     *  mechanism in this file and the one every "not yet safe to reach" flag uses;
-     *  [SCREEN_SECURITY_ENABLED] is the single `BuildConfig` case and it is flavor-gated because
-     *  it is genuinely meant to differ per flavor. This one is not. There is no build in which
-     *  the read-back should be on today, so a per-flavor mechanism would be a knob with no
-     *  correct second position.
+     *  **A `BuildConfig` field, true in dev only (ruling R-DEV, on-device SLM memo 16).** Like
+     *  [SCREEN_SECURITY_ENABLED], it genuinely differs per flavor now. In dev the read-back runs
+     *  on the on-device engine over mock data, for the operator to try; `SlmNetworkModule` and
+     *  the dev `LocalSlmModule` hold the rest of that switch.
      *
-     *  **Stays `false`, and flipping it is not a flag change.** What is built is the device half:
-     *  the seam, its gates, the transport, and this surface. What is not built or not proven is
-     *  everything on the other side of the wire. The generation service does not exist in this
-     *  repository at all; the GPU host it would run on has a full Docker filesystem, so its
-     *  container, GPU reservation and loopback publish are configured and unproven; no end-to-end
-     *  run has happened on real hardware; and six hazard items covering this path are pending
-     *  operator sign-off. Turning this on before those is turning on a clinical feature whose
-     *  answer path nobody has watched work.
+     *  **Staging and prod stay `false`, and flipping them is not a flag change.** What is not
+     *  built or not proven there is everything on the other side of the wire: the generation
+     *  service does not exist in this repository, no end-to-end run has happened on real
+     *  hardware, six hazard items covering this path are pending operator sign-off, and local
+     *  case data is not facility-scoped until the product-wide facility-scope PR (memo 15).
      *
      *  See [com.example.samdapp.presentation.report.ReportScreen]. */
-    const val SLM_READBACK_ENABLED = false
+    val SLM_READBACK_ENABLED = BuildConfig.SLM_READBACK_ENABLED
 }
