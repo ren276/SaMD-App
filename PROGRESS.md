@@ -5649,3 +5649,10 @@ Filed follow-ups, not in this branch:
 - The D4 GPU performance batches (not needed while the engine selects CPU only).
 - Operator, GPU machine: the service token rotation and the port 8100 binding.
 - The server's own 22 of 34 Devanagari-answer failures, filed as a readback-quality finding (V-4).
+- Audit failure posture (PR #81 diff review, 2026-10-26, deferred by the operator until the phone is
+  back): `ReadbackAudit.write` in `SlmReadbackUseCase` logs a failed audit write and still returns
+  the readback, which matches the codebase's breadcrumb rule but not the literal A-1 wording ("a
+  readback is never shown without its audit row"). If A-1 is literal, a failed INVOKED or
+  OUTPUT_SUPPRESSED write must refuse the readback; needs a ruling, a test and a device check.
+- Backend comment `audit_actions_device.py` still says the four `slm_readback_*` actions are "Not
+  emitted yet"; the device emits them since S4. Fix with the next backend change.
