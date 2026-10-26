@@ -374,6 +374,42 @@ class LocalSlmEngineTest {
     }
 
     @Test
+    fun aStartAfterAReleaseWaitsForTheAbandonedStartToFinishAndItsEngineToClose() {
+        val gate = CountDownLatch(1)
+        val runtime = FakeRuntime(createGate = gate, cacheWrites = CACHE)
+        val dispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+        val engine = engine(runtime, dispatcher = dispatcher, initTimeoutMs = 200)
+        try {
+            runBlocking {
+                assertRefused(SlmEngineError.UNAVAILABLE, LocalSlmReason.INIT_TIMEOUT) { engine.collect() }
+                engine.release()
+                assertRefused(SlmEngineError.UNAVAILABLE, LocalSlmReason.STARTING) { engine.collect() }
+                assertEquals("no second start is queued behind the abandoned one", 1, runtime.created.size)
+
+                gate.countDown()
+                assertTrue(runtime.engineClosed.await(5, TimeUnit.SECONDS))
+                // The close returns just before its job completes; until then a start is still refused.
+                var answer: List<String>? = null
+                repeat(100) {
+                    if (answer == null) {
+                        try {
+                            answer = engine.collect()
+                        } catch (e: SlmEngineException) {
+                            assertEquals(LocalSlmReason.STARTING, e.message)
+                            delay(20)
+                        }
+                    }
+                }
+                assertEquals(listOf("hello"), answer)
+                assertEquals(2, runtime.created.size)
+                assertEquals("the second engine started only after the first was closed", 1, runtime.closesAtCreate[1])
+            }
+        } finally {
+            dispatcher.close()
+        }
+    }
+
+    @Test
     fun thermalSevereOrAboveRefusesBeforeAnyWork() = runTest {
         listOf(
             PowerManager.THERMAL_STATUS_SEVERE,
@@ -839,11 +875,14 @@ class LocalSlmEngineTest {
         val engineClosed = CountDownLatch(1)
         /** How many times an engine handle was closed. */
         val closes = java.util.concurrent.atomic.AtomicInteger()
+        /** [closes] as it stood when each engine was created. */
+        val closesAtCreate: MutableList<Int> = Collections.synchronizedList(mutableListOf())
 
         override fun promptTemplateOverride(): String? = templateOverride
 
         override fun createEngine(modelPath: String, accelerator: LocalAccelerator, cacheDir: String): RuntimeEngine {
             created += accelerator
+            closesAtCreate += closes.get()
             modelPaths += modelPath
             cacheDirs += cacheDir
             val dir = File(cacheDir)

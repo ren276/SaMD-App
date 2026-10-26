@@ -56,8 +56,10 @@ import kotlin.concurrent.thread
  * - `-e ids g-025,g-026` runs only those golden ids, no performance batches unless `-e phase perf`.
  * - `-e phase golden|perf|both` (default both). `-e perf_ids g-034,g-028` names the performance
  *   prompts (otherwise the median-token and longest-within-2048 golden prompts of this run).
- * - `-e tag NAME` adds `-NAME` to the output file names. A subset run (`limit` or `ids`) requires a
- *   tag or is a smoke run, so it can never overwrite a full run's files.
+ * - `-e tag NAME` adds `-NAME` to the output file names. A subset run (`limit` or `ids`) or a
+ *   single-phase run (`phase` golden or perf) requires a tag or is a smoke run, so it can never
+ *   overwrite a full run's files. `-e phase perf` also requires `-e perf_ids`: it has no golden
+ *   results to choose from.
  * Every row records `pss` (`on` or `off`). Cold start is measured only on full runs.
  */
 @RunWith(AndroidJUnit4::class)
@@ -86,7 +88,9 @@ class LocalSlmParityHarness {
         pssOn = args.getString("pss") == "on"
         assertTrue("phase must be golden, perf or both", phase in setOf("golden", "perf", "both"))
         val subset = limit != null || ids != null
-        assertTrue("a subset run needs -e tag, so it cannot overwrite a full run", !subset || tag != null || limit != null)
+        val partial = subset || phase != "both"
+        assertTrue("a subset or single-phase run needs -e tag, so it cannot overwrite a full run", !partial || tag != null || limit != null)
+        assertTrue("-e phase perf needs -e perf_ids: there are no golden results to choose from", phase != "perf" || perfIds != null)
         val all = File(dir, "prompts-v1.jsonl").readLines(Charsets.UTF_8).filter { it.isNotBlank() }
             .map { Json.parseToJsonElement(it).jsonObject }
         assertEquals("golden prompts", 120, all.size)
@@ -146,6 +150,7 @@ class LocalSlmParityHarness {
                         }
                     } else {
                         val eligible = results.filter { it.ok && (it.prefillTokens ?: 0) in 1..2048 }.sortedBy { it.prefillTokens }
+                        check(eligible.isNotEmpty()) { "no eligible golden result for the perf batches; pass -e perf_ids" }
                         listOf("median" to eligible[eligible.size / 2], "longest" to eligible.last())
                     }
                     chosen.forEach { (label, pick) ->

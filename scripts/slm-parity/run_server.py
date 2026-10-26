@@ -14,6 +14,7 @@ skipped: prompts the product would refuse before sending are sent too, and their
 """
 
 import argparse
+import http.client
 import json
 import os
 import sys
@@ -31,6 +32,16 @@ TOKEN_ENV = "SLM_SERVICE_TOKEN"
 TIMEOUT_SECONDS = 55
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A redirect is an error response: following it would send the token to a host not named."""
+
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
 def request_body(prompt, template_version):
     """Same keys and values as the backend's outbound dict (services/slm.py:371-380)."""
     return {
@@ -46,7 +57,7 @@ def request_body(prompt, template_version):
 
 
 def post(url, token, body):
-    """One request. Returns (http_status, parsed_json_or_None). Never retries."""
+    """One request. Returns (http_status, parsed_json_or_None). Never retries or follows a redirect."""
     data = json.dumps(body).encode("utf-8")
     request = urllib.request.Request(
         url,
@@ -55,7 +66,7 @@ def post(url, token, body):
         headers={"Content-Type": "application/json", TOKEN_HEADER: token},
     )
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
+        with _OPENER.open(request, timeout=TIMEOUT_SECONDS) as response:
             raw = response.read()
             status = response.status
     except urllib.error.HTTPError as error:
@@ -107,7 +118,7 @@ def main(argv=None):
             try:
                 status, parsed = post(url, token, body)
                 error = None
-            except (urllib.error.URLError, OSError, TimeoutError) as exc:
+            except (urllib.error.URLError, http.client.HTTPException, OSError, TimeoutError) as exc:
                 # The class name only: a message can quote the URL, and nothing here may carry the token.
                 status, parsed, error = None, None, type(exc).__name__
             wall_ms = round((time.monotonic() - started) * 1000)

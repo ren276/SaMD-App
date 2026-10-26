@@ -135,6 +135,17 @@ class LanguageGate(unittest.TestCase):
         self.assertTrue(c.language_gate(text, self.section, "Devanagari"))
         self.assertFalse(c.language_gate(text, "APPROVED RECORD\n- other record", "Devanagari"))
 
+    def test_a_devanagari_word_is_one_word_with_its_vowel_signs(self):
+        self.assertEqual(["दवा", "खाने", "के", "बाद", "लें"], c.WORD_RE.findall("दवा खाने के बाद लें।"))
+
+    def test_vowel_signs_count_toward_the_devanagari_script(self):
+        # 15 Devanagari characters against 10 Latin letters; letters alone (8) would lose to the Latin.
+        self.assertEqual((15, 10), c.script_of("दवा खाने के बाद लें please take"))
+        self.assertTrue(c.language_gate("दवा खाने के बाद लें please take", self.section, "Devanagari"))
+
+    def test_the_danda_and_devanagari_digits_are_not_letters(self):
+        self.assertEqual((0, 0), c.script_of("। ॥ ५००"))
+
     def test_an_answer_with_no_letters_left_passes(self):
         self.assertTrue(c.language_gate("Amoxicillin 500", self.section, "Devanagari"))
 

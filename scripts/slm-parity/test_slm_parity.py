@@ -146,12 +146,28 @@ class Handler(http.server.BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         Handler.seen.append({"path": self.path, "token": self.headers.get(run_server.TOKEN_HEADER),
                              "content_type": self.headers.get("Content-Type"), "body": body})
-        if len(body["prompt"]) > 100:
+        if body["prompt"] == "redirect me":
+            self.send_response(302)
+            self.send_header("Location", "/elsewhere")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+        elif body["prompt"] == "truncate me":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", "100")
+            self.end_headers()
+            self.wfile.write(b'{"text": "O')
+            self.close_connection = True
+        elif len(body["prompt"]) > 100:
             self._send(422, {"code": "SAMD-SLM-8003", "detail": "echoes the prompt: " + body["prompt"][:20]})
         else:
             self._send(200, {"generation_id": "g", "text": "OK", "model_id": "google/gemma-4-E2B-it",
                              "model_sha256": "abc", "prompt_template_version": body["prompt_template_version"],
                              "finish_reason": "stop", "usage": {"prompt_tokens": 5, "completion_tokens": 1}})
+
+    def do_GET(self):  # noqa: N802 - only a followed redirect would arrive here
+        Handler.seen.append({"path": self.path, "token": self.headers.get(run_server.TOKEN_HEADER), "body": None})
+        self._send(200, {"text": "followed"})
 
     def _send(self, status, payload):
         data = json.dumps(payload).encode("utf-8")
@@ -230,6 +246,23 @@ class RunServerTests(unittest.TestCase):
         row = common.read_jsonl(out)[0]
         self.assertIsNone(row["http_status"])
         self.assertIn(row["transport_error"], {"URLError", "ConnectionRefusedError"})
+
+    def test_a_redirect_is_recorded_and_never_followed_so_the_token_stays_with_the_named_host(self):
+        code, out, stdout, stderr = self.run_main([golden_row("g-1", "redirect me")])
+        self.assertEqual(0, code)
+        self.assertEqual(["/v1/generate"], [seen["path"] for seen in Handler.seen])
+        row = common.read_jsonl(out)[0]
+        self.assertEqual(302, row["http_status"])
+        self.assertIsNone(row["text"])
+
+    def test_a_truncated_response_is_a_per_prompt_error_and_the_run_goes_on(self):
+        rows = [golden_row("g-1", "truncate me"), golden_row("g-2", "short prompt")]
+        code, out, stdout, stderr = self.run_main(rows)
+        self.assertEqual(0, code)
+        results = {r["id"]: r for r in common.read_jsonl(out)}
+        self.assertIsNone(results["g-1"]["http_status"])
+        self.assertEqual("IncompleteRead", results["g-1"]["transport_error"])
+        self.assertEqual("OK", results["g-2"]["text"])
 
     def test_a_missing_token_refuses_before_any_request_or_file(self):
         code, out, stdout, stderr = self.run_main([golden_row("g-1", "p")], env={})

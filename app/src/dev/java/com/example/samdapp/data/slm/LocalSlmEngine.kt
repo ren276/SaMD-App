@@ -15,7 +15,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Job
@@ -142,7 +141,7 @@ data class LocalSlmStart(
  *   in its own `cacheDir/slm/<sha256>/` checked against the manifest of the last clean release and
  *   deleted on any mismatch (C-2); then the CPU backend, at start only (memo 6.3, 4.6, V-1). A failing
  *   latches UNAVAILABLE until [release]. The start has a 60 s wall-clock bound; an abandoned start's
- *   engine is closed when it finishes.
+ *   engine is closed when it finishes, and no new start begins before that close has run.
  * - [release] that closes the engine normally writes the cache manifest; any other end leaves none,
  *   so the next start discards whatever the runtime left behind.
  * - Generation: one new conversation per call, closed on every path; 60 s deadline (V-2); on cancel or
@@ -208,6 +207,8 @@ class LocalSlmEngine(
     private var loaded: Loaded? = null
     private var starting: Deferred<Loaded>? = null
     private var latchedReason: String? = null
+    /** The close of an abandoned start, active until that start has finished and its engine is closed. */
+    private var abandonedClose: Job? = null
 
     // Per-generation state, cleared before each call and read by the seam after the flow ends.
     @Volatile private var lastServedModelId: String? = null
@@ -343,6 +344,9 @@ class LocalSlmEngine(
     private suspend fun engineReady(): Loaded {
         loaded?.let { return it }
         latchedReason?.let { throw unavailable(it) }
+        // An abandoned start still owns the runtime cache dir and, once done, a resident engine: a new
+        // start now would discard that cache under it and hold two engines at once.
+        if (abandonedClose?.isActive == true) throw unavailable(LocalSlmReason.STARTING)
         val existing = starting
         // A start whose caller was cancelled keeps running; it is adopted once it has finished.
         if (existing != null && existing.isActive) throw unavailable(LocalSlmReason.STARTING)
@@ -408,11 +412,17 @@ class LocalSlmEngine(
         throw unavailable(LocalSlmReason.INIT_FAILED)
     }
 
-    /** Closes the abandoned start's engine whenever it finishes, now if it already has. */
-    @OptIn(ExperimentalCoroutinesApi::class)
+    /**
+     * Closes the abandoned start's engine whenever it finishes, now if it already has. Caller holds
+     * [inFlight]; [engineReady] refuses a new start until this close has run.
+     */
     private fun abandon(attempt: Deferred<Loaded>) {
-        attempt.invokeOnCompletion { cause ->
-            if (cause == null) startScope.launch { closeQuietly(attempt.getCompleted().engine) }
+        abandonedClose = startScope.launch {
+            try {
+                closeQuietly(attempt.await().engine)
+            } catch (e: Exception) {
+                // The start failed, so it left no engine to close.
+            }
         }
     }
 

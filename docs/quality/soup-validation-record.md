@@ -219,7 +219,7 @@ and one release cadence, so one row is the accurate representation, not four ide
 2. **Gemma 4 E2B `.litertlm` artifact**, the model the local engine runs. It is in no APK: it is
    delivered to a dev phone by `adb` into the app's private files directory
    (`docs/design/on-device-slm-memo.md:771-787`) and pinned by digest in code
-   (`app/src/dev/java/com/example/samdapp/data/slm/LocalSlmEngine.kt:42`).
+   (`app/src/dev/java/com/example/samdapp/data/slm/LocalSlmEngine.kt:41`).
 3. **The remote model as served**, `google/gemma-4-E2B-it` bf16 behind the backend's SLM proxy. It
    was SOUP with no entry before this section (F-21, `docs/design/on-device-slm-memo.md:156-157`).
 4. **Dev-only transitive versions** that LiteRT-LM pulls in: `kotlin-stdlib` 2.4.0,
@@ -244,7 +244,7 @@ dev phone, and the remote model is the parity reference the local one is judged 
 ### 6.2 Validation evidence, per requirement
 
 **L-1, byte identity.** Artifact: full SHA-256 before every engine start, refusal on mismatch
-(`LocalSlmEngine.kt:42,380`), and the derived runtime cache is checked against a manifest written
+(`LocalSlmEngine.kt:41,384`), and the derived runtime cache is checked against a manifest written
 at clean release (`app/src/dev/java/com/example/samdapp/data/slm/LocalSlmRuntimeCache.kt:49,78`,
 C-2). On the Pixel the file is 2,588,147,712 B with the pinned digest (verified on device
 2026-10-16, STOP S7 install check). The served model id passes the identity gate only through its
@@ -266,13 +266,13 @@ byte-level egress measurement like the ASR record's L3.2.
 (`gradle/libs.versions.toml:29`), and `LiteRtLmIsDevOnlyTest`
 (`app/src/test/java/com/example/samdapp/config/LiteRtLmIsDevOnlyTest.kt:22,39`) fails if the library
 is declared other than through `devImplementation` or at another version. The artifact digest is a
-code constant (`LocalSlmEngine.kt:42`); a different artifact is a code change.
+code constant (`LocalSlmEngine.kt:41`); a different artifact is a code change.
 
 **L-4, honest failure.** Missing file: UNAVAILABLE `artifact_missing`; wrong file: UNAVAILABLE
 `artifact_digest_mismatch`, never loaded (`docs/design/on-device-slm-memo.md:794-795`); init bound
-60 s then UNAVAILABLE with a latch (`LocalSlmEngine.kt:174,351-356`); over-length prompts refused by
+60 s then UNAVAILABLE with a latch (`LocalSlmEngine.kt:173,355-360`); over-length prompts refused by
 the prefill backstop or the runtime's own error, both emitting nothing
-(`LocalSlmEngine.kt:441-443,456-457`; on-device `LocalSlmLengthVerificationTest`,
+(`LocalSlmEngine.kt:451-453,466-467`; on-device `LocalSlmLengthVerificationTest`,
 `app/src/androidTestDev/java/com/example/samdapp/slm/LocalSlmLengthVerificationTest.kt:53-99`).
 
 **L-5, dev only.** Declaration guarded as above. APK scans at the merge of S9 (2026-10-16, merge

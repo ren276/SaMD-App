@@ -65,7 +65,9 @@ DIGIT_TABLE = {ord(c): str(i) for i, c in enumerate(DEVANAGARI_DIGITS)}
 NUMBER_RE = re.compile("[0-9" + DEVANAGARI_DIGITS + "]+(?:[.,/][0-9" + DEVANAGARI_DIGITS + "]+)*")
 ENUMERATION_MARKER_RE = re.compile(r"^\s*[0-9]+[.)]\s", re.MULTILINE)
 BRACKET_SHAPE_RE = re.compile(r"<[^\s<>\[\]]+>|\[[^\s<>\[\]]+\]")
-WORD_RE = re.compile(r"\w+", re.UNICODE)
+# \w alone splits a Devanagari word at every vowel sign and virama (they are marks, not letters), so
+# the Devanagari block up to U+0963 joins it. The danda marks (U+0964, U+0965) still end a word.
+WORD_RE = re.compile(r"[\w\u0900-\u0963]+")
 
 
 # ------------------------------------------------------------------------------ small utilities
@@ -210,7 +212,9 @@ def control_token_gate(output, control_tokens):
 
 
 def script_of(text):
-    deva = sum(1 for ch in text if "ऀ" <= ch <= "ॿ" and ch.isalpha())
+    # Every Devanagari letter and sign counts, vowel signs included (they are not isalpha()). The
+    # danda marks and the digits (U+0964 to U+096F) do not.
+    deva = sum(1 for ch in text if "\u0900" <= ch <= "\u097f" and not "\u0964" <= ch <= "\u096f")
     latin = sum(1 for ch in text if ("a" <= ch <= "z") or ("A" <= ch <= "Z"))
     return deva, latin
 
