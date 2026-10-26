@@ -1,6 +1,6 @@
 # On-device SLM on the Tensor G6 NPU: design memo (STOP N0)
 
-Status: DESIGN, AWAITING OPERATOR RULINGS (section 9). Nothing here is built yet.
+Status: DESIGN, RULED 2026-10-26 (section 9.1). Nothing here is built yet; slices wait for PR #81 to merge and the facility-scope work to start.
 Branch: `feat/on-device-slm-npu`, cut from `feat/on-device-slm` at `a270074` (PR #81, unmerged).
 Date: 2026-10-26.
 
@@ -222,3 +222,17 @@ change to staging or prod, any runtime local-to-remote fallback (see N-3).
 - **N-7** Context stays 2560 on every backend (server parity); the NPU's 4096 is not used.
 - **N-8** If the device shows that the dispatch library must be a file, legacy JNI packaging for
   the dev variant only (staging and prod packaging unchanged).
+
+### 9.1 Rulings 2026-10-26 (appended verbatim)
+
+N-1 Backend.NPU approved, with the Google Tensor dispatch runtime litert-npu-runtime-google-tensor:2.3.0. The Tensor-specific option is used only if the phone shows NPU cannot initialize without it.
+N-2 (a) approved, with constraints: fall back to CPU only at init and never mid-generation; latch the failure (no TPU retry per request); every audit row records the answering artifact and accelerator.
+N-3 Confirmed: the remote engine stays in code and stays the staging and prod engine, fixed per build; per-request switching between phone and server is rejected without its own memo.
+N-4 Approved as a hard gate, widened: 30 of 30 byte-identical repeats, plus on-device rendering parity 120 of 120 for the TPU artifact, plus the full v3 comparator on TPU output against the server with the same gates as CPU. No desktop leg.
+N-5 Approved: CPU stays the default; TPU is opt-in, dev only, until N-4 passes.
+N-6 Approved: pin unchanged; re-pinning is a model change needing a new parity run and an ACP entry.
+N-7 Approved: 2560 on every backend.
+N-8 Approved, dev only: variant-scoped packaging configuration plus an APK-scan test proving staging and prod native-library packaging is unchanged.
+H-56 Accepted as PROPOSED; its controls (free-space check before a second artifact download, a free-space floor reserved for clinical writes, refusal below it) belong to the production-delivery work.
+
+Sequencing: the NPU slices are not built yet; they wait until PR #81 merges and the facility-scope work starts.
