@@ -21,7 +21,7 @@ import org.junit.Test
 import java.time.Instant
 
 /**
- * The owner marker's claim, read and clear (facility-scope memo 3.1) against real SQLite, in a
+ * The owner marker's claim and read (facility-scope memo 3.1) against real SQLite, in a
  * file database of its own (never the app's), so concurrent claims go through Room's real
  * connection pool rather than one in-memory connection.
  */
@@ -89,7 +89,7 @@ class DeviceDataOwnerDaoTest {
     @Test
     fun ofConcurrentClaimsExactlyOneWins() = runBlocking {
         repeat(ROUNDS) { round ->
-            dao.clear()
+            db.openHelper.writableDatabase.execSQL("DELETE FROM device_data_owner")
             val blocker = SQLiteDatabase.openDatabase(
                 context.getDatabasePath(testDbName).path, null,
                 SQLiteDatabase.OPEN_READWRITE or SQLiteDatabase.ENABLE_WRITE_AHEAD_LOGGING,
@@ -105,18 +105,6 @@ class DeviceDataOwnerDaoTest {
             assertEquals("round $round: the stored owner is the winner", winners.single(), dao.read()?.facilityId)
             assertEquals("round $round: one owner row", 1, ownerRows())
         }
-    }
-
-    @Test
-    fun clearRemovesTheOwnerAndANewClaimSucceeds() = runBlocking {
-        assertTrue(claim("fac-a"))
-
-        dao.clear()
-
-        assertNull("no owner after the clear", dao.read())
-        assertEquals(0, ownerRows())
-        assertTrue("the phone can be claimed again", claim("fac-b"))
-        assertEquals("fac-b", dao.read()?.facilityId)
     }
 
     private companion object {

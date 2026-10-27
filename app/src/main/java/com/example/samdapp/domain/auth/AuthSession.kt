@@ -52,6 +52,14 @@ sealed interface SignInResult {
      *  when true. */
     data class Success(val mustChangePin: Boolean) : SignInResult
     data class Failure(val message: String) : SignInResult
+
+    /** The PIN was accepted but this phone belongs to another facility (facility-scope memo 3.2,
+     *  FS-R): nothing was saved and the new login was revoked. [ownerFacilityName] is for the copy. */
+    data class FacilityBlocked(val ownerFacilityName: String) : SignInResult
+
+    /** The PIN was accepted but the account carries no facility id: refused like
+     *  [FacilityBlocked], nothing saved, the new login revoked. */
+    data object NoFacility : SignInResult
 }
 
 /** Result of [AuthSession.changePin]. */

@@ -60,6 +60,13 @@ DEVICE_AUDIT_ACTIONS: frozenset[str] = frozenset(
         "kernel_empty_differential",
         "kernel_unrecognised_output",
         "kernel_response_received",
+        # Facility scope (facility-scope memo 3.7, ruling FS-R): the phone's data claimed for the
+        # signing-in worker's facility (legacy true on a phone upgraded with data and no owner), and
+        # a sign-in refused because the phone belongs to another facility or the account has no
+        # facility id. Payload is facility ids, the decision, outbox counts and the revoke result,
+        # never patient or record content. Added with the Kotlin AuditAction values in the same commit.
+        "cross_facility_sign_in_blocked",
+        "local_data_owner_claimed",
         "medical_history_item_added",
         "medication_added",
         # Navigation back-stack restore (process-death fix, phase 1): a persisted back stack was

@@ -8,7 +8,8 @@ import com.example.samdapp.data.local.entity.DeviceDataOwnerEntity
 import com.example.samdapp.data.local.entity.DeviceDataOwnerEntity.Companion.OWNER_ROW_ID
 import java.time.Instant
 
-/** The owner marker (facility-scope memo 3.1). Claim, read, and a clear that only the wipe calls. */
+/** The owner marker (facility-scope memo 3.1). Claim and read only: nothing in the app clears it
+ *  (FS-R2); moving a phone clears the app's storage (memo section 12). */
 @Dao
 interface DeviceDataOwnerDao {
 
@@ -40,8 +41,4 @@ interface DeviceDataOwnerDao {
 
     @Query("SELECT * FROM device_data_owner WHERE id = $OWNER_ROW_ID")
     suspend fun read(): DeviceDataOwnerEntity?
-
-    /** Only the wipe (memo 3.4) calls this, after the data it describes is gone. */
-    @Query("DELETE FROM device_data_owner")
-    suspend fun clear()
 }

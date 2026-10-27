@@ -2,6 +2,8 @@ package com.example.samdapp.di
 
 import com.example.samdapp.data.assessment.AssessmentQueueScheduler
 import com.example.samdapp.data.assessment.WorkManagerAssessmentScheduler
+import com.example.samdapp.data.local.LocalClinicalData
+import com.example.samdapp.data.local.RoomLocalClinicalData
 import com.example.samdapp.data.local.audit.RoomAuditLogger
 import com.example.samdapp.data.local.auth.AuthTokenStore
 import com.example.samdapp.data.local.auth.BackendAuthSession
@@ -105,6 +107,9 @@ abstract class RepositoryModule {
 
     @Binds @Singleton
     abstract fun bindAuthSession(impl: BackendAuthSession): AuthSession
+
+    @Binds
+    abstract fun bindLocalClinicalData(impl: RoomLocalClinicalData): LocalClinicalData
 
     @Binds @Singleton
     abstract fun bindAuthTokenStore(impl: DataStoreAuthTokenStore): AuthTokenStore

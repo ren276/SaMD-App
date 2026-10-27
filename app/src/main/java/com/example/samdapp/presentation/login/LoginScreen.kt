@@ -26,6 +26,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -33,6 +34,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
+import com.example.samdapp.R
 import com.example.samdapp.domain.auth.UserRole
 import com.example.samdapp.presentation.common.BiometricResult
 import com.example.samdapp.presentation.common.displayLabel
@@ -95,7 +97,12 @@ internal fun LoginContent(uiState: LoginUiState, actions: LoginActions) {
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            uiState.errorMessage?.let { message ->
+            val refusalText = when (val refusal = uiState.refusal) {
+                is SignInRefusal.FacilityBlocked -> stringResource(R.string.sign_in_facility_blocked, refusal.ownerFacilityName)
+                SignInRefusal.NoFacility -> stringResource(R.string.sign_in_no_facility)
+                null -> null
+            }
+            (refusalText ?: uiState.errorMessage)?.let { message ->
                 Text(text = message, color = MaterialTheme.colorScheme.error)
             }
 

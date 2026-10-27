@@ -508,4 +508,9 @@
     <!-- Shown while the form holds values an emulated instrument wrote (memo 14.5 item 12). -->
     <string name="emulated_instrument_banner">Emulated instrument. Synthetic values, not a real measurement.</string>
     <string name="emulated_field_supporting_text">Emulated</string>
+
+    <!-- Sign-in refused by the facility check (facility-scope memo 3.2, ruling FS-R). %1$s is the
+         owner facility's name, from the phone's owner marker. Copy PENDING operator approval at STOP P3. -->
+    <string name="sign_in_facility_blocked">This phone belongs to %1$s. Sign in with a %1$s account, or contact support to move this phone.</string>
+    <string name="sign_in_no_facility">This account is not linked to a facility. Contact support.</string>
 </resources>

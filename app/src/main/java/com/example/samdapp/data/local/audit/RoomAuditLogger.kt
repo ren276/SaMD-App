@@ -18,8 +18,13 @@ class RoomAuditLogger @Inject constructor(
     private val auditLogDao: AuditLogDao,
     private val authSession: AuthSession,
 ) : AuditLogger {
-    override suspend fun log(action: AuditAction, patientId: String?, caseRecordId: String?, payload: String) {
-        val userId = authSession.currentUser().first()?.userId ?: PLACEHOLDER_USER_ID
+    override suspend fun log(action: AuditAction, patientId: String?, caseRecordId: String?, payload: String) =
+        insert(authSession.currentUser().first()?.userId ?: PLACEHOLDER_USER_ID, action, patientId, caseRecordId, payload)
+
+    override suspend fun logAs(actorUserId: String, action: AuditAction, payload: String) =
+        insert(actorUserId, action, patientId = null, caseRecordId = null, payload = payload)
+
+    private suspend fun insert(userId: String, action: AuditAction, patientId: String?, caseRecordId: String?, payload: String) {
         val now = Instant.now()
         auditLogDao.insert(
             AuditLogEntity(

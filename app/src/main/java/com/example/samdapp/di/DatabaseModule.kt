@@ -36,6 +36,7 @@ import com.example.samdapp.data.local.dao.AuditLogDao
 import com.example.samdapp.data.local.dao.CaseRecordDao
 import com.example.samdapp.data.local.dao.ConsultationDao
 import com.example.samdapp.data.local.dao.ConsultationDocumentDao
+import com.example.samdapp.data.local.dao.DeviceDataOwnerDao
 import com.example.samdapp.data.local.dao.DiagnosisFeedbackDao
 import com.example.samdapp.data.local.dao.DoctorDao
 import com.example.samdapp.data.local.dao.EncounterDao
@@ -127,4 +128,5 @@ object DatabaseModule {
     @Provides fun provideEvaluateReportDao(db: AppDatabase): EvaluateReportDao = db.evaluateReportDao()
     @Provides fun provideDiagnosisFeedbackDao(db: AppDatabase): DiagnosisFeedbackDao = db.diagnosisFeedbackDao()
     @Provides fun provideConsultationDocumentDao(db: AppDatabase): ConsultationDocumentDao = db.consultationDocumentDao()
+    @Provides fun provideDeviceDataOwnerDao(db: AppDatabase): DeviceDataOwnerDao = db.deviceDataOwnerDao()
 }

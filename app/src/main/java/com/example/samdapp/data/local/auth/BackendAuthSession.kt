@@ -21,6 +21,7 @@ import javax.inject.Singleton
 class BackendAuthSession @Inject constructor(
     private val authApiService: RetrofitAuthService,
     private val tokenStore: AuthTokenStore,
+    private val facilityGate: FacilitySignInGate,
 ) : AuthSession {
 
     override fun currentUser(): Flow<UserSession?> = tokenStore.session
@@ -34,6 +35,16 @@ class BackendAuthSession @Inject constructor(
         return when (val result = authApiService.login(workerId, pin, deviceId)) {
             is AuthApiResult.Success -> {
                 val login = result.data
+                // Before anything is saved (facility-scope memo 3.2): a refused sign-in never
+                // becomes a session on this phone. Typed nullable on purpose: Gson can deliver a
+                // missing facility as null whatever the DTO declares.
+                val facilityId: String? = login.worker.facilityId
+                val facilityName: String? = login.worker.facilityName
+                when (val admission = facilityGate.admit(login.worker.workerId, facilityId, facilityName, login.refreshToken)) {
+                    is FacilityAdmission.Blocked -> return SignInResult.FacilityBlocked(admission.ownerFacilityName)
+                    FacilityAdmission.NoFacility -> return SignInResult.NoFacility
+                    FacilityAdmission.Admitted -> Unit
+                }
                 tokenStore.saveLogin(
                     accessToken = login.accessToken,
                     refreshToken = login.refreshToken,
