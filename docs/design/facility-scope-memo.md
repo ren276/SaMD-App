@@ -1,7 +1,9 @@
 # Facility scope of local clinical data: design memo
 
-Status: DESIGN, RULED 2026-10-27 (section 10.1; sections 3 to 8 carry the rulings). Slices P1 and
-P2 authorized; P3 onward wait for their own STOP.
+Status: DESIGN, RULED 2026-10-27 (10.1), REDUCED by ruling FS-R the same day (10.2): one phone per
+facility, BLOCK for any other facility, no in-app wipe and no release path. Sections 3, 7 and 8
+carry FS-R; moving a phone is the support procedure in section 12. P1 and P2 done; P3 onward wait
+for their own STOP.
 Branch: `feat/facility-scope`, worktree `/media/sandesh/extra-ssd/wt-on-device-slm`, base
 origin/master `213bb0a` (PR #81 merged).
 Date: 2026-10-26. Rating: HIGH (on-device SLM memo 7.1, ruling Y-21).
@@ -65,91 +67,65 @@ the readback-only case of it).
 
 One rule closes both hazards: **a session of facility B never exists on a phone that holds
 facility A's data.** Then nothing pushes A's rows under B (H-57) and nothing shows them to B
-(H-58, H-54), with no per-screen filtering and no schema change to clinical tables.
+(H-58, H-54), with no per-screen filtering and no schema change to clinical tables. Since FS-R
+(10.2) each facility has its own phone: a sign-in by another facility is always blocked, and a phone
+moves between facilities only through the support procedure (section 12), never in the app.
 
 ### 3.1 The owner marker (FS-3)
 
-A single-row Room table `device_data_owner(facility_id, facility_name, claimed_at,
-claimed_by_worker_id, legacy)`, migration 22 to 23. A single row is enforced by a fixed primary
-key. In the same encrypted database as the data it describes: a Keystore-loss reset
-(`DatabasePassphraseProvider.kt:40`, `deleteDatabaseFiles`) removes data and marker together, so
-they cannot disagree. `LocalDataOwnerFacility` reads it.
+A single-row Room table `device_data_owner(facilityId, facilityName, claimedAt,
+claimedByWorkerId, legacy)` (camelCase like every other table, accepted at STOP P2), migration 22
+to 23. A single row is enforced by a fixed primary key. In the same encrypted database as the data
+it describes: a Keystore-loss reset (`DatabasePassphraseProvider.kt:40`, `deleteDatabaseFiles`)
+removes data and marker together, so they cannot disagree, and so does clearing the app's storage
+in the support procedure. `LocalDataOwnerFacility` reads it.
 
-The DAO has three operations: an atomic claim (an insert that succeeds only when no owner
-exists), a read, and a clear that only the wipe (3.4) calls. Per FS-3 the migration is tested by
-actually running the upgrade with `MigrationTestHelper`; it is roll-forward only and is never
-edited once merged.
+The DAO has an atomic claim (an insert that succeeds only when no owner exists), a read, and a
+clear. P2 built the clear for the in-app wipe, which FS-R dropped: nothing calls it now. Per FS-3
+the migration is tested by actually running the upgrade with `MigrationTestHelper`; it is
+roll-forward only and is never edited once merged.
 
-### 3.2 The decision at sign-in (FS-1)
+### 3.2 The decision at sign-in (FS-1 as reduced by FS-R)
 
-After the server accepts the PIN and before `saveLogin`, a pure function in `domain` decides from
-the login's facility id, the marker, whether the database holds any clinical row, and the outbox
-state:
+After the server accepts the PIN and before `saveLogin`, a pure function in `domain`
+(`decideFacilitySignIn`, `domain/auth/FacilitySignIn.kt`) decides from the login's facility id,
+the marker and whether the database holds any clinical row:
 
-| Marker | Outbox | Decision |
+| Marker | Database | Decision |
 |---|---|---|
-| none, database empty | any | CLAIM: write the marker for this facility, continue |
+| none | empty | CLAIM: write the marker for this facility, continue |
+| none | holds data (upgrade from 22) | LEGACY_CLAIM: claim with `legacy = true` (FS-4(a), section 4) |
 | same facility id | any | CONTINUE |
-| other facility | everything sent (pending, held, pending audit, failed and conflict all 0) | WIPE_THEN_CLAIM: wipe (3.4), then claim, then continue |
-| other facility | anything not sent | BLOCK: revoke the new refresh token (`logout`), save nothing, show who must sign in |
-| none, database not empty (upgrade from 22) | any | LEGACY_CLAIM (FS-4(a), section 4) |
+| other facility | any, whatever the sync state | BLOCK: save nothing, revoke the new refresh token (`logout`), name the owner facility |
+| (login carries a blank facility id) | any | refused; P3 handles it like BLOCK |
 
-"Everything sent" (FS-1(1)) is computed from the SAME shared predicates the drain uses: the
-twenty one-shot grouped state counts behind `readOutboxCounts` (`data/sync/OutboxCounts.kt:17-38`,
-`RoomSyncOutboxRepository.readOutboxCounts`), which use `SyncSql`'s held-row constants and the
-`SyncSql.EVALUATE_SYNCABLE` exclusion of local-only evaluate markers. A local-only marker is
-facility A data: it counts as a clinical row held by the database and is wiped (3.4), but it never
-blocks. An instrumented consistency test in the style of `CountDrainConsistencyTest` pins that the
-state agrees with what the drain collects.
+There is no WIPE_THEN_CLAIM outcome. The outbox state (the same shared predicates the drain uses,
+P1's `signInOutboxOf`) still reaches the function, so "blocked whatever the sync state" is its own
+tested property, and P3 records the counts in the audit; it never changes the outcome.
 
 If the revoke call on BLOCK fails, the sign-in still saves nothing (fail closed), and the failure
 is recorded in the audit (FS-1(2)).
 
 Facility ids compare exactly, never by name (same rule as `facilityScopeAllows`,
 `domain/slm/FacilityScope.kt`). A BLOCK leaves the phone exactly as it was: A's data, no session,
-so no drain under B. The copy names facility A from the marker ("This phone has records from
-<facility A> that have not been sent. A worker from <facility A> must sign in to send them.").
+so no drain under B. The BLOCK copy (FS-R, to the operator for approval at STOP P3) names the owner
+facility from the marker: "This phone belongs to <Facility A>. Sign in with a <Facility A> account,
+or contact support to move this phone."
 
-### 3.3 Rows that can never drain (FS-2)
+### 3.3 Rows that can never drain
 
-FAILED and CONFLICT rows never leave on their own and the app has no record edit path, so "block
-until drained" can lock a phone for good. Release path (FS-2, restricted): only a facility A
-worker at `CadreTier.LICENSED_CLINICAL` or `CadreTier.PHYSICIAN`, signed in, may use "Release this
-phone", never `COMMUNITY`. A drain runs; release is allowed only with `pendingClinical`,
-`heldClinical` and `pendingAudit` at 0; the screen lists the FAILED and CONFLICT counts; the worker
-confirms by typing the confirmation. The device then writes a `local_data_released` audit row
-(counts per table, no record content) and drains it, and the wipe starts only after the server has
-acknowledged that row; only then is the marker cleared. The data loss is explicit, attributed to a
-licensed facility A worker and on the server before it happens.
+FAILED and CONFLICT rows never leave on their own and the app has no record edit path. Under FS-R
+this no longer locks anything in the app: the phone stays with its facility, whose workers keep
+signing in. There is no release path (FS-2 is superseded); the support procedure (section 12)
+covers a phone that must move.
 
-### 3.4 The wipe (FS-5)
+### 3.4 No in-app wipe
 
-Before anything is deleted (FS-5): cancel and await all clinical WorkManager work (the sync
-work, `WorkManagerSyncOutboxScheduler.kt:40,48`, and every `assess_<caseRecordId>` assessment
-work, `WorkManagerAssessmentScheduler.kt:44,61`), and hold the `SyncOutboxDrainer` mutex
-(`SyncOutboxDrainer.kt:54,58`) for the whole wipe, so no drain or assessment writes during it.
-
-Scope, from the stores found (VERIFIED, grep for `filesDir`, `cacheDir`, DataStore and
-SharedPreferences names under `app/src/main/java`):
-- Room: every table (`clearAllTables`), then `PRAGMA wal_checkpoint(TRUNCATE)`, then `VACUUM`.
-- `filesDir/documents/` including `.capture` (`ConsultationDocumentRepositoryImpl.kt:58`,
-  `AndroidDocumentCaptureStore.kt:81,93`); `filesDir/ailment_audio/`
-  (`AndroidAilmentAudioRecorder.kt:27`).
-- `cacheDir/reports/` (`ReportPdfExporter.kt:49`), `cacheDir/attachments/`
-  (`ConsultationScreen.kt:774`), the document viewer temp dir (`DocumentViewerViewModel.kt:51,139`).
-- The `sync_outbox` DataStore (in-flight batch, `InFlightBatchStore.kt:53`) and the drain outcome.
-- The persisted navigation back stack (it can carry patient ids; it already discards on a session
-  change, `NavBackStackSaver.kt:55,331`, but is cleared anyway).
-- The image loader's disk cache (FS-5). VERIFIED there is none today: no Coil, Glide or Picasso in
-  `gradle/libs.versions.toml` or `app/build.gradle.kts` and no `ImageLoader` under
-  `app/src/main/java`. If one is added, its disk cache joins this list.
-
-Kept: the auth store (the new session is about to be written), the device id, the database
-passphrase, the SLM and ASR model files (not clinical). Crash safety: a `wipe_pending` flag in its
-own DataStore is set first and cleared last; app start re-runs an interrupted wipe before any
-screen opens (the wipe is idempotent). INFERRED: `clearAllTables` with Room open avoids a process
-restart; deleting the database file instead would need one. An instrumented test seeds a
-sentinel into every listed location and asserts it is absent after the wipe.
+FS-R drops the wipe (FS-5 is superseded) and slice P4. The P4 work in progress was never
+committed: it is kept outside the branch (`git stash` on the worktree, plus a patch and tar under
+`/media/sandesh/extra-ssd/samd-slm-parity/fs/p4-dropped/`). Clearing a phone's data is the support
+procedure's "clear the app's storage", which removes the database, every file and every DataStore
+at once.
 
 ### 3.5 Server-side defence in depth (FS-6)
 
@@ -172,12 +148,12 @@ dev. With 3.2 in place, the seam's check (step 0) becomes a real comparison ever
 ### 3.7 Audit
 
 New device actions, each with the backend mirror in the same commit (the standing rule in
-`AuditLogger.kt` and `audit_actions_device.py`): `local_data_owner_claimed`,
-`cross_facility_sign_in_blocked`, `local_data_wiped`, `local_data_released`. Payloads: facility
-ids, counts, the decision, `legacy` on a claim (FS-4(a)), and on a block whether the revoke call
-failed (FS-1(2)); never patient or record content. A blocked attempt's row is a device row
-with B's worker id as `user_id`; it reaches the server under the next facility A session, stamped
-facility A, which is where it happened.
+`AuditLogger.kt` and `audit_actions_device.py`): `local_data_owner_claimed` and
+`cross_facility_sign_in_blocked` (FS-R drops `local_data_wiped` and `local_data_released`).
+Payloads: facility ids, counts, the decision, `legacy` on a claim (FS-4(a)), and on a block
+whether the revoke call failed (FS-1(2)); never patient or record content. A blocked attempt's row
+is a device row with B's worker id as `user_id`; it reaches the server under the next facility A
+session, stamped facility A, which is where it happened.
 
 ---
 
@@ -192,7 +168,7 @@ an unknown owner, is not built.
 ## 5. Untouched
 
 Clinical table schemas, the sync wire format of rows (FS-6 adds an envelope field only), the
-readback seam's logic, the remote engine, every flag, same-facility sign-ins (no wipe, no block).
+readback seam's logic, the remote engine, every flag, same-facility sign-ins (no block).
 
 ## 6. Tests
 
@@ -201,71 +177,68 @@ Instrumented tests run on the Pixel (USB serial 67041FDKX004ZY, `adb install` pl
 files and directories, never the app's real database or files, and the operator confirms the
 phone is free before any adb command.
 
-- The decision function: a JVM table test over every row of 3.2 plus FS-4(a), and an instrumented
-  consistency test of the outbox state against the drain (FS-1(1)). Mutation rows: compare by name;
-  treat FAILED as drained; ignore held rows; let local-only evaluate markers block; LEGACY_CLAIM
-  without the legacy flag.
+- The decision function: a JVM table test over every row of 3.2 (FS-R) plus FS-4(a), each over
+  every outbox shape. Mutation rows at P1: compare by name; LEGACY_CLAIM without the legacy flag;
+  decide a blank id; and the outbox fold rows. At FS-R: compare by name; let BLOCK pass when
+  everything is synced; continue on a blank id.
 - Sign-in: a BLOCK saves no token and calls logout with the new refresh token; a failed revoke
-  still saves nothing and is audited; a WIPE completes before `saveLogin`; a failed wipe saves no
-  token (fail closed).
+  still saves nothing and is audited; a blank id is refused the same way.
 - Marker and migration 22 to 23: `MigrationTestHelper` runs the upgrade on a seeded v22 test
   database (every existing row survives, the new table exists empty); two concurrent claims,
   exactly one wins; the clear works.
-- Wipe: an instrumented test seeds a sentinel into every location in 3.4 and asserts each is absent
-  after, and that an interrupted wipe resumes at the next start.
-- Release: COMMUNITY tier refused; no wipe before the server acknowledges `local_data_released`.
 - Backend (FS-6): a mismatched batch is refused and **no row is persisted**, read back from the
   database, not from the response (CLAUDE.md).
 - Readback: `ReadbackFlavorGraphTest` updated: the owner is the marker in every flavor.
 
-## 7. Hazards (PROPOSED, approved as PROPOSED under FS-8)
+## 7. Hazards (PROPOSED, approved as PROPOSED under FS-8; controls per FS-R)
 
 - **H-57 (new):** clinical and audit rows recorded under one facility are pushed under another
   facility's session after a sign-in change, and the server files them under the wrong facility
   (new rows) or refuses them permanently (edits); the source facility never receives them.
-  Controls: 3.2 BLOCK, 3.3, 3.5. Severity high, patient-safety consequence: facility A's follow-up
-  never sees the patient (the records reach facility B's registers, or are refused, and never
-  reach facility A).
+  Controls: 3.2 BLOCK and the server envelope check (3.5). Severity high, patient-safety
+  consequence: facility A's follow-up never sees the patient (the records reach facility B's
+  registers, or are refused, and never reach facility A).
 - **H-58 (new):** facility A's patients and records are readable on every screen by a facility B
-  worker signed in on the same phone. Controls: 3.2 (B's session cannot exist with A's data).
+  worker signed in on the same phone. Control: 3.2 BLOCK (B's session cannot exist on A's phone).
 - **H-54** (readback case) updated: the owner becomes the marker; the always-UNKNOWN control is
   replaced by 3.2.
-- **H-59 (new):** the wipe destroys clinical data that never reached the server. Controls: WIPE
-  only when every row is SYNCED; FAILED and CONFLICT only through the audited release (3.3);
-  crash-safe resumable wipe.
+- **H-59 (new), residual risk of the support procedure:** clearing a phone's storage destroys
+  clinical data that never reached the server. Not controlled by software: the control is the
+  procedure's documented pre-check (section 12, step 1).
 
 ## 8. Slices
 
-| Slice | Content | Needs |
+| Slice | Content | Status |
 |---|---|---|
-| P1 | Decision function, its JVM tests, the outbox-state consistency test | nothing (JVM); Pixel for the consistency test |
-| P2 | Marker table, migration 23, `MigrationTestHelper` test | Pixel |
-| P3 | Sign-in integration, BLOCK copy (string resources), revoke | nothing (JVM); live check on a device |
-| P4 | Wipe executor, `wipe_pending` resume, sentinel test | Pixel |
-| P5 | Release path UI (FS-2) | Pixel; live check |
-| P6 | Audit actions plus the backend mirror, one commit | nothing |
-| P7 | Backend envelope check (FS-6), api-contract, persisted-row tests | backend test DB |
-| P8 | Readback owner binding swap | nothing |
-| P9 | RMF rows H-54, H-57 to H-59, DHF entry | nothing |
+| P1 | Decision function and its JVM tests, the outbox-state consistency test | done (`26a419f`), reduced to FS-R (`93b3f22`) |
+| P2 | Marker table, migration 23, `MigrationTestHelper` test | done (`3dade60`) |
+| P3 | Sign-in wiring per 3.2 (FS-R): claim, continue, block, blank id; BLOCK and blank-id copy; revoke | next |
+| P4 | Wipe executor | DROPPED by FS-R (never committed, 3.4) |
+| P5 | Release path UI | DROPPED by FS-R |
+| P6 | Audit actions `local_data_owner_claimed` and `cross_facility_sign_in_blocked` plus the backend mirror, one commit | later |
+| P7 | Backend envelope check (FS-6), api-contract, persisted-row tests | later |
+| P8 | Readback owner binding swap (FS-7) | later |
+| P9 | RMF rows H-54, H-57 to H-59 (per section 7), DHF entry, the support procedure | later |
 
-P3 also handles a login with a blank facility id (operator, 2026-10-27, after STOP P1; P1's
-`decideFacilitySignIn` refuses it rather than deciding it): on the persistence side exactly like
-BLOCK (nothing saved, the new refresh token revoked, a failed revoke recorded in the audit), with
-its own string resource for the message. That copy goes to the operator for approval at STOP P3,
-like the BLOCK copy.
+P3 also handles a login with a blank facility id (operator, 2026-10-27, after STOP P1; FS-R keeps
+it): on the persistence side exactly like BLOCK (nothing saved, the new refresh token revoked, a
+failed revoke recorded in the audit), with its own string resource for the message. That copy and
+the BLOCK copy go to the operator for approval at STOP P3.
 
-Per the operator's correction (10.1), P2, P4 and P5 run their instrumented tests on the Pixel, not
-the emulator. The live cross-facility check (two seeded accounts in two facilities, one phone)
-needs the Pixel against the staging-like backend.
+Per the operator's correction (10.1), instrumented tests run on the Pixel, not the emulator. The
+live cross-facility check (two seeded accounts in two facilities, one phone) needs the Pixel
+against the staging-like backend.
 
 ## 9. Not in this PR
 
 Author attribution for clinical rows within one facility; a pull path; multi-facility roles;
-remote wipe or device management; anything about the SLM beyond the owner binding.
+remote wipe or device management; an in-app wipe or release path (FS-R); anything about the SLM
+beyond the owner binding.
 
 ## 10. Rulings
 
-The questions as asked (STOP FS0), then the operator's rulings verbatim (10.1).
+The questions as asked (STOP FS0), then the operator's rulings verbatim (10.1), then the scope
+reduction FS-R verbatim (10.2), which supersedes parts of 10.1.
 
 - **FS-1** Adopt the decision table in 3.2 (CLAIM, CONTINUE, WIPE only when fully SYNCED, BLOCK
   otherwise, with the new refresh token revoked).
@@ -301,9 +274,38 @@ FS-8 Approved as PROPOSED; H-57's severity text names the patient-safety consequ
 
 Correction: instrumented tests (P2, P4, P5) run on the Pixel (USB serial 67041FDKX004ZY, adb install plus am instrument), not the emulator, per the operator's standing rule. They use their own test database files and directories, never the app's real database or files. Ask the operator to confirm the phone is free before any adb command.
 
+### 10.2 Ruling FS-R, 2026-10-27 (verbatim)
+
+Scope change from the operator: each facility gets its own device, so the design is reduced.
+
+Ruling FS-R (2026-10-27), supersedes FS-1 WIPE, FS-2, FS-5 and the P3 progress-state addition:
+- Sign-in decision: CLAIM (fresh phone), LEGACY_CLAIM (FS-4(a)), CONTINUE (same facility), and BLOCK for ANY other facility regardless of sync state; a blank facility id is refused like BLOCK. There is no WIPE_THEN_CLAIM outcome. BLOCK saves nothing and revokes the new refresh token (a failed revoke is recorded in the audit). BLOCK copy names the owner facility: "This phone belongs to <Facility A>. Sign in with a <Facility A> account, or contact support to move this phone." (Copy to me for approval at STOP P3.)
+- No in-app wipe and no release path. P4 and P5 are dropped. Moving a phone to another facility is a documented support procedure: a facility A worker confirms Home shows nothing waiting; support clears the app's storage; support re-delivers the model; the new facility signs in and claims.
+- Kept: P1 (simplify the table to the above), P2 (done), P3 (sign-in wiring per the above), P6 (audit actions claimed and blocked, with backend mirrors; local_data_wiped and local_data_released are dropped), P7 (the server envelope check, FS-6 as ruled), P8 (the readback owner binding), P9 (risk rows).
+- Hazards: H-57 controls become BLOCK plus the server check; H-58 control is BLOCK; H-59 becomes a residual risk of the support procedure (clearing storage with unsent data), controlled by the documented pre-check, not by software.
+
 ## 11. Merge order
 
 `feat/local-network-permission` (F1, unmerged) changes `LoginViewModel`, `LoginScreen`,
 `strings.xml`, `TokenAuthenticator` tests and the drainer tests, which P3 also touches. Whichever
 merges second merges master in with a merge commit (Y-14 rule); the P3 sign-in change is the
 likely conflict and is resolved by hand, not by a rebase.
+
+## 12. Moving a phone to another facility (support procedure, FS-R)
+
+The app never moves a phone between facilities. Support does, in this order:
+
+1. **Pre-check (the H-59 control).** A facility A worker signs in on the phone and confirms Home
+   shows nothing waiting to send.
+2. **Clear.** Support clears the app's storage (Android Settings, the app, Storage, Clear storage).
+   This removes the database with its owner marker, every file, every DataStore and the database
+   passphrase, so the next start creates a new, empty database.
+3. **Model.** Support re-delivers the SLM model (on-device SLM memo 9.1 for dev; the production
+   delivery of Y-10 once it exists), because clearing storage also removes `files/slm`.
+4. **Claim.** A facility B worker signs in; the empty phone is claimed for facility B (CLAIM, 3.2).
+
+OPEN for the operator: "nothing waiting" on Home covers rows still to send (pending, held, audit),
+but rows that need review (FAILED, CONFLICT, Home's review card) never send on their own and the
+app cannot correct them (3.3). As written, step 1 can pass with such rows on the phone, and step 2
+then destroys them. Proposed: step 1 also requires Home's review card to be absent, and a phone
+with rows to review goes to support with that list before it is cleared.
