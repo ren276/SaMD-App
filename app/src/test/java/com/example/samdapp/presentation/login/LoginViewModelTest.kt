@@ -118,4 +118,13 @@ class LoginViewModelTest {
         viewModel.onPinChange("1")
         assertNull("editing the form clears the refusal", viewModel.uiState.value.refusal)
     }
+
+    @Test
+    fun `a sign-in the facility check could not complete is refused with the generic message`() = runTest(mainDispatcherRule.dispatcher) {
+        val state = signInWith(SignInResult.Unavailable).uiState.value
+
+        assertEquals(SignInRefusal.Unavailable, state.refusal)
+        assertEquals("", state.pin)
+        assertTrue(!state.isSubmitting)
+    }
 }

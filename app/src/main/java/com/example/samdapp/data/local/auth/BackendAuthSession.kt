@@ -43,6 +43,7 @@ class BackendAuthSession @Inject constructor(
                 when (val admission = facilityGate.admit(login.worker.workerId, facilityId, facilityName, login.refreshToken)) {
                     is FacilityAdmission.Blocked -> return SignInResult.FacilityBlocked(admission.ownerFacilityName)
                     FacilityAdmission.NoFacility -> return SignInResult.NoFacility
+                    FacilityAdmission.Unavailable -> return SignInResult.Unavailable
                     FacilityAdmission.Admitted -> Unit
                 }
                 tokenStore.saveLogin(

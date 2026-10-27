@@ -7,6 +7,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.samdapp.data.local.AppDatabase
 import com.example.samdapp.data.local.ENTITY_SCOPES
 import com.example.samdapp.data.local.RoomLocalClinicalData
+import com.example.samdapp.data.local.RoomLocalTransaction
 import com.example.samdapp.data.local.audit.RoomAuditLogger
 import com.example.samdapp.data.remote.RetrofitAuthService
 import com.example.samdapp.data.remote.api.AuthApiService
@@ -125,7 +126,10 @@ class FacilitySignInDeviceTest {
 
         init {
             val audit = RoomAuditLogger(db.auditLogDao(), NoSession)
-            val gate = FacilitySignInGate(db.deviceDataOwnerDao(), RoomLocalClinicalData(db), outboxRepository(), RetrofitAuthService(api)) { audit }
+            val gate = FacilitySignInGate(
+                db.deviceDataOwnerDao(), RoomLocalClinicalData(db), outboxRepository(), RoomLocalTransaction(db),
+                RetrofitAuthService(api),
+            ) { audit }
             session = BackendAuthSession(RetrofitAuthService(api), tokens, gate)
         }
 
@@ -304,6 +308,38 @@ class FacilitySignInDeviceTest {
             assertTrue("${scope.table} counts as clinical data", check.present())
             db.openHelper.writableDatabase.execSQL("DELETE FROM `${scope.table}`")
         }
+    }
+
+    /** Every audit insert fails, in SQLite itself, as a full or corrupt database would make it. */
+    private fun failAuditWrites() =
+        db.openHelper.writableDatabase.execSQL(
+            "CREATE TRIGGER fail_audit BEFORE INSERT ON audit_log BEGIN SELECT RAISE(ABORT, 'forced audit failure'); END",
+        )
+
+    @Test
+    fun anAuditFailureDuringAClaimRollsTheClaimBackAndSavesNothing() = runBlocking {
+        failAuditWrites()
+        val device = Device("fac-b", "PHC Beta", "w-b1")
+
+        assertEquals(SignInResult.Unavailable, device.signIn())
+
+        assertEquals("the owner row rolled back with its audit row", 0, ownerRows())
+        assertNull("no token is saved", device.tokens.refreshToken)
+        assertEquals("the new login is revoked", listOf("refresh-w-b1"), device.api.logouts)
+        assertEquals(0, auditRows().size)
+    }
+
+    @Test
+    fun anAuditFailureDuringABlockStillBlocks() = runBlocking {
+        claimAlpha()
+        failAuditWrites()
+        val device = Device("fac-b", "PHC Beta", "w-b1")
+
+        assertEquals(SignInResult.FacilityBlocked("PHC Alpha"), device.signIn())
+
+        assertNull(device.tokens.refreshToken)
+        assertEquals(listOf("refresh-w-b1"), device.api.logouts)
+        assertEquals("fac-a", db.deviceDataOwnerDao().read()?.facilityId)
     }
 
     private companion object {

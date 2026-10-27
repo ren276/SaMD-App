@@ -1,7 +1,11 @@
 package com.example.samdapp.data.local.auth
 
 import com.example.samdapp.data.local.LocalClinicalData
+import com.example.samdapp.data.local.LocalTransaction
+import com.example.samdapp.data.local.audit.RoomAuditLogger
+import com.example.samdapp.data.local.dao.AuditLogDao
 import com.example.samdapp.data.local.dao.DeviceDataOwnerDao
+import com.example.samdapp.data.local.entity.AuditLogEntity
 import com.example.samdapp.data.local.entity.DeviceDataOwnerEntity
 import com.example.samdapp.data.remote.RetrofitAuthService
 import com.example.samdapp.data.remote.api.AuthApiService
@@ -16,10 +20,11 @@ import com.example.samdapp.data.remote.dto.MeResponseDto
 import com.example.samdapp.data.remote.dto.RefreshRequestDto
 import com.example.samdapp.data.remote.dto.TokenPairDto
 import com.example.samdapp.domain.audit.AuditAction
-import com.example.samdapp.domain.audit.AuditLogger
 import com.example.samdapp.domain.auth.SignInOutbox
 import com.example.samdapp.domain.auth.SignInResult
 import com.example.samdapp.domain.auth.UserRole
+import com.example.samdapp.testutil.FakeAuditLogDao
+import com.example.samdapp.testutil.FakeAuthSession
 import com.example.samdapp.testutil.FakeAuthTokenStore
 import com.example.samdapp.testutil.FakeSyncOutboxRepository
 import com.google.gson.Gson
@@ -52,9 +57,12 @@ class FacilitySignInGateTest {
         /** Runs just before an insert, to let a concurrent sign-in claim first. */
         var beforeInsert: () -> Unit = {}
 
+        /** Every insert loses and no owner appears: a state the real table cannot be in. */
+        var loseEveryClaim = false
+
         override suspend fun insertIfAbsent(owner: DeviceDataOwnerEntity): Long {
             beforeInsert()
-            if (this.owner != null) return -1L
+            if (this.owner != null || loseEveryClaim) return -1L
             this.owner = owner
             return 1L
         }
@@ -62,15 +70,30 @@ class FacilitySignInGateTest {
         override suspend fun read(): DeviceDataOwnerEntity? = owner
     }
 
-    private data class Row(val actor: String?, val action: AuditAction, val patientId: String?, val caseRecordId: String?, val payload: String)
+    private data class Row(val actor: String, val action: AuditAction, val patientId: String?, val caseRecordId: String?, val payload: String)
 
-    private class RecordingAuditLogger : AuditLogger {
-        val rows = mutableListOf<Row>()
-        override suspend fun log(action: AuditAction, patientId: String?, caseRecordId: String?, payload: String) {
-            rows += Row(null, action, patientId, caseRecordId, payload)
+    /** The real audit logger writes through this; [fail] makes every insert throw, as a full or
+     *  corrupt database would. */
+    private class SwitchableAuditLogDao(private val inner: FakeAuditLogDao = FakeAuditLogDao()) : AuditLogDao by inner {
+        var fail = false
+        override suspend fun insert(entry: AuditLogEntity) {
+            if (fail) throw IllegalStateException("audit write failed")
+            inner.insert(entry)
         }
-        override suspend fun logAs(actorUserId: String, action: AuditAction, payload: String) {
-            rows += Row(actorUserId, action, null, null, payload)
+        val rows: List<Row>
+            get() = inner.inserted.map { e -> Row(e.userId, AuditAction.values().first { it.value == e.action }, e.patientId, e.caseRecordId, e.payload) }
+    }
+
+    /** As Room's transaction: a block that throws leaves the owner as it was before. */
+    private class RollbackTransaction(private val owners: FakeOwnerDao) : LocalTransaction {
+        override suspend fun <T> run(block: suspend () -> T): T {
+            val before = owners.owner
+            return try {
+                block()
+            } catch (e: Exception) {
+                owners.owner = before
+                throw e
+            }
         }
     }
 
@@ -112,18 +135,30 @@ class FacilitySignInGateTest {
 
     private val alpha = DeviceDataOwnerEntity(facilityId = "fac-a", facilityName = "PHC Alpha", claimedAt = Instant.EPOCH, claimedByWorkerId = "w-a", legacy = false)
 
-    private inner class Harness(facilityId: String? = "fac-b", facilityName: String? = "PHC Beta", holdsData: Boolean = false) {
+    private inner class Harness(
+        facilityId: String? = "fac-b",
+        facilityName: String? = "PHC Beta",
+        holdsData: Boolean = false,
+        clinical: suspend () -> Boolean = { holdsData },
+    ) {
         val api = FakeAuthApi(facilityId, facilityName)
         val tokens = FakeAuthTokenStore()
         val owners = FakeOwnerDao()
-        val audit = RecordingAuditLogger()
+        val audit = SwitchableAuditLogDao()
         val outbox = FakeSyncOutboxRepository().apply { signInOutbox = SignInOutbox(pendingClinical = 2, failed = 1) }
+        private val logger = RoomAuditLogger(audit, FakeAuthSession())
         val session = BackendAuthSession(
             RetrofitAuthService(api), tokens,
-            FacilitySignInGate(owners, object : LocalClinicalData { override suspend fun present() = holdsData }, outbox, RetrofitAuthService(api)) { audit },
+            FacilitySignInGate(
+                owners, object : LocalClinicalData { override suspend fun present() = clinical() }, outbox,
+                RollbackTransaction(owners), RetrofitAuthService(api),
+            ) { logger },
         )
 
         suspend fun signIn() = session.signIn("Worker", UserRole.NURSE, "482915")
+
+        /** The result, or the exception that escaped as text, so an escape fails at the assertion. */
+        suspend fun signInWithoutThrowing(): Any = runCatching { signIn() }.getOrElse { "escaped: $it" }
         suspend fun saved() = tokens.snapshot().refreshToken != null || tokens.session.first() != null
     }
 
@@ -268,6 +303,73 @@ class FacilitySignInGateTest {
             assertNull(row.caseRecordId)
             assertTrue("${row.action}: no patient field in the payload", fields(row.payload).keys.none { "patient" in it || "case" in it })
         }
+    }
+
+    // ── FS-R5: nothing leaves the gate, and the claim and its audit row are atomic ──
+
+    @Test
+    fun `an audit write failure during a claim rolls the claim back, saves nothing and refuses`() = runTest {
+        listOf(false, true).forEach { holdsData ->
+            val h = Harness(holdsData = holdsData)
+            h.audit.fail = true
+
+            assertEquals("holds data $holdsData", SignInResult.Unavailable, h.signInWithoutThrowing())
+
+            assertNull("holds data $holdsData: no owner survives the rolled-back claim", h.owners.owner)
+            assertTrue("holds data $holdsData: no token is saved", !h.saved())
+            assertEquals("holds data $holdsData: the new login is revoked", listOf("refresh-new"), h.api.logouts)
+        }
+    }
+
+    @Test
+    fun `an audit write failure during a block still blocks, with its message`() = runTest {
+        val h = Harness()
+        h.owners.owner = alpha
+        h.audit.fail = true
+
+        assertEquals(SignInResult.FacilityBlocked("PHC Alpha"), h.signIn())
+
+        assertTrue(!h.saved())
+        assertEquals(listOf("refresh-new"), h.api.logouts)
+        assertEquals(alpha, h.owners.owner)
+    }
+
+    @Test
+    fun `an audit write failure on a blank facility id still refuses it`() = runTest {
+        val h = Harness(facilityId = "")
+        h.audit.fail = true
+
+        assertEquals(SignInResult.NoFacility, h.signIn())
+
+        assertTrue(!h.saved())
+        assertNull(h.owners.owner)
+    }
+
+    @Test
+    fun `a lost claim followed by no owner is refused fail closed and audited`() = runTest {
+        val h = Harness()
+        h.owners.loseEveryClaim = true
+
+        assertEquals(SignInResult.Unavailable, h.signIn())
+
+        assertTrue(!h.saved())
+        assertNull(h.owners.owner)
+        assertEquals(listOf("refresh-new"), h.api.logouts)
+        val row = h.audit.rows.single()
+        assertEquals(AuditAction.CROSS_FACILITY_SIGN_IN_BLOCKED, row.action)
+        assertEquals("unavailable", fields(row.payload)["decision"])
+    }
+
+    @Test
+    fun `a failing database read is refused fail closed, never thrown`() = runTest {
+        val h = Harness(clinical = { throw IllegalStateException("database unreadable") })
+
+        assertEquals(SignInResult.Unavailable, h.signInWithoutThrowing())
+
+        assertTrue(!h.saved())
+        assertNull(h.owners.owner)
+        assertEquals(listOf("refresh-new"), h.api.logouts)
+        assertEquals("unavailable", fields(h.audit.rows.single().payload)["decision"])
     }
 
     private companion object {

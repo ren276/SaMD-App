@@ -510,7 +510,10 @@
     <string name="emulated_field_supporting_text">Emulated</string>
 
     <!-- Sign-in refused by the facility check (facility-scope memo 3.2, ruling FS-R). %1$s is the
-         owner facility's name, from the phone's owner marker. Copy PENDING operator approval at STOP P3. -->
-    <string name="sign_in_facility_blocked">This phone belongs to %1$s. Sign in with a %1$s account, or contact support to move this phone.</string>
-    <string name="sign_in_no_facility">This account is not linked to a facility. Contact support.</string>
+         owner facility's name, from the phone's owner marker. Copy approved, ruling FS-R3. -->
+    <string name="sign_in_facility_blocked">This phone belongs to %1$s. Sign in with a %1$s account, or ask your supervisor to move this phone.</string>
+    <string name="sign_in_no_facility">This account is not linked to a facility. Tell your supervisor.</string>
+    <!-- The facility check could not complete safely, so the sign-in was refused fail closed (FS-R5).
+         Copy PENDING operator approval at STOP P3b. -->
+    <string name="sign_in_failed_generic">Cannot sign in on this phone right now. Try again, or tell your supervisor.</string>
 </resources>

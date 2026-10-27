@@ -5,11 +5,6 @@ import kotlinx.serialization.json.put
 
 interface AuditLogger {
     suspend fun log(action: AuditAction, patientId: String? = null, caseRecordId: String? = null, payload: String)
-
-    /** [log] attributed to [actorUserId] rather than the current session, for a row written while
-     *  no session exists yet: the sign-in facility check runs before the login is saved
-     *  (facility-scope memo 3.7). Carries no patient or case id. */
-    suspend fun logAs(actorUserId: String, action: AuditAction, payload: String) = log(action, payload = payload)
 }
 
 /**
@@ -212,14 +207,14 @@ enum class AuditAction(val value: String) {
     /** The phone's data was claimed for the signing-in worker's facility (facility-scope memo 3.2):
      *  the first sign-in on a fresh phone, or on a phone upgraded from schema 22 with data and no
      *  owner (`legacy` true, FS-4(a)). Payload: facility id, decision, legacy, outbox counts. Never
-     *  patient or record content. Attributed to the signing-in worker ([AuditLogger.logAs]). */
+     *  patient or record content. Attributed to the signing-in worker (`RoomAuditLogger.logAs`). */
     LOCAL_DATA_OWNER_CLAIMED("local_data_owner_claimed"),
 
     /** A sign-in whose PIN the server accepted was refused because the phone belongs to another
      *  facility, or because the account carries no facility id (FS-R). Nothing was saved and the
      *  new refresh token was revoked; payload says whether the revoke succeeded, with the login's
      *  and the owner's facility ids, the decision and the outbox counts. Never patient or record
-     *  content. Attributed to the signing-in worker ([AuditLogger.logAs]); it reaches the server
+     *  content. Attributed to the signing-in worker (`RoomAuditLogger.logAs`); it reaches the server
      *  under the owner facility's next session. */
     CROSS_FACILITY_SIGN_IN_BLOCKED("cross_facility_sign_in_blocked"),
 }

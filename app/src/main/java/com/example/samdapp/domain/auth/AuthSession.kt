@@ -60,6 +60,11 @@ sealed interface SignInResult {
     /** The PIN was accepted but the account carries no facility id: refused like
      *  [FacilityBlocked], nothing saved, the new login revoked. */
     data object NoFacility : SignInResult
+
+    /** The PIN was accepted but the facility check could not complete safely (an audit write or
+     *  a database read failed, or the phone's owner was in a state it cannot be): refused fail
+     *  closed (FS-R5), nothing saved, the new login revoked. */
+    data object Unavailable : SignInResult
 }
 
 /** Result of [AuthSession.changePin]. */

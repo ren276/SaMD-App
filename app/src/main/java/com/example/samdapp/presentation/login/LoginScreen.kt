@@ -100,6 +100,7 @@ internal fun LoginContent(uiState: LoginUiState, actions: LoginActions) {
             val refusalText = when (val refusal = uiState.refusal) {
                 is SignInRefusal.FacilityBlocked -> stringResource(R.string.sign_in_facility_blocked, refusal.ownerFacilityName)
                 SignInRefusal.NoFacility -> stringResource(R.string.sign_in_no_facility)
+                SignInRefusal.Unavailable -> stringResource(R.string.sign_in_failed_generic)
                 null -> null
             }
             (refusalText ?: uiState.errorMessage)?.let { message ->

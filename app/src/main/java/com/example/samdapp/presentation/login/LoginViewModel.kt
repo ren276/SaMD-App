@@ -36,6 +36,9 @@ sealed interface SignInRefusal {
 
     /** The account is not linked to a facility. */
     data object NoFacility : SignInRefusal
+
+    /** The facility check could not complete safely (FS-R5). */
+    data object Unavailable : SignInRefusal
 }
 
 // Mirrors backend/core/app/schemas/auth.py's PIN_MIN_LENGTH/PIN_MAX_LENGTH: early client-side
@@ -113,6 +116,8 @@ class LoginViewModel @Inject constructor(
                 }
                 SignInResult.NoFacility ->
                     _uiState.update { it.copy(isSubmitting = false, refusal = SignInRefusal.NoFacility, pin = "") }
+                SignInResult.Unavailable ->
+                    _uiState.update { it.copy(isSubmitting = false, refusal = SignInRefusal.Unavailable, pin = "") }
             }
         }
     }
