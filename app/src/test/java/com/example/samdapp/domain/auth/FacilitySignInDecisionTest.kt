@@ -4,14 +4,14 @@ import com.example.samdapp.domain.auth.FacilitySignInDecision.Block
 import com.example.samdapp.domain.auth.FacilitySignInDecision.Claim
 import com.example.samdapp.domain.auth.FacilitySignInDecision.Continue
 import com.example.samdapp.domain.auth.FacilitySignInDecision.LegacyClaim
-import com.example.samdapp.domain.auth.FacilitySignInDecision.WipeThenClaim
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Test
 
 /**
- * Every row of facility-scope memo 3.2 plus FS-4(a), each against every outbox shape: drained, and
- * each of the five ways a row can still be owed to the server on its own.
+ * Every row of facility-scope memo 3.2 as reduced by FS-R, plus FS-4(a), each against every outbox
+ * shape: drained, and each of the five ways a row can still be owed to the server on its own. The
+ * outbox never changes the outcome.
  */
 class FacilitySignInDecisionTest {
 
@@ -46,14 +46,10 @@ class FacilitySignInDecisionTest {
     }
 
     @Test
-    fun `another facility over a drained outbox wipes then claims`() {
-        assertEquals(WipeThenClaim, decide(facilityB, owner = facilityA, holdsRows = true, drained))
-    }
-
-    @Test
-    fun `another facility over anything not sent is blocked, naming the owner`() {
-        notSent.forEach { (name, outbox) ->
+    fun `another facility is blocked whatever the outbox says, everything synced included, naming the owner`() {
+        everyOutbox.forEach { (name, outbox) ->
             assertEquals(name, Block("PHC Alpha"), decide(facilityB, owner = facilityA, holdsRows = true, outbox))
+            assertEquals("$name, empty database", Block("PHC Alpha"), decide(facilityB, owner = facilityA, holdsRows = false, outbox))
         }
     }
 
@@ -68,7 +64,7 @@ class FacilitySignInDecisionTest {
     fun `facility ids compare exactly and never by name`() {
         val sameNameOtherId = SessionFacility("fac-b", "PHC Alpha")
         assertEquals(Block("PHC Alpha"), decide(sameNameOtherId, owner = facilityA, holdsRows = true, SignInOutbox(pendingClinical = 1)))
-        assertEquals(WipeThenClaim, decide(sameNameOtherId, owner = facilityA, holdsRows = true, drained))
+        assertEquals(Block("PHC Alpha"), decide(sameNameOtherId, owner = facilityA, holdsRows = true, drained))
 
         val sameIdOtherName = SessionFacility("fac-a", "PHC Alpha (renamed)")
         assertEquals(Continue, decide(sameIdOtherName, owner = facilityA, holdsRows = true, SignInOutbox(pendingClinical = 1)))
