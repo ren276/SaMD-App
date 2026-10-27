@@ -121,6 +121,9 @@ class FakeSyncOutboxRepository(
     var directOutboxCounts: com.example.samdapp.data.sync.OutboxCounts? = null
     override suspend fun readOutboxCounts() = directOutboxCounts ?: outboxCounts.value
 
+    var signInOutbox = com.example.samdapp.domain.auth.SignInOutbox()
+    override suspend fun readSignInOutbox() = signInOutbox
+
     /** Mirrors the real repository closely enough for a ViewModel test: FAILED rows only, never
      *  a RETRYABLE one, classified by the same
      *  [com.example.samdapp.domain.model.syncFailureReasonFor] the real one calls. */
