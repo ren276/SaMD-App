@@ -5656,3 +5656,18 @@ Filed follow-ups, not in this branch:
   OUTPUT_SUPPRESSED write must refuse the readback; needs a ruling, a test and a device check.
 - Backend comment `audit_actions_device.py` still says the four `slm_readback_*` actions are "Not
   emitted yet"; the device emits them since S4. Fix with the next backend change.
+
+## Facility scope P7: sync push owner check, deploy note - 2026-10-27
+
+The sync push envelope gained a REQUIRED `owner_facility_id` (api-contract.md 6.1, ruling FS-6),
+on branch `feat/facility-scope`. Both sides are strict, so they deploy together: the new server
+refuses an envelope without the field (400 `SAMD-SYS-9001`), and an old server's `StrictModel`
+refuses an envelope with it. After the merge the operator rebuilds the API image:
+
+```
+docker compose build --no-cache api
+```
+
+No Alembic revision: `audit_events.action` is a plain string column, so the new server action
+`sync_batch_owner_mismatch` needs no schema change.
+

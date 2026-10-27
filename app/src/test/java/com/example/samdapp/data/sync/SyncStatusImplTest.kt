@@ -1,17 +1,19 @@
 package com.example.samdapp.data.sync
 
+import com.example.samdapp.data.remote.dto.AllergySyncPayloadDto
+import com.example.samdapp.data.remote.dto.SyncRecordDto
 import com.example.samdapp.domain.connectivity.ConnectivityController
 import com.example.samdapp.domain.model.CaseRecord
 import com.example.samdapp.domain.model.CaseStatus
 import com.example.samdapp.domain.sync.SyncOfflineException
-import com.example.samdapp.data.remote.dto.AllergySyncPayloadDto
-import com.example.samdapp.data.remote.dto.SyncRecordDto
 import com.example.samdapp.testutil.FakeAuthTokenStore
 import com.example.samdapp.testutil.FakeCaseRecordRepository
 import com.example.samdapp.testutil.FakeNetworkMonitor
 import com.example.samdapp.testutil.FakeSyncOutboxRepository
 import com.example.samdapp.testutil.FakeSyncOutboxScheduler
 import com.example.samdapp.testutil.FakeSyncPushService
+import com.example.samdapp.testutil.TestDataOwner
+import java.time.Instant
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -23,7 +25,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.time.Instant
 
 /**
  * Ports `MockSyncStatusTest`'s six behaviors to [SyncStatusImpl] unchanged in substance — same
@@ -59,6 +60,7 @@ class SyncStatusImplTest {
         pushService,
         InMemoryStore(),
         FakeAuthTokenStore(),
+        TestDataOwner,
         drainOutcome,
     )
 

@@ -23,6 +23,8 @@ from app.schemas.common import StrictModel
 
 BATCH_ID_MAX = 36
 DEVICE_ID_MAX = 64
+# user_accounts.facility_id / facilities.id are String(32).
+FACILITY_ID_MAX = 32
 MAX_RECORDS = 500
 MAX_BODY_BYTES = 5 * 1024 * 1024
 
@@ -30,5 +32,9 @@ MAX_BODY_BYTES = 5 * 1024 * 1024
 class SyncPushEnvelope(StrictModel):
     batch_id: str = Field(min_length=1, max_length=BATCH_ID_MAX)
     device_id: str = Field(min_length=1, max_length=DEVICE_ID_MAX)
+    # The facility that owns the device's local data, from its device_data_owner marker
+    # (facility-scope memo 3.5, ruling FS-6). REQUIRED, no fallback: a batch without it is a
+    # malformed envelope. push() refuses the whole batch when it differs from the token's facility.
+    owner_facility_id: str = Field(min_length=1, max_length=FACILITY_ID_MAX)
     client_time: datetime
     records: list[dict[str, Any]]

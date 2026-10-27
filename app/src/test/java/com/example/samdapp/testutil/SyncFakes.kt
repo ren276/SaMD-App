@@ -227,3 +227,9 @@ class FakeSyncPushService(
         )
     }
 }
+
+/** A device whose local data is owned by `fac-test` (facility-scope FS-6), for drainer tests that
+ *  are not about the owner. */
+object TestDataOwner : com.example.samdapp.domain.slm.LocalDataOwnerFacility {
+    override suspend fun owningFacility() = com.example.samdapp.domain.slm.OwningFacility.Known("fac-test")
+}

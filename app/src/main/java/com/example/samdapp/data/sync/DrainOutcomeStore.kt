@@ -28,13 +28,24 @@ class DrainOutcomeStore @Inject constructor() {
  *  be classified. Before this the code was flattened into an exception message and lost. */
 class SyncPushFailedException(val code: String?, message: String) : IllegalStateException(message)
 
+/** The phone has no `device_data_owner` marker, so the drain pushed nothing (facility-scope memo
+ *  3.5): a phone nobody has signed in on since the upgrade, or one whose marker is unreadable. */
+class NoDataOwnerException : IllegalStateException("no device data owner: nothing was pushed")
+
+/** The server refused the batch because its owner is not the session's facility (FS-6). */
+const val SYNC_OWNER_FACILITY_MISMATCH_CODE = "SAMD-SYNC-6007"
+
 /** Pure, so the classification is testable without a drain. Any failure that is not a push
- *  failure comes from preparing the batch on this phone (the in-flight store), see
- *  [SyncOutboxDrainer.drain]. */
+ *  failure comes from preparing the batch on this phone (the in-flight store, or no owner marker,
+ *  [NoDataOwnerException]), see [SyncOutboxDrainer.drain].
+ *
+ *  [SYNC_OWNER_FACILITY_MISMATCH_CODE] is named, not left to the default: the batch is terminal
+ *  on this session and nothing on this phone fixes it, which is what SERVER_REFUSED says. */
 fun drainFailureFor(error: Throwable): DrainFailure = when (error) {
     is SyncPushFailedException -> when {
         error.code == null -> DrainFailure.NO_CONNECTION
         error.code.startsWith("SAMD-AUTH-") -> DrainFailure.SIGN_IN
+        error.code == SYNC_OWNER_FACILITY_MISMATCH_CODE -> DrainFailure.SERVER_REFUSED
         else -> DrainFailure.SERVER_REFUSED
     }
     else -> DrainFailure.LOCAL_STORE

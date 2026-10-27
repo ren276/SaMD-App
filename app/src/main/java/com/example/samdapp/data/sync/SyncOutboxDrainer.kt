@@ -6,6 +6,8 @@ import com.example.samdapp.data.remote.SyncPushService
 import com.example.samdapp.data.remote.dto.SyncPushRequestDto
 import com.example.samdapp.data.remote.dto.SyncRecordDto
 import com.example.samdapp.data.remote.dto.SyncResultDto
+import com.example.samdapp.domain.slm.LocalDataOwnerFacility
+import com.example.samdapp.domain.slm.OwningFacility
 import com.example.samdapp.domain.model.SyncRetryClass
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -38,6 +40,9 @@ class SyncOutboxDrainer @Inject constructor(
     private val pushService: SyncPushService,
     private val inFlightBatchStore: InFlightBatchStore,
     private val authTokenStore: AuthTokenStore,
+    /** The owner marker (FS-6): every envelope carries its facility id, and with no owner the
+     *  drain pushes nothing. Not defaulted: a default owner would be a fail-open drain. */
+    private val ownerFacility: LocalDataOwnerFacility,
     /** Defaulted so the many drainer tests that do not care about it stay unchanged; Hilt
      *  injects the singleton. */
     private val drainOutcomeStore: DrainOutcomeStore = DrainOutcomeStore(),
@@ -90,6 +95,11 @@ class SyncOutboxDrainer @Inject constructor(
         val attempted = mutableSetOf<Pair<String, String>>()
         observer?.onDrainStart()
 
+        // No owner, or a blank one: nothing is pushed, not even a resumed batch (facility-scope
+        // memo 3.5). It surfaces as LOCAL_STORE, "this phone could not prepare records to send".
+        val owner = (ownerFacility.owningFacility() as? OwningFacility.Known)?.facilityId?.takeIf { it.isNotBlank() }
+            ?: return Result.failure(NoDataOwnerException())
+
         // Seeded with the resumed batch's members BEFORE the loop, not left empty. A resumed
         // batch is an attempt like any other, and a row it acks as RETRYABLE is still collectable
         // the instant the loop below starts. MEASURED: without this seeding, a crash-then-resume
@@ -97,7 +107,7 @@ class SyncOutboxDrainer @Inject constructor(
         // landed outside the guard and the first loop pass picked the row straight back up.
         // Guard 1 (the SQL interval) would have hidden this in production and not in the fake,
         // which is exactly why the guard is not allowed to depend on it.
-        resumeInFlightBatch()?.let { resumed ->
+        resumeInFlightBatch(owner)?.let { resumed ->
             attempted += resumed.members
             if (resumed.result.isFailure) return resumed.result
         }
@@ -110,7 +120,7 @@ class SyncOutboxDrainer @Inject constructor(
             val packed = packer.pack(pending)
             failOversizedRecordsLocally(packed.oversized)
             for (batch in packed.batches) {
-                val result = sendAndApply(batch, alreadyPersisted = false)
+                val result = sendAndApply(batch, owner, alreadyPersisted = false)
                 if (result.isFailure) return result
             }
         }
@@ -149,7 +159,7 @@ class SyncOutboxDrainer @Inject constructor(
     /** Null if there was nothing to resume. A non-null result must be checked by the caller:
      *  [drain] stops the whole run on failure rather than piling a fresh batch on top of an
      *  un-acked one. */
-    private suspend fun resumeInFlightBatch(): ResumedBatch? {
+    private suspend fun resumeInFlightBatch(owner: String): ResumedBatch? {
         val saved = inFlightBatchStore.load().getOrElse { e ->
             // Unreadable, not "none": proceeding as if there were no in-flight batch could mint a
             // fresh batch_id for rows the backend already applied under the lost batch_id. Fail
@@ -166,7 +176,7 @@ class SyncOutboxDrainer @Inject constructor(
             return null
         }
         return ResumedBatch(
-            sendAndApply(SyncBatch(saved.batchId, records), alreadyPersisted = true, revisionOverrides = savedRevisions),
+            sendAndApply(SyncBatch(saved.batchId, records), owner, alreadyPersisted = true, revisionOverrides = savedRevisions),
             records.map { it.table to it.id }.toSet(),
         )
     }
@@ -179,6 +189,7 @@ class SyncOutboxDrainer @Inject constructor(
      *  .collectPendingRecords] and this call. */
     private suspend fun sendAndApply(
         batch: SyncBatch,
+        owner: String,
         alreadyPersisted: Boolean,
         revisionOverrides: Map<Pair<String, String>, Long> = emptyMap(),
     ): Result<Unit> {
@@ -193,6 +204,7 @@ class SyncOutboxDrainer @Inject constructor(
         val request = SyncPushRequestDto(
             batchId = batch.batchId,
             deviceId = authTokenStore.deviceId(),
+            ownerFacilityId = owner,
             clientTime = Instant.now(),
             records = batch.records,
         )

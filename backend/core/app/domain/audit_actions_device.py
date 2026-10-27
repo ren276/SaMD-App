@@ -89,9 +89,8 @@ DEVICE_AUDIT_ACTIONS: frozenset[str] = frozenset(
         # file exists: a device action this set does not accept is rejected at sync, "rejected"
         # maps to SyncState.FAILED on the device, no drain re-collects a FAILED row and nothing
         # renders failedCount, so a split commit silently and permanently loses exactly the rows
-        # that prove clinical narrative left the device. Not emitted yet; the seam's audit stage is
-        # not built. Same posture as voice_field_* and referral_status_changed: accepting a
-        # not-yet-emitted value now is cheap, accepting it late needs a coordinated field migration.
+        # that prove clinical narrative left the device. Emitted by the device's readback seam
+        # since on-device SLM slice S4.
         # Payload is measured metadata only in every case, never the question text, never the
         # generated text, never a drug name.
         "slm_readback_input_refused",
