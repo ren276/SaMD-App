@@ -10,9 +10,6 @@ import com.example.samdapp.data.slm.LiteRtLmRuntime
 import com.example.samdapp.data.slm.LocalAccelerator
 import com.example.samdapp.data.slm.LOCAL_SLM_DEFAULT_ACCELERATORS
 import com.example.samdapp.data.slm.LocalSlmEngine
-import com.example.samdapp.domain.auth.SessionFacilitySource
-import com.example.samdapp.domain.slm.LocalDataOwnerFacility
-import com.example.samdapp.domain.slm.OwningFacility
 import com.example.samdapp.domain.slm.SlmEngine
 import dagger.Module
 import dagger.Provides
@@ -25,12 +22,12 @@ import java.util.concurrent.Executors
 import javax.inject.Singleton
 
 /**
- * Dev-only holder for [LocalSlmEngine] (on-device SLM memo 4.1, 4.2), and the dev flavor's two
- * readback overrides (ruling R-DEV, memo 16): the seam runs on [LocalSlmEngine], and the local data
- * is owned by the signed-in session's facility. `SlmNetworkModule` uses them when present; staging
- * and prod have no such module, so they keep the remote engine and an owner that is always UNKNOWN.
- * `SlmEngineIsUnreachableFromPresentationTest` allows exactly the engine override below and no
- * other binding outside `SlmNetworkModule`.
+ * Dev-only holder for [LocalSlmEngine] (on-device SLM memo 4.1, 4.2), and the dev flavor's one
+ * readback override (ruling R-DEV, memo 16): the seam runs on [LocalSlmEngine]. `SlmNetworkModule`
+ * uses it when present; staging and prod have no such module, so they keep the remote engine. The
+ * owner of the local data is the `device_data_owner` marker in every flavor (facility-scope FS-7),
+ * which superseded R-DEV's session-facility owner. `SlmEngineIsUnreachableFromPresentationTest`
+ * allows exactly the engine override below and no other binding outside `SlmNetworkModule`.
  */
 @Module
 @InstallIn(SingletonComponent::class)
@@ -48,19 +45,6 @@ object LocalSlmModule {
 
     @Provides @DevReadbackOverride
     fun provideDevReadbackEngine(engine: LocalSlmEngine): SlmEngine = engine
-
-    /**
-     * Dev holds mock data only, so the owner of the local data is taken to be the signed-in
-     * session's facility: the facility check passes for any signed-in worker whose login carried a
-     * facility id, and refuses when signed out. This is not a facility scope and must never ship:
-     * staging and prod wait for the product-wide facility-scope PR (memo 15).
-     */
-    @Provides @DevReadbackOverride
-    fun provideDevLocalDataOwnerFacility(session: SessionFacilitySource): LocalDataOwnerFacility =
-        object : LocalDataOwnerFacility {
-            override suspend fun owningFacility(): OwningFacility =
-                session.currentFacility()?.let { OwningFacility.Known(it.facilityId) } ?: OwningFacility.Unknown
-        }
 }
 
 /**

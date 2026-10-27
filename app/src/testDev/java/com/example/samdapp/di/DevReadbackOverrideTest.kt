@@ -1,39 +1,38 @@
 package com.example.samdapp.di
 
-import com.example.samdapp.domain.auth.SessionFacility
-import com.example.samdapp.domain.auth.SessionFacilitySource
+import com.example.samdapp.domain.slm.LocalDataOwnerFacility
 import com.example.samdapp.domain.slm.OwningFacility
-import com.example.samdapp.domain.slm.facilityScopeAllows
-import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Ruling R-DEV (on-device SLM memo 16): in dev the owner of the local data is the signed-in
- * session's facility, so the seam's facility check (step 0, Y-21') lets a signed-in worker's
- * readback through and still refuses when nobody is signed in. Which engine dev resolves is pinned
- * by `ReadbackFlavorGraphTest` and `SlmEngineIsUnreachableFromPresentationTest`.
+ * Ruling R-DEV (on-device SLM memo 16) gave dev an owner override: the signed-in session's
+ * facility. Facility-scope FS-7 superseded it: dev's owner is the `device_data_owner` marker, as in
+ * every flavor (`ReadbackFlavorGraphTest`), so the dev holder provides the engine override and
+ * nothing that answers [LocalDataOwnerFacility]. Which engine dev resolves is pinned by
+ * `ReadbackFlavorGraphTest` and `SlmEngineIsUnreachableFromPresentationTest`.
  */
 class DevReadbackOverrideTest {
 
-    private class Session(private val facility: SessionFacility?) : SessionFacilitySource {
-        override suspend fun currentFacility(): SessionFacility? = facility
-    }
+    private fun ownerProviders(holder: Class<*>) =
+        holder.declaredMethods.filter { LocalDataOwnerFacility::class.java.isAssignableFrom(it.returnType) }.map { it.name }
 
     @Test
-    fun theDevOwnerIsTheSignedInSessionsFacilitySoTheScopeCheckPasses() = runTest {
-        val session = SessionFacility("fac-7", "PHC Rampur")
-        val owner = LocalSlmModule.provideDevLocalDataOwnerFacility(Session(session)).owningFacility()
-        assertEquals(OwningFacility.Known("fac-7"), owner)
-        assertTrue("a signed-in dev readback was refused at the facility check", facilityScopeAllows(session, owner))
+    fun theDevHolderNoLongerProvidesAnOwner() {
+        assertEquals(emptyList<String>(), ownerProviders(LocalSlmModule::class.java))
     }
 
+    /** Positive control: a holder that still provides the session-facility owner is caught. */
     @Test
-    fun signedOutTheDevOwnerIsUnknownAndTheScopeCheckRefuses() = runTest {
-        val owner = LocalSlmModule.provideDevLocalDataOwnerFacility(Session(null)).owningFacility()
-        assertEquals(OwningFacility.Unknown, owner)
-        assertFalse(facilityScopeAllows(null, owner))
+    fun aHolderThatProvidesAnOwnerIsCaught() {
+        assertTrue(ownerProviders(WithOwner::class.java).contains("provideDevLocalDataOwnerFacility"))
+    }
+
+    private object WithOwner {
+        @Suppress("unused")
+        fun provideDevLocalDataOwnerFacility(): LocalDataOwnerFacility = object : LocalDataOwnerFacility {
+            override suspend fun owningFacility(): OwningFacility = OwningFacility.Unknown
+        }
     }
 }
