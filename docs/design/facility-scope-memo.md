@@ -248,6 +248,12 @@ phone is free before any adb command.
 | P8 | Readback owner binding swap | nothing |
 | P9 | RMF rows H-54, H-57 to H-59, DHF entry | nothing |
 
+P3 also handles a login with a blank facility id (operator, 2026-10-27, after STOP P1; P1's
+`decideFacilitySignIn` refuses it rather than deciding it): on the persistence side exactly like
+BLOCK (nothing saved, the new refresh token revoked, a failed revoke recorded in the audit), with
+its own string resource for the message. That copy goes to the operator for approval at STOP P3,
+like the BLOCK copy.
+
 Per the operator's correction (10.1), P2, P4 and P5 run their instrumented tests on the Pixel, not
 the emulator. The live cross-facility check (two seeded accounts in two facilities, one phone)
 needs the Pixel against the staging-like backend.
