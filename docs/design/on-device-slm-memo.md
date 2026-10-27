@@ -1201,6 +1201,14 @@ Resolved at batch 6: Y-21 Option 3 in this PR (S4); the product-wide fix is a se
 Filed by ruling (not this PR): Y-9 device request id; Y-10 production delivery; Y-11 ASR release;
 Y-12 fleet capability probe; G-7 licence confirmation; Tensor G6 follow-up (Y-18).
 
+### 15.4 Pixel dev database at schema 23 (operator, 2026-10-27)
+
+From `3dade60` (facility-scope P2, `feat/facility-scope`) on, the Pixel's dev database is version
+23 (`MIGRATION_22_23`, the `device_data_owner` table). Installing a v22 build (master or any other
+branch without that migration) crashes on open: Room has no downgrade path. The only way back is
+clearing the dev app's data, which also deletes `files/slm` and requires re-pushing the model per
+9.1.
+
 ---
 
 ## 16. Rulings 2026-10-15
