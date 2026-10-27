@@ -661,3 +661,21 @@ val MIGRATION_21_22 = object : Migration(21, 22) {
         )
     }
 }
+
+/**
+ * Room 22 to 23: the device data owner marker (facility-scope memo 3.1, FS-3).
+ *
+ * Adds the empty single-row table `device_data_owner`, with the DDL Room exported to `23.json`.
+ * No existing table or row is touched: an upgraded phone has data and no owner, and its first
+ * sign-in claims it with `legacy = true` (FS-4(a)). Roll-forward only, and never edited once
+ * merged (FS-3).
+ */
+val MIGRATION_22_23 = object : Migration(22, 23) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL(
+            "CREATE TABLE IF NOT EXISTS `device_data_owner` (`id` INTEGER NOT NULL, " +
+                "`facilityId` TEXT NOT NULL, `facilityName` TEXT NOT NULL, `claimedAt` INTEGER NOT NULL, " +
+                "`claimedByWorkerId` TEXT NOT NULL, `legacy` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        )
+    }
+}
