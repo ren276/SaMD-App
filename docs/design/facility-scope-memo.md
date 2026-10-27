@@ -80,8 +80,8 @@ it describes: a Keystore-loss reset (`DatabasePassphraseProvider.kt:40`, `delete
 removes data and marker together, so they cannot disagree, and so does clearing the app's storage
 in the support procedure. `LocalDataOwnerFacility` reads it.
 
-The DAO has an atomic claim (an insert that succeeds only when no owner exists), a read, and a
-clear. P2 built the clear for the in-app wipe, which FS-R dropped: nothing calls it now. Per FS-3
+The DAO has an atomic claim (an insert that succeeds only when no owner exists) and a read. P2's
+clear, built for the in-app wipe that FS-R dropped, is deleted in P3 (FS-R2). Per FS-3
 the migration is tested by actually running the upgrade with `MigrationTestHelper`; it is
 roll-forward only and is never edited once merged.
 
@@ -122,8 +122,8 @@ covers a phone that must move.
 ### 3.4 No in-app wipe
 
 FS-R drops the wipe (FS-5 is superseded) and slice P4. The P4 work in progress was never
-committed: it is kept outside the branch (`git stash` on the worktree, plus a patch and tar under
-`/media/sandesh/extra-ssd/samd-slm-parity/fs/p4-dropped/`). Clearing a phone's data is the support
+committed. Its stash was dropped (FS-R2) after checking it byte for byte against the patch and tar
+kept under `/media/sandesh/extra-ssd/samd-slm-parity/fs/p4-dropped/`. Clearing a phone's data is the support
 procedure's "clear the app's storage", which removes the database, every file and every DataStore
 at once.
 
@@ -185,7 +185,7 @@ phone is free before any adb command.
   still saves nothing and is audited; a blank id is refused the same way.
 - Marker and migration 22 to 23: `MigrationTestHelper` runs the upgrade on a seeded v22 test
   database (every existing row survives, the new table exists empty); two concurrent claims,
-  exactly one wins; the clear works.
+  exactly one wins.
 - Backend (FS-6): a mismatched batch is refused and **no row is persisted**, read back from the
   database, not from the response (CLAUDE.md).
 - Readback: `ReadbackFlavorGraphTest` updated: the owner is the marker in every flavor.
@@ -238,7 +238,7 @@ beyond the owner binding.
 ## 10. Rulings
 
 The questions as asked (STOP FS0), then the operator's rulings verbatim (10.1), then the scope
-reduction FS-R verbatim (10.2), which supersedes parts of 10.1.
+reduction FS-R verbatim (10.2), which supersedes parts of 10.1, then FS-R1 and FS-R2 (10.3).
 
 - **FS-1** Adopt the decision table in 3.2 (CLAIM, CONTINUE, WIPE only when fully SYNCED, BLOCK
   otherwise, with the new refresh token revoked).
@@ -284,6 +284,12 @@ Ruling FS-R (2026-10-27), supersedes FS-1 WIPE, FS-2, FS-5 and the P3 progress-s
 - Kept: P1 (simplify the table to the above), P2 (done), P3 (sign-in wiring per the above), P6 (audit actions claimed and blocked, with backend mirrors; local_data_wiped and local_data_released are dropped), P7 (the server envelope check, FS-6 as ruled), P8 (the readback owner binding), P9 (risk rows).
 - Hazards: H-57 controls become BLOCK plus the server check; H-58 control is BLOCK; H-59 becomes a residual risk of the support procedure (clearing storage with unsent data), controlled by the documented pre-check, not by software.
 
+### 10.3 Rulings FS-R1 and FS-R2, 2026-10-27 (verbatim)
+
+FS-R1 Support-procedure pre-check: Home's sync caption reads exactly "Up to date" (by the #76 truth table that state means nothing pending, failed, conflicted or blocked). Any other caption means the phone goes to support first; storage is never cleared while records are unsent or stuck.
+
+FS-R2 Delete DeviceDataOwnerDao.clear() and its test in P3 (no caller remains). Drop the P4 stash (git stash drop on that exact entry; verify the SSD backup in samd-slm-parity/fs/p4-dropped/ exists first).
+
 ## 11. Merge order
 
 `feat/local-network-permission` (F1, unmerged) changes `LoginViewModel`, `LoginScreen`,
@@ -295,17 +301,14 @@ likely conflict and is resolved by hand, not by a rebase.
 
 The app never moves a phone between facilities. Support does, in this order:
 
-1. **Pre-check (the H-59 control).** A facility A worker signs in on the phone and confirms Home
-   shows nothing waiting to send.
+1. **Pre-check (the H-59 control, FS-R1).** A facility A worker signs in on the phone and confirms
+   Home's sync caption reads exactly "Up to date" (`sync_caption_up_to_date`, said only when
+   nothing is pending, failed, conflicted or blocked: the #76 truth table, `strings.xml:131,174`,
+   `SyncCaption.kt:62`). Any other caption means the phone goes to support first; storage is never
+   cleared while records are unsent or stuck.
 2. **Clear.** Support clears the app's storage (Android Settings, the app, Storage, Clear storage).
    This removes the database with its owner marker, every file, every DataStore and the database
    passphrase, so the next start creates a new, empty database.
 3. **Model.** Support re-delivers the SLM model (on-device SLM memo 9.1 for dev; the production
    delivery of Y-10 once it exists), because clearing storage also removes `files/slm`.
 4. **Claim.** A facility B worker signs in; the empty phone is claimed for facility B (CLAIM, 3.2).
-
-OPEN for the operator: "nothing waiting" on Home covers rows still to send (pending, held, audit),
-but rows that need review (FAILED, CONFLICT, Home's review card) never send on their own and the
-app cannot correct them (3.3). As written, step 1 can pass with such rows on the phone, and step 2
-then destroys them. Proposed: step 1 also requires Home's review card to be absent, and a phone
-with rows to review goes to support with that list before it is cleared.
