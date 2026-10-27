@@ -1330,3 +1330,16 @@ V-2 Local generation deadline 60 s (the server stays at 40 s); the init bound st
 V-3 Number gate: a record value joined by '/' (for example 148/92) also contributes each part as a matchable number; the whole stays matchable. Nothing else in the gate changes.
 V-4 Language: the language gate stays a hard gate, as a RELEASE gate for any non-dev enablement. Its fix is a follow-up PR: prompt template slm-readback-v2 adding an instruction to answer in the language and script of the QUESTION, with a PROMPT_TEMPLATE_VERSION bump and re-runs of G-6, the server run and the local runs. The server's own 22 of 34 failure is filed as a readback-quality finding.
 V-5 The R7 hard gates gate enablement outside dev, not the merge of this dev-only PR. The PR body states the verdict and every failing gate verbatim.
+
+### Note 2026-10-27: R-DEV's owner override superseded by facility-scope FS-7
+
+R-DEV's third clause (in dev, `LocalDataOwnerFacility` returns the signed-in session's facility)
+is superseded by facility-scope ruling FS-7 (`docs/design/facility-scope-memo.md` 3.6, 10.1),
+built in P8 (`fb5d590` on `feat/facility-scope`). In every flavor the owner is now the
+`device_data_owner` marker (`MarkerLocalDataOwnerFacility`), claimed at sign-in; the dev
+session-facility provider and `UnknownLocalDataOwnerFacility` are deleted. The rest of R-DEV
+stands unchanged: `SLM_READBACK_ENABLED` is true in dev only, and dev's engine is `LocalSlmEngine`.
+The readback seam's facility check now compares the session's facility against the marker
+everywhere. The statements of the old binding in sections 1, 4.1, 7.1 and 15 are kept as the
+record of what R-DEV built; this note is what holds from `fb5d590` on.
+
