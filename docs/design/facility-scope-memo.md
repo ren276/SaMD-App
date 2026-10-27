@@ -290,6 +290,18 @@ FS-R1 Support-procedure pre-check: Home's sync caption reads exactly "Up to date
 
 FS-R2 Delete DeviceDataOwnerDao.clear() and its test in P3 (no caller remains). Drop the P4 stash (git stash drop on that exact entry; verify the SSD backup in samd-slm-parity/fs/p4-dropped/ exists first).
 
+### 10.4 Rulings FS-R3 to FS-R6, 2026-10-27 (verbatim)
+
+FS-R3 Strings: sign_in_facility_blocked = "This phone belongs to %1$s. Sign in with a %1$s account, or ask your supervisor to move this phone." sign_in_no_facility = "This account is not linked to a facility. Tell your supervisor."
+
+FS-R4 The audit table stays classified as clinical data.
+
+FS-R5 No exception may leave FacilitySignInGate. CLAIM and LEGACY_CLAIM write the owner row and its audit row in ONE Room transaction; if the audit write fails, the claim rolls back, no token is saved, and LoginViewModel shows the existing generic sign-in failure string (cite which). BLOCK and blank id stay refused and still show their message even if the audit write fails; a failed audit never turns a refusal into an admit. Any unexpected state (including losing a claim and then finding no owner) is refused fail closed with the generic failure string, nothing saved, audited if possible. If the audit hash chain cannot be written inside the same transaction as the claim, STOP and report why before choosing another design.
+
+FS-R6 logAs: restrict its visibility as narrowly as Kotlin allows, plus a source-scan test (scanned files declared as Test inputs, positive control) that only FacilitySignInGate calls it.
+
+Operator answer, 2026-10-27, on FS-R5's generic string: no generic sign-in failure string resource exists on this branch (a failure shows `SignInResult.Failure.message`, the server's or the transport's raw text; F1's strings are cause-specific and unmerged), so a new resource `sign_in_failed_generic` is added and its copy goes to the operator for approval at STOP P3b. On the hash chain: the device audit row has no hash field (`AuditLogEntity`); the chain is built server side when the row is pushed, so the device row is a plain insert and joins the claim's transaction.
+
 ## 11. Merge order
 
 `feat/local-network-permission` (F1, unmerged) changes `LoginViewModel`, `LoginScreen`,
