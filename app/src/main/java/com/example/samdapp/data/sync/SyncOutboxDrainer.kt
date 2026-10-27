@@ -46,6 +46,8 @@ class SyncOutboxDrainer @Inject constructor(
     /** Defaulted so the many drainer tests that do not care about it stay unchanged; Hilt
      *  injects the singleton. */
     private val drainOutcomeStore: DrainOutcomeStore = DrainOutcomeStore(),
+    /** Defaulted like [drainOutcomeStore]; Hilt injects the persisted one. */
+    private val ownerMismatchHold: OwnerMismatchHold = MemoryOwnerMismatchHold(),
     /** Present only in a build that binds one (the dev source set). */
     drainObserver: java.util.Optional<DrainObserver> = java.util.Optional.empty(),
 ) {
@@ -99,6 +101,9 @@ class SyncOutboxDrainer @Inject constructor(
         // memo 3.5). It surfaces as LOCAL_STORE, "this phone could not prepare records to send".
         val owner = (ownerFacility.owningFacility() as? OwningFacility.Known)?.facilityId?.takeIf { it.isNotBlank() }
             ?: return Result.failure(NoDataOwnerException())
+        // A batch refused as another facility's records is never resent automatically: the same
+        // batch under the same session is refused identically. Only a new sign-in releases it.
+        if (ownerMismatchHold.isHeld()) return Result.failure(OwnerMismatchHeldException())
 
         // Seeded with the resumed batch's members BEFORE the loop, not left empty. A resumed
         // batch is an attempt like any other, and a row it acks as RETRYABLE is still collectable
@@ -220,6 +225,9 @@ class SyncOutboxDrainer @Inject constructor(
                 Result.success(Unit)
             }
             is SyncPushResult.Failure -> {
+                // The one batch-terminal refusal: hold the outbox until a new sign-in (above). The
+                // in-flight batch is still kept, so the same batch_id is what goes after it.
+                if (result.code == SYNC_OWNER_FACILITY_MISMATCH_CODE) ownerMismatchHold.hold()
                 // Deliberately do NOT clear the persisted in-flight batch here: whether this
                 // failure means "never reached the backend" or "backend applied it but the
                 // response never arrived", resending under this same batch_id on the next run is

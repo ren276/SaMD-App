@@ -2,6 +2,7 @@ package com.example.samdapp.data.local.auth
 
 import com.example.samdapp.data.remote.AuthApiResult
 import com.example.samdapp.data.remote.RetrofitAuthService
+import com.example.samdapp.data.sync.OwnerMismatchHold
 import com.example.samdapp.domain.auth.AuthSession
 import com.example.samdapp.domain.auth.ChangePinResult
 import com.example.samdapp.domain.auth.SignInResult
@@ -22,6 +23,7 @@ class BackendAuthSession @Inject constructor(
     private val authApiService: RetrofitAuthService,
     private val tokenStore: AuthTokenStore,
     private val facilityGate: FacilitySignInGate,
+    private val ownerMismatchHold: OwnerMismatchHold,
 ) : AuthSession {
 
     override fun currentUser(): Flow<UserSession?> = tokenStore.session
@@ -57,6 +59,9 @@ class BackendAuthSession @Inject constructor(
                     facilityId = login.worker.facilityId,
                     facilityName = login.worker.facilityName,
                 )
+                // A new sign-in is the one thing that releases a drain held after an owner-facility
+                // refusal (SAMD-SYNC-6007, facility-scope memo 3.5).
+                ownerMismatchHold.release()
                 SignInResult.Success(mustChangePin = login.mustChangePin)
             }
             is AuthApiResult.Failure -> SignInResult.Failure(result.message)

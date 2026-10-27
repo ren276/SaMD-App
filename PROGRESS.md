@@ -5715,4 +5715,8 @@ instrumented package 134 of 134 at `d00c004`. Mutation rows in
 - A phone that held two facilities' data before this ships is not detected (FS-4(a), basis: no field pilot).
 - Merge order with F1 (`feat/local-network-permission`): memo section 11; the second to merge merges master in.
 - After the merge: `docker compose build --no-cache api` (device and server deploy together).
+- Backend test `tests/test_config.py::test_live_abdm_requires_credentials` fails on this machine and
+  passes in CI: it depends on the local `.env`, which pydantic-settings loads automatically, so a
+  locally set ABDM credential makes the "missing credentials" case not raise. Fix by forcing the
+  environment on the pytest invocation or by disabling env-file loading in tests.
 

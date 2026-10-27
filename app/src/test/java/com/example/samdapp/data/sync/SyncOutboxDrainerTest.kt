@@ -566,10 +566,32 @@ class DrainOutcomeRecordingTest {
     }
 
     @Test
-    fun `a batch the server refuses as another facility's records reads SERVER_REFUSED`() = runTest {
+    fun `a batch the server refuses as another facility's records reads OWNER_MISMATCH and is not resent until a sign-in`() = runTest {
+        var calls = 0
+        val refusing = object : com.example.samdapp.data.remote.SyncPushService {
+            override suspend fun push(request: com.example.samdapp.data.remote.dto.SyncPushRequestDto) =
+                com.example.samdapp.data.remote.SyncPushResult.Failure(code = SYNC_OWNER_FACILITY_MISMATCH_CODE, message = "refused").also { calls++ }
+        }
+        val hold = MemoryOwnerMismatchHold()
         val outcome = DrainOutcomeStore()
-        drainWith(failingPush(code = SYNC_OWNER_FACILITY_MISMATCH_CODE), outcome)
-        assertEquals(com.example.samdapp.domain.sync.DrainFailure.SERVER_REFUSED, outcome.lastFailure.value)
-        assertEquals("SAMD-SYNC-6007", SYNC_OWNER_FACILITY_MISMATCH_CODE)
+        val store = InMemoryInFlightBatchStore()
+        fun drainer() = SyncOutboxDrainer(
+            FakeSyncOutboxRepository(listOf(record("a-1"))),
+            SyncBatchPacker(com.example.samdapp.data.remote.SyncGson.create()),
+            refusing, store, FakeAuthTokenStore(), TestDataOwner, outcome, hold,
+        )
+
+        drainer().drain()
+        assertEquals(com.example.samdapp.domain.sync.DrainFailure.OWNER_MISMATCH, outcome.lastFailure.value)
+        assertEquals(1, calls)
+
+        drainer().drain()
+        drainer().drain()
+        assertEquals("the refused batch is not resent on later cycles", 1, calls)
+        assertEquals(com.example.samdapp.domain.sync.DrainFailure.OWNER_MISMATCH, outcome.lastFailure.value)
+
+        hold.release() // what a new sign-in does
+        drainer().drain()
+        assertEquals("after a sign-in the same batch goes again", 2, calls)
     }
 }

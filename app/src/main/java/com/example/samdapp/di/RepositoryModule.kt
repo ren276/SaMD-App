@@ -11,7 +11,9 @@ import com.example.samdapp.data.local.auth.AuthTokenStore
 import com.example.samdapp.data.local.auth.BackendAuthSession
 import com.example.samdapp.data.local.auth.DataStoreAuthTokenStore
 import com.example.samdapp.data.sync.DataStoreInFlightBatchStore
+import com.example.samdapp.data.sync.DataStoreOwnerMismatchHold
 import com.example.samdapp.data.sync.InFlightBatchStore
+import com.example.samdapp.data.sync.OwnerMismatchHold
 import com.example.samdapp.data.sync.RoomSyncOutboxRepository
 import com.example.samdapp.data.sync.SyncOutboxRepository
 import com.example.samdapp.data.sync.SyncOutboxScheduler
@@ -106,6 +108,9 @@ abstract class RepositoryModule {
 
     @Binds @Singleton
     abstract fun bindInFlightBatchStore(impl: DataStoreInFlightBatchStore): InFlightBatchStore
+
+    @Binds
+    abstract fun bindOwnerMismatchHold(impl: DataStoreOwnerMismatchHold): OwnerMismatchHold
 
     @Binds @Singleton
     abstract fun bindAuthSession(impl: BackendAuthSession): AuthSession

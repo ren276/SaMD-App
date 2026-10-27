@@ -21,6 +21,7 @@ import com.example.samdapp.data.remote.dto.LogoutResponseDto
 import com.example.samdapp.data.remote.dto.MeResponseDto
 import com.example.samdapp.data.remote.dto.RefreshRequestDto
 import com.example.samdapp.data.remote.dto.TokenPairDto
+import com.example.samdapp.data.sync.MemoryOwnerMismatchHold
 import com.example.samdapp.data.sync.RoomSyncOutboxRepository
 import com.example.samdapp.domain.audit.AuditAction
 import com.example.samdapp.domain.auth.AuthSession
@@ -130,7 +131,7 @@ class FacilitySignInDeviceTest {
                 db.deviceDataOwnerDao(), RoomLocalClinicalData(db), outboxRepository(), RoomLocalTransaction(db),
                 RetrofitAuthService(api),
             ) { audit }
-            session = BackendAuthSession(RetrofitAuthService(api), tokens, gate)
+            session = BackendAuthSession(RetrofitAuthService(api), tokens, gate, MemoryOwnerMismatchHold())
         }
 
         suspend fun signIn() = session.signIn("Worker", UserRole.NURSE, "482915")

@@ -146,6 +146,10 @@
     <string name="sync_caption_could_not_send_no_connection">Could not send: could not reach the server. %1$d waiting.</string>
     <string name="sync_caption_could_not_send_sign_in">Could not send: sign in again to send. %1$d waiting.</string>
     <string name="sync_caption_could_not_send_server_refused">Could not send: the server is not accepting records right now. %1$d waiting.</string>
+    <!-- SAMD-SYNC-6007 (facility-scope memo 3.5): the server refused the batch as another
+         facility's records. Shown as the caption and after "Sync now". Copy PENDING operator
+         approval at STOP P7b. -->
+    <string name="sync_caption_owner_mismatch">Could not send: this phone\'s records belong to a different facility than this account. Tell your supervisor.</string>
     <string name="sync_caption_could_not_send_local_store">Could not send: this phone could not prepare records to send. %1$d waiting.</string>
     <plurals name="sync_caption_waiting_records">
         <item quantity="one">1 record waiting to send.</item>

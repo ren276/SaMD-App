@@ -35,18 +35,23 @@ class NoDataOwnerException : IllegalStateException("no device data owner: nothin
 /** The server refused the batch because its owner is not the session's facility (FS-6). */
 const val SYNC_OWNER_FACILITY_MISMATCH_CODE = "SAMD-SYNC-6007"
 
+/** A drain skipped because an earlier batch was refused with [SYNC_OWNER_FACILITY_MISMATCH_CODE]
+ *  and nobody has signed in since ([OwnerMismatchHold]). */
+class OwnerMismatchHeldException : IllegalStateException("held after an owner-facility refusal: nothing was pushed")
+
 /** Pure, so the classification is testable without a drain. Any failure that is not a push
  *  failure comes from preparing the batch on this phone (the in-flight store, or no owner marker,
  *  [NoDataOwnerException]), see [SyncOutboxDrainer.drain].
  *
- *  [SYNC_OWNER_FACILITY_MISMATCH_CODE] is named, not left to the default: the batch is terminal
- *  on this session and nothing on this phone fixes it, which is what SERVER_REFUSED says. */
+ *  [SYNC_OWNER_FACILITY_MISMATCH_CODE] and a drain held after it are [DrainFailure.OWNER_MISMATCH]:
+ *  terminal for the batch under this session, with its own message. */
 fun drainFailureFor(error: Throwable): DrainFailure = when (error) {
     is SyncPushFailedException -> when {
         error.code == null -> DrainFailure.NO_CONNECTION
         error.code.startsWith("SAMD-AUTH-") -> DrainFailure.SIGN_IN
-        error.code == SYNC_OWNER_FACILITY_MISMATCH_CODE -> DrainFailure.SERVER_REFUSED
+        error.code == SYNC_OWNER_FACILITY_MISMATCH_CODE -> DrainFailure.OWNER_MISMATCH
         else -> DrainFailure.SERVER_REFUSED
     }
+    is OwnerMismatchHeldException -> DrainFailure.OWNER_MISMATCH
     else -> DrainFailure.LOCAL_STORE
 }

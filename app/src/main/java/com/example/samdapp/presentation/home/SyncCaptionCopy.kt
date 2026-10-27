@@ -17,15 +17,14 @@ fun SyncCaption.text(resources: Resources): String = when (this) {
     SyncCaption.OfflineActivityLog -> resources.getString(R.string.sync_caption_offline_activity_log)
     SyncCaption.OfflineNothingElse -> resources.getString(R.string.sync_caption_offline_nothing_else)
     SyncCaption.OfflineAllSent -> resources.getString(R.string.sync_caption_offline_all_sent)
-    is SyncCaption.CouldNotSend -> resources.getString(
-        when (failure) {
-            DrainFailure.NO_CONNECTION -> R.string.sync_caption_could_not_send_no_connection
-            DrainFailure.SIGN_IN -> R.string.sync_caption_could_not_send_sign_in
-            DrainFailure.SERVER_REFUSED -> R.string.sync_caption_could_not_send_server_refused
-            DrainFailure.LOCAL_STORE -> R.string.sync_caption_could_not_send_local_store
-        },
-        waiting,
-    )
+    is SyncCaption.CouldNotSend -> when (failure) {
+        // No count: the records are this phone's, held back on purpose, not "waiting".
+        DrainFailure.OWNER_MISMATCH -> resources.getString(R.string.sync_caption_owner_mismatch)
+        DrainFailure.NO_CONNECTION -> resources.getString(R.string.sync_caption_could_not_send_no_connection, waiting)
+        DrainFailure.SIGN_IN -> resources.getString(R.string.sync_caption_could_not_send_sign_in, waiting)
+        DrainFailure.SERVER_REFUSED -> resources.getString(R.string.sync_caption_could_not_send_server_refused, waiting)
+        DrainFailure.LOCAL_STORE -> resources.getString(R.string.sync_caption_could_not_send_local_store, waiting)
+    }
     is SyncCaption.Waiting ->
         if (doctorCases > 0) {
             resources.getString(R.string.sync_caption_waiting_records_and_doctor_cases, records, doctorCases)
@@ -52,6 +51,7 @@ fun SyncNowMessage.text(resources: Resources): String = when (this) {
             DrainFailure.SIGN_IN -> R.string.sync_now_failed_sign_in
             DrainFailure.SERVER_REFUSED -> R.string.sync_now_failed_server_refused
             DrainFailure.LOCAL_STORE -> R.string.sync_now_failed_local_store
+            DrainFailure.OWNER_MISMATCH -> R.string.sync_caption_owner_mismatch
         },
     )
     is SyncNowMessage.SentNeedsReview -> resources.getQuantityString(R.plurals.sync_now_sent_needs_review, count, count)

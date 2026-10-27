@@ -8,6 +8,7 @@ import com.example.samdapp.data.local.dao.DeviceDataOwnerDao
 import com.example.samdapp.data.local.entity.AuditLogEntity
 import com.example.samdapp.data.local.entity.DeviceDataOwnerEntity
 import com.example.samdapp.data.remote.RetrofitAuthService
+import com.example.samdapp.data.sync.MemoryOwnerMismatchHold
 import com.example.samdapp.data.remote.api.AuthApiService
 import com.example.samdapp.data.remote.dto.ApiEnvelopeDto
 import com.example.samdapp.data.remote.dto.ChangePinRequestDto
@@ -147,12 +148,14 @@ class FacilitySignInGateTest {
         val audit = SwitchableAuditLogDao()
         val outbox = FakeSyncOutboxRepository().apply { signInOutbox = SignInOutbox(pendingClinical = 2, failed = 1) }
         private val logger = RoomAuditLogger(audit, FakeAuthSession())
+        val hold = MemoryOwnerMismatchHold()
         val session = BackendAuthSession(
             RetrofitAuthService(api), tokens,
             FacilitySignInGate(
                 owners, object : LocalClinicalData { override suspend fun present() = clinical() }, outbox,
                 RollbackTransaction(owners), RetrofitAuthService(api),
             ) { logger },
+            hold,
         )
 
         suspend fun signIn() = session.signIn("Worker", UserRole.NURSE, "482915")
@@ -303,6 +306,30 @@ class FacilitySignInGateTest {
             assertNull(row.caseRecordId)
             assertTrue("${row.action}: no patient field in the payload", fields(row.payload).keys.none { "patient" in it || "case" in it })
         }
+    }
+
+    // ── P7b: a new sign-in releases a drain held after SAMD-SYNC-6007; a refused one does not ──
+
+    @Test
+    fun `an admitted sign-in releases a drain held after an owner-facility refusal`() = runTest {
+        val h = Harness(facilityId = "fac-a", facilityName = "PHC Alpha")
+        h.owners.owner = alpha
+        h.hold.hold()
+
+        assertEquals(SignInResult.Success(mustChangePin = false), h.signIn())
+
+        assertEquals(false, h.hold.isHeld())
+    }
+
+    @Test
+    fun `a refused sign-in leaves the hold in place`() = runTest {
+        val blocked = Harness().apply { owners.owner = alpha; hold.hold() }
+        assertEquals(SignInResult.FacilityBlocked("PHC Alpha"), blocked.signIn())
+        assertEquals(true, blocked.hold.isHeld())
+
+        val noFacility = Harness(facilityId = "").apply { hold.hold() }
+        assertEquals(SignInResult.NoFacility, noFacility.signIn())
+        assertEquals(true, noFacility.hold.isHeld())
     }
 
     // ── FS-R5: nothing leaves the gate, and the claim and its audit row are atomic ──
