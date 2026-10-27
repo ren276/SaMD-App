@@ -514,6 +514,6 @@
     <string name="sign_in_facility_blocked">This phone belongs to %1$s. Sign in with a %1$s account, or ask your supervisor to move this phone.</string>
     <string name="sign_in_no_facility">This account is not linked to a facility. Tell your supervisor.</string>
     <!-- The facility check could not complete safely, so the sign-in was refused fail closed (FS-R5).
-         Copy PENDING operator approval at STOP P3b. -->
+         Copy approved by the operator after STOP P3b (facility-scope memo 10.5). -->
     <string name="sign_in_failed_generic">Cannot sign in on this phone right now. Try again, or tell your supervisor.</string>
 </resources>

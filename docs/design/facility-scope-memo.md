@@ -302,6 +302,10 @@ FS-R6 logAs: restrict its visibility as narrowly as Kotlin allows, plus a source
 
 Operator answer, 2026-10-27, on FS-R5's generic string: no generic sign-in failure string resource exists on this branch (a failure shows `SignInResult.Failure.message`, the server's or the transport's raw text; F1's strings are cause-specific and unmerged), so a new resource `sign_in_failed_generic` is added and its copy goes to the operator for approval at STOP P3b. On the hash chain: the device audit row has no hash field (`AuditLogEntity`); the chain is built server side when the row is pushed, so the device row is a plain insert and joins the claim's transaction.
 
+### 10.5 Approval of sign_in_failed_generic, 2026-10-27 (verbatim)
+
+sign_in_failed_generic approved as written: "Cannot sign in on this phone right now. Try again, or tell your supervisor."
+
 ## 11. Merge order
 
 `feat/local-network-permission` (F1, unmerged) changes `LoginViewModel`, `LoginScreen`,
