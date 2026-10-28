@@ -5654,5 +5654,69 @@ Filed follow-ups, not in this branch:
   the readback, which matches the codebase's breadcrumb rule but not the literal A-1 wording ("a
   readback is never shown without its audit row"). If A-1 is literal, a failed INVOKED or
   OUTPUT_SUPPRESSED write must refuse the readback; needs a ruling, a test and a device check.
-- Backend comment `audit_actions_device.py` still says the four `slm_readback_*` actions are "Not
-  emitted yet"; the device emits them since S4. Fix with the next backend change.
+- ~~Backend comment `audit_actions_device.py` still says the four `slm_readback_*` actions are "Not
+  emitted yet"~~ fixed 2026-10-27 with the facility-scope P7 backend change (`f65ff8d`).
+
+## Facility scope P7: sync push owner check, deploy note - 2026-10-27
+
+The sync push envelope gained a REQUIRED `owner_facility_id` (api-contract.md 6.1, ruling FS-6),
+on branch `feat/facility-scope`. Both sides are strict, so they deploy together: the new server
+refuses an envelope without the field (400 `SAMD-SYS-9001`), and an old server's `StrictModel`
+refuses an envelope with it. After the merge the operator rebuilds the API image:
+
+```
+docker compose build --no-cache api
+```
+
+No Alembic revision: `audit_events.action` is a plain string column, so the new server action
+`sync_batch_owner_mismatch` needs no schema change.
+
+## Facility scope of local clinical data - 2026-10-27
+
+Branch `feat/facility-scope` (off master `213bb0a`), design memo
+`docs/design/facility-scope-memo.md`, rulings in its section 10. Not merged; no PR yet.
+
+**Why.** A pending outbox was pushed under the next worker's session and the server filed it under
+that worker's facility (H-57), and any worker could read another facility's records on a shared
+phone (H-58). Ruling FS-R: each facility has its own phone.
+
+**Shipped.**
+- P1 `26a419f`, reduced by FS-R in `93b3f22`: `decideFacilitySignIn` (CLAIM, LEGACY_CLAIM,
+  CONTINUE, BLOCK for any other facility whatever the sync state; a blank facility id refused).
+- P2 `3dade60`: `device_data_owner` table, Room 22 to 23, atomic claim.
+- P3 `83b0b18` and P3b `d00c004`: the sign-in check before any token is saved; the claim and its
+  audit row in one Room transaction; BLOCK and a blank id revoke the new login; nothing leaves the
+  check as an exception (FS-R5); strings approved (FS-R3, memo 10.5); `logAs` narrowed and
+  scanned (FS-R6); audit actions `local_data_owner_claimed` and `cross_facility_sign_in_blocked`
+  mirrored in the backend.
+- P8 `fb5d590`: the readback owner is the marker in every flavor (FS-7).
+- P7 `f65ff8d`: every sync push carries `owner_facility_id`; the backend refuses a batch whose owner
+  is not the session's facility with `SAMD-SYNC-6007`, before any row is read, audited out of band
+  (FS-6). Deploy note above.
+- P9 `6f2bea8`: PROPOSED risk rows H-57, H-58, H-59, RR-05, H-54 extended; DHF entry.
+
+**Dropped by FS-R.** P4 (in-app wipe) and P5 (audited release path): with one phone per facility a
+move between facilities is rare and handled by people, so the app has no wipe. The P4 work was never
+committed; its patch and files are kept under `/media/sandesh/extra-ssd/samd-slm-parity/fs/p4-dropped/`.
+
+**Support procedure (memo section 12).** To move a phone to another facility: a facility A worker
+confirms Home's sync caption reads exactly "Up to date" (FS-R1), otherwise the phone goes to support
+first; support clears the app's storage; support re-delivers the SLM model (on-device SLM memo 9.1
+for dev); a facility B worker signs in and the empty phone is claimed. H-59 is the residual risk.
+
+**Verification.** Unit suites at `f65ff8d`: dev 1279 (3 skipped), staging 944, prod 944 (each 1
+skipped). Backend 523 passed; 1 pre-existing failure, `test_config.py::test_live_abdm_requires_credentials`
+(fails the same before any of this; environment-dependent). Pixel 67041FDKX004ZY: `data.local`
+instrumented package 134 of 134 at `d00c004`. Mutation rows in
+`/media/sandesh/extra-ssd/samd-slm-parity/mutation-fs.log`.
+
+**Open.**
+- The Pixel's dev database is at schema 23 (on-device SLM memo 15.4): a v22 build crashes on open.
+- A phone that held two facilities' data before this ships is not detected (FS-4(a), basis: no field pilot).
+- Merge order with F1 (`feat/local-network-permission`): memo section 11; the second to merge merges master in.
+- After the merge: `docker compose build --no-cache api` (device and server deploy together).
+- Backend test `tests/test_config.py::test_live_abdm_requires_credentials` fails on this machine and
+  passes in CI: it depends on the local `.env`, which pydantic-settings loads automatically, so a
+  locally set ABDM credential makes the "missing credentials" case not raise. Fix by forcing the
+  environment on the pytest invocation or by disabling env-file loading in tests.
+

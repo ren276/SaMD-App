@@ -1067,6 +1067,7 @@ background sync worker. REQ-SYN-02, H-05.
 {
   "batch_id": "b7c1e2f3-4a5b-6c7d-8e9f-001122334455",
   "device_id": "9f8b1c2d3e4a5b6c",
+  "owner_facility_id": "PHC-RJ-0042",
   "client_time": "2026-08-16T10:05:00.000Z",
   "records": [
     {
@@ -1100,6 +1101,16 @@ background sync worker. REQ-SYN-02, H-05.
 }
 ```
 
+- `owner_facility_id` (string, **required**, 1 to 32 characters) is the facility that owns the
+  device's local data: its `device_data_owner` marker, claimed at the first sign-in on the phone
+  (facility-scope memo 3.2, 3.5, ruling FS-6). There is no fallback. A missing or empty value is a
+  malformed envelope, `400` / `SAMD-SYS-9001`. A value that is not the token's facility refuses the
+  **whole batch** with `403` / `SAMD-SYNC-6007`, TERMINAL for the batch, nothing applied. That
+  check runs before anything else, the idempotency lookup included, so a batch held under one
+  facility can never be applied, or replayed, under another facility's session (hazard H-57). The
+  refusal is recorded as a server-origin `sync_batch_owner_mismatch` audit event (batch id, the
+  claimed owner, the record count) that survives the request's rollback. A device with no marker
+  sends nothing.
 - `op` is `upsert` or `insert`. There is no `delete`. Nothing in this system hard-deletes clinical
   or audit data (`docs/data-retention.md`); a deletion is expressed as a soft-delete field inside
   `data` (for example `ailments.deleted_at`).
@@ -1303,6 +1314,7 @@ verbatim without re-applying anything.
 - 400: `SAMD-SYS-9001`
 - 401: `SAMD-AUTH-1002`, `SAMD-AUTH-1003`
 - 403: `SAMD-SYNC-6005` (`device_id` does not match the device bound to the token)
+- 403: `SAMD-SYNC-6007` (`owner_facility_id` is not the token's facility; checked first)
 - 413: `SAMD-SYNC-6001`
 - 422: `SAMD-SYNC-6002` (unknown table name anywhere in the batch)
 - 500: `SAMD-SYS-9005`
@@ -1603,6 +1615,7 @@ autofill changes when the mock is replaced:
 | `SAMD-SYNC-6004` | 409 | Version conflict (`base_version` mismatch) |
 | `SAMD-SYNC-6005` | 403 | `device_id` does not match the token's device |
 | `SAMD-SYNC-6006` | 422 | Forbidden field present (for example `ailments.audio_local_uri`) |
+| `SAMD-SYNC-6007` | 403 | The batch's `owner_facility_id` is not the token's facility; whole batch refused, nothing applied |
 | `SAMD-AUDIT-7001` | 500 | Hash chain integrity failure detected during a write |
 | `SAMD-AUDIT-7002` | 403 | Attempted mutation of an audit record |
 | `SAMD-AUDIT-7003` | 422 | Audit query range too wide |

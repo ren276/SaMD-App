@@ -20,4 +20,9 @@ enum class DrainFailure {
 
     /** This phone could not prepare the batch: the persisted in-flight batch could not be read. */
     LOCAL_STORE,
+
+    /** The server refused the batch because this phone's records belong to another facility than
+     *  the signed-in account (`SAMD-SYNC-6007`, facility-scope memo 3.5). Terminal for that batch
+     *  under this session: it is not resent until someone signs in again. */
+    OWNER_MISMATCH,
 }

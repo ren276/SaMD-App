@@ -20,8 +20,10 @@ import com.example.samdapp.data.local.dao.PatientDao
 import com.example.samdapp.data.local.dao.PrescriptionDao
 import com.example.samdapp.data.local.dao.ReferralDao
 import com.example.samdapp.data.local.dao.SocialHistoryDao
+import com.example.samdapp.data.local.dao.SyncStateCount
 import com.example.samdapp.data.remote.dto.SyncRecordDto
 import com.example.samdapp.data.remote.dto.SyncResultDto
+import com.example.samdapp.domain.auth.SignInOutbox
 import com.example.samdapp.domain.model.MAX_SYNC_ATTEMPTS
 import com.example.samdapp.domain.model.RETRY_EXHAUSTED_CODE
 import com.example.samdapp.domain.model.RETRY_MIN_INTERVAL
@@ -228,8 +230,13 @@ class RoomSyncOutboxRepository @Inject constructor(
      * patient in front of them, on the SQLCipher pool the perf audit found already contended
      * (F2A-01).
      */
-    override suspend fun readOutboxCounts(): OutboxCounts = outboxCountsOf(
-        clinical = listOf(
+    override suspend fun readOutboxCounts(): OutboxCounts = readStateCounts().let { (clinical, audit) -> outboxCountsOf(clinical, audit) }
+
+    override suspend fun readSignInOutbox(): SignInOutbox = readStateCounts().let { (clinical, audit) -> signInOutboxOf(clinical, audit) }
+
+    /** The twenty one-shot grouped state counts: clinical tables first, `audit_log` apart. */
+    private suspend fun readStateCounts(): Pair<List<SyncStateCount>, List<SyncStateCount>> = Pair(
+        listOf(
             patientDao.getSyncStateCounts(), encounterDao.getSyncStateCounts(),
             consultationDao.getSyncStateCounts(), attachmentDao.getSyncStateCounts(),
             observationDao.getSyncStateCounts(), ailmentDao.getSyncStateCounts(),
@@ -241,7 +248,7 @@ class RoomSyncOutboxRepository @Inject constructor(
             prescriptionDao.getMedicationLineSyncStateCounts(), referralDao.getSyncStateCounts(),
             abhaProfileDao.getSyncStateCounts(),
         ).flatten(),
-        audit = auditLogDao.getSyncStateCounts(),
+        auditLogDao.getSyncStateCounts(),
     )
 
     override suspend fun failedRecords(): List<FailedSyncRecord> {

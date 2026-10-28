@@ -2,19 +2,20 @@ package com.example.samdapp.data.sync
 
 import com.example.samdapp.data.remote.dto.AllergySyncPayloadDto
 import com.example.samdapp.data.remote.dto.SyncRecordDto
+import com.example.samdapp.domain.model.MAX_SYNC_ATTEMPTS
+import com.example.samdapp.domain.model.RETRY_EXHAUSTED_CODE
 import com.example.samdapp.testutil.FakeAuthTokenStore
 import com.example.samdapp.testutil.FakeSyncOutboxRepository
 import com.example.samdapp.testutil.FakeSyncPushService
+import com.example.samdapp.testutil.TestDataOwner
+import java.time.Instant
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
-import com.example.samdapp.domain.model.MAX_SYNC_ATTEMPTS
-import com.example.samdapp.domain.model.RETRY_EXHAUSTED_CODE
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.time.Instant
 
 /** In-memory [InFlightBatchStore] — a real one needs DataStore/Context; this is the seam that
  *  makes the crash-resume test possible without either. */
@@ -51,7 +52,7 @@ class SyncOutboxDrainerTest {
         val repository = FakeSyncOutboxRepository(records)
         val pushService = FakeSyncPushService()
         val store = InMemoryInFlightBatchStore()
-        val drainer = SyncOutboxDrainer(repository, SyncBatchPacker(com.example.samdapp.data.remote.SyncGson.create()), pushService, store, FakeAuthTokenStore())
+        val drainer = SyncOutboxDrainer(repository, SyncBatchPacker(com.example.samdapp.data.remote.SyncGson.create()), pushService, store, FakeAuthTokenStore(), TestDataOwner)
 
         val result = drainer.drain()
 
@@ -76,7 +77,7 @@ class SyncOutboxDrainerTest {
         // lost before this process records the ack — simulating a process kill right there. The
         // batch_id is minted fresh inside drain() (SyncBatchPacker), not predictable in advance,
         // so the fake crashes on whichever request arrives next rather than a specific id.
-        val firstDrainer = SyncOutboxDrainer(repository, packer, pushService, store, FakeAuthTokenStore())
+        val firstDrainer = SyncOutboxDrainer(repository, packer, pushService, store, FakeAuthTokenStore(), TestDataOwner)
         pushService.crashOnNextPush = true
         val crashed = runCatching { firstDrainer.drain() }
         assertTrue("expected the simulated crash to propagate as a thrown exception", crashed.isFailure)
@@ -86,7 +87,7 @@ class SyncOutboxDrainerTest {
         val firstBatchId = requireNotNull(store.stored?.batchId) { "in-flight batch must be persisted before the send that crashed" }
 
         // Second drainer instance: "process restarted". Must reuse the persisted batch_id.
-        val secondDrainer = SyncOutboxDrainer(repository, packer, pushService, store, FakeAuthTokenStore())
+        val secondDrainer = SyncOutboxDrainer(repository, packer, pushService, store, FakeAuthTokenStore(), TestDataOwner)
         val result = secondDrainer.drain()
 
         assertTrue(result.isSuccess)
@@ -108,7 +109,7 @@ class SyncOutboxDrainerTest {
         val repository = FakeSyncOutboxRepository(records)
         val pushService = FakeSyncPushService(rejectedRecordIds = setOf("malformed-1"))
         val store = InMemoryInFlightBatchStore()
-        val drainer = SyncOutboxDrainer(repository, SyncBatchPacker(com.example.samdapp.data.remote.SyncGson.create()), pushService, store, FakeAuthTokenStore())
+        val drainer = SyncOutboxDrainer(repository, SyncBatchPacker(com.example.samdapp.data.remote.SyncGson.create()), pushService, store, FakeAuthTokenStore(), TestDataOwner)
 
         val result = drainer.drain()
 
@@ -133,7 +134,7 @@ class SyncOutboxDrainerTest {
         val pushService = FakeSyncPushService()
         val store = InMemoryInFlightBatchStore()
         store.loadFailure = java.io.IOException("simulated unreadable DataStore")
-        val drainer = SyncOutboxDrainer(repository, SyncBatchPacker(com.example.samdapp.data.remote.SyncGson.create()), pushService, store, FakeAuthTokenStore())
+        val drainer = SyncOutboxDrainer(repository, SyncBatchPacker(com.example.samdapp.data.remote.SyncGson.create()), pushService, store, FakeAuthTokenStore(), TestDataOwner)
 
         val result = drainer.drain()
 
@@ -153,7 +154,7 @@ class SyncOutboxDrainerTest {
         val repository = FakeSyncOutboxRepository(records)
         val pushService = FakeSyncPushService()
         val store = InMemoryInFlightBatchStore()
-        val drainer = SyncOutboxDrainer(repository, SyncBatchPacker(com.example.samdapp.data.remote.SyncGson.create()), pushService, store, FakeAuthTokenStore())
+        val drainer = SyncOutboxDrainer(repository, SyncBatchPacker(com.example.samdapp.data.remote.SyncGson.create()), pushService, store, FakeAuthTokenStore(), TestDataOwner)
 
         val result = drainer.drain()
 
@@ -173,7 +174,7 @@ class SyncOutboxDrainerTest {
         val repository = FakeSyncOutboxRepository(records)
         val pushService = FakeSyncPushService()
         val store = InMemoryInFlightBatchStore()
-        val drainer = SyncOutboxDrainer(repository, SyncBatchPacker(com.example.samdapp.data.remote.SyncGson.create()), pushService, store, FakeAuthTokenStore())
+        val drainer = SyncOutboxDrainer(repository, SyncBatchPacker(com.example.samdapp.data.remote.SyncGson.create()), pushService, store, FakeAuthTokenStore(), TestDataOwner)
 
         // Both calls share the same drainer instance, so its Mutex serializes them — the second
         // call's collectPendingRecords() only runs after the first has applied its acks and the
@@ -213,6 +214,7 @@ class SyncOutboxRetryBehaviourTest {
         pushService,
         store,
         FakeAuthTokenStore(),
+        TestDataOwner,
     )
 
     @Test
@@ -418,6 +420,7 @@ class SyncOutboxRetryBehaviourTest {
                 unreachable,
                 InMemoryInFlightBatchStore(),
                 FakeAuthTokenStore(),
+                TestDataOwner,
             ).drain()
         }
 
@@ -461,7 +464,7 @@ class DrainOutcomeRecordingTest {
     ): Result<Unit> = SyncOutboxDrainer(
         FakeSyncOutboxRepository(listOf(record("a-1"))),
         SyncBatchPacker(com.example.samdapp.data.remote.SyncGson.create()),
-        push, batchStore, FakeAuthTokenStore(), outcome,
+        push, batchStore, FakeAuthTokenStore(), TestDataOwner, outcome,
     ).drain()
 
     @Test
@@ -502,5 +505,93 @@ class DrainOutcomeRecordingTest {
         drainWith(FakeSyncPushService(), outcome)
 
         assertNull(outcome.lastFailure.value)
+    }
+
+    // ── facility scope (memo 3.5, FS-6): the owner on the envelope, nothing pushed without one ──
+
+    private fun owner(state: com.example.samdapp.domain.slm.OwningFacility) = object : com.example.samdapp.domain.slm.LocalDataOwnerFacility {
+        override suspend fun owningFacility() = state
+    }
+
+    private fun drainerOwnedBy(
+        owner: com.example.samdapp.domain.slm.LocalDataOwnerFacility,
+        push: FakeSyncPushService,
+        store: InFlightBatchStore,
+        outcome: DrainOutcomeStore = DrainOutcomeStore(),
+    ) = SyncOutboxDrainer(
+        FakeSyncOutboxRepository(listOf(record("a-1"))),
+        SyncBatchPacker(com.example.samdapp.data.remote.SyncGson.create()),
+        push, store, FakeAuthTokenStore(), owner, outcome,
+    )
+
+    @Test
+    fun `every envelope carries the owner marker's facility id`() = runTest {
+        val push = FakeSyncPushService()
+
+        drainerOwnedBy(owner(com.example.samdapp.domain.slm.OwningFacility.Known("fac-7")), push, InMemoryInFlightBatchStore()).drain()
+
+        assertEquals(listOf("fac-7"), push.calls.map { it.ownerFacilityId })
+    }
+
+    @Test
+    fun `with no owner, or a blank one, nothing is pushed, not even a resumed batch, and it reads LOCAL_STORE`() = runTest {
+        listOf(
+            com.example.samdapp.domain.slm.OwningFacility.Unknown,
+            com.example.samdapp.domain.slm.OwningFacility.Known(" "),
+        ).forEach { state ->
+            val push = FakeSyncPushService()
+            val store = InMemoryInFlightBatchStore()
+            store.save(InFlightBatch("resumed-1", listOf(InFlightBatchMember("allergies", "a-1", 0))))
+            val outcome = DrainOutcomeStore()
+
+            val result = drainerOwnedBy(owner(state), push, store, outcome).drain()
+
+            assertTrue("$state: the drain fails", result.isFailure)
+            assertEquals("$state: nothing is pushed", 0, push.calls.size)
+            assertEquals("$state", com.example.samdapp.domain.sync.DrainFailure.LOCAL_STORE, outcome.lastFailure.value)
+            assertEquals("$state: the in-flight batch is kept for a later drain", "resumed-1", store.load().getOrThrow()?.batchId)
+        }
+    }
+
+    @Test
+    fun `the marker-backed owner with no marker pushes nothing`() = runTest {
+        val noMarker = com.example.samdapp.data.local.MarkerLocalDataOwnerFacility(object : com.example.samdapp.data.local.dao.DeviceDataOwnerDao {
+            override suspend fun insertIfAbsent(owner: com.example.samdapp.data.local.entity.DeviceDataOwnerEntity): Long = error("unused")
+            override suspend fun read(): com.example.samdapp.data.local.entity.DeviceDataOwnerEntity? = null
+        })
+        val push = FakeSyncPushService()
+
+        assertTrue(drainerOwnedBy(noMarker, push, InMemoryInFlightBatchStore()).drain().isFailure)
+        assertEquals(0, push.calls.size)
+    }
+
+    @Test
+    fun `a batch the server refuses as another facility's records reads OWNER_MISMATCH and is not resent until a sign-in`() = runTest {
+        var calls = 0
+        val refusing = object : com.example.samdapp.data.remote.SyncPushService {
+            override suspend fun push(request: com.example.samdapp.data.remote.dto.SyncPushRequestDto) =
+                com.example.samdapp.data.remote.SyncPushResult.Failure(code = SYNC_OWNER_FACILITY_MISMATCH_CODE, message = "refused").also { calls++ }
+        }
+        val hold = MemoryOwnerMismatchHold()
+        val outcome = DrainOutcomeStore()
+        val store = InMemoryInFlightBatchStore()
+        fun drainer() = SyncOutboxDrainer(
+            FakeSyncOutboxRepository(listOf(record("a-1"))),
+            SyncBatchPacker(com.example.samdapp.data.remote.SyncGson.create()),
+            refusing, store, FakeAuthTokenStore(), TestDataOwner, outcome, hold,
+        )
+
+        drainer().drain()
+        assertEquals(com.example.samdapp.domain.sync.DrainFailure.OWNER_MISMATCH, outcome.lastFailure.value)
+        assertEquals(1, calls)
+
+        drainer().drain()
+        drainer().drain()
+        assertEquals("the refused batch is not resent on later cycles", 1, calls)
+        assertEquals(com.example.samdapp.domain.sync.DrainFailure.OWNER_MISMATCH, outcome.lastFailure.value)
+
+        hold.release() // what a new sign-in does
+        drainer().drain()
+        assertEquals("after a sign-in the same batch goes again", 2, calls)
     }
 }

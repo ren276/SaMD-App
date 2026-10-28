@@ -3,6 +3,7 @@ package com.example.samdapp.data.sync
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -54,6 +55,7 @@ private val Context.syncOutboxDataStore: DataStore<Preferences> by preferencesDa
 
 private object Keys {
     val IN_FLIGHT_BATCH_JSON = stringPreferencesKey("in_flight_batch_json")
+    val OWNER_MISMATCH_HOLD = booleanPreferencesKey("owner_mismatch_hold")
 }
 
 @Singleton
@@ -86,4 +88,42 @@ class DataStoreInFlightBatchStore @Inject constructor(
     override suspend fun clear() {
         dataStore.edit { prefs -> prefs.remove(Keys.IN_FLIGHT_BATCH_JSON) }
     }
+}
+
+/**
+ * Set when the server refused a batch because this phone's data belongs to another facility than
+ * the session (`SAMD-SYNC-6007`, facility-scope memo 3.5). While it is set the drainer pushes
+ * nothing: resending the same batch under the same session is refused identically, so it is never
+ * retried automatically. Released only by a new sign-in (`BackendAuthSession`). Kept in the
+ * `sync_outbox` DataStore so it survives process death, like the in-flight batch it holds back.
+ */
+interface OwnerMismatchHold {
+    suspend fun isHeld(): Boolean
+    suspend fun hold()
+    suspend fun release()
+}
+
+@Singleton
+class DataStoreOwnerMismatchHold @Inject constructor(
+    @ApplicationContext context: Context,
+) : OwnerMismatchHold {
+    private val dataStore = context.syncOutboxDataStore
+
+    override suspend fun isHeld(): Boolean = dataStore.data.first()[Keys.OWNER_MISMATCH_HOLD] == true
+
+    override suspend fun hold() {
+        dataStore.edit { it[Keys.OWNER_MISMATCH_HOLD] = true }
+    }
+
+    override suspend fun release() {
+        dataStore.edit { it.remove(Keys.OWNER_MISMATCH_HOLD) }
+    }
+}
+
+/** In memory, for tests and for drainer constructions that do not exercise the hold. */
+class MemoryOwnerMismatchHold : OwnerMismatchHold {
+    @Volatile private var held = false
+    override suspend fun isHeld() = held
+    override suspend fun hold() { held = true }
+    override suspend fun release() { held = false }
 }

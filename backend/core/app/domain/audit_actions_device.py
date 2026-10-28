@@ -60,6 +60,14 @@ DEVICE_AUDIT_ACTIONS: frozenset[str] = frozenset(
         "kernel_empty_differential",
         "kernel_unrecognised_output",
         "kernel_response_received",
+        # Facility scope (facility-scope memo 3.7, ruling FS-R): the phone's data claimed for the
+        # signing-in worker's facility (legacy true on a phone upgraded with data and no owner), and
+        # a sign-in refused because the phone belongs to another facility or the account has no
+        # facility id. Payload is facility ids, the decision, outbox counts and the revoke result,
+        # never patient or record content. Added with the Kotlin AuditAction values in the same
+        # commit.
+        "cross_facility_sign_in_blocked",
+        "local_data_owner_claimed",
         "medical_history_item_added",
         "medication_added",
         # Navigation back-stack restore (process-death fix, phase 1): a persisted back stack was
@@ -82,9 +90,8 @@ DEVICE_AUDIT_ACTIONS: frozenset[str] = frozenset(
         # file exists: a device action this set does not accept is rejected at sync, "rejected"
         # maps to SyncState.FAILED on the device, no drain re-collects a FAILED row and nothing
         # renders failedCount, so a split commit silently and permanently loses exactly the rows
-        # that prove clinical narrative left the device. Not emitted yet; the seam's audit stage is
-        # not built. Same posture as voice_field_* and referral_status_changed: accepting a
-        # not-yet-emitted value now is cheap, accepting it late needs a coordinated field migration.
+        # that prove clinical narrative left the device. Emitted by the device's readback seam
+        # since on-device SLM slice S4.
         # Payload is measured metadata only in every case, never the question text, never the
         # generated text, never a drug name.
         "slm_readback_input_refused",

@@ -1,10 +1,10 @@
 package com.example.samdapp.di
 
+import com.example.samdapp.data.local.MarkerLocalDataOwnerFacility
 import com.example.samdapp.data.remote.RemoteSlmEngine
 import com.example.samdapp.data.remote.api.SlmApiService
 import com.example.samdapp.domain.slm.LocalDataOwnerFacility
 import com.example.samdapp.domain.slm.SlmEngine
-import com.example.samdapp.domain.slm.UnknownLocalDataOwnerFacility
 import com.google.gson.Gson
 import dagger.BindsOptionalOf
 import dagger.Module
@@ -28,9 +28,9 @@ import javax.inject.Singleton
 annotation class SlmHttpStack
 
 /**
- * Marks the dev flavor's override of a readback provision (ruling R-DEV, on-device SLM memo 16).
+ * Marks the dev flavor's override of the readback engine (ruling R-DEV, on-device SLM memo 16).
  * Only the dev `LocalSlmModule` may provide it; staging and prod provide nothing under it, so they
- * get the defaults in [SlmNetworkModule].
+ * get the remote engine. The owner is no longer overridable (FS-7).
  */
 @Qualifier
 @Retention(AnnotationRetention.BINARY)
@@ -40,13 +40,16 @@ annotation class DevReadbackOverride
  * The SLM readback transport, and the binding of [SlmEngine] and [LocalDataOwnerFacility] for
  * every flavor.
  *
- * **Staging and prod: [RemoteSlmEngine] and [UnknownLocalDataOwnerFacility], from this module
- * alone.** No staging or prod source set provides anything under [DevReadbackOverride], so the
- * optionals below are empty there and the defaults apply. The remote engine is the shipping
- * architecture rather than a production-only arrangement.
+ * **The owner, every flavor: [MarkerLocalDataOwnerFacility]** (facility-scope memo 3.6, FS-7), the
+ * `device_data_owner` marker claimed at sign-in. It replaced the always-UNKNOWN staging and prod
+ * owner and the dev session-facility override; no flavor can override it.
  *
- * **Dev only (ruling R-DEV): the on-device engine and the session's facility.** The dev
- * `LocalSlmModule` provides both overrides. The choice is made once, when Hilt builds the graph
+ * **Staging and prod: [RemoteSlmEngine], from this module alone.** No staging or prod source set
+ * provides anything under [DevReadbackOverride], so the optional below is empty there. The remote
+ * engine is the shipping architecture rather than a production-only arrangement.
+ *
+ * **Dev only (ruling R-DEV): the on-device engine.** The dev `LocalSlmModule` provides the engine
+ * override. The choice is made once, when Hilt builds the graph
  * for a flavor, never per request (R3). This shape keeps `src/staging` and `src/prod` free of any
  * readback source, which is what `SlmEngineIsUnreachableFromPresentationTest` rule 3 checks.
  *
@@ -153,11 +156,9 @@ object SlmNetworkModule {
         remote: Provider<RemoteSlmEngine>,
     ): SlmEngine = if (devEngine.isPresent) devEngine.get() else remote.get()
 
-    /** The dev override if the flavor has one, else always UNKNOWN, so the seam refuses (Y-21'). */
+    /** The marker, in every flavor (FS-7). No override exists. */
     @Provides
-    fun provideLocalDataOwnerFacility(
-        @DevReadbackOverride devOwner: Optional<LocalDataOwnerFacility>,
-    ): LocalDataOwnerFacility = devOwner.orElse(UnknownLocalDataOwnerFacility())
+    fun provideLocalDataOwnerFacility(marker: MarkerLocalDataOwnerFacility): LocalDataOwnerFacility = marker
 
     @Module
     @InstallIn(SingletonComponent::class)
@@ -165,9 +166,5 @@ object SlmNetworkModule {
         @BindsOptionalOf
         @DevReadbackOverride
         fun devReadbackEngine(): SlmEngine
-
-        @BindsOptionalOf
-        @DevReadbackOverride
-        fun devLocalDataOwnerFacility(): LocalDataOwnerFacility
     }
 }

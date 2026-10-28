@@ -11,6 +11,10 @@ import java.time.Instant
 data class SyncPushRequestDto(
     @SerializedName("batch_id") val batchId: String,
     @SerializedName("device_id") val deviceId: String,
+    /** The facility that owns this phone's local data, from the `device_data_owner` marker
+     *  (facility-scope memo 3.5, FS-6). Required by the server, which refuses the whole batch with
+     *  `SAMD-SYNC-6007` when it is not the session's facility. */
+    @SerializedName("owner_facility_id") val ownerFacilityId: String,
     @SerializedName("client_time") val clientTime: Instant,
     val records: List<SyncRecordDto>,
 )

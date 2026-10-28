@@ -121,6 +121,9 @@ class FakeSyncOutboxRepository(
     var directOutboxCounts: com.example.samdapp.data.sync.OutboxCounts? = null
     override suspend fun readOutboxCounts() = directOutboxCounts ?: outboxCounts.value
 
+    var signInOutbox = com.example.samdapp.domain.auth.SignInOutbox()
+    override suspend fun readSignInOutbox() = signInOutbox
+
     /** Mirrors the real repository closely enough for a ViewModel test: FAILED rows only, never
      *  a RETRYABLE one, classified by the same
      *  [com.example.samdapp.domain.model.syncFailureReasonFor] the real one calls. */
@@ -223,4 +226,10 @@ class FakeSyncPushService(
             results = results,
         )
     }
+}
+
+/** A device whose local data is owned by `fac-test` (facility-scope FS-6), for drainer tests that
+ *  are not about the owner. */
+object TestDataOwner : com.example.samdapp.domain.slm.LocalDataOwnerFacility {
+    override suspend fun owningFacility() = com.example.samdapp.domain.slm.OwningFacility.Known("fac-test")
 }

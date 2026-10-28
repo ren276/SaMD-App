@@ -1,7 +1,6 @@
 package com.example.samdapp.domain.slm
 
 import com.example.samdapp.domain.auth.SessionFacility
-import javax.inject.Inject
 
 /** Which facility the clinical data on this device belongs to (on-device SLM memo 7.1, Y-21'). */
 sealed interface OwningFacility {
@@ -11,21 +10,12 @@ sealed interface OwningFacility {
 }
 
 /**
- * The owner of the local clinical data. The store behind it (where the marker lives, its
- * migration, when it is claimed, the wipe-after-drain policy) is the product-wide facility-scope
- * PR's (Y-21'); this PR has no store.
+ * The owner of the local clinical data. One implementation in every flavor, the
+ * `device_data_owner` marker (`MarkerLocalDataOwnerFacility`, facility-scope memo 3.6, FS-7), which
+ * replaced the always-UNKNOWN staging and prod owner and the dev session-facility override (R-DEV).
  */
 interface LocalDataOwnerFacility {
     suspend fun owningFacility(): OwningFacility
-}
-
-/**
- * The staging and prod owner, and it always answers [OwningFacility.Unknown], so the readback seam
- * refuses every request there (Y-21'). Dev overrides it with the session's facility over mock data
- * (R-DEV, `LocalSlmModule`); no other flavor may until the product-wide facility-scope PR.
- */
-class UnknownLocalDataOwnerFacility @Inject constructor() : LocalDataOwnerFacility {
-    override suspend fun owningFacility(): OwningFacility = OwningFacility.Unknown
 }
 
 /**

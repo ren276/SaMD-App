@@ -2,12 +2,18 @@ package com.example.samdapp.di
 
 import com.example.samdapp.data.assessment.AssessmentQueueScheduler
 import com.example.samdapp.data.assessment.WorkManagerAssessmentScheduler
+import com.example.samdapp.data.local.LocalClinicalData
+import com.example.samdapp.data.local.LocalTransaction
+import com.example.samdapp.data.local.RoomLocalClinicalData
+import com.example.samdapp.data.local.RoomLocalTransaction
 import com.example.samdapp.data.local.audit.RoomAuditLogger
 import com.example.samdapp.data.local.auth.AuthTokenStore
 import com.example.samdapp.data.local.auth.BackendAuthSession
 import com.example.samdapp.data.local.auth.DataStoreAuthTokenStore
 import com.example.samdapp.data.sync.DataStoreInFlightBatchStore
+import com.example.samdapp.data.sync.DataStoreOwnerMismatchHold
 import com.example.samdapp.data.sync.InFlightBatchStore
+import com.example.samdapp.data.sync.OwnerMismatchHold
 import com.example.samdapp.data.sync.RoomSyncOutboxRepository
 import com.example.samdapp.data.sync.SyncOutboxRepository
 import com.example.samdapp.data.sync.SyncOutboxScheduler
@@ -103,8 +109,17 @@ abstract class RepositoryModule {
     @Binds @Singleton
     abstract fun bindInFlightBatchStore(impl: DataStoreInFlightBatchStore): InFlightBatchStore
 
+    @Binds
+    abstract fun bindOwnerMismatchHold(impl: DataStoreOwnerMismatchHold): OwnerMismatchHold
+
     @Binds @Singleton
     abstract fun bindAuthSession(impl: BackendAuthSession): AuthSession
+
+    @Binds
+    abstract fun bindLocalClinicalData(impl: RoomLocalClinicalData): LocalClinicalData
+
+    @Binds
+    abstract fun bindLocalTransaction(impl: RoomLocalTransaction): LocalTransaction
 
     @Binds @Singleton
     abstract fun bindAuthTokenStore(impl: DataStoreAuthTokenStore): AuthTokenStore

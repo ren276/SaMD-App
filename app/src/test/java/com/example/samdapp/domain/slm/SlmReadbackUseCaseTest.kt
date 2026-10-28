@@ -1566,30 +1566,16 @@ class SlmReadbackUseCaseTest {
     }
 
     /**
-     * The staging and prod owner (Y-21'): no owner store exists, so every readback refuses. The one
-     * other implementation is the dev override (R-DEV), and it lives in `src/dev` only.
+     * An unknown owner (no `device_data_owner` marker yet) refuses a fully eligible readback (Y-21').
+     * The one owner implementation in any flavor is the marker (FS-7); `ReadbackFlavorGraphTest` pins
+     * that no other is declared.
      */
     @Test
-    fun `the staging and prod owner is UNKNOWN and refuses a fully eligible readback, and only dev has another`() = runTest {
-        assertEquals(OwningFacility.Unknown, UnknownLocalDataOwnerFacility().owningFacility())
+    fun `an unknown owner refuses a fully eligible readback`() = runTest {
         val engine = RecordingSlmEngine(output = groundedOutput)
-        val result = useCase(session(UserRole.DOCTOR), engine, owner = UnknownLocalDataOwnerFacility().owningFacility())("case-1", tethered)
+        val result = useCase(session(UserRole.DOCTOR), engine, owner = OwningFacility.Unknown)("case-1", tethered)
         assertEquals(SlmReadbackResult.Refused(SlmRefusal.ENGINE_REJECTED_INPUT), result)
         assertEquals(0, engine.callCount)
-
-        val src = listOf(java.io.File("src"), java.io.File("app/src")).first { java.io.File(it, "main").isDirectory }
-        val implementers = listOf("main", "dev", "staging", "prod")
-            .flatMap { java.io.File(src, it).walkTopDown().filter { f -> f.isFile && f.extension == "kt" }.toList() }
-            // A class or object declaring the supertype, not a parameter or a return type.
-            .filter { Regex("""(\)|\bobject)\s*:\s*LocalDataOwnerFacility\s*\{""").containsMatchIn(it.readText()) }
-            .map { it.relativeTo(src).invariantSeparatorsPath }
-        assertEquals(
-            listOf(
-                "dev/java/com/example/samdapp/di/LocalSlmModule.kt",
-                "main/java/com/example/samdapp/domain/slm/FacilityScope.kt",
-            ),
-            implementers.sorted(),
-        )
     }
 
     // -------------------------------------- tokenizer-divergent markup (G-5 final, slice S6)

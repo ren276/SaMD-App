@@ -652,7 +652,7 @@ device equivalent:
 
 `worker_login_succeeded`, `worker_login_failed`, `worker_logout`, `token_refreshed`,
 `refresh_reuse_detected`, `patient_record_read`, `audit_log_read`, `kernel_call_forwarded`,
-`kernel_call_failed`, `sync_batch_received`, `sync_record_rejected`, `abha_session_started`,
+`kernel_call_failed`, `sync_batch_received`, `sync_record_rejected`, `sync_batch_owner_mismatch`, `abha_session_started`,
 `abha_session_failed`, `abha_identity_linked`, `abha_identity_submitted`, `abha_otp_verified`,
 `abha_enrolled`, `abha_mobile_verified`, `abha_profile_retrieved`.
 

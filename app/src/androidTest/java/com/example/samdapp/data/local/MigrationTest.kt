@@ -14,8 +14,8 @@ import org.junit.Test
  * and [MIGRATION_7_8] (kernel_reports.inferenceSource traceability, REQ-HAN-08).
  *
  * [migrateAllTheWayFrom1To8] runs the plaintext (non-SQLCipher) chain through the whole history;
- * `migrateAllTheWayFrom1To17` and `migrateAllTheWayFrom1To22` extend that chain through
- * [MIGRATION_16_17] and [MIGRATION_21_22], so the full chain, not just each migration in
+ * `migrateAllTheWayFrom1To17`, `migrateAllTheWayFrom1To22` and `migrateAllTheWayFrom1To23` extend
+ * that chain through [MIGRATION_16_17], [MIGRATION_21_22] and [MIGRATION_22_23], so the full chain, not just each migration in
  * isolation, is proven to apply cleanly in order. Per-migration correctness for
  * [MIGRATION_15_16] (de-dup + unique-index) and [MIGRATION_16_17] (provenance backfill) is
  * [MigrationTest15To16]/[MigrationTest16To17], which use the SQLCipher variant — this file's
@@ -105,6 +105,39 @@ class MigrationTest {
             MIGRATION_19_20,
             MIGRATION_20_21,
             MIGRATION_21_22,
+        )
+    }
+
+    @Test
+    fun migrateAllTheWayFrom1To23() {
+        helper.createDatabase(testDbName, 1).close()
+
+        helper.runMigrationsAndValidate(
+            testDbName,
+            23,
+            true,
+            MIGRATION_1_2,
+            MIGRATION_2_3,
+            MIGRATION_3_4,
+            MIGRATION_4_5,
+            MIGRATION_5_6,
+            MIGRATION_6_7,
+            MIGRATION_7_8,
+            MIGRATION_8_9,
+            MIGRATION_9_10,
+            MIGRATION_10_11,
+            MIGRATION_11_12,
+            MIGRATION_12_13,
+            MIGRATION_13_14,
+            MIGRATION_14_15,
+            MIGRATION_15_16,
+            MIGRATION_16_17,
+            MIGRATION_17_18,
+            MIGRATION_18_19,
+            MIGRATION_19_20,
+            MIGRATION_20_21,
+            MIGRATION_21_22,
+            MIGRATION_22_23,
         )
     }
 
