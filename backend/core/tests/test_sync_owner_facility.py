@@ -25,14 +25,18 @@ from tests.test_sync import audit_record, batch_body, patient_record
 
 
 async def _count(session: AsyncSession, model: type, *where: object) -> int:
-    return (await session.execute(select(func.count()).select_from(model).where(*where))).scalar_one()
+    return (
+        await session.execute(select(func.count()).select_from(model).where(*where))
+    ).scalar_one()
 
 
 async def _mismatch_rows(session: AsyncSession) -> list[AuditEvent]:
     return list(
         (
             await session.execute(
-                select(AuditEvent).where(AuditEvent.action == AuditAction.SYNC_BATCH_OWNER_MISMATCH.value)
+                select(AuditEvent).where(
+                    AuditEvent.action == AuditAction.SYNC_BATCH_OWNER_MISMATCH.value
+                )
             )
         ).scalars()
     )
@@ -41,7 +45,9 @@ async def _mismatch_rows(session: AsyncSession) -> list[AuditEvent]:
 async def test_a_batch_owned_by_another_facility_is_refused_whole_and_nothing_is_persisted(
     client: AsyncClient, auth_headers: dict[str, str], session: AsyncSession
 ) -> None:
-    body = batch_body([patient_record(), audit_record("al-own-1")], owner_facility_id=OTHER_FACILITY_ID)
+    body = batch_body(
+        [patient_record(), audit_record("al-own-1")], owner_facility_id=OTHER_FACILITY_ID
+    )
     device_audit_before = await _count(session, AuditEvent, AuditEvent.origin == "DEVICE")
 
     response = await client.post("/api/v1/sync/push", json=body, headers=auth_headers)
@@ -49,13 +55,20 @@ async def test_a_batch_owned_by_another_facility_is_refused_whole_and_nothing_is
     assert response.status_code == 403
     assert response.json()["code"] == ErrorCode.SYNC_OWNER_FACILITY_MISMATCH.value
     session.expire_all()
-    assert await _count(session, Patient, Patient.id == PATIENT_ID) == 0, "no clinical row is written"
+    assert await _count(session, Patient, Patient.id == PATIENT_ID) == 0, (
+        "no clinical row is written"
+    )
     assert await _count(session, SyncBatch, SyncBatch.batch_id == body["batch_id"]) == 0
     assert await _count(session, SyncLogEntry, SyncLogEntry.batch_id == body["batch_id"]) == 0
-    assert await _count(session, AuditEvent, AuditEvent.origin == "DEVICE") == device_audit_before, (
-        "the batch's device audit record is not appended"
+    assert (
+        await _count(session, AuditEvent, AuditEvent.origin == "DEVICE") == device_audit_before
+    ), "the batch's device audit record is not appended"
+    assert (
+        await _count(
+            session, AuditEvent, AuditEvent.action == AuditAction.SYNC_BATCH_RECEIVED.value
+        )
+        == 0
     )
-    assert await _count(session, AuditEvent, AuditEvent.action == AuditAction.SYNC_BATCH_RECEIVED.value) == 0
 
     rows = await _mismatch_rows(session)
     assert len(rows) == 1, "the refusal is audited, and the row survived the request rollback"
@@ -93,7 +106,9 @@ async def test_the_owner_check_runs_before_the_replay_lookup(
     assert first.status_code == 200
 
     resent = await client.post(
-        "/api/v1/sync/push", json={**body, "owner_facility_id": OTHER_FACILITY_ID}, headers=auth_headers
+        "/api/v1/sync/push",
+        json={**body, "owner_facility_id": OTHER_FACILITY_ID},
+        headers=auth_headers,
     )
 
     assert resent.status_code == 403

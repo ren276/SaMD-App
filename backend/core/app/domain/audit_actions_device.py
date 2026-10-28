@@ -64,7 +64,8 @@ DEVICE_AUDIT_ACTIONS: frozenset[str] = frozenset(
         # signing-in worker's facility (legacy true on a phone upgraded with data and no owner), and
         # a sign-in refused because the phone belongs to another facility or the account has no
         # facility id. Payload is facility ids, the decision, outbox counts and the revoke result,
-        # never patient or record content. Added with the Kotlin AuditAction values in the same commit.
+        # never patient or record content. Added with the Kotlin AuditAction values in the same
+        # commit.
         "cross_facility_sign_in_blocked",
         "local_data_owner_claimed",
         "medical_history_item_added",
