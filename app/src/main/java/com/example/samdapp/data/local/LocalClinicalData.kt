@@ -24,6 +24,7 @@ import com.example.samdapp.data.local.entity.PatientEntity
 import com.example.samdapp.data.local.entity.PrescriptionEntity
 import com.example.samdapp.data.local.entity.ReferralEntity
 import com.example.samdapp.data.local.entity.SocialHistoryEntity
+import com.example.samdapp.domain.audit.AuditAction
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
@@ -36,8 +37,9 @@ interface LocalClinicalData {
 }
 
 /** How one Room entity counts for [LocalClinicalData]: its table, and why it is or is not data a
- *  facility owns. */
-internal data class EntityScope(val table: String, val clinical: Boolean, val reason: String)
+ *  facility owns. [notData] is a SQL condition on the table's rows that do not count even when the
+ *  table does. */
+internal data class EntityScope(val table: String, val clinical: Boolean, val reason: String, val notData: String? = null)
 
 /**
  * Every entity in [AppDatabase], classified. `ClinicalEntityClassificationTest` fails when an entity
@@ -57,7 +59,12 @@ internal val ENTITY_SCOPES: Map<KClass<*>, EntityScope> = mapOf(
     FamilyHistoryEntryEntity::class to EntityScope("family_history_entries", true, "a patient's family history"),
     SocialHistoryEntity::class to EntityScope("social_histories", true, "a patient's social history"),
     CaseRecordEntity::class to EntityScope("case_records", true, "a patient's case"),
-    AuditLogEntity::class to EntityScope("audit_log", true, "actions on the facility's records, with patient ids; pushed with the outbox"),
+    AuditLogEntity::class to EntityScope(
+        "audit_log", true, "actions on the facility's records, with patient ids; pushed with the outbox",
+        // A refusal is written while the phone may have no owner (no facility id, a lost claim), so
+        // it must not make the next sign-in on a fresh phone a LEGACY_CLAIM.
+        notData = "action = '${AuditAction.CROSS_FACILITY_SIGN_IN_BLOCKED.value}'",
+    ),
     AbhaProfileEntity::class to EntityScope("abha_profiles", true, "a patient's ABHA identity"),
     AilmentEntity::class to EntityScope("ailments", true, "a patient's complaints"),
     PrescriptionEntity::class to EntityScope("prescriptions", true, "a patient's prescription"),
@@ -79,6 +86,9 @@ class RoomLocalClinicalData @Inject constructor(private val db: AppDatabase) : L
 
     private companion object {
         val PRESENT_SQL = "SELECT " + ENTITY_SCOPES.values.filter { it.clinical }
-            .joinToString(" OR ") { "EXISTS (SELECT 1 FROM `${it.table}`)" }
+            .joinToString(" OR ") { scope ->
+                val where = scope.notData?.let { " WHERE NOT ($it)" }.orEmpty()
+                "EXISTS (SELECT 1 FROM `${scope.table}`$where)"
+            }
     }
 }

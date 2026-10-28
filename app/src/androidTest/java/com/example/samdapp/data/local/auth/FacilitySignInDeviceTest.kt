@@ -260,6 +260,18 @@ class FacilitySignInDeviceTest {
         assertEquals(listOf("refresh-w-x"), device.api.logouts)
     }
 
+    /** A refusal row is written with no owner; it must not turn the next claim into a legacy one. */
+    @Test
+    fun aRefusalRowOnAFreshPhoneDoesNotMakeTheNextClaimLegacy() = runBlocking {
+        assertEquals(SignInResult.NoFacility, Device("", null, "w-x").signIn())
+        assertEquals("the refusal is audited", 1, auditRows().count { it.action == AuditAction.CROSS_FACILITY_SIGN_IN_BLOCKED.value })
+        assertFalse("a refusal row alone is not clinical data", RoomLocalClinicalData(db).present())
+
+        assertEquals(SignInResult.Success(mustChangePin = false), Device("fac-b", "PHC Beta", "w-b1").signIn())
+
+        assertEquals(false, db.deviceDataOwnerDao().read()?.legacy)
+    }
+
     /**
      * Both sign-ins read "no owner" and decide CLAIM before either can insert: a second connection
      * holds the write lock while they start. Exactly one claim wins; the other re-decides and is
