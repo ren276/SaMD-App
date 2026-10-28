@@ -2,6 +2,7 @@ package com.example.samdapp.data.sync
 
 import com.example.samdapp.data.remote.dto.SyncRecordDto
 import com.example.samdapp.data.remote.dto.SyncResultDto
+import com.example.samdapp.domain.auth.SignInOutbox
 import com.example.samdapp.domain.sync.FailedSyncRecord
 import kotlinx.coroutines.flow.Flow
 import java.time.Instant
@@ -68,6 +69,10 @@ interface SyncOutboxRepository {
 
     /** The same counts as [observeOutboxCounts], read once by one-shot suspend DAO queries. */
     suspend fun readOutboxCounts(): OutboxCounts
+
+    /** The sign-in outbox state (facility-scope memo 3.2), from the same one-shot counts as
+     *  [readOutboxCounts]. See [signInOutboxOf]. */
+    suspend fun readSignInOutbox(): SignInOutbox
 
     /** The rows behind [OutboxCounts.needsReview], newest first, classified for the worker-facing
      *  review list (S-3). Suspend rather than a Flow: the count is already observed from app

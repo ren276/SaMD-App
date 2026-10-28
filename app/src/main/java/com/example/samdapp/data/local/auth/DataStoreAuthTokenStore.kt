@@ -9,6 +9,8 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.example.samdapp.domain.auth.SessionFacility
+import com.example.samdapp.domain.auth.SessionFacilitySource
 import com.example.samdapp.domain.auth.UserRole
 import com.example.samdapp.domain.auth.UserSession
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -40,12 +42,15 @@ private object Keys {
 }
 
 /** Real, Preferences-DataStore-backed [AuthTokenStore]. See that interface's KDoc for why this is
- *  split out. */
+ *  split out. Also the [SessionFacilitySource]: the facility keys are written by [saveLogin] from
+ *  the backend's login response and cleared with the session. */
 @Singleton
-class DataStoreAuthTokenStore @Inject constructor(
-    @ApplicationContext context: Context,
-) : AuthTokenStore {
-    private val dataStore = context.authDataStore
+class DataStoreAuthTokenStore internal constructor(
+    private val dataStore: DataStore<Preferences>,
+) : AuthTokenStore, SessionFacilitySource {
+
+    @Inject
+    constructor(@ApplicationContext context: Context) : this(context.authDataStore)
 
     override val session: Flow<UserSession?> =
         dataStore.data
@@ -68,6 +73,14 @@ class DataStoreAuthTokenStore @Inject constructor(
         } catch (e: IOException) {
             emptyPreferences()
         }
+
+    /** Only while a worker is signed in; a blank or absent id is no facility (fail closed). */
+    override suspend fun currentFacility(): SessionFacility? {
+        val prefs = safePrefs()
+        if (prefs[Keys.WORKER_ID] == null) return null
+        val id = prefs[Keys.FACILITY_ID]?.takeIf { it.isNotBlank() } ?: return null
+        return SessionFacility(facilityId = id, facilityName = prefs[Keys.FACILITY_NAME].orEmpty())
+    }
 
     override suspend fun deviceId(): String {
         val existing = safePrefs()[Keys.DEVICE_ID]

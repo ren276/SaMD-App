@@ -59,6 +59,19 @@ sealed interface SignInResult {
         val message: String,
         val reason: SignInFailureReason = SignInFailureReason.SERVER,
     ) : SignInResult
+
+    /** The PIN was accepted but this phone belongs to another facility (facility-scope memo 3.2,
+     *  FS-R): nothing was saved and the new login was revoked. [ownerFacilityName] is for the copy. */
+    data class FacilityBlocked(val ownerFacilityName: String) : SignInResult
+
+    /** The PIN was accepted but the account carries no facility id: refused like
+     *  [FacilityBlocked], nothing saved, the new login revoked. */
+    data object NoFacility : SignInResult
+
+    /** The PIN was accepted but the facility check could not complete safely (an audit write or
+     *  a database read failed, or the phone's owner was in a state it cannot be): refused fail
+     *  closed (FS-R5), nothing saved, the new login revoked. */
+    data object Unavailable : SignInResult
 }
 
 /** Why a sign-in failed, as far as the screen needs to know. */
@@ -115,4 +128,18 @@ interface AuthSession {
     suspend fun changePin(currentPin: String, newPin: String): ChangePinResult
 
     suspend fun signOut()
+}
+
+/**
+ * The facility the backend assigned the signed-in worker: `worker.facility_id` and
+ * `worker.facility_name` of the login response (api-contract.md §2.2, `LoginResponseDto.worker`),
+ * exactly as [com.example.samdapp.data.local.auth.BackendAuthSession.signIn] stored them. Never
+ * parsed out of a token. Scope decisions compare [facilityId]; [facilityName] is display text.
+ */
+data class SessionFacility(val facilityId: String, val facilityName: String)
+
+/** Read side of [SessionFacility] (on-device SLM memo 7.1, Y-21'). */
+interface SessionFacilitySource {
+    /** Null when signed out, or when the stored login carries no facility id. */
+    suspend fun currentFacility(): SessionFacility?
 }

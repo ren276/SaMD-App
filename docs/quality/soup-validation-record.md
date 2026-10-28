@@ -17,6 +17,9 @@ note, and the framing that follows it, is ASR-specific: CameraX is Maven-publish
 in the generated CycloneDX SBOM, the opposite of what the Scope paragraph above says about the ASR
 components, so section 5 does not reuse this paragraph's "why this record exists" reasoning.
 
+**Note (2026-10-16).** Section 6 covers a third inventory, the on-device SLM (dev flavor only), and
+is PROPOSED on its own terms. Like section 5 it does not reuse the ASR framing above.
+
 **Why this record exists now.** Until PR 4b these components were compiled into the APK but
 unreachable: both voice flags were `false`. `VOICE_FIELD_IMPACT_ENABLED` is now `true`, so the ASR
 SOUP is live on one field and its validation state stops being hypothetical.
@@ -200,3 +203,125 @@ and one release cadence, so one row is the accurate representation, not four ide
    verified structurally (compiles against the real 1.6.2 API, binds/unbinds without a crash in
    manual runs); the byte-extraction half is unit-tested (`DocumentCameraCaptureTest`); the
    viewfinder rendering and shutter-disabled-while-ingesting behaviour have no automated UI test.
+
+## 6. On-device SLM (dev flavor only): LiteRT-LM runtime, Gemma 4 E2B artifact, remote model
+
+> **PROPOSED, AWAITING OPERATOR SIGN-OFF. NOT APPROVED.** Not an approved controlled document. This
+> section was added 2026-10-16 (slice S8, `docs/design/on-device-slm-memo.md` section 13.3) and does
+> not touch sections 1 to 5.
+
+**Scope.** Four entries:
+
+1. **LiteRT-LM Android runtime**, `com.google.ai.edge.litertlm:litertlm-android:0.18.0`
+   (`gradle/libs.versions.toml:29,37`), Maven-published (Google Maven), declared through
+   `devImplementation` only (`app/build.gradle.kts:332`). It is in the dev APK and in no staging or
+   prod APK.
+2. **Gemma 4 E2B `.litertlm` artifact**, the model the local engine runs. It is in no APK: it is
+   delivered to a dev phone by `adb` into the app's private files directory
+   (`docs/design/on-device-slm-memo.md:771-787`) and pinned by digest in code
+   (`app/src/dev/java/com/example/samdapp/data/slm/LocalSlmEngine.kt:41`).
+3. **The remote model as served**, `google/gemma-4-E2B-it` bf16 behind the backend's SLM proxy. It
+   was SOUP with no entry before this section (F-21, `docs/design/on-device-slm-memo.md:156-157`).
+4. **Dev-only transitive versions** that LiteRT-LM pulls in: `kotlin-stdlib` 2.4.0,
+   `kotlin-reflect` 2.4.0 and `gson` 2.14.0.
+
+**Why this record exists now.** Ruling R-DEV made the readback reachable in the dev flavor on the
+local engine (`SLM_READBACK_ENABLED` true in dev only, `app/build.gradle.kts:179,200,208`;
+`docs/design/on-device-slm-memo.md:1312-1315`). The runtime and the artifact therefore execute on a
+dev phone, and the remote model is the parity reference the local one is judged against.
+
+### 6.1 Requirements placed on this SOUP
+
+| # | Requirement | Why it is a requirement and not a preference |
+|---|---|---|
+| L-1 | The model bytes that run are the bytes that were assessed | A swapped or partially copied artifact carries a different template, vocabulary or stop ids (H-48) |
+| L-2 | The local path performs no off-device transmission | The local engine's purpose is on-device inference; a network dependency acquired through a runtime upgrade would be unreviewed egress of a clinical prompt |
+| L-3 | The runtime and the artifact change only by a reviewed change | A version or artifact change is a design change; the parity evidence below is valid for exactly one runtime version and one artifact digest |
+| L-4 | Failure is honest: a missing, corrupt or unloadable model, or an over-length prompt, refuses; it never degrades or truncates | H-25, H-53 |
+| L-5 | The runtime never reaches staging or prod | Its validation below is dev evidence only; prod is tested on its own classpath (S1-L) |
+| L-6 | Licence obligations are known and discharged before distribution beyond the dev team | Apache-2.0 attribution, and the model's own terms (G-7) |
+
+### 6.2 Validation evidence, per requirement
+
+**L-1, byte identity.** Artifact: full SHA-256 before every engine start, refusal on mismatch
+(`LocalSlmEngine.kt:41,384`), and the derived runtime cache is checked against a manifest written
+at clean release (`app/src/dev/java/com/example/samdapp/data/slm/LocalSlmRuntimeCache.kt:49,78`,
+C-2). On the Pixel the file is 2,588,147,712 B with the pinned digest (verified on device
+2026-10-16, STOP S7 install check). The served model id passes the identity gate only through its
+exact allowlist entry (`app/src/main/java/com/example/samdapp/domain/slm/SlmStreamSanitizer.kt:99,107`,
+G-4). Runtime: the AAR sha256 `706cbb8a87739b2818111bf3a19a78b8f7781586d10f80adf3415581fab7595f`
+and POM sha256 `3c631cd8e04fe4289818d41675c0f6b1f26a7a37db63606699a51e2c95695a54` are recorded
+(`docs/design/on-device-slm-memo.md:179-180`) but **not enforced by the build** (no Gradle
+dependency verification file exists under `gradle/`); see 6.4.
+
+**L-2, no off-device transmission.** `LocalSlmSourceScanTest` fails if any file of the engine
+package names `okhttp3`, `retrofit2`, `java.net` or `android.net`; `LocalSlmOfflineSmokeTest`
+(`app/src/androidTestDev/java/com/example/samdapp/slm/LocalSlmOfflineSmokeTest.kt:13-20`) first
+asserts no active network, then runs the smoke. On the Pixel with airplane mode on and Wi-Fi and
+Bluetooth off, both probes were exact with finish STOP on GPU and on CPU; with the network on, the
+test failed at its assertion (commit `140c51e`). This is a runtime witness on one device, not a
+byte-level egress measurement like the ASR record's L3.2.
+
+**L-3, change control.** The runtime version is pinned once in the catalog
+(`gradle/libs.versions.toml:29`), and `LiteRtLmIsDevOnlyTest`
+(`app/src/test/java/com/example/samdapp/config/LiteRtLmIsDevOnlyTest.kt:22,39`) fails if the library
+is declared other than through `devImplementation` or at another version. The artifact digest is a
+code constant (`LocalSlmEngine.kt:41`); a different artifact is a code change.
+
+**L-4, honest failure.** Missing file: UNAVAILABLE `artifact_missing`; wrong file: UNAVAILABLE
+`artifact_digest_mismatch`, never loaded (`docs/design/on-device-slm-memo.md:794-795`); init bound
+60 s then UNAVAILABLE with a latch (`LocalSlmEngine.kt:173,355-360`); over-length prompts refused by
+the prefill backstop or the runtime's own error, both emitting nothing
+(`LocalSlmEngine.kt:451-453,466-467`; on-device `LocalSlmLengthVerificationTest`,
+`app/src/androidTestDev/java/com/example/samdapp/slm/LocalSlmLengthVerificationTest.kt:53-99`).
+
+**L-5, dev only.** Declaration guarded as above. APK scans at the merge of S9 (2026-10-16, merge
+commit `916b722`): the staging and prod debug APKs contain no `com/google/ai/edge/litertlm` class,
+no `liblitertlm_jni.so`, and no `LocalSlmEngine`, `LiteRtLmRuntime` or `LocalSlmModule`.
+
+**L-6, licences.** Runtime: Apache-2.0 (POM, `docs/design/on-device-slm-memo.md:181`). Artifact:
+the model card says apache-2.0 and the repository has no LICENSE file; both facts are recorded and
+a confirmation against the upstream Gemma 4 terms is filed for the sign-off batch (G-7,
+`docs/design/on-device-slm-memo.md:1239`). **Not discharged:** the Open Source Licences screen
+lists sherpa-onnx, ONNX Runtime and CameraX but not LiteRT-LM or Gemma
+(`app/src/main/java/com/example/samdapp/presentation/licenses/OpenSourceLicensesScreen.kt:49,58,67`);
+see 6.4.
+
+**Functional validation (parity, all four entries).** Prompt path: token-id and rendering parity
+120 of 120 between the remote tokenizer and the artifact's, and trim parity 28 of 28 on desktop and
+on device. Refusal parity PASS. Content gates FAIL, attributable to the language gate on Devanagari
+questions (operator verdict V-0, `docs/design/on-device-slm-memo.md:1319`; v3 CPU numbers in the
+risk file, H-47). Repeatability: CPU 28 of 28 comparable byte-identical, GPU 9 of 30, so the engine
+selects CPU only (V-1, `docs/design/on-device-slm-memo.md:1320`; H-55).
+
+### 6.3 Per-component notes
+
+| Component | Role in the device | Validation state |
+|---|---|---|
+| `litertlm-android` 0.18.0 (Apache-2.0), AAR sha256 `706cbb8a...595f`, tag `v0.18.0` at `b2f686e2ed4718fb84ec398a61dd59ca0f0aff27` (`docs/design/on-device-slm-memo.md:176-181`); `liblitertlm_jni.so` arm64-v8a 22,155,680 B, x86_64 26,353,160 B (:212-215); `NEEDED` system libraries only (:217-218); 16 KB aligned (:236) | Kotlin API and JNI runtime for the local engine, dev flavor only | S1: builds and packages in dev only (commits `de26a8d`, `fa204f5`). S2: initialises on the Pixel on GPU and on CPU with the AAR alone, so `litert-gpu` was not added (Y-4; GPU cold init 30,640 ms, CPU 2,355 ms, `docs/design/on-device-slm-memo.md:403-404`; the catalog has no `litert-gpu` entry, `gradle/libs.versions.toml:29,37`). Offline proof and parity as in 6.2. Only the CPU backend is selected (V-1) |
+| Gemma 4 E2B artifact, `litert-community/gemma-4-E2B-it-litert-lm` at `b3ca0d2f076785a8f4b2219ddbd2bdb99954eae1`, `gemma-4-E2B-it.litertlm`, 2,588,147,712 B, sha256 `181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c`, not gated; embedded template 11,995 B sha256 `02b3091a...f629` (`docs/design/on-device-slm-memo.md:1102-1108`) | The model the local engine runs, with its bundled chat template (G-1') | L-1 pinned by digest before every start. Vocabulary and stop ids {1, 50, 106} established offline (G2, G-3', `docs/design/on-device-slm-memo.md:1245`); rendering parity 120 of 120 on device. Licence per G-7, confirmation filed. Parity verdict V-0 |
+| Remote `google/gemma-4-E2B-it` at `3e22461f65e89153144f8adb70e3b8c2cc9845a7`, bf16 weights sha256 `2db5482b20d746879bb3ef79b5203e9075a2e2b98f54ec7c2f281c1477ddc550`, served by transformers 5.5.0 and torch 2.4.1+cu124, chat template 18,569 B (`docs/design/on-device-slm-memo.md:96,145-149,1109-1112`) | The generation service behind the backend's SLM proxy (all flavors; unreachable in staging and prod while the flag is false), and the parity reference | The device identity gate pins the model id exactly (`SlmStreamSanitizer.kt:89,107`). G-6 token parity 120 of 120; the server run is the reference of the parity comparison and fails its own language gate on 22 of 34 Devanagari answers (filed as a readback-quality finding, V-4). Licence not recorded in this section; PROPOSED: extend the filed G-7 confirmation against the upstream Gemma 4 terms to this entry |
+| `kotlin-stdlib` 2.4.0, `kotlin-reflect` 2.4.0, `gson` 2.14.0 (dev resolution) | Transitive dependencies of `litertlm-android`; dev only | S1-L (`docs/design/on-device-slm-memo.md:1272`): dev resolves these while prod resolves `kotlin-stdlib` 2.3.21, no `kotlin-reflect`, and `gson` 2.10.1, and prod stays tested on its own classpath at every hash. **Filed:** align `gson` and Kotlin deliberately, each in its own PR, before LiteRT-LM leaves dev |
+
+### 6.4 Open items, carried not closed
+
+1. **The SBOM is not regenerated in this PR.** The controlled CycloneDX SBOM is generated from
+   `devReleaseRuntimeClasspath` (`app/build.gradle.kts:363`, `docs/sbom/README.md:73-76`), so its
+   next regeneration will list `litertlm-android` 0.18.0 and the dev transitive versions above,
+   none of which ship in a staging or prod build. That the SBOM tracks the dev classpath is an
+   existing filed item (`PROGRESS.md:5495`); regenerate and review with the next SBOM pass.
+2. **No model companion entry for the artifact.** The companion convention
+   (`docs/sbom/README.md:17-40`) covers SOUP the generated SBOM cannot see in a release. The
+   `.litertlm` is in no APK today (adb delivery to dev phones only), so the convention does not
+   yet apply; production artifact delivery (Y-10, deferred) must add one.
+3. **The AAR hash is recorded, not enforced.** Resolution is by version from Google Maven with no
+   dependency verification metadata; a republished artifact at the same version would not be
+   caught by the build.
+4. **Licences not surfaced.** LiteRT-LM and Gemma are not on the Open Source Licences screen, and
+   the G-7 confirmation is outstanding. Both are owed before any distribution beyond the dev team.
+5. **No CVE monitoring for the runtime**, the same gap section 4 item 2 records for the ASR
+   runtimes.
+6. **Validation is one device, one runtime version, one artifact.** Pixel 11 Pro only; field phones
+   are unmeasured (Y-12). The GPU backend is not selected and needs its own determinism
+   investigation and parity run before re-enablement; the Tensor G6 NPU artifact is a follow-up
+   that must measure repeatability first (Y-18, V-1).

@@ -1,6 +1,7 @@
 package com.example.samdapp.data.sync
 
 import com.example.samdapp.data.local.dao.SyncStateCount
+import com.example.samdapp.domain.auth.SignInOutbox
 import com.example.samdapp.domain.model.SyncState
 
 /**
@@ -35,4 +36,14 @@ fun outboxCountsOf(clinical: List<SyncStateCount>, audit: List<SyncStateCount>):
     heldClinical = clinical.sumOf(PENDING_STATES, held = true),
     pendingAudit = audit.sumOf(PENDING_STATES),
     needsReview = clinical.sumOf(REVIEW_STATES) + audit.sumOf(REVIEW_STATES),
+)
+
+/** The sign-in outbox state (facility-scope memo 3.2, FS-1(1)) from the same grouped counts as
+ *  [outboxCountsOf], so "everything sent" at sign-in and Home's numbers cannot disagree. */
+fun signInOutboxOf(clinical: List<SyncStateCount>, audit: List<SyncStateCount>): SignInOutbox = SignInOutbox(
+    pendingClinical = clinical.sumOf(PENDING_STATES, held = false),
+    heldClinical = clinical.sumOf(PENDING_STATES, held = true),
+    pendingAudit = audit.sumOf(PENDING_STATES),
+    failed = clinical.sumOf(setOf(SyncState.FAILED)) + audit.sumOf(setOf(SyncState.FAILED)),
+    conflict = clinical.sumOf(setOf(SyncState.CONFLICT)) + audit.sumOf(setOf(SyncState.CONFLICT)),
 )

@@ -34,6 +34,7 @@ from sqlalchemy.exc import DataError, IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import utcnow
+from app.db.session import write_out_of_band
 from app.deps import CurrentWorker
 from app.domain.audit_actions_device import DEVICE_AUDIT_ACTIONS
 from app.domain.kernel_identity import (
@@ -101,6 +102,7 @@ _SERVER_ONLY_AUDIT_ACTIONS = frozenset(
         AuditAction.KERNEL_CALL_FAILED,
         AuditAction.SYNC_BATCH_RECEIVED,
         AuditAction.SYNC_RECORD_REJECTED,
+        AuditAction.SYNC_BATCH_OWNER_MISMATCH,
         AuditAction.ABHA_SESSION_STARTED,
         AuditAction.ABHA_SESSION_FAILED,
         AuditAction.ABHA_IDENTITY_LINKED,
@@ -786,6 +788,36 @@ async def _apply_one(
     return result
 
 
+async def _audit_owner_mismatch(
+    worker: CurrentWorker, envelope_body: SyncPushEnvelope, *, request_id: str
+) -> None:
+    """The server-origin row for a refused batch, on the token worker's facility chain (the
+    session the batch arrived under). Ids and a count only, never record content."""
+
+    async def work(session: AsyncSession) -> None:
+        await audit_service.append(
+            session,
+            action=AuditAction.SYNC_BATCH_OWNER_MISMATCH.value,
+            facility_id=worker.facility_id,
+            actor_id=worker.worker_id,
+            actor_role=worker.role,
+            device_id=worker.device_id,
+            request_id=request_id,
+            origin=AuditOrigin.SERVER,
+            payload=json.dumps(
+                {
+                    "batch_id": envelope_body.batch_id,
+                    "owner_facility_id": envelope_body.owner_facility_id,
+                    "received": len(envelope_body.records),
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+        )
+
+    await write_out_of_band(work, context="sync_owner_mismatch")
+
+
 async def push(
     session: AsyncSession,
     worker: CurrentWorker,
@@ -798,6 +830,12 @@ async def push(
 
     Ordering is the load-bearing part of this function, not an implementation detail:
 
+    0. The owner check (facility-scope memo 3.5, FS-6), before any row is read or written, the
+       idempotency lookup included: a batch whose owner_facility_id is not the token's facility
+       is refused whole with SAMD-SYNC-6007, and the refusal is audited through
+       write_out_of_band so the row survives the rollback. It reads nothing, so a legitimate
+       replay still touches nothing; a replay of another facility's in-flight batch under this
+       session is exactly what it exists to stop (H-57).
     1. Idempotency lookup by batch_id, before anything else is touched. A hit returns the stored
        envelope verbatim and stops (api-contract.md section 6.1: "returns the original stored
        response verbatim without re-applying anything").
@@ -814,8 +852,17 @@ async def push(
     batch is not an event that already happened out in the world before this function was
     called; it is pure database work, so there is no failure-path trap to guard against and no
     reason to split it into a second transaction. See the Phase 4 report for the explicit
-    statement this brief asked for.
+    statement this brief asked for. The one exception is step 0's refusal audit, which must
+    outlive the rollback its own SamdError causes; nothing has appended to the audit chain on
+    this request before it, so write_out_of_band's deadlock rule is respected.
     """
+    if envelope_body.owner_facility_id != worker.facility_id:
+        await _audit_owner_mismatch(worker, envelope_body, request_id=request_id)
+        raise SamdError(
+            ErrorCode.SYNC_OWNER_FACILITY_MISMATCH,
+            detail="This batch holds another facility's records; nothing was applied.",
+        )
+
     existing_batch = (
         await session.execute(select(SyncBatch).where(SyncBatch.batch_id == envelope_body.batch_id))
     ).scalar_one_or_none()

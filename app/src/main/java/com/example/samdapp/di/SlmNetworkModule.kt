@@ -1,10 +1,12 @@
 package com.example.samdapp.di
 
+import com.example.samdapp.data.local.MarkerLocalDataOwnerFacility
 import com.example.samdapp.data.remote.RemoteSlmEngine
 import com.example.samdapp.data.remote.api.SlmApiService
+import com.example.samdapp.domain.slm.LocalDataOwnerFacility
 import com.example.samdapp.domain.slm.SlmEngine
 import com.google.gson.Gson
-import dagger.Binds
+import dagger.BindsOptionalOf
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -12,7 +14,9 @@ import dagger.hilt.components.SingletonComponent
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import java.util.Optional
 import java.util.concurrent.TimeUnit
+import javax.inject.Provider
 import javax.inject.Qualifier
 import javax.inject.Singleton
 
@@ -24,27 +28,40 @@ import javax.inject.Singleton
 annotation class SlmHttpStack
 
 /**
- * The SLM readback transport, and the binding of [SlmEngine] for every flavor.
+ * Marks the dev flavor's override of the readback engine (ruling R-DEV, on-device SLM memo 16).
+ * Only the dev `LocalSlmModule` may provide it; staging and prod provide nothing under it, so they
+ * get the remote engine. The owner is no longer overridable (FS-7).
+ */
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class DevReadbackOverride
+
+/**
+ * The SLM readback transport, and the binding of [SlmEngine] and [LocalDataOwnerFacility] for
+ * every flavor.
  *
- * **This module lives in `src/main/`, deliberately, and that is the whole flavor story.** Dev,
- * staging and prod all get [RemoteSlmEngine] calling the same backend endpoint, because that is the
- * shipping architecture rather than a production-only arrangement. No flavor source set binds an
- * [SlmEngine], and there is no mock, stub, fake or fallback implementation anywhere outside
- * `src/test/`.
+ * **The owner, every flavor: [MarkerLocalDataOwnerFacility]** (facility-scope memo 3.6, FS-7), the
+ * `device_data_owner` marker claimed at sign-in. It replaced the always-UNKNOWN staging and prod
+ * owner and the dev session-facility override; no flavor can override it.
  *
- * That is the opposite of the posture `MockBoundaryModule` documents for `VitalsSource` and
- * `KernelFallbackSource`, and the difference is the point. Those are flavored because a dev build
- * needs plausible clinical *values* to demonstrate against and a non-dev build must never reach
- * them. A stub engine would be the same hazard wearing the same clothes: a readback is clinical
- * narrative, and a stub one is a fabricated clinical narrative that would read exactly like a real
- * one on a worker's screen, with a `finish_reason` it made up and an identity gate it satisfied by
- * answering with the pin it was compiled against. H-09 and H-13 are both in the hazard register
- * because a plausible fabricated value reachable in a non-dev build is this project's recurring
- * failure mode. One binding for all three flavors means there is no build in which a different
- * thing answers.
+ * **Staging and prod: [RemoteSlmEngine], from this module alone.** No staging or prod source set
+ * provides anything under [DevReadbackOverride], so the optional below is empty there. The remote
+ * engine is the shipping architecture rather than a production-only arrangement.
  *
- * Nothing is reachable through any of this yet: there is no `SLM_READBACK_ENABLED` flag and no UI
- * (PR-7). The binding exists and is unreached.
+ * **Dev only (ruling R-DEV): the on-device engine.** The dev `LocalSlmModule` provides the engine
+ * override. The choice is made once, when Hilt builds the graph
+ * for a flavor, never per request (R3). This shape keeps `src/staging` and `src/prod` free of any
+ * readback source, which is what `SlmEngineIsUnreachableFromPresentationTest` rule 3 checks.
+ *
+ * The dev override is a real model, not a stub. A stub engine is still forbidden in every flavor:
+ * a readback is clinical narrative, and a stub one is a fabricated clinical narrative that would
+ * read exactly like a real one on a worker's screen, with a `finish_reason` it made up and an
+ * identity gate it satisfied by answering with the pin it was compiled against. H-09 and H-13 are
+ * both in the hazard register because a plausible fabricated value reachable in a non-dev build is
+ * this project's recurring failure mode. The local engine answers from the pinned, digest-verified
+ * Gemma artifact through the same seam and the same gates, and only in dev.
+ *
+ * In staging and prod nothing here is reachable: `SLM_READBACK_ENABLED` is false there.
  */
 @Module(includes = [SlmNetworkModule.Bindings::class])
 @InstallIn(SingletonComponent::class)
@@ -130,12 +147,24 @@ object SlmNetworkModule {
     fun provideSlmApiService(@SlmHttpStack retrofit: Retrofit): SlmApiService =
         retrofit.create(SlmApiService::class.java)
 
+    /** The only binding of [SlmEngine] in the project: the dev override if the flavor has one,
+     *  else [RemoteSlmEngine]. [Provider], so dev never constructs the remote engine. */
+    @Provides
+    @Singleton
+    fun provideSlmEngine(
+        @DevReadbackOverride devEngine: Optional<SlmEngine>,
+        remote: Provider<RemoteSlmEngine>,
+    ): SlmEngine = if (devEngine.isPresent) devEngine.get() else remote.get()
+
+    /** The marker, in every flavor (FS-7). No override exists. */
+    @Provides
+    fun provideLocalDataOwnerFacility(marker: MarkerLocalDataOwnerFacility): LocalDataOwnerFacility = marker
+
     @Module
     @InstallIn(SingletonComponent::class)
     interface Bindings {
-        /** The only binding of [SlmEngine] in the project, in any source set. */
-        @Binds
-        @Singleton
-        fun bindSlmEngine(impl: RemoteSlmEngine): SlmEngine
+        @BindsOptionalOf
+        @DevReadbackOverride
+        fun devReadbackEngine(): SlmEngine
     }
 }

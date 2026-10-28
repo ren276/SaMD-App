@@ -40,6 +40,12 @@ class SyncCaptionTest {
             syncCaption(idle.copy(outboxPending = 2, auditPending = 3, pendingCount = 1, lastDrainFailure = DrainFailure.NO_CONNECTION), isOnline = true),
         )
 
+    @Test fun `row 6 an owner-facility refusal has its own state`() =
+        assertEquals(
+            SyncCaption.CouldNotSend(DrainFailure.OWNER_MISMATCH, waiting = 2),
+            syncCaption(idle.copy(outboxPending = 2, lastDrainFailure = DrainFailure.OWNER_MISMATCH), isOnline = true),
+        )
+
     @Test fun `row 6 does not fire on a stale failure with nothing queued`() =
         assertEquals(SyncCaption.UpToDate, syncCaption(idle.copy(lastDrainFailure = DrainFailure.SERVER_REFUSED), isOnline = true))
 

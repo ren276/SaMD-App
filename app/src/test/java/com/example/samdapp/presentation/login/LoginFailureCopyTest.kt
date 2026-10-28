@@ -1,10 +1,16 @@
 package com.example.samdapp.presentation.login
 
 import com.example.samdapp.R
+import com.example.samdapp.data.local.LocalClinicalData
+import com.example.samdapp.data.local.LocalTransaction
 import com.example.samdapp.data.local.auth.BackendAuthSession
+import com.example.samdapp.data.local.auth.FacilitySignInGate
+import com.example.samdapp.data.local.dao.DeviceDataOwnerDao
+import com.example.samdapp.data.local.entity.DeviceDataOwnerEntity
 import com.example.samdapp.data.remote.LocalNetworkGateInterceptor
 import com.example.samdapp.data.remote.RetrofitAuthService
 import com.example.samdapp.data.remote.api.AuthApiService
+import com.example.samdapp.data.sync.MemoryOwnerMismatchHold
 import com.example.samdapp.domain.auth.AuthSession
 import com.example.samdapp.domain.auth.ChangePinResult
 import com.example.samdapp.domain.auth.SignInFailureReason
@@ -15,6 +21,7 @@ import com.example.samdapp.domain.auth.signInFailureReasonFor
 import com.example.samdapp.domain.connectivity.LocalNetworkGate
 import com.example.samdapp.domain.connectivity.LocalNetworkNotAllowedException
 import com.example.samdapp.testutil.FakeAuthTokenStore
+import com.example.samdapp.testutil.FakeSyncOutboxRepository
 import com.example.samdapp.testutil.MainDispatcherRule
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -113,7 +120,19 @@ class LoginFailureCopyTest {
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(AuthApiService::class.java)
-        val session = BackendAuthSession(RetrofitAuthService(api), FakeAuthTokenStore())
+        // The login fails at the gate interceptor, so the facility gate must never run: every
+        // dependency it would touch throws (master's signature, a semantic merge fix).
+        val gate = FacilitySignInGate(
+            object : DeviceDataOwnerDao {
+                override suspend fun insertIfAbsent(owner: DeviceDataOwnerEntity): Long = error("gate must not run")
+                override suspend fun read(): DeviceDataOwnerEntity? = error("gate must not run")
+            },
+            object : LocalClinicalData { override suspend fun present(): Boolean = error("gate must not run") },
+            FakeSyncOutboxRepository(),
+            object : LocalTransaction { override suspend fun <T> run(block: suspend () -> T): T = error("gate must not run") },
+            RetrofitAuthService(api),
+        ) { error("gate must not run") }
+        val session = BackendAuthSession(RetrofitAuthService(api), FakeAuthTokenStore(), gate, MemoryOwnerMismatchHold())
 
         val result = runBlocking { session.signIn("Asha", UserRole.ASHA_WORKER, "482915") }
 

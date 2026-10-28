@@ -18,8 +18,19 @@ class RoomAuditLogger @Inject constructor(
     private val auditLogDao: AuditLogDao,
     private val authSession: AuthSession,
 ) : AuditLogger {
-    override suspend fun log(action: AuditAction, patientId: String?, caseRecordId: String?, payload: String) {
-        val userId = authSession.currentUser().first()?.userId ?: PLACEHOLDER_USER_ID
+    override suspend fun log(action: AuditAction, patientId: String?, caseRecordId: String?, payload: String) =
+        insert(authSession.currentUser().first()?.userId ?: PLACEHOLDER_USER_ID, action, patientId, caseRecordId, payload)
+
+    /**
+     * [log] attributed to [actorUserId] rather than the current session, for a row written while no
+     * session exists yet: the sign-in facility check runs before the login is saved (facility-scope
+     * memo 3.7). Carries no patient or case id. `internal`, the narrowest visibility a cross-file
+     * caller allows (FS-R6), and `LogAsCallerScanTest` pins `FacilitySignInGate` as its only caller.
+     */
+    internal suspend fun logAs(actorUserId: String, action: AuditAction, payload: String) =
+        insert(actorUserId, action, patientId = null, caseRecordId = null, payload = payload)
+
+    private suspend fun insert(userId: String, action: AuditAction, patientId: String?, caseRecordId: String?, payload: String) {
         val now = Instant.now()
         auditLogDao.insert(
             AuditLogEntity(

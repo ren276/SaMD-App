@@ -1,5 +1,7 @@
 package com.example.samdapp.presentation.login
 
+import com.example.samdapp.domain.auth.AuthSession
+import com.example.samdapp.domain.auth.SignInResult
 import com.example.samdapp.domain.auth.UserRole
 import com.example.samdapp.testutil.FakeAuthSession
 import com.example.samdapp.testutil.MainDispatcherRule
@@ -7,6 +9,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -78,4 +81,50 @@ class LoginViewModelTest {
             assertEquals("Asha", viewModel.uiState.value.name)
             assertTrue(!viewModel.uiState.value.isSubmitting)
         }
+
+    private class RefusingAuthSession(private val result: SignInResult) : AuthSession by FakeAuthSession() {
+        override suspend fun signIn(name: String, role: UserRole, pin: String): SignInResult = result
+    }
+
+    private fun TestScope.signInWith(result: SignInResult): LoginViewModel {
+        val viewModel = LoginViewModel(RefusingAuthSession(result))
+        viewModel.onNameChange("Asha")
+        viewModel.onRoleSelect(UserRole.ASHA_WORKER)
+        viewModel.onPinChange("482915")
+        viewModel.onSubmit()
+        advanceUntilIdle()
+        viewModel.onBiometricSucceeded()
+        advanceUntilIdle()
+        return viewModel
+    }
+
+    @Test
+    fun `a sign-in blocked by the facility check names the owner facility and clears the PIN`() = runTest(mainDispatcherRule.dispatcher) {
+        val state = signInWith(SignInResult.FacilityBlocked("PHC Alpha")).uiState.value
+
+        assertEquals(SignInRefusal.FacilityBlocked("PHC Alpha"), state.refusal)
+        assertNull("no raw message alongside the string resource", state.errorMessage)
+        assertEquals("", state.pin)
+        assertTrue(!state.isSubmitting)
+    }
+
+    @Test
+    fun `a sign-in with no facility is refused with its own message`() = runTest(mainDispatcherRule.dispatcher) {
+        val viewModel = signInWith(SignInResult.NoFacility)
+
+        assertEquals(SignInRefusal.NoFacility, viewModel.uiState.value.refusal)
+        assertEquals("", viewModel.uiState.value.pin)
+
+        viewModel.onPinChange("1")
+        assertNull("editing the form clears the refusal", viewModel.uiState.value.refusal)
+    }
+
+    @Test
+    fun `a sign-in the facility check could not complete is refused with the generic message`() = runTest(mainDispatcherRule.dispatcher) {
+        val state = signInWith(SignInResult.Unavailable).uiState.value
+
+        assertEquals(SignInRefusal.Unavailable, state.refusal)
+        assertEquals("", state.pin)
+        assertTrue(!state.isSubmitting)
+    }
 }

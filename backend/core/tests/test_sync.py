@@ -45,6 +45,8 @@ def batch_body(records: list[dict[str, Any]], **overrides: Any) -> dict[str, Any
     body: dict[str, Any] = {
         "batch_id": batch_id(),
         "device_id": TEST_DEVICE_ID,
+        # The test device's local data is owned by the test worker's facility (FS-6).
+        "owner_facility_id": TEST_FACILITY_ID,
         "client_time": "2026-08-16T10:05:00.000Z",
         "records": records,
     }

@@ -89,6 +89,9 @@ class AuditAction(StrEnum):
     SLM_CALL_FAILED = "slm_call_failed"
     SYNC_BATCH_RECEIVED = "sync_batch_received"
     SYNC_RECORD_REJECTED = "sync_record_rejected"
+    # A batch refused because its owner_facility_id is not the token's facility (FS-6). Written
+    # out of band so it survives the request rollback the refusal causes.
+    SYNC_BATCH_OWNER_MISMATCH = "sync_batch_owner_mismatch"
     ABHA_SESSION_STARTED = "abha_session_started"
     ABHA_SESSION_FAILED = "abha_session_failed"
     ABHA_IDENTITY_LINKED = "abha_identity_linked"

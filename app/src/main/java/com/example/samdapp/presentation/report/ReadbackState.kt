@@ -76,9 +76,9 @@ fun ReadbackState.isGenerating(): Boolean = this is ReadbackState.Generating
  * Whether the read-back entry point exists on the report screen at all.
  *
  * Pure and parameterised rather than reading [com.example.samdapp.config.FeatureFlags] inline, so
- * **both sides of the flag are testable**. `SLM_READBACK_ENABLED` is a `const val false`, so a test
- * that only exercised the shipped value would prove "the button is hidden" without ever proving
- * that the flag is what hides it: every assertion would pass just as well if the gate were
+ * **both sides of the flag are testable**. `SLM_READBACK_ENABLED` is a build constant per flavor,
+ * so a test that only exercised the shipped value would prove "the button is hidden" without ever
+ * proving that the flag is what hides it: every assertion would pass just as well if the gate were
  * `false &&` anything, or if the approval condition were the only thing doing the work. Splitting
  * the two inputs is what makes "flag off makes the entry point unreachable" a proof rather than a
  * restatement, which is what this PR was asked for.

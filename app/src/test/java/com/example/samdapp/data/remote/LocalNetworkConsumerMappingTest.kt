@@ -67,7 +67,7 @@ class LocalNetworkConsumerMappingTest {
     @Test
     fun `sync push keeps the typed exception as the failure cause`() {
         val service = RetrofitSyncPushService(blockedRetrofit().create(SyncPushApiService::class.java), SyncGson.create())
-        val result = runBlocking { service.push(SyncPushRequestDto(batchId = "b", deviceId = "d", clientTime = java.time.Instant.EPOCH, records = emptyList())) }
+        val result = runBlocking { service.push(SyncPushRequestDto(batchId = "b", deviceId = "d", clientTime = java.time.Instant.EPOCH, records = emptyList(), ownerFacilityId = "f")) }
         assertTrue("was $result", result is SyncPushResult.Failure && result.cause is LocalNetworkNotAllowedException)
     }
 

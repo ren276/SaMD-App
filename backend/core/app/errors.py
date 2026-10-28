@@ -108,6 +108,9 @@ class ErrorCode(StrEnum):
     SYNC_VERSION_CONFLICT = "SAMD-SYNC-6004"
     SYNC_DEVICE_MISMATCH = "SAMD-SYNC-6005"
     SYNC_FORBIDDEN_FIELD = "SAMD-SYNC-6006"
+    # Facility scope (facility-scope memo 3.5, FS-6): the batch's owner_facility_id is not the
+    # token's facility. TERMINAL for the batch; nothing is applied.
+    SYNC_OWNER_FACILITY_MISMATCH = "SAMD-SYNC-6007"
 
     # AUDIT-7xxx
     AUDIT_CHAIN_BROKEN = "SAMD-AUDIT-7001"
@@ -180,6 +183,7 @@ _REGISTRY: dict[ErrorCode, tuple[int, str]] = {
     ErrorCode.SYNC_VERSION_CONFLICT: (409, "Version conflict"),
     ErrorCode.SYNC_DEVICE_MISMATCH: (403, "Device does not match the token"),
     ErrorCode.SYNC_FORBIDDEN_FIELD: (422, "Forbidden field present"),
+    ErrorCode.SYNC_OWNER_FACILITY_MISMATCH: (403, "Device data belongs to another facility"),
     ErrorCode.AUDIT_CHAIN_BROKEN: (500, "Audit chain integrity failure"),
     ErrorCode.AUDIT_MUTATION_REJECTED: (403, "Audit records cannot be modified"),
     ErrorCode.AUDIT_RANGE_TOO_WIDE: (422, "Audit query range too wide"),

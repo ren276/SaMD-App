@@ -5609,3 +5609,152 @@ New strings awaiting wording approval (not in memo 5.2 to 5.5): `kernel_failure_
 - [ ] Phase 2 (login request flow, hub scoping and copy, Home caption): paused; resumes only when
       the operator says RESUME L2.
 - [ ] Phase 3 (device pass D1 to D10, API 36 AVD, hazard row H-46, PR).
+
+## On-device SLM, dev flavor only: Gemma 4 E2B on LiteRT-LM 0.18.0 - 2026-10-16
+
+`feat/on-device-slm` (worktree `/media/sandesh/extra-ssd/wt-on-device-slm`, base `1ce3b4a`), not
+pushed yet. Design and every ruling: `docs/design/on-device-slm-memo.md` (rulings in section 16).
+The local engine exists in the dev flavor only. Staging and prod are unchanged: the readback flag
+stays false, `SlmEngine` resolves to `RemoteSlmEngine`, the local data owner is always UNKNOWN, and
+their APKs contain no LiteRT-LM class or native library. Unit tests at `cf50b0a`: dev 1237,
+staging 903, prod 903 (3, 1 and 1 skipped). Every new guard has a mutation row
+(`samd-slm-parity/mutation.log` on the SSD scratch).
+
+- [x] S1: `litertlm-android` 0.18.0 as `devImplementation`, guarded to dev (`de26a8d`, `fa204f5`).
+- [x] S2: `LocalSlmEngine` over a thin runtime seam: artifact sha256 before every start, bundled
+  template, thinking off, greedy sampler with every field set, context 2560, prefill backstop,
+  single emit after the post-run checks, single-flight, cancellation, init latch, thermal
+  pre-check, no-log scan; derived-cache manifest (C-2), API 29 floor (`b241eac`, `99a55eb`,
+  `2ef8f7c`, `d115e8e`).
+- [x] S4: engine identity and the four `SLM_READBACK_*` audit rows, both engines; fail-closed
+  facility check in the seam (Y-21') (`1067bf3`, `3f4252a`, `2d784e5`).
+- [x] S6: all 24 service control tokens, the 70 tokenizer-divergent HTML tag pieces refused before
+  any engine call, exact allowlist entry for the local model (`a38642c`, `6be5e49`).
+- [x] S3: on-device rendering parity, trim parity, over-length refusals; the runtime's
+  input-too-long error mapped to the payload refusal (R9-a) (`f2275ad`, `edad89f`, `7fd53b6`).
+- [x] S5: golden export, GPU-machine scripts, Pixel harness, offline proof, deterministic
+  comparator with hard gates (`ac4ffeb`, `e340559`, `140c51e`, `6cb6f5e`, `51a8c9f`, `1257a17`).
+- [x] V-1 and V-2: CPU is the only backend the engine selects; local generation deadline 60 s
+  (`cf8e64e`).
+- [x] S9: dev-only readback through the on-device engine, ruling R-DEV (`3865679`, merged at
+  `916b722`).
+- [x] S7: release after 5 minutes idle and on memory pressure, dev only (`cf50b0a`).
+- [x] S8: PROPOSED risk rows H-47 to H-55, extensions of H-22 to H-25 and H-27, and SOUP section 6
+  (`d23c7e6`). All AWAITING OPERATOR SIGN-OFF.
+
+Parity verdict, recorded as is (operator ruling V-0, memo section 16):
+
+> V-0 Verdict: prompt path PASS (token-id and rendering parity 120 of 120; trim 28 of 28 on desktop
+> and on device); refusal parity PASS (H3, H4); content gates FAIL, attributable to the language gate
+> on Devanagari questions (server 22 of 34 fail, GPU 31 of 34, CPU 29 of 31) and one slash-format
+> number case. Recorded as is in the PR.
+
+The v3 comparator run (CPU gated, after V-3 and the CPU re-run of the six 40 s timeouts) still exits
+1. Every failing gate, verbatim from `PARITY_REPORT-v3.md`:
+
+```
+| H1 content gates 100% (pixel-cpu) | FAIL | 73/104 shown outputs pass all four |
+| H2 non-inferiority (pixel-cpu) | FAIL | 9 violating prompts |
+- pixel-cpu: violations 9 ['g-004', 'g-043', 'g-049', 'g-052', 'g-055', 'g-067', 'g-079', 'g-112', 'g-115']; refused where the server answered: 1
+```
+
+All 31 failing CPU outputs fail the language gate only, and all are answers to Devanagari questions
+(31 of 33); numbers, control tokens and grounding pass 104 of 104 after V-3. H3, H4 and H5 pass.
+Ruling V-5: these gates gate enablement outside dev, not the merge of this dev-only PR. The one
+refusal where the server answered is g-037, which decoded the full 512 tokens on CPU (server: 13).
+
+Measured on the Pixel 11 Pro (CPU, host-sampled memory only, M-1): decode median 11.1 and 11.5
+tok/s over two 20-generation batches, thermal status 1 throughout, peak PSS about 1.9 GB; cold
+start 3.4 s plus a 5.7 s artifact hash. Repeatability: CPU 28 of 28 comparable byte-identical, GPU
+9 of 30.
+
+Filed follow-ups, not in this branch:
+
+- Prompt template `slm-readback-v2`: answer in the language and script of the question, plus a
+  brevity and stop instruction (g-037); `PROMPT_TEMPLATE_VERSION` bump and re-runs of G-6, the server
+  run and the local runs. Release gate for any non-dev enablement (V-4).
+- MEDIUM, before pilot: the worker-tier intent gate is English-only, so a Devanagari worker question
+  is refused as `OUT_OF_SCOPE_INTENT`.
+- HIGH: the product-wide facility-scope PR, with its own hazard row; no non-dev flavor can enable the
+  readback before it provides a real `LocalDataOwnerFacility`.
+- The Tensor G6 NPU artifact, which must measure repeatability first (Y-18).
+- The GPU determinism investigation and its own parity run before GPU is selected again (V-1).
+- Align `gson` and Kotlin deliberately, each in its own PR, before LiteRT-LM leaves dev (S1-L).
+- ASR release on memory pressure (Y-11).
+- Production artifact delivery (Y-10).
+- The device request id that joins remote `slm_call_log` rows to device rows (Y-9).
+- The blind clinician review of `review-v3/blind-sample.csv` before any non-dev enablement.
+- The D4 GPU performance batches (not needed while the engine selects CPU only).
+- Operator, GPU machine: the service token rotation and the port 8100 binding.
+- The server's own 22 of 34 Devanagari-answer failures, filed as a readback-quality finding (V-4).
+- Audit failure posture (PR #81 diff review, 2026-10-26, deferred by the operator until the phone is
+  back): `ReadbackAudit.write` in `SlmReadbackUseCase` logs a failed audit write and still returns
+  the readback, which matches the codebase's breadcrumb rule but not the literal A-1 wording ("a
+  readback is never shown without its audit row"). If A-1 is literal, a failed INVOKED or
+  OUTPUT_SUPPRESSED write must refuse the readback; needs a ruling, a test and a device check.
+- ~~Backend comment `audit_actions_device.py` still says the four `slm_readback_*` actions are "Not
+  emitted yet"~~ fixed 2026-10-27 with the facility-scope P7 backend change (`f65ff8d`).
+
+## Facility scope P7: sync push owner check, deploy note - 2026-10-27
+
+The sync push envelope gained a REQUIRED `owner_facility_id` (api-contract.md 6.1, ruling FS-6),
+on branch `feat/facility-scope`. Both sides are strict, so they deploy together: the new server
+refuses an envelope without the field (400 `SAMD-SYS-9001`), and an old server's `StrictModel`
+refuses an envelope with it. After the merge the operator rebuilds the API image:
+
+```
+docker compose build --no-cache api
+```
+
+No Alembic revision: `audit_events.action` is a plain string column, so the new server action
+`sync_batch_owner_mismatch` needs no schema change.
+
+## Facility scope of local clinical data - 2026-10-27
+
+Branch `feat/facility-scope` (off master `213bb0a`), design memo
+`docs/design/facility-scope-memo.md`, rulings in its section 10. Not merged; no PR yet.
+
+**Why.** A pending outbox was pushed under the next worker's session and the server filed it under
+that worker's facility (H-57), and any worker could read another facility's records on a shared
+phone (H-58). Ruling FS-R: each facility has its own phone.
+
+**Shipped.**
+- P1 `26a419f`, reduced by FS-R in `93b3f22`: `decideFacilitySignIn` (CLAIM, LEGACY_CLAIM,
+  CONTINUE, BLOCK for any other facility whatever the sync state; a blank facility id refused).
+- P2 `3dade60`: `device_data_owner` table, Room 22 to 23, atomic claim.
+- P3 `83b0b18` and P3b `d00c004`: the sign-in check before any token is saved; the claim and its
+  audit row in one Room transaction; BLOCK and a blank id revoke the new login; nothing leaves the
+  check as an exception (FS-R5); strings approved (FS-R3, memo 10.5); `logAs` narrowed and
+  scanned (FS-R6); audit actions `local_data_owner_claimed` and `cross_facility_sign_in_blocked`
+  mirrored in the backend.
+- P8 `fb5d590`: the readback owner is the marker in every flavor (FS-7).
+- P7 `f65ff8d`: every sync push carries `owner_facility_id`; the backend refuses a batch whose owner
+  is not the session's facility with `SAMD-SYNC-6007`, before any row is read, audited out of band
+  (FS-6). Deploy note above.
+- P9 `6f2bea8`: PROPOSED risk rows H-57, H-58, H-59, RR-05, H-54 extended; DHF entry.
+
+**Dropped by FS-R.** P4 (in-app wipe) and P5 (audited release path): with one phone per facility a
+move between facilities is rare and handled by people, so the app has no wipe. The P4 work was never
+committed; its patch and files are kept under `/media/sandesh/extra-ssd/samd-slm-parity/fs/p4-dropped/`.
+
+**Support procedure (memo section 12).** To move a phone to another facility: a facility A worker
+confirms Home's sync caption reads exactly "Up to date" (FS-R1), otherwise the phone goes to support
+first; support clears the app's storage; support re-delivers the SLM model (on-device SLM memo 9.1
+for dev); a facility B worker signs in and the empty phone is claimed. H-59 is the residual risk.
+
+**Verification.** Unit suites at `f65ff8d`: dev 1279 (3 skipped), staging 944, prod 944 (each 1
+skipped). Backend 523 passed; 1 pre-existing failure, `test_config.py::test_live_abdm_requires_credentials`
+(fails the same before any of this; environment-dependent). Pixel 67041FDKX004ZY: `data.local`
+instrumented package 134 of 134 at `d00c004`. Mutation rows in
+`/media/sandesh/extra-ssd/samd-slm-parity/mutation-fs.log`.
+
+**Open.**
+- The Pixel's dev database is at schema 23 (on-device SLM memo 15.4): a v22 build crashes on open.
+- A phone that held two facilities' data before this ships is not detected (FS-4(a), basis: no field pilot).
+- Merge order with F1 (`feat/local-network-permission`): memo section 11; the second to merge merges master in.
+- After the merge: `docker compose build --no-cache api` (device and server deploy together).
+- Backend test `tests/test_config.py::test_live_abdm_requires_credentials` fails on this machine and
+  passes in CI: it depends on the local `.env`, which pydantic-settings loads automatically, so a
+  locally set ABDM credential makes the "missing credentials" case not raise. Fix by forcing the
+  environment on the pytest invocation or by disabling env-file loading in tests.
+

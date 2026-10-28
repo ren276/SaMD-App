@@ -28,8 +28,22 @@ data class LoginUiState(
     val errorMessage: String? = null,
     /** Set instead of [errorMessage] when the failure is ours to word (Q4): never exception text. */
     @StringRes val errorRes: Int? = null,
+    /** A sign-in the server accepted but this phone refused (facility-scope memo 3.2). Shown
+     *  from a string resource, in place of [errorMessage]. */
+    val refusal: SignInRefusal? = null,
 ) {
     val canSubmit: Boolean get() = name.isNotBlank() && role != null && pin.length in PIN_MIN_LENGTH..PIN_MAX_LENGTH && !isSubmitting
+}
+
+sealed interface SignInRefusal {
+    /** The phone belongs to [ownerFacilityName]'s facility. */
+    data class FacilityBlocked(val ownerFacilityName: String) : SignInRefusal
+
+    /** The account is not linked to a facility. */
+    data object NoFacility : SignInRefusal
+
+    /** The facility check could not complete safely (FS-R5). */
+    data object Unavailable : SignInRefusal
 }
 
 // Mirrors backend/core/app/schemas/auth.py's PIN_MIN_LENGTH/PIN_MAX_LENGTH: early client-side
@@ -68,13 +82,13 @@ class LoginViewModel @Inject constructor(
     private val _effects = Channel<LoginEffect>(Channel.BUFFERED)
     val effects = _effects.receiveAsFlow()
 
-    override fun onNameChange(value: String) = _uiState.update { it.copy(name = value, errorMessage = null, errorRes = null) }
+    override fun onNameChange(value: String) = _uiState.update { it.copy(name = value, errorMessage = null, errorRes = null, refusal = null) }
 
-    override fun onRoleSelect(role: UserRole) = _uiState.update { it.copy(role = role, errorMessage = null, errorRes = null) }
+    override fun onRoleSelect(role: UserRole) = _uiState.update { it.copy(role = role, errorMessage = null, errorRes = null, refusal = null) }
 
     override fun onPinChange(value: String) {
         if (value.length <= PIN_MAX_LENGTH && value.all { it.isDigit() }) {
-            _uiState.update { it.copy(pin = value, errorMessage = null, errorRes = null) }
+            _uiState.update { it.copy(pin = value, errorMessage = null, errorRes = null, refusal = null) }
         }
     }
 
@@ -82,7 +96,7 @@ class LoginViewModel @Inject constructor(
         val current = _uiState.value
         if (!current.canSubmit) return
         viewModelScope.launch {
-            _uiState.update { it.copy(isSubmitting = true, errorMessage = null, errorRes = null) }
+            _uiState.update { it.copy(isSubmitting = true, errorMessage = null, errorRes = null, refusal = null) }
             _effects.send(LoginEffect.RequestBiometricAuth(subtitle = current.name.trim()))
         }
     }
@@ -111,6 +125,13 @@ class LoginViewModel @Inject constructor(
                         )
                     }
                 }
+                is SignInResult.FacilityBlocked -> _uiState.update {
+                    it.copy(isSubmitting = false, refusal = SignInRefusal.FacilityBlocked(result.ownerFacilityName), pin = "")
+                }
+                SignInResult.NoFacility ->
+                    _uiState.update { it.copy(isSubmitting = false, refusal = SignInRefusal.NoFacility, pin = "") }
+                SignInResult.Unavailable ->
+                    _uiState.update { it.copy(isSubmitting = false, refusal = SignInRefusal.Unavailable, pin = "") }
             }
         }
     }

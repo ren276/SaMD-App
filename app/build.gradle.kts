@@ -174,6 +174,9 @@ android {
             buildConfigField("boolean", "PI_GATEWAY_BASE_URL_OVERRIDDEN", "${piBaseUrlOverride.isNotEmpty()}")
             // FLAG_SECURE off in dev so investor/demo screen recordings work; staging/prod enforce it.
             buildConfigField("boolean", "SCREEN_SECURITY_ENABLED", "false")
+            // R-DEV: the SLM read-back is on in dev only, over the on-device engine and mock data.
+            // Staging and prod keep it off (memo 16).
+            buildConfigField("boolean", "SLM_READBACK_ENABLED", "true")
             // samd.dev.kernelFallback=none binds the always-null kernel fallback staging and prod
             // use, so the honest UNAVAILABLE card and Retry can be exercised live on a dev build.
             // Absent keeps the mock scenario source. Any other value fails the build here, at
@@ -194,6 +197,7 @@ android {
             buildConfigField("String", "ENVIRONMENT", "\"staging\"")
             buildConfigField("boolean", "PI_GATEWAY_ENABLED", "false")
             buildConfigField("boolean", "SCREEN_SECURITY_ENABLED", "true")
+            buildConfigField("boolean", "SLM_READBACK_ENABLED", "false")
         }
         create("prod") {
             dimension = "environment"
@@ -201,6 +205,7 @@ android {
             buildConfigField("String", "ENVIRONMENT", "\"prod\"")
             buildConfigField("boolean", "PI_GATEWAY_ENABLED", "false")
             buildConfigField("boolean", "SCREEN_SECURITY_ENABLED", "true")
+            buildConfigField("boolean", "SLM_READBACK_ENABLED", "false")
         }
     }
 
@@ -322,6 +327,9 @@ dependencies {
     // BLE client for the kernelhub2 emulator, dev flavour only (PR-B addendum 2, Q11): staging and
     // prod resolve no no.nordicsemi artifact (addendum 1.3, live check 9).
     "devImplementation"(libs.nordic.ble.ktx)
+    // On-device SLM runtime, dev flavour only (on-device SLM memo sections 3 and 14, slice S1):
+    // staging and prod resolve no com.google.ai.edge.litertlm artifact. Guarded by LiteRtLmIsDevOnlyTest.
+    "devImplementation"(libs.litertlm.android)
     // On-device ASR — sherpa-onnx 1.13.7 release AAR, vendored under app/libs/ because the
     // group com.k2fsa.sherpa.onnx does not publish to Maven Central (searched 2026-09-02: zero
     // artifacts). A file dependency, so it needs no repository declaration under this project's
@@ -408,6 +416,16 @@ tasks.withType<Test>().configureEach {
         .withPropertyName("backendMirrorSourcesReadByMirrorTests")
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .optional()
+
+    // LiteRtLmIsDevOnlyTest reads this file and the version catalog as text. Neither is on the
+    // test classpath, so without this an edit to either leaves the task UP-TO-DATE and the
+    // guard never runs on the change it exists to catch.
+    inputs.files(
+        layout.projectDirectory.file("build.gradle.kts"),
+        rootProject.layout.projectDirectory.file("gradle/libs.versions.toml"),
+    )
+        .withPropertyName("buildScriptsReadByLiteRtLmGuard")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
 
     // ClassifierFixtureMirrorTest asserts this directory is byte-identical to
     // src/test/resources/classifier-fixtures. Without it declared, an edit to only the backend

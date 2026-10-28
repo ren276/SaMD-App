@@ -1,0 +1,331 @@
+{
+  "note": "Verdicts of the real Kotlin outputIsGrounded, firstControlTokenIn and SlmStreamSanitizer (one chunk, then finish). Regenerate with ParityFixtureTest.",
+  "named_control_tokens": [
+    "<audio|>",
+    "<bos>",
+    "<channel|>",
+    "<eos>",
+    "<image|>",
+    "<mask>",
+    "<pad>",
+    "<tool_call|>",
+    "<tool_response|>",
+    "<tool|>",
+    "<turn|>",
+    "<unk>",
+    "<|\"|>",
+    "<|audio>",
+    "<|audio|>",
+    "<|channel>",
+    "<|image>",
+    "<|image|>",
+    "<|think|>",
+    "<|tool>",
+    "<|tool_call>",
+    "<|tool_response>",
+    "<|turn>",
+    "<|video|>",
+    "[multimodal]"
+  ],
+  "unused_token_count": 6227,
+  "cases": [
+    {
+      "id": "grounded",
+      "medication_lines": [
+        "Amoxicillin (Mox) - 500 mg | oral | three times a day | 5 days | 15"
+      ],
+      "diagnosis": "Acute viral pharyngitis",
+      "decision": "AGREE",
+      "output": "The doctor approved Amoxicillin 500 mg, three times a day, for 5 days, 15 in total.",
+      "grounded": true,
+      "control_token_hit": false,
+      "sanitized": "The doctor approved Amoxicillin 500 mg, three times a day, for 5 days, 15 in total."
+    },
+    {
+      "id": "drug-not-in-record",
+      "medication_lines": [
+        "Amoxicillin (Mox) - 500 mg | oral | three times a day | 5 days | 15"
+      ],
+      "diagnosis": null,
+      "decision": "AGREE",
+      "output": "Take ibuprofen with the amoxicillin.",
+      "grounded": false,
+      "control_token_hit": false,
+      "sanitized": "Take ibuprofen with the amoxicillin."
+    },
+    {
+      "id": "dose-not-in-record",
+      "medication_lines": [
+        "Amoxicillin (Mox) - 500 mg | oral | three times a day | 5 days | 15"
+      ],
+      "diagnosis": null,
+      "decision": "AGREE",
+      "output": "Take 250 mg of amoxicillin.",
+      "grounded": false,
+      "control_token_hit": false,
+      "sanitized": "Take 250 mg of amoxicillin."
+    },
+    {
+      "id": "numeral-from-diagnosis",
+      "medication_lines": [
+        "Amoxicillin (Mox) - 500 mg | oral | three times a day | 5 days | 15"
+      ],
+      "diagnosis": "Fever for 3 days",
+      "decision": "MODIFY",
+      "output": "Fever for 3 days, take amoxicillin.",
+      "grounded": true,
+      "control_token_hit": false,
+      "sanitized": "Fever for 3 days, take amoxicillin."
+    },
+    {
+      "id": "drug-only-in-diagnosis",
+      "medication_lines": [
+        "Amoxicillin (Mox) - 500 mg | oral | three times a day | 5 days | 15"
+      ],
+      "diagnosis": "Allergic to penicillin",
+      "decision": "MODIFY",
+      "output": "Avoid penicillin.",
+      "grounded": false,
+      "control_token_hit": false,
+      "sanitized": "Avoid penicillin."
+    },
+    {
+      "id": "reject-no-medicines",
+      "medication_lines": [],
+      "diagnosis": "Viral fever",
+      "decision": "REJECT",
+      "output": "The doctor did not prescribe paracetamol.",
+      "grounded": false,
+      "control_token_hit": false,
+      "sanitized": "The doctor did not prescribe paracetamol."
+    },
+    {
+      "id": "decimal-dose",
+      "medication_lines": [
+        "Albendazole - 400 mg | oral | once a day | 3 days | 3"
+      ],
+      "diagnosis": null,
+      "decision": "AGREE",
+      "output": "Give albendazole 0.5 tablet.",
+      "grounded": false,
+      "control_token_hit": false,
+      "sanitized": "Give albendazole 0.5 tablet."
+    },
+    {
+      "id": "suffix-drug",
+      "medication_lines": [
+        "Paracetamol - 500 mg | oral | every 8 hours | 3 days | 9"
+      ],
+      "diagnosis": null,
+      "decision": "AGREE",
+      "output": "Azithromycin is not on the record.",
+      "grounded": false,
+      "control_token_hit": false,
+      "sanitized": "Azithromycin is not on the record."
+    },
+    {
+      "id": "hydrocortisone-suffix",
+      "medication_lines": [
+        "Paracetamol - 500 mg | oral | every 8 hours | 3 days | 9"
+      ],
+      "diagnosis": null,
+      "decision": "AGREE",
+      "output": "Hydrocortisone cream.",
+      "grounded": false,
+      "control_token_hit": false,
+      "sanitized": "Hydrocortisone cream."
+    },
+    {
+      "id": "exact-word-ors",
+      "medication_lines": [
+        "Oral rehydration salts - 1 sachet | oral | after each loose stool | 3 days | 6"
+      ],
+      "diagnosis": null,
+      "decision": "AGREE",
+      "output": "Give ORS after each loose stool, 1 sachet.",
+      "grounded": false,
+      "control_token_hit": false,
+      "sanitized": "Give ORS after each loose stool, 1 sachet."
+    },
+    {
+      "id": "ors-not-in-record",
+      "medication_lines": [
+        "Paracetamol - 500 mg | oral | every 8 hours | 3 days | 9"
+      ],
+      "diagnosis": null,
+      "decision": "AGREE",
+      "output": "Give ORS.",
+      "grounded": false,
+      "control_token_hit": false,
+      "sanitized": "Give ORS."
+    },
+    {
+      "id": "upper-case",
+      "medication_lines": [
+        "Amoxicillin (Mox) - 500 mg | oral | three times a day | 5 days | 15"
+      ],
+      "diagnosis": null,
+      "decision": "AGREE",
+      "output": "AMOXICILLIN 500 MG THREE TIMES A DAY.",
+      "grounded": true,
+      "control_token_hit": false,
+      "sanitized": "AMOXICILLIN 500 MG THREE TIMES A DAY."
+    },
+    {
+      "id": "devanagari-only",
+      "medication_lines": [
+        "Amoxicillin (Mox) - 500 mg | oral | three times a day | 5 days | 15"
+      ],
+      "diagnosis": null,
+      "decision": "AGREE",
+      "output": "डॉक्टर ने दवा लिखी है।",
+      "grounded": true,
+      "control_token_hit": false,
+      "sanitized": "डॉक्टर ने दवा लिखी है।"
+    },
+    {
+      "id": "devanagari-digits",
+      "medication_lines": [
+        "Amoxicillin (Mox) - 500 mg | oral | three times a day | 5 days | 15"
+      ],
+      "diagnosis": null,
+      "decision": "AGREE",
+      "output": "दवा ५ दिन लें।",
+      "grounded": true,
+      "control_token_hit": false,
+      "sanitized": "दवा ५ दिन लें।"
+    },
+    {
+      "id": "glued-unit",
+      "medication_lines": [
+        "Amoxicillin (Mox) - 500 mg | oral | three times a day | 5 days | 15"
+      ],
+      "diagnosis": null,
+      "decision": "AGREE",
+      "output": "Take 500mg and 5days.",
+      "grounded": true,
+      "control_token_hit": false,
+      "sanitized": "Take 500mg and 5days."
+    },
+    {
+      "id": "channel-leak",
+      "medication_lines": [
+        "Amoxicillin (Mox) - 500 mg | oral | three times a day | 5 days | 15"
+      ],
+      "diagnosis": null,
+      "decision": "AGREE",
+      "output": "<|channel>thought\nthe worker may want ibuprofen<channel|>Take amoxicillin 500 mg.",
+      "grounded": false,
+      "control_token_hit": true,
+      "sanitized": "Take amoxicillin 500 mg."
+    },
+    {
+      "id": "unused-token",
+      "medication_lines": [
+        "Amoxicillin (Mox) - 500 mg | oral | three times a day | 5 days | 15"
+      ],
+      "diagnosis": null,
+      "decision": "AGREE",
+      "output": "Take amoxicillin <unused12> now.",
+      "grounded": false,
+      "control_token_hit": true,
+      "sanitized": "Take amoxicillin  now."
+    },
+    {
+      "id": "multimodal-token",
+      "medication_lines": [
+        "Amoxicillin (Mox) - 500 mg | oral | three times a day | 5 days | 15"
+      ],
+      "diagnosis": null,
+      "decision": "AGREE",
+      "output": "Take [multimodal] amoxicillin.",
+      "grounded": true,
+      "control_token_hit": true,
+      "sanitized": "Take  amoxicillin."
+    },
+    {
+      "id": "bp-less-than",
+      "medication_lines": [
+        "Amoxicillin (Mox) - 500 mg | oral | three times a day | 5 days | 15"
+      ],
+      "diagnosis": null,
+      "decision": "AGREE",
+      "output": "BP <120/80 and amoxicillin.",
+      "grounded": false,
+      "control_token_hit": false,
+      "sanitized": "BP <120/80 and amoxicillin."
+    },
+    {
+      "id": "egfr-range",
+      "medication_lines": [
+        "Amoxicillin (Mox) - 500 mg | oral | three times a day | 5 days | 15"
+      ],
+      "diagnosis": null,
+      "decision": "AGREE",
+      "output": "eGFR <60 and >90 with amoxicillin.",
+      "grounded": false,
+      "control_token_hit": false,
+      "sanitized": "eGFR <60 and >90 with amoxicillin."
+    },
+    {
+      "id": "footnote",
+      "medication_lines": [
+        "Amoxicillin (Mox) - 500 mg | oral | three times a day | 5 days | 15"
+      ],
+      "diagnosis": null,
+      "decision": "AGREE",
+      "output": "See note [2] on amoxicillin.",
+      "grounded": false,
+      "control_token_hit": false,
+      "sanitized": "See note [2] on amoxicillin."
+    },
+    {
+      "id": "unknown-angle",
+      "medication_lines": [
+        "Amoxicillin (Mox) - 500 mg | oral | three times a day | 5 days | 15"
+      ],
+      "diagnosis": null,
+      "decision": "AGREE",
+      "output": "Take <pending> amoxicillin.",
+      "grounded": true,
+      "control_token_hit": false,
+      "sanitized": "Take  amoxicillin."
+    },
+    {
+      "id": "trailing-partial-token",
+      "medication_lines": [
+        "Amoxicillin (Mox) - 500 mg | oral | three times a day | 5 days | 15"
+      ],
+      "diagnosis": null,
+      "decision": "AGREE",
+      "output": "Take amoxicillin. <|chan",
+      "grounded": true,
+      "control_token_hit": false,
+      "sanitized": "Take amoxicillin. "
+    },
+    {
+      "id": "unterminated-channel",
+      "medication_lines": [
+        "Amoxicillin (Mox) - 500 mg | oral | three times a day | 5 days | 15"
+      ],
+      "diagnosis": null,
+      "decision": "AGREE",
+      "output": "Take amoxicillin. <|channel>thought: still thinking",
+      "grounded": true,
+      "control_token_hit": true,
+      "sanitized": "Take amoxicillin. "
+    },
+    {
+      "id": "close-without-open",
+      "medication_lines": [
+        "Amoxicillin (Mox) - 500 mg | oral | three times a day | 5 days | 15"
+      ],
+      "diagnosis": null,
+      "decision": "AGREE",
+      "output": "Take amoxicillin<channel|> now.",
+      "grounded": true,
+      "control_token_hit": true,
+      "sanitized": "Take amoxicillin now."
+    }
+  ]
+}

@@ -172,9 +172,9 @@ enum class AuditAction(val value: String) {
      *  `failedCount`, so a split commit is silent permanent loss of exactly the rows that prove
      *  clinical narrative left the device.
      *
-     *  **Not emitted yet.** The seam's audit stage is not built; these land now so that the
-     *  vocabulary agreement is already in place when it is, same reasoning the `VOICE_FIELD_*`
-     *  values were added ahead of their caller.
+     *  **Emitted by `SlmReadbackUseCase` only** (on-device SLM memo 8, slice S4), for both
+     *  engines; the field list per row is that memo's table. They landed ahead of their caller so
+     *  the vocabulary agreement was in place first, same reasoning as the `VOICE_FIELD_*` values.
      *
      *  Payload is measured metadata only, on every one of them: case id, tier, model id and
      *  version, prompt-template version, token counts, latency, refusal reason code, suppression
@@ -203,6 +203,20 @@ enum class AuditAction(val value: String) {
      *  change is what PR-1 established the counts alone could not distinguish from a clean
      *  generation. Neither is visible anywhere else. */
     SLM_READBACK_SANITIZER_ACTIVITY("slm_readback_sanitizer_activity"),
+
+    /** The phone's data was claimed for the signing-in worker's facility (facility-scope memo 3.2):
+     *  the first sign-in on a fresh phone, or on a phone upgraded from schema 22 with data and no
+     *  owner (`legacy` true, FS-4(a)). Payload: facility id, decision, legacy, outbox counts. Never
+     *  patient or record content. Attributed to the signing-in worker (`RoomAuditLogger.logAs`). */
+    LOCAL_DATA_OWNER_CLAIMED("local_data_owner_claimed"),
+
+    /** A sign-in whose PIN the server accepted was refused because the phone belongs to another
+     *  facility, or because the account carries no facility id (FS-R). Nothing was saved and the
+     *  new refresh token was revoked; payload says whether the revoke succeeded, with the login's
+     *  and the owner's facility ids, the decision and the outbox counts. Never patient or record
+     *  content. Attributed to the signing-in worker (`RoomAuditLogger.logAs`); it reaches the server
+     *  under the owner facility's next session. */
+    CROSS_FACILITY_SIGN_IN_BLOCKED("cross_facility_sign_in_blocked"),
 }
 
 /** Builds the JSON blob stored in AuditLogEntity.payload from a flat set of fields. */

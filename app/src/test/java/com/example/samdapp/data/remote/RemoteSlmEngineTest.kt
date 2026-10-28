@@ -5,6 +5,8 @@ import com.example.samdapp.domain.slm.PROMPT_TEMPLATE_VERSION
 import com.example.samdapp.domain.slm.SANITIZER_TARGET_MODEL_ID
 import com.example.samdapp.domain.slm.SlmEngineError
 import com.example.samdapp.domain.slm.SlmEngineException
+import com.example.samdapp.domain.slm.SlmEngineIdentity
+import com.example.samdapp.domain.slm.SlmEngineKind
 import com.example.samdapp.domain.slm.SlmFinishReason
 import com.google.gson.Gson
 import com.google.gson.JsonObject
@@ -472,6 +474,32 @@ class RemoteSlmEngineTest {
         // fail closed: a caller that loses it reads null, and null refuses on both gates.
         assertNull(engine.servedModelId())
         assertNull(engine.finishReason())
+    }
+
+    /** Memo 4.1: what the envelope carried, verbatim, REMOTE; and nothing once a call has failed. */
+    @Test
+    fun answeredByReportsTheEnvelopeAndIsClearedByAFailedCall() = runBlocking {
+        assertNull(engine.answeredBy())
+        server.enqueue(ok(envelope(modelId = "some/other-model", digest = "abc123")))
+        engine.generate(CASE, PROMPT, 512).toList()
+
+        assertEquals(
+            SlmEngineIdentity(
+                engine = SlmEngineKind.REMOTE,
+                accelerator = null,
+                modelId = "some/other-model",
+                artifactSha256 = "abc123",
+                runtimeVersion = null,
+            ),
+            engine.answeredBy(),
+        )
+        assertNull("no device conditions for a server-side generation", engine.runConditions())
+
+        server.enqueue(problem(502, "SAMD-SLM-8006"))
+        assertThrows(SlmEngineException::class.java) {
+            runBlocking { engine.generate(CASE, PROMPT, 512).toList() }
+        }
+        assertNull(engine.answeredBy())
     }
 
     // --------------------------------------------------------------- totality
