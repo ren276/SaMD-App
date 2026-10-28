@@ -306,6 +306,10 @@ Operator answer, 2026-10-27, on FS-R5's generic string: no generic sign-in failu
 
 sign_in_failed_generic approved as written: "Cannot sign in on this phone right now. Try again, or tell your supervisor."
 
+### 10.6 Approval of sync_caption_owner_mismatch, 2026-10-28 (verbatim)
+
+sync_caption_owner_mismatch approved as written: "Could not send: this phone's records belong to a different facility than this account. Tell your supervisor."
+
 ## 11. Merge order
 
 `feat/local-network-permission` (F1, unmerged) changes `LoginViewModel`, `LoginScreen`,
