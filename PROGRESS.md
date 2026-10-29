@@ -5618,6 +5618,8 @@ New strings awaiting wording approval (not in memo 5.2 to 5.5): `kernel_failure_
 - [x] FU-1b (2026-10-29): `CopyRef.resolve` takes a two-operation `CopyText`, so it is testable without Android; the 15 count-free strings are back on the plain `getString(res)` overload (FU-1 had sent them through `String.format`), pinned by `CopyRefResolveTest` (`FU1b-*` rows).
 FU-4: ruling R1 recorded in the F1 memo (kernel_failure_local_network_body approved).
 - [x] Phase 2 A1 (2026-10-29): login asks `LocalNetworkGate.blocksHost` (now the interceptor's one host decision) for the backend host after the biometric step; memo 5.2 rationale only when no declared NEARBY_DEVICES member is granted, every denial is `lnp_denied_login` with Open settings, no auto re-submit; `LoginUiState` holds one sealed `LoginError`; `LoginLocalNetworkFlowTest`, mutation rows `P2A-*`.
+- [x] Phase 2 A2 (2026-10-29): Home's local-network caption comes from `BackendLocalNetwork` (`blocksHost` on the live backend host) on every emission, only while something is waiting, never over the observed owner-mismatch hold (P2-R9, new `OwnerMismatchHold.held` over the same key); Open settings is its action; ON_RESUME after the block clears runs one Sync now; LOCAL_NETWORK_NOT_ALLOWED now ends the worker run (P2-R8); `HomeLocalNetworkTest`, rows `P2A2-*`.
+- File: after a cold start a held phone shows a generic waiting caption, not the owner-mismatch caption, until the next drain (pre-existing facility-scope gap, own PR).
 
 ## On-device SLM, dev flavor only: Gemma 4 E2B on LiteRT-LM 0.18.0 - 2026-10-16
 

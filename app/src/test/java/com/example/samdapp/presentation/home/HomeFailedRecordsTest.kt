@@ -1,5 +1,6 @@
 package com.example.samdapp.presentation.home
 
+import com.example.samdapp.data.sync.MemoryOwnerMismatchHold
 import com.example.samdapp.domain.model.RETRY_EXHAUSTED_CODE
 import com.example.samdapp.domain.model.SYNC_RECORD_INVALID_CODE
 import com.example.samdapp.domain.model.SyncFailureAction
@@ -43,7 +44,7 @@ class HomeFailedRecordsTest {
         sync,
         FakeAuthSession(),
         FakeCaseRecordRepository(),
-        FakePatientRepository(),
+        FakePatientRepository(), MemoryOwnerMismatchHold(), publicBackendLocalNetwork(),
     )
 
     private fun failed(

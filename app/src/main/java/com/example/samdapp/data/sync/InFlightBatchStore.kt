@@ -8,7 +8,12 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
@@ -98,6 +103,9 @@ class DataStoreInFlightBatchStore @Inject constructor(
  * `sync_outbox` DataStore so it survives process death, like the in-flight batch it holds back.
  */
 interface OwnerMismatchHold {
+    /** The same value as [isHeld], observed (memo P2-R9): Home combines it into its state, so a
+     *  release while Home is visible shows on the next emission. */
+    val held: Flow<Boolean>
     suspend fun isHeld(): Boolean
     suspend fun hold()
     suspend fun release()
@@ -109,7 +117,10 @@ class DataStoreOwnerMismatchHold @Inject constructor(
 ) : OwnerMismatchHold {
     private val dataStore = context.syncOutboxDataStore
 
-    override suspend fun isHeld(): Boolean = dataStore.data.first()[Keys.OWNER_MISMATCH_HOLD] == true
+    override val held: Flow<Boolean> = heldFrom(dataStore.data)
+
+    // One mapping for both reads, so a read error does the same thing in each: it propagates.
+    override suspend fun isHeld(): Boolean = held.first()
 
     override suspend fun hold() {
         dataStore.edit { it[Keys.OWNER_MISMATCH_HOLD] = true }
@@ -120,10 +131,15 @@ class DataStoreOwnerMismatchHold @Inject constructor(
     }
 }
 
+/** The hold as read from the `sync_outbox` preferences: the one key, no other storage. */
+internal fun heldFrom(data: Flow<Preferences>): Flow<Boolean> =
+    data.map { it[Keys.OWNER_MISMATCH_HOLD] == true }.distinctUntilChanged()
+
 /** In memory, for tests and for drainer constructions that do not exercise the hold. */
 class MemoryOwnerMismatchHold : OwnerMismatchHold {
-    @Volatile private var held = false
-    override suspend fun isHeld() = held
-    override suspend fun hold() { held = true }
-    override suspend fun release() { held = false }
+    private val state = MutableStateFlow(false)
+    override val held: Flow<Boolean> = state.asStateFlow()
+    override suspend fun isHeld() = state.value
+    override suspend fun hold() { state.value = true }
+    override suspend fun release() { state.value = false }
 }

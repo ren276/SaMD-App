@@ -2,10 +2,13 @@ package com.example.samdapp.presentation.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.samdapp.data.sync.OwnerMismatchHold
 import com.example.samdapp.domain.auth.AuthSession
+import com.example.samdapp.domain.connectivity.BackendLocalNetwork
 import com.example.samdapp.domain.model.Patient
 import com.example.samdapp.domain.repository.CaseRecordRepository
 import com.example.samdapp.domain.repository.PatientRepository
+import com.example.samdapp.domain.sync.DrainFailure
 import com.example.samdapp.domain.sync.FailedSyncRecord
 import com.example.samdapp.domain.sync.SyncState
 import com.example.samdapp.domain.sync.SyncStatus
@@ -15,6 +18,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -52,7 +56,15 @@ data class HomeUiState(
      *  the sync flow this ViewModel collects, so the card that shows the number costs nothing;
      *  the twenty queries behind the list are kept off the launch path (perf audit F2A-01). */
     val failedRecords: List<FailedSyncRecord> = emptyList(),
+    /** The gate's decision for the backend host at the last evaluation (memo P2-R5). */
+    val localNetworkBlocked: Boolean = false,
+    /** The persisted owner-mismatch hold, observed (memo P2-R9). */
+    val ownerMismatchHeld: Boolean = false,
 )
+
+/** Home's caption: [syncCaption] over the drain failure Home should show (see [homeDrainFailure]). */
+fun HomeUiState.caption(isOnline: Boolean): SyncCaption =
+    syncCaption(sync.copy(lastDrainFailure = homeDrainFailure(sync.lastDrainFailure, localNetworkBlocked, ownerMismatchHeld)), isOnline)
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
@@ -61,6 +73,8 @@ class HomeViewModel @Inject constructor(
     private val authSession: AuthSession,
     private val caseRecordRepository: CaseRecordRepository,
     private val patientRepository: PatientRepository,
+    private val ownerMismatchHold: OwnerMismatchHold,
+    private val backendLocalNetwork: BackendLocalNetwork,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -77,7 +91,13 @@ class HomeViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
-            syncStatus.state.collect { syncState -> _uiState.update { it.copy(sync = syncState) } }
+            // Every emission re-asks the gate with the host read live (P2-R5); the hold is observed,
+            // never read once (P2-R9), so a release while Home is visible shows on the next one.
+            combine(syncStatus.state, ownerMismatchHold.held) { syncState, held -> syncState to held }
+                .collect { (syncState, held) ->
+                    val blocked = evaluateLocalNetwork()
+                    _uiState.update { it.copy(sync = syncState, ownerMismatchHeld = held, localNetworkBlocked = blocked) }
+                }
         }
         viewModelScope.launch {
             authSession.currentUser()
@@ -112,6 +132,33 @@ class HomeViewModel @Inject constructor(
             val result = syncStatus.syncNow()
             _effects.send(HomeEffect.ShowSyncNowResult(syncNowMessage(result, syncStatus.stateNow())))
         }
+    }
+
+    // In memory only: this process saw the gate block the backend host (memo 5.5).
+    private var sawLocalNetworkBlock = false
+
+    private fun evaluateLocalNetwork(): Boolean = backendLocalNetwork.blocked().also { if (it) sawLocalNetworkBlock = true }
+
+    /**
+     * Memo 5.5: nothing else wakes the drain when the grant comes back from Settings. If this
+     * process saw the block, or the last drain was refused by it, and the gate no longer blocks and
+     * something is waiting, run exactly one Sync now (same enqueue as the button, REPLACE, no snackbar). The flag
+     * then reflects only this evaluation.
+     */
+    fun onResume() {
+        val hadBlock = sawLocalNetworkBlock
+        sawLocalNetworkBlock = false
+        val blocked = evaluateLocalNetwork()
+        val sync = _uiState.value.sync
+        _uiState.update { it.copy(localNetworkBlocked = blocked) }
+        val refusedBefore = hadBlock || sync.lastDrainFailure == DrainFailure.LOCAL_NETWORK_NOT_ALLOWED
+        if (!blocked && refusedBefore && sync.outboxPending + sync.auditPending > 0) syncOnResume()
+    }
+
+    /** The same enqueue as [onSyncNow] (SyncStatus.syncNow, REPLACE), without its snackbar: the
+     *  worker did not ask for this one, so a result toast would be noise. */
+    private fun syncOnResume() {
+        viewModelScope.launch { syncStatus.syncNow() }
     }
 
     fun onOpenFailedRecords() {

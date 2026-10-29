@@ -630,6 +630,11 @@ class FakeSyncStatus : SyncStatus {
     var nextSyncResult: Result<Unit> = Result.success(Unit)
     var stateAfterSync: SyncState? = null
 
+    /** Puts [state] on the observed flow, as a Room emission would. */
+    fun emit(state: SyncState) {
+        _state.value = state
+    }
+
     /** What [stateNow], the direct read, returns; null means the same as [state]. Set apart from
      *  [stateAfterSync] to model the Flow lagging the database. */
     var directState: SyncState? = null
