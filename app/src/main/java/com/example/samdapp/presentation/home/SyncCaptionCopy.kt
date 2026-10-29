@@ -16,16 +16,36 @@ sealed interface CopyRef {
     data class Plural(@PluralsRes val res: Int, val count: Int) : CopyRef
 }
 
-fun CopyRef.resolve(resources: Resources): String = when (this) {
-    is CopyRef.Str -> resources.getString(res, *args.map { if (it is CopyRef) it.resolve(resources) else it }.toTypedArray())
-    is CopyRef.Plural -> resources.getQuantityString(res, count, count)
+/** The two Android calls [CopyRef.resolve] needs, so it is JVM-testable with a fake. */
+interface CopyText {
+    fun string(@StringRes res: Int, args: List<Any>): String
+    fun plural(@PluralsRes res: Int, count: Int, args: List<Any>): String
+}
+
+/** Delegates to [Resources] and nothing else. A string with no arguments takes the plain
+ *  `getString(res)`, which does not run `String.format` over the text. */
+class ResourcesCopyText(private val resources: Resources) : CopyText {
+    override fun string(res: Int, args: List<Any>): String =
+        stringVia(args, plain = { resources.getString(res) }, formatted = { resources.getString(res, *it) })
+
+    override fun plural(res: Int, count: Int, args: List<Any>): String =
+        resources.getQuantityString(res, count, *args.toTypedArray())
+}
+
+/** Which `getString` overload a string takes, apart from [Resources] so a JVM test can see it. */
+internal fun stringVia(args: List<Any>, plain: () -> String, formatted: (Array<Any>) -> String): String =
+    if (args.isEmpty()) plain() else formatted(args.toTypedArray())
+
+fun CopyRef.resolve(text: CopyText): String = when (this) {
+    is CopyRef.Str -> text.string(res, args.map { if (it is CopyRef) it.resolve(text) else it })
+    is CopyRef.Plural -> text.plural(res, count, listOf(count))
 }
 
 /** The words for each [SyncCaption]. The screen calls this; [copyRef] is what tests pin. */
-fun SyncCaption.text(resources: Resources): String = copyRef().resolve(resources)
+fun SyncCaption.text(resources: Resources): String = copyRef().resolve(ResourcesCopyText(resources))
 
 /** The "Sync now" snackbar. Same single path as [text] above. */
-fun SyncNowMessage.text(resources: Resources): String = copyRef().resolve(resources)
+fun SyncNowMessage.text(resources: Resources): String = copyRef().resolve(ResourcesCopyText(resources))
 
 fun SyncCaption.copyRef(): CopyRef = when (this) {
     SyncCaption.Sending -> CopyRef.Str(R.string.sync_caption_sending)

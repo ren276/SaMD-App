@@ -5612,6 +5612,7 @@ New strings awaiting wording approval (not in memo 5.2 to 5.5): `kernel_failure_
 - [x] FU-1 (2026-10-28): Home caption and Sync now text come from one pure function, `copyRef()` in
 - [x] FU-2 (2026-10-29): testDev `DevLocalNetworkGateOrderTest` builds the client through `NetworkModule.provideOkHttpClient` with the real dev host interceptor and asserts the gate judges the rewritten 10.x address (denied, granted, public host); STEPM-Me and a gate-removed mutant go RED in it (`FU2-*` rows).
 - [x] FU-3 (2026-10-29): tests pin F1-M1 (a held drain reads OWNER_MISMATCH over the local network gate and pushes nothing; Home shows the owner mismatch caption) and the revoke path (a revoke stopped by the gate stays FacilityBlocked, saves nothing, audits revoke=failed without exception text); STEPM-Md and a revoke-to-admit mutant go RED at the new assertions (`FU3-*` rows).
+- [x] FU-1b (2026-10-29): `CopyRef.resolve` takes a two-operation `CopyText`, so it is testable without Android; the 15 count-free strings are back on the plain `getString(res)` overload (FU-1 had sent them through `String.format`), pinned by `CopyRefResolveTest` (`FU1b-*` rows).
       `SyncCaptionCopy.kt`; `captionRes` and `syncNowFailedRes` removed; every DrainFailure value and
       caption state asserted on it; mutation rows `FU1-*` in samd-lnp/mutation.log.
 
