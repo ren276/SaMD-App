@@ -26,6 +26,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -37,11 +38,20 @@ import com.example.samdapp.R
 @Composable
 fun PinChangeScreen(viewModel: PinChangeViewModel = hiltViewModel()) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    PinChangeContent(uiState = uiState, actions = viewModel)
+    val context = LocalContext.current
+    PinChangeContent(
+        uiState = uiState,
+        actions = viewModel,
+        onOpenSettings = {
+            context.startActivity(
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)),
+            )
+        },
+    )
 }
 
 @Composable
-internal fun PinChangeContent(uiState: PinChangeUiState, actions: PinChangeActions) {
+internal fun PinChangeContent(uiState: PinChangeUiState, actions: PinChangeActions, onOpenSettings: () -> Unit) {
     Scaffold(topBar = { TopAppBar(title = { Text("Change your PIN") }) }) { padding: PaddingValues ->
         Column(
             modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(padding).padding(16.dp),
@@ -88,14 +98,9 @@ internal fun PinChangeContent(uiState: PinChangeUiState, actions: PinChangeActio
                 Text(text = message, color = MaterialTheme.colorScheme.error)
             }
             if (uiState.error.offersOpenSettings()) {
-                val context = LocalContext.current
                 OutlinedButton(
-                    onClick = {
-                        context.startActivity(
-                            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)),
-                        )
-                    },
-                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onOpenSettings,
+                    modifier = Modifier.fillMaxWidth().testTag("pin_change_open_settings"),
                 ) { Text(stringResource(R.string.lnp_open_settings)) }
             }
 
