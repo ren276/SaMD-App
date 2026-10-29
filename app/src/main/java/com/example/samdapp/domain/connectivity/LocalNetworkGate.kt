@@ -14,6 +14,10 @@ class LocalNetworkGate(
     private val granted: () -> Boolean,
 ) {
     fun blocks(local: Boolean): Boolean = local && isLocalNetworkBlocked(sdkInt, granted(), local)
+
+    /** The one decision for a host name (memo P2-R1): the interceptor, login and Home all call
+     *  this, so none of them can disagree with what a call to [host] would meet. */
+    fun blocksHost(host: String): Boolean = blocks(isLocalNetworkHost(host))
 }
 
 /**

@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.example.samdapp.data.connectivity.PackageAppPermissions
 import com.example.samdapp.data.remote.BearerInterceptor
 import com.example.samdapp.data.remote.LocalNetworkGateDns
 import com.example.samdapp.data.remote.LocalNetworkGateInterceptor
@@ -22,6 +23,7 @@ import com.example.samdapp.data.remote.api.KernelApiService
 import com.example.samdapp.data.remote.api.SyncPushApiService
 import com.example.samdapp.domain.abha.AbdmAbhaSource
 import com.example.samdapp.domain.connectivity.ACCESS_LOCAL_NETWORK_PERMISSION
+import com.example.samdapp.domain.connectivity.AppPermissions
 import com.example.samdapp.domain.connectivity.LocalNetworkGate
 import com.example.samdapp.domain.kernel.EvaluateKernelSource
 import com.example.samdapp.domain.kernel.RemoteKernelSource
@@ -230,5 +232,9 @@ object NetworkModule {
         @Binds
         @Singleton
         abstract fun bindAbdmAbhaSource(impl: RetrofitAbhaSource): AbdmAbhaSource
+
+        /** What login reads to decide whether the memo 5.2 rationale is needed (P2-R2). */
+        @Binds
+        abstract fun bindAppPermissions(impl: PackageAppPermissions): AppPermissions
     }
 }

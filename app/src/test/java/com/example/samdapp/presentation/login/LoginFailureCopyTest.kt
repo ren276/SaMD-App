@@ -81,7 +81,7 @@ class LoginFailureCopyTest {
             SignInFailureReason.LOCAL_NETWORK_NOT_ALLOWED to R.string.lnp_denied_login,
             SignInFailureReason.NO_CONNECTION to R.string.login_failed_no_connection,
         )) {
-            val viewModel = LoginViewModel(FailingAuthSession(SignInResult.Failure(rawText, reason)))
+            val viewModel = LoginViewModel(FailingAuthSession(SignInResult.Failure(rawText, reason)), publicBackendCheck())
             viewModel.onNameChange("Asha")
             viewModel.onRoleSelect(UserRole.ASHA_WORKER)
             viewModel.onPinChange("482915")
@@ -89,14 +89,14 @@ class LoginFailureCopyTest {
             advanceUntilIdle()
             viewModel.onBiometricSucceeded()
             advanceUntilIdle()
-            assertEquals("$reason", res, viewModel.uiState.value.errorRes)
-            assertNull("$reason must not show exception text", viewModel.uiState.value.errorMessage)
+            assertEquals("$reason", res, (viewModel.uiState.value.error as? LoginError.Worded)?.res)
+            assertNull("$reason must not show exception text", (viewModel.uiState.value.error as? LoginError.ServerDetail)?.detail)
         }
     }
 
     @Test
     fun `a server refusal keeps the server's detail`() = runTest(mainDispatcherRule.dispatcher) {
-        val viewModel = LoginViewModel(FailingAuthSession(SignInResult.Failure("Invalid credentials.")))
+        val viewModel = LoginViewModel(FailingAuthSession(SignInResult.Failure("Invalid credentials.")), publicBackendCheck())
         viewModel.onNameChange("Asha")
         viewModel.onRoleSelect(UserRole.ASHA_WORKER)
         viewModel.onPinChange("482915")
@@ -104,8 +104,8 @@ class LoginFailureCopyTest {
         advanceUntilIdle()
         viewModel.onBiometricSucceeded()
         advanceUntilIdle()
-        assertEquals("Invalid credentials.", viewModel.uiState.value.errorMessage)
-        assertNull(viewModel.uiState.value.errorRes)
+        assertEquals("Invalid credentials.", (viewModel.uiState.value.error as? LoginError.ServerDetail)?.detail)
+        assertNull((viewModel.uiState.value.error as? LoginError.Worded)?.res)
     }
 
     @Test

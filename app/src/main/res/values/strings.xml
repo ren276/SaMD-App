@@ -190,6 +190,13 @@
     <string name="sync_now_failed_local_store">Could not send: this phone could not prepare records to send.</string>
     <string name="sync_now_failed_local_network">Could not send: this app is not allowed to use the local network.</string>
     <string name="lnp_denied_login">Cannot sign in: this app is not allowed to use the local network. Allow Nearby devices for this app in Settings, then sign in again.</string>
+    <!-- Memo 5.2 (Q5): the in-app rationale shown before the ACCESS_LOCAL_NETWORK request at login. -->
+    <string name="lnp_rationale_title">Allow this phone to reach the clinic server</string>
+    <string name="lnp_rationale_body">In this setup the clinic server is on the local network. Android lists that under Nearby devices. On the next screen, choose Allow to sign in and send records.</string>
+    <string name="lnp_rationale_continue">Continue</string>
+    <string name="lnp_rationale_not_now">Not now</string>
+    <!-- Memo 5.3 and Q7: opens this app's page in system Settings. -->
+    <string name="lnp_open_settings">Open settings</string>
     <string name="login_failed_no_connection">Cannot sign in: could not reach the server. Check this phone\'s connection, then try again.</string>
     <string name="login_failed_secure_connection">Cannot sign in: this phone could not make a safe connection to the server. Tell your supervisor.</string>
     <plurals name="sync_now_sent_needs_review">

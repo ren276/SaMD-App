@@ -3,7 +3,6 @@ package com.example.samdapp.data.remote
 import com.example.samdapp.domain.connectivity.LocalNetworkGate
 import com.example.samdapp.domain.connectivity.LocalNetworkNotAllowedException
 import com.example.samdapp.domain.connectivity.isLocalNetworkAddress
-import com.example.samdapp.domain.connectivity.isLocalNetworkHost
 import okhttp3.Dns
 import okhttp3.Interceptor
 import okhttp3.Response
@@ -17,7 +16,7 @@ import java.net.InetAddress
  */
 class LocalNetworkGateInterceptor(private val gate: LocalNetworkGate) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
-        if (gate.blocks(isLocalNetworkHost(chain.request().url.host))) throw LocalNetworkNotAllowedException()
+        if (gate.blocksHost(chain.request().url.host)) throw LocalNetworkNotAllowedException()
         return chain.proceed(chain.request())
     }
 }

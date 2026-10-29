@@ -5369,6 +5369,7 @@ stays at v22). Must merge before any pilot use. Design and operator rulings:
 12. Follow-up chains deeper than one level still count as waiting (H-32 residual).
 13. Hardcoded Kotlin user-facing strings: externalize all of them, and add a Hindi locale before
     pilot (only the default `values/` locale exists).
+    Biometric failure copy carries an em dash; fix to 'Can't sign in: $message' with string externalization (copy change needs approval).
 14. Doctor review must surface the derivation flags (`derivation_ok`, SUPERSEDED, MISMATCH). Today
     the doctor's screen does not call `GET /encounters/{id}`; this needs a pull-path design memo.
 15. Test infrastructure: a `samd_test` advisory lock plus a clean-slate guard, and a SHA-256 pin
@@ -5616,6 +5617,7 @@ New strings awaiting wording approval (not in memo 5.2 to 5.5): `kernel_failure_
 - [x] FU-3 (2026-10-29): tests pin F1-M1 (a held drain reads OWNER_MISMATCH over the local network gate and pushes nothing; Home shows the owner mismatch caption) and the revoke path (a revoke stopped by the gate stays FacilityBlocked, saves nothing, audits revoke=failed without exception text); STEPM-Md and a revoke-to-admit mutant go RED at the new assertions (`FU3-*` rows).
 - [x] FU-1b (2026-10-29): `CopyRef.resolve` takes a two-operation `CopyText`, so it is testable without Android; the 15 count-free strings are back on the plain `getString(res)` overload (FU-1 had sent them through `String.format`), pinned by `CopyRefResolveTest` (`FU1b-*` rows).
 FU-4: ruling R1 recorded in the F1 memo (kernel_failure_local_network_body approved).
+- [x] Phase 2 A1 (2026-10-29): login asks `LocalNetworkGate.blocksHost` (now the interceptor's one host decision) for the backend host after the biometric step; memo 5.2 rationale only when no declared NEARBY_DEVICES member is granted, every denial is `lnp_denied_login` with Open settings, no auto re-submit; `LoginUiState` holds one sealed `LoginError`; `LoginLocalNetworkFlowTest`, mutation rows `P2A-*`.
 
 ## On-device SLM, dev flavor only: Gemma 4 E2B on LiteRT-LM 0.18.0 - 2026-10-16
 

@@ -1,9 +1,12 @@
 package com.example.samdapp.di
 
+import com.example.samdapp.BuildConfig
+import com.example.samdapp.domain.connectivity.BackendHost
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Interceptor
 
 /**
@@ -19,4 +22,8 @@ object ProductionNetworkModule {
     @Provides
     @DevHostInterceptors
     fun provideDevHostInterceptors(): List<Interceptor> = emptyList()
+
+    /** No host rewrite in this build, so every backend call reaches the built-in URL's host. */
+    @Provides
+    fun provideBackendHost(): BackendHost = BackendHost { BuildConfig.BACKEND_BASE_URL.toHttpUrl().host }
 }
