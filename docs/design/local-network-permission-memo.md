@@ -575,6 +575,8 @@ Q13 Phase 2 classifies IPv6 ULA fc00::/7 as local, with a test and mutation row;
 Q14 Approved copy: kernel_failure_local_network_title, readback_refusal_local_network_title,
    readback_refusal_local_network_body, login_failed_no_connection, login_failed_secure_connection
    as reported at STOP L1. kernel_failure_local_network_body is HELD pending the item 3 finding.
+
+R1 (operator ruling, 2026-10-28): kernel_failure_local_network_body is APPROVED; prod continues via the acknowledgement box. Supersedes the HELD status in Q14.
 Filed, not in F1: single refresh coordinator PR (one @Singleton authenticator with a Mutex shared
    by backend and ABHA clients; DataStore read error distinct from missing token); ABHA fallback
    copy to strings.xml.
