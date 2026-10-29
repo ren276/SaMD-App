@@ -73,6 +73,35 @@ class NetworkLoggingInterceptorTest {
     }
 
     @Test
+    fun `no body is logged on the refresh path, either way`() {
+        server.enqueue(MockResponse().setBody("""{"access_token":"eyJnew-access-secret","refresh_token":"eyJnew-refresh-secret"}"""))
+        post("/api/v1/auth/refresh", """{"refresh_token":"eyJold-refresh-secret","device_id":"dev-1"}""")
+        assertFalse(log, "eyJold-refresh-secret" in log)
+        assertFalse(log, "eyJnew-access-secret" in log)
+        assertFalse(log, "eyJnew-refresh-secret" in log)
+        assertTrue("the logger ran", "--> POST" in log)
+    }
+
+    @Test
+    fun `no body is logged on the change-pin path, either way`() {
+        server.enqueue(MockResponse().setBody("""{"pin_changed":true,"note":"eyJchange-response-secret"}"""))
+        post("/api/v1/auth/change-pin", """{"current_pin":"246810","new_pin":"135791"}""")
+        assertFalse(log, "246810" in log)
+        assertFalse(log, "135791" in log)
+        assertFalse(log, "eyJchange-response-secret" in log)
+        assertTrue("the logger ran", "--> POST" in log)
+    }
+
+    @Test
+    fun `no body is logged on the logout path, either way`() {
+        server.enqueue(MockResponse().setBody("""{"revoked":true,"token":"eyJlogout-response-secret"}"""))
+        post("/api/v1/auth/logout", """{"refresh_token":"eyJlogout-refresh-secret"}""")
+        assertFalse(log, "eyJlogout-refresh-secret" in log)
+        assertFalse(log, "eyJlogout-response-secret" in log)
+        assertTrue("the logger ran", "--> POST" in log)
+    }
+
+    @Test
     fun `no body is logged on the SLM read-back, either way`() {
         server.enqueue(MockResponse().setBody("""{"text":"Take paracetamol for the fever"}"""))
         post("/api/v1/slm/readback", """{"question":"Patient Asha has a fever"}""")
