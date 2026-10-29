@@ -2,6 +2,9 @@
 
 package com.example.samdapp.presentation.login
 
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -14,6 +17,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -21,11 +25,14 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.samdapp.R
 
 @Composable
 fun PinChangeScreen(viewModel: PinChangeViewModel = hiltViewModel()) {
@@ -72,8 +79,24 @@ internal fun PinChangeContent(uiState: PinChangeUiState, actions: PinChangeActio
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            uiState.errorMessage?.let { message ->
+            val errorText = when (val error = uiState.error) {
+                is PinChangeError.ServerDetail -> error.detail
+                is PinChangeError.Worded -> stringResource(error.res)
+                null -> null
+            }
+            errorText?.let { message ->
                 Text(text = message, color = MaterialTheme.colorScheme.error)
+            }
+            if (uiState.error.offersOpenSettings()) {
+                val context = LocalContext.current
+                OutlinedButton(
+                    onClick = {
+                        context.startActivity(
+                            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)),
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(stringResource(R.string.lnp_open_settings)) }
             }
 
             Button(

@@ -5623,6 +5623,7 @@ FU-4: ruling R1 recorded in the F1 memo (kernel_failure_local_network_body appro
 - [x] Phase 2 B-1 (2026-10-29): IPv6 unique local fc00::/7 is local network (Q13), one byte check `(first byte and 0xFE) == 0xFC` shared by `isLocalNetworkHost`, `isLocalNetworkAddress` and the Dns wrapper; `LocalNetworkUlaTest`, rows `P2B-ula-*`. Device check of a ULA stays Phase 3.
 - File LOW: isLocalNetworkHost takes a String; a malformed host containing a colon could reach InetAddress.getByName's name-lookup fallback. Unreachable today (all callers pass HttpUrl.host). Fix by making blocksHost take an HttpUrl so only OkHttp-validated hosts reach the classifier.
 - [x] Phase 2 B-2 (2026-10-29): hub Start asks for ACCESS_LOCAL_NETWORK only when the optional `HubLocalNetworkNeed` says so (Q3, P2-R10): `src/dev` binds Wi-Fi route AND `blocksHost(gateway host)`, staging and prod bind nothing, decided at click time; `acq_reject_permission_denied_wifi` reworded (P2-R10a) and carries Open settings; rows `P2B-*`.
+- [x] Phase 2 B-3 (2026-10-29): the PIN change maps every IOException to `pin_change_failed_*` strings (Q12, P2-R11): `ChangePinResult.Failure` carries a `signInFailureReasonFor` reason, a server refusal keeps its detail, the local-network case has Open settings, no path renders e.message and the session is kept on every failure; `PinChangeFailureCopyTest`, rows `P2B-pin-*`.
 
 ## On-device SLM, dev flavor only: Gemma 4 E2B on LiteRT-LM 0.18.0 - 2026-10-16
 

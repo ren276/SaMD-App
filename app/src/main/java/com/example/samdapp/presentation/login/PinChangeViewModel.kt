@@ -1,10 +1,13 @@
 package com.example.samdapp.presentation.login
 
+import androidx.annotation.StringRes
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.samdapp.R
 import com.example.samdapp.domain.auth.AuthSession
 import com.example.samdapp.domain.auth.ChangePinResult
+import com.example.samdapp.domain.auth.SignInFailureReason
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -21,7 +24,8 @@ data class PinChangeUiState(
     val newPin: String = "",
     val confirmPin: String = "",
     val isSubmitting: Boolean = false,
-    val errorMessage: String? = null,
+    /** At most one error on screen. */
+    val error: PinChangeError? = null,
 ) {
     val canSubmit: Boolean
         get() = currentPin.isNotBlank() &&
@@ -29,6 +33,30 @@ data class PinChangeUiState(
             newPin == confirmPin &&
             newPin != currentPin &&
             !isSubmitting
+}
+
+/** Every way a PIN change can fail on screen (memo Q12, P2-R11). */
+sealed interface PinChangeError {
+    /** A server refusal: the server's own detail is shown. */
+    data class ServerDetail(val detail: String) : PinChangeError
+
+    /** A transport failure the app words itself: never exception text. */
+    data class Worded(@StringRes val res: Int) : PinChangeError
+}
+
+/** The Open settings action belongs to the local-network case only (memo 5.3, P2-R11). */
+internal fun PinChangeError?.offersOpenSettings(): Boolean =
+    this is PinChangeError.Worded && res == R.string.pin_change_failed_local_network
+
+/** The string for a PIN-change failure the app words itself, or null for a server refusal, whose
+ *  own detail is shown. The same reasons as sign-in (one classifier), so no exception text reaches
+ *  the screen. */
+@StringRes
+internal fun pinChangeFailureRes(reason: SignInFailureReason): Int? = when (reason) {
+    SignInFailureReason.SERVER -> null
+    SignInFailureReason.LOCAL_NETWORK_NOT_ALLOWED -> R.string.pin_change_failed_local_network
+    SignInFailureReason.NO_CONNECTION -> R.string.pin_change_failed_no_connection
+    SignInFailureReason.SECURE_CONNECTION_FAILED -> R.string.pin_change_failed_secure_connection
 }
 
 @Stable
@@ -56,19 +84,19 @@ class PinChangeViewModel @Inject constructor(
 
     override fun onCurrentPinChange(value: String) {
         if (value.length <= PIN_MAX_LENGTH && value.all { it.isDigit() }) {
-            _uiState.update { it.copy(currentPin = value, errorMessage = null) }
+            _uiState.update { it.copy(currentPin = value, error = null) }
         }
     }
 
     override fun onNewPinChange(value: String) {
         if (value.length <= PIN_MAX_LENGTH && value.all { it.isDigit() }) {
-            _uiState.update { it.copy(newPin = value, errorMessage = null) }
+            _uiState.update { it.copy(newPin = value, error = null) }
         }
     }
 
     override fun onConfirmPinChange(value: String) {
         if (value.length <= PIN_MAX_LENGTH && value.all { it.isDigit() }) {
-            _uiState.update { it.copy(confirmPin = value, errorMessage = null) }
+            _uiState.update { it.copy(confirmPin = value, error = null) }
         }
     }
 
@@ -76,13 +104,16 @@ class PinChangeViewModel @Inject constructor(
         val current = _uiState.value
         if (!current.canSubmit) return
         viewModelScope.launch {
-            _uiState.update { it.copy(isSubmitting = true, errorMessage = null) }
+            _uiState.update { it.copy(isSubmitting = true, error = null) }
             when (val result = authSession.changePin(current.currentPin, current.newPin)) {
                 is ChangePinResult.Success -> Unit // session clears; AppNavHost routes away.
-                is ChangePinResult.Failure ->
+                is ChangePinResult.Failure -> {
+                    val res = pinChangeFailureRes(result.reason)
+                    val error = if (res == null) PinChangeError.ServerDetail(result.message) else PinChangeError.Worded(res)
                     _uiState.update {
-                        it.copy(isSubmitting = false, errorMessage = result.message, currentPin = "", newPin = "", confirmPin = "")
+                        it.copy(isSubmitting = false, error = error, currentPin = "", newPin = "", confirmPin = "")
                     }
+                }
             }
         }
     }

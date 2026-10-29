@@ -78,7 +78,7 @@ class BackendAuthSession @Inject constructor(
                 tokenStore.clear()
                 ChangePinResult.Success
             }
-            is AuthApiResult.Failure -> ChangePinResult.Failure(result.message)
+            is AuthApiResult.Failure -> ChangePinResult.Failure(result.message, signInFailureReasonFor(result.cause))
         }
     }
 

@@ -197,6 +197,10 @@
     <string name="lnp_rationale_not_now">Not now</string>
     <!-- Memo 5.3 and Q7: opens this app's page in system Settings. -->
     <string name="lnp_open_settings">Open settings</string>
+    <!-- Memo P2-R11a: the PIN change never shows exception text. -->
+    <string name="pin_change_failed_local_network">Cannot change PIN: this app is not allowed to use the local network. Allow Nearby devices for this app in Settings, then try again.</string>
+    <string name="pin_change_failed_no_connection">Cannot change PIN: could not reach the server. Check this phone\'s connection, then try again.</string>
+    <string name="pin_change_failed_secure_connection">Cannot change PIN: this phone could not make a safe connection to the server. Tell your supervisor.</string>
     <string name="login_failed_no_connection">Cannot sign in: could not reach the server. Check this phone\'s connection, then try again.</string>
     <string name="login_failed_secure_connection">Cannot sign in: this phone could not make a safe connection to the server. Tell your supervisor.</string>
     <plurals name="sync_now_sent_needs_review">

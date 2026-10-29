@@ -101,7 +101,9 @@ fun signInFailureReasonFor(cause: java.io.IOException?): SignInFailureReason = w
 /** Result of [AuthSession.changePin]. */
 sealed interface ChangePinResult {
     data object Success : ChangePinResult
-    data class Failure(val message: String) : ChangePinResult
+    /** [reason] is [SignInFailureReason.SERVER] when the server answered, and then [message] is its
+     *  own detail; for any other reason [message] is exception text and must never be shown. */
+    data class Failure(val message: String, val reason: SignInFailureReason = SignInFailureReason.SERVER) : ChangePinResult
 }
 
 /**
