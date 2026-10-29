@@ -577,6 +577,53 @@ Q14 Approved copy: kernel_failure_local_network_title, readback_refusal_local_ne
    as reported at STOP L1. kernel_failure_local_network_body is HELD pending the item 3 finding.
 
 R1 (operator ruling, 2026-10-28): kernel_failure_local_network_body is APPROVED; prod continues via the acknowledgement box. Supersedes the HELD status in Q14.
+
+Phase 2 rulings, 2026-10-29:
+
+P2-R1 Timing, memo 5.1 stands. Login checks before the Sign in call, after the biometric step. The
+   check calls the gate's single host decision function, blocksHost(host): the interceptor's
+   expression gate.blocks(isLocalNetworkHost(host)) extracted into one function that the
+   interceptor, login and Home (P2-R5) all call. Login applies it to the active backend URL host
+   (DevServerConfig's active URL in dev). No other copy of that expression may exist. Safety net: if
+   signIn still returns LOCAL_NETWORK_NOT_ALLOWED (for example a LAN hostname that only the Dns
+   wrapper's isLocalNetworkAddress check catches, or a permission revoked between check and call),
+   show the 5.3/5.4 denied state; no automatic re-submit.
+P2-R2 Rationale, Q5 stands.
+   - Show the in-app rationale only when no NEARBY_DEVICES permission that the app declares (in the
+     merged manifest of the running flavor) is granted.
+   - If one is granted, launch the request directly.
+   - After a denial in this session with shouldShowRequestPermissionRationale false, skip the
+     rationale and lead with Open settings.
+   - No persisted denial flag.
+   - Read the rationale through LocalActivity.current (activity-compose 1.13.0). If it is null, show
+     the rationale.
+   - "Not now" returns to the form with no error and no request, unless the memo rules otherwise
+     (report it).
+P2-R3 Denied, memo 5.3 stands. Every denial shows lnp_denied_login plus an Open settings button:
+   Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName,
+   null)). No ask-again strings.
+P2-R4 The Home action is Open settings (Q7). No allow action, no request launched from Home.
+P2-R5 Home reads the gate (Q7).
+   - The local-network caption derives from the gate's decision for the backend host (blocksHost,
+     the same function as P2-R1), never from checkSelfPermission alone. A public backend host never
+     shows it, whatever the permission state.
+   - It shows only when something is waiting.
+   - F1-M1: the persisted OWNER_MISMATCH hold outranks it.
+   - Memo 5.5: on ON_RESUME, if the gate no longer blocks the backend host and something is
+     waiting, enqueue exactly one sync through the EXISTING unique work name and policy.
+P2-R6 LoginUiState.
+   - One sealed LoginError (ServerDetail, Worded, Refusal, Biometric) replaces errorMessage,
+     errorRes and refusal.
+   - LoginScreen renders it with one exhaustive when.
+   - Existing tests change accessors only, expected values byte-identical. No derived get-only
+     properties added for tests.
+   - Report whether the PIN is ever held in rememberSaveable or SavedStateHandle; if it is, STOP.
+P2-R7 The A1 docs commit also fixes the PROGRESS.md FU-1 split (move FU-1's last two lines back
+   under its first line) and adds the missing blank line between the R1 paragraph and "Filed, not
+   in F1:" in the memo.
+Standing: F1-M1, R1, Q4, Q10a, Q12, and the facility order (local-network check, server accepts the
+   PIN, facility gate, saveLogin only on CLAIM, LEGACY_CLAIM or CONTINUE; BLOCK stays BLOCK).
+
 Filed, not in F1: single refresh coordinator PR (one @Singleton authenticator with a Mutex shared
    by backend and ABHA clients; DataStore read error distinct from missing token); ABHA fallback
    copy to strings.xml.
