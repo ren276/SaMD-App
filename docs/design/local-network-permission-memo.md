@@ -627,6 +627,15 @@ P2-R6 LoginUiState.
 P2-R7 The A1 docs commit also fixes the PROGRESS.md FU-1 split (move FU-1's last two lines back
    under its first line) and adds the missing blank line between the R1 paragraph and "Filed, not
    in F1:" in the memo.
+P2-R8 SyncPushWorker returns Result.failure() for LOCAL_NETWORK_NOT_ALLOWED, as it does for
+   OWNER_MISMATCH. Outbox rows stay PENDING. The periodic job resumes at its next period with the
+   attempt count reset, so recovery after a grant is bounded by the period with no user action. The
+   resume enqueue (5.5, through syncNow, REPLACE) and Sync now still wake a drain at once.
+   Supersedes the "returns retry" clause of memo 5.5 because a periodic job in backoff runs at the
+   backoff delay (up to 5 h), not its interval.
+P2-R9 Home observes the OwnerMismatchHold (a Flow, combined into Home's state), never a one-shot
+   read. While the hold is set, Home shows no local-network caption and no local-network Open
+   settings, cold start included.
 Standing: F1-M1, R1, Q4, Q10a, Q12, and the facility order (local-network check, server accepts the
    PIN, facility gate, saveLogin only on CLAIM, LEGACY_CLAIM or CONTINUE; BLOCK stays BLOCK).
 
