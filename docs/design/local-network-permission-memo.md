@@ -660,6 +660,25 @@ P2-R11a Approved copy:
      phone's connection, then try again."
    pin_change_failed_secure_connection = "Cannot change PIN: this phone could not make a safe
      connection to the server. Tell your supervisor."
+P3-R1 Q13 device half is met by LocalNetworkClassifierDeviceTest run on the Pixel (API 37): the B-1
+   vectors through isLocalNetworkHost, isLocalNetworkAddress and blocksHost on the phone's own
+   runtime, including bracketed and IPv4-mapped forms that libcore parses differently from the JVM.
+   A live ULA backend was not used because DevServerReceiver's dev-only isLocalDevHost allowlist
+   rejects IPv6 (filed LOW, by design: it is a receiver allowlist, not a gate decision).
+P3-R2 D1 and D2 run permission-fresh on the Pixel, not install-fresh: sign out, pm revoke
+   ACCESS_LOCAL_NETWORK and BLUETOOTH_CONNECT, pm clear-permission-flags for both with user-set and
+   user-fixed, verified by dumpsys. Uninstalling would delete the on-device model and the v23
+   database. D1's BLE half runs in the hub session with D6 and D7.
+P3-R3 On-device render checks cover each CopyText path once (a plain string, a formatted string, a
+   plural), the local-network caption, NO_CONNECTION, and Open settings on login, Home, the hub
+   rejection and PIN change. SERVER_REFUSED, SIGN_IN, OWNER_MISMATCH and LOCAL_STORE captions stay
+   covered by JVM tests; producing OWNER_MISMATCH would need a second facility's account on the
+   phone, which is forbidden.
+P3-R4 Network logging stays off on the Pixel. "No backend call" is proven from the backend access
+   log by the operator. Auth-path body redaction for login, refresh, change-pin and logout is pinned
+   by NetworkLoggingInterceptorTest.
+P3-R5 Migration instrumented tests are excluded from Phase 3 runs because they leave
+   migration-*-test.db files in the app's databases folder; F1 changes no migration.
 Standing: F1-M1, R1, Q4, Q10a, Q12, and the facility order (local-network check, server accepts the
    PIN, facility gate, saveLogin only on CLAIM, LEGACY_CLAIM or CONTINUE; BLOCK stays BLOCK).
 
