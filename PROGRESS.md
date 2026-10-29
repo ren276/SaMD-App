@@ -5609,6 +5609,9 @@ New strings awaiting wording approval (not in memo 5.2 to 5.5): `kernel_failure_
 - [ ] Phase 2 (login request flow, hub scoping and copy, Home caption): paused; resumes only when
       the operator says RESUME L2.
 - [ ] Phase 3 (device pass D1 to D10, API 36 AVD, hazard row H-46, PR).
+- [x] FU-1 (2026-10-28): Home caption and Sync now text come from one pure function, `copyRef()` in
+      `SyncCaptionCopy.kt`; `captionRes` and `syncNowFailedRes` removed; every DrainFailure value and
+      caption state asserted on it; mutation rows `FU1-*` in samd-lnp/mutation.log.
 
 ## On-device SLM, dev flavor only: Gemma 4 E2B on LiteRT-LM 0.18.0 - 2026-10-16
 
