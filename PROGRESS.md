@@ -5610,6 +5610,7 @@ New strings awaiting wording approval (not in memo 5.2 to 5.5): `kernel_failure_
       the operator says RESUME L2.
 - [ ] Phase 3 (device pass D1 to D10, API 36 AVD, hazard row H-46, PR).
 - [x] FU-1 (2026-10-28): Home caption and Sync now text come from one pure function, `copyRef()` in
+- [x] FU-2 (2026-10-29): testDev `DevLocalNetworkGateOrderTest` builds the client through `NetworkModule.provideOkHttpClient` with the real dev host interceptor and asserts the gate judges the rewritten 10.x address (denied, granted, public host); STEPM-Me and a gate-removed mutant go RED in it (`FU2-*` rows).
       `SyncCaptionCopy.kt`; `captionRes` and `syncNowFailedRes` removed; every DrainFailure value and
       caption state asserted on it; mutation rows `FU1-*` in samd-lnp/mutation.log.
 
