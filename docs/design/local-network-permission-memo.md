@@ -599,6 +599,12 @@ P2-R2 Rationale, Q5 stands.
      the rationale.
    - "Not now" returns to the form with no error and no request, unless the memo rules otherwise
      (report it).
+P2-R2a The NEARBY_DEVICES member set is a Hilt Set<String> multibinding. src/main contributes
+   NEARBY_WIFI_DEVICES and UWB_RANGING. src/dev contributes BLUETOOTH_SCAN, BLUETOOTH_CONNECT and
+   BLUETOOTH_ADVERTISE through @ElementsIntoSet in a dev-only module. Staging and prod contribute
+   nothing beyond main. The set is intersected with the running package's requested permissions;
+   ACCESS_LOCAL_NETWORK never counts. No Bluetooth token may appear in src/main, src/staging or
+   src/prod (G-B11b unchanged).
 P2-R3 Denied, memo 5.3 stands. Every denial shows lnp_denied_login plus an Open settings button:
    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName,
    null)). No ask-again strings.
