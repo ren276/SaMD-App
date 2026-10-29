@@ -636,6 +636,17 @@ P2-R8 SyncPushWorker returns Result.failure() for LOCAL_NETWORK_NOT_ALLOWED, as 
 P2-R9 Home observes the OwnerMismatchHold (a Flow, combined into Home's state), never a one-shot
    read. While the hold is set, Home shows no local-network caption and no local-network Open
    settings, cold start included.
+P2-R10 Hub Start requests ACCESS_LOCAL_NETWORK only when HubLocalNetworkNeed says so. src/main
+   declares the interface (needsRequest(instrument): Boolean) and an @BindsOptionalOf for it. Only
+   src/dev binds an implementation: the instrument's HubAssignment route is Wi-Fi AND
+   gate.blocksHost(gateway host), with the gateway host parsed from PI_GATEWAY_BASE_URL through
+   HttpUrl. Staging and prod bind nothing; an absent binding means no request. The decision is
+   evaluated when Start is clicked, never cached at composition. The hub rejection
+   acq_reject_permission_denied_wifi carries an Open settings button (lnp_open_settings,
+   ACTION_APPLICATION_DETAILS_SETTINGS), per memo 5.3. The hub path launches the request directly;
+   the login rationale (5.2) does not apply.
+P2-R10a Approved copy (hub rejection): acq_reject_permission_denied_wifi = "Local network access is
+   off for this app. Allow Nearby devices for this app in Settings to reach the device gateway."
 Standing: F1-M1, R1, Q4, Q10a, Q12, and the facility order (local-network check, server accepts the
    PIN, facility gate, saveLogin only on CLAIM, LEGACY_CLAIM or CONTINUE; BLOCK stays BLOCK).
 
