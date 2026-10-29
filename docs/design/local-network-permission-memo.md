@@ -647,6 +647,19 @@ P2-R10 Hub Start requests ACCESS_LOCAL_NETWORK only when HubLocalNetworkNeed say
    the login rationale (5.2) does not apply.
 P2-R10a Approved copy (hub rejection): acq_reject_permission_denied_wifi = "Local network access is
    off for this app. Allow Nearby devices for this app in Settings to reach the device gateway."
+P2-R11 PIN change follows Q4 and Q12. ChangePinResult.Failure carries a reason from the existing
+   signInFailureReasonFor(cause), with no second classifier. Transport failures map to
+   pin_change_failed_* resources, a server refusal keeps the server detail, and no path renders
+   e.message. The session is kept on every failure (Q10a). The local-network case carries an Open
+   settings button (lnp_open_settings, ACTION_APPLICATION_DETAILS_SETTINGS), as on login, Home and
+   the hub (5.3).
+P2-R11a Approved copy:
+   pin_change_failed_local_network = "Cannot change PIN: this app is not allowed to use the local
+     network. Allow Nearby devices for this app in Settings, then try again."
+   pin_change_failed_no_connection = "Cannot change PIN: could not reach the server. Check this
+     phone's connection, then try again."
+   pin_change_failed_secure_connection = "Cannot change PIN: this phone could not make a safe
+     connection to the server. Tell your supervisor."
 Standing: F1-M1, R1, Q4, Q10a, Q12, and the facility order (local-network check, server accepts the
    PIN, facility gate, saveLogin only on CLAIM, LEGACY_CLAIM or CONTINUE; BLOCK stays BLOCK).
 
