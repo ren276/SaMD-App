@@ -8,13 +8,13 @@ import java.net.InetAddress
  * Whether Android 17 treats [address] as local network, per
  * https://developer.android.com/privacy-and-security/local-network-definition (memo section 1.2):
  * IPv4 10/8, 172.16/12, 192.168/16, 169.254/16, 100.64/10, multicast 224/4 and the broadcast
- * 255.255.255.255; IPv6 link-local and multicast. Loopback is not local: measured exempt on the
+ * 255.255.255.255; IPv6 link-local, multicast and unique-local fc00::/7 (memo Q13). Loopback is not local: measured exempt on the
  * Pixel (memo 1.3), and treating it as local would put a prompt in front of the `adb reverse` setup.
  */
 fun isLocalNetworkAddress(address: InetAddress): Boolean = when {
     address.isLoopbackAddress || address.isAnyLocalAddress -> false
     address is Inet4Address -> isLocalIpv4(address.address)
-    address is Inet6Address -> address.isLinkLocalAddress || address.isMulticastAddress
+    address is Inet6Address -> address.isLinkLocalAddress || address.isMulticastAddress || isUniqueLocalIpv6(address.address)
     else -> false
 }
 
@@ -38,6 +38,10 @@ fun isLocalNetworkHost(host: String): Boolean {
  *  call run and classify as it always has. */
 fun isLocalNetworkBlocked(sdkInt: Int, granted: Boolean, local: Boolean): Boolean =
     sdkInt >= ACCESS_LOCAL_NETWORK_ENFORCED_SDK && !granted && local
+
+/** IPv6 unique local, fc00::/7: the first byte with its low bit masked is 0xFC. Read from the
+ *  address bytes, never from text, so [isLocalNetworkHost] and a resolved address agree. */
+private fun isUniqueLocalIpv6(b: ByteArray): Boolean = (b[0].toInt() and 0xFE) == 0xFC
 
 private fun isLocalIpv4(b: ByteArray): Boolean {
     val a0 = b[0].toInt() and 0xff
