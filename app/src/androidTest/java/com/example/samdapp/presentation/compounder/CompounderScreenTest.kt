@@ -63,6 +63,7 @@ private class FakeCompounderActions : CompounderActions {
     override fun onStartAcquisition() = Unit
     override fun onStopAcquisition() = Unit
     override fun onLocalNetworkPermissionDenied() = Unit
+    override fun needsLocalNetworkRequest() = false
     override fun fillDemoData() = Unit
 }
 

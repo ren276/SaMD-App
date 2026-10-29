@@ -18,6 +18,7 @@ import com.example.samdapp.domain.usecase.StopDeviceAcquisitionUseCase
 import com.example.samdapp.domain.vitalssource.AcquisitionRequest
 import com.example.samdapp.domain.vitalssource.AcquisitionResult
 import com.example.samdapp.domain.vitalssource.AcquisitionTransport
+import com.example.samdapp.domain.vitalssource.HubLocalNetworkNeed
 import com.example.samdapp.domain.vitalssource.Instrument
 import com.example.samdapp.domain.vitalssource.RejectReason
 import com.example.samdapp.domain.vitalssource.Scenario
@@ -36,6 +37,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -95,7 +97,10 @@ class CompounderViewModelTest {
     private val audit = FakeAuditLogger()
     private val vitalsRepository = RecordingVitalsRepository()
 
-    private fun viewModel(source: FakeVitalsSource): CompounderViewModel {
+    private fun viewModel(
+        source: FakeVitalsSource,
+        need: java.util.Optional<HubLocalNetworkNeed> = java.util.Optional.empty(),
+    ): CompounderViewModel {
         val ailments = FakeAilmentRepository()
         return CompounderViewModel(
             patientId = "patient-1",
@@ -113,6 +118,7 @@ class CompounderViewModelTest {
             ailmentAudioRecorder = NoopAudioRecorder(),
             checkEmergencyThresholdsUseCase = CheckEmergencyThresholdsUseCase(),
             auditLogger = audit,
+            hubLocalNetworkNeed = need,
         )
     }
 
@@ -623,5 +629,71 @@ class CompounderViewModelTest {
 
         assertNull(vm.uiState.value.fieldProvenance[VitalsField.BLOOD_GLUCOSE_MG_DL])
         assertEquals(ObservationSource.MANUAL, vm.uiState.value.source)
+    }
+
+    // Memo Q3, P2-R10: the hub Start asks for ACCESS_LOCAL_NETWORK only when HubLocalNetworkNeed says
+    // so, decided on every click.
+
+    private class RecordingNeed(var answer: Boolean = true) : HubLocalNetworkNeed {
+        val asked = mutableListOf<Instrument>()
+        override fun needsRequest(instrument: Instrument): Boolean {
+            asked += instrument
+            return answer
+        }
+    }
+
+    @Test
+    fun `an empty Optional means Start asks for no local network request`() {
+        val vm = viewModel(FakeVitalsSource(), java.util.Optional.empty())
+        assertFalse(vm.needsLocalNetworkRequest())
+    }
+
+    @Test
+    fun `a present HubLocalNetworkNeed answers for the selected instrument`() {
+        val need = RecordingNeed(answer = true)
+        val vm = viewModel(FakeVitalsSource(), java.util.Optional.of(need))
+        vm.onInstrumentSelected(Instrument.BP)
+
+        assertTrue(vm.needsLocalNetworkRequest())
+        vm.onInstrumentSelected(Instrument.SPO2)
+        need.answer = false
+        assertFalse(vm.needsLocalNetworkRequest())
+        assertEquals(listOf(Instrument.BP, Instrument.SPO2), need.asked)
+    }
+
+    @Test
+    fun `the decision is made at click time, so a permission change between clicks changes the second answer`() {
+        val need = RecordingNeed(answer = true)
+        val vm = viewModel(FakeVitalsSource(), java.util.Optional.of(need))
+
+        assertTrue("before the grant", vm.needsLocalNetworkRequest())
+        need.answer = false // the worker allowed it in Settings
+        assertFalse("after the grant", vm.needsLocalNetworkRequest())
+        need.answer = true // and revoked it again
+        assertTrue("after the revoke", vm.needsLocalNetworkRequest())
+        assertEquals(3, need.asked.size)
+    }
+
+    @Test
+    fun `the hub rejection offers Open settings and no other rejection does`() {
+        assertTrue(acquisitionRejectionOffersOpenSettings(R.string.acq_reject_permission_denied_wifi))
+        assertTrue(
+            acquisitionRejectionOffersOpenSettings(acquisitionRejectionRes(RejectReason.PERMISSION_DENIED, sdkInt = 37)),
+        )
+        for (reason in RejectReason.entries - RejectReason.PERMISSION_DENIED) {
+            assertFalse("$reason", acquisitionRejectionOffersOpenSettings(acquisitionRejectionRes(reason, sdkInt = 37)))
+        }
+    }
+
+    @Test
+    fun `a declined local network prompt yields the permission-denied rejection and leaves no acquisition running`() {
+        val vm = viewModel(FakeVitalsSource())
+        vm.onLocalNetworkPermissionDenied()
+
+        val state = vm.uiState.value
+        // On SDK 37 and later this resource is acq_reject_permission_denied_wifi, which offers Open
+        // settings (pinned above); the JVM default SDK takes the same mapping function.
+        assertEquals(acquisitionRejectionRes(RejectReason.PERMISSION_DENIED), state.acquisitionError)
+        assertEquals(null, state.acquiringInstrument)
     }
 }

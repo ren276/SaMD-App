@@ -61,3 +61,8 @@ internal fun localNetworkFailureRes(reason: RejectReason, sdkInt: Int): Int =
         LocalNetworkFailure.UNREACHABLE -> R.string.acq_reject_unreachable_wifi
         LocalNetworkFailure.UNREACHABLE_OR_BLOCKED -> R.string.acq_reject_unreachable_or_blocked_wifi
     }
+
+/** The hub rejection whose words tell the worker to allow Nearby devices in Settings carries an
+ *  Open settings action (memo 5.3, P2-R10). */
+internal fun acquisitionRejectionOffersOpenSettings(@StringRes messageRes: Int): Boolean =
+    messageRes == R.string.acq_reject_permission_denied_wifi

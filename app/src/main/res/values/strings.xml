@@ -507,7 +507,7 @@
          differently by transport carry a transport suffix; every other reason has one string.
          Keep each text free of any measured value. -->
     <string name="acq_reject_unreachable_wifi">Cannot reach the device gateway. Check it is powered on and on the same Wi-Fi.</string>
-    <string name="acq_reject_permission_denied_wifi">Local network access is off for this app. Allow it in system settings to reach the device gateway.</string>
+    <string name="acq_reject_permission_denied_wifi">Local network access is off for this app. Allow Nearby devices for this app in Settings to reach the device gateway.</string>
     <!-- Below the enforcement level the app cannot tell a gateway that is down from a vendor-level
          local-network block, so this text names both causes instead of claiming one. -->
     <string name="acq_reject_unreachable_or_blocked_wifi">Cannot reach the device gateway. Check the Pi is running and on the same Wi-Fi, and check this app\'s local-network access in system settings.</string>
