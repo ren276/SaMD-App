@@ -2,6 +2,7 @@ package com.example.samdapp.data.vitalssource
 
 import com.example.samdapp.data.remote.SyncGson
 import com.example.samdapp.di.PiGatewayNetworkModule
+import com.example.samdapp.domain.connectivity.LocalNetworkGate
 import com.example.samdapp.domain.vitalssource.AcquisitionRequest
 import com.example.samdapp.domain.vitalssource.AcquisitionResult
 import com.example.samdapp.domain.vitalssource.AcquisitionTransport
@@ -38,7 +39,7 @@ class PiGatewayVitalsSourceTest {
         server.start()
         val api = Retrofit.Builder()
             .baseUrl(server.url("/"))
-            .client(PiGatewayNetworkModule.piGatewayOkHttpClient(HUB))
+            .client(PiGatewayNetworkModule.piGatewayOkHttpClient(HUB, gate = LocalNetworkGate(sdkInt = 0) { true }))
             .addConverterFactory(GsonConverterFactory.create(SyncGson.create()))
             .build()
             .create(PiGatewayApi::class.java)
@@ -161,6 +162,25 @@ class PiGatewayVitalsSourceTest {
 
         assertTrue("expected Rejected, was $result", result is AcquisitionResult.Rejected)
         assertEquals(RejectReason.UNREACHABLE, (result as AcquisitionResult.Rejected).reason)
+    }
+
+    @Test
+    fun `a call stopped by the local network gate is PERMISSION_DENIED, not UNREACHABLE`() = runTest {
+        // A shut gate and a .local host, as on a denied Android 17 phone: no lookup, no socket.
+        val blocked = PiGatewayVitalsSource(
+            Retrofit.Builder()
+                .baseUrl("http://kernelhub1.local:8090/")
+                .client(PiGatewayNetworkModule.piGatewayOkHttpClient(HUB, gate = LocalNetworkGate(sdkInt = 37) { false }))
+                .addConverterFactory(GsonConverterFactory.create(SyncGson.create()))
+                .build()
+                .create(PiGatewayApi::class.java),
+            expectedHubId = HUB,
+        )
+
+        val result = blocked.startAcquisition(bpRequest)
+
+        assertTrue("expected Rejected, was $result", result is AcquisitionResult.Rejected)
+        assertEquals(RejectReason.PERMISSION_DENIED, (result as AcquisitionResult.Rejected).reason)
     }
 
     /**
@@ -322,7 +342,7 @@ class PiGatewayVitalsSourceTest {
     fun `with no Wi-Fi hub assigned every answer is refused, even one with an empty hub header`() = runTest {
         val api = Retrofit.Builder()
             .baseUrl(server.url("/"))
-            .client(PiGatewayNetworkModule.piGatewayOkHttpClient(expectedHubId = ""))
+            .client(PiGatewayNetworkModule.piGatewayOkHttpClient(expectedHubId = "", gate = LocalNetworkGate(sdkInt = 0) { true }))
             .addConverterFactory(GsonConverterFactory.create(SyncGson.create()))
             .build()
             .create(PiGatewayApi::class.java)

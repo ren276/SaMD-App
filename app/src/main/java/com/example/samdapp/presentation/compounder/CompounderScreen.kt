@@ -3,6 +3,9 @@
 package com.example.samdapp.presentation.compounder
 
 import android.Manifest
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -38,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -286,10 +290,14 @@ internal fun CompounderContent(uiState: CompounderUiState, actions: CompounderAc
  */
 @Composable
 private fun AcquisitionControls(uiState: CompounderUiState, actions: CompounderActions) {
-    val startAcquisition = rememberLocalNetworkPermissionAction(
+    val requestThenStart = rememberLocalNetworkPermissionAction(
         onGranted = actions::onStartAcquisition,
         onDenied = actions::onLocalNetworkPermissionDenied,
     )
+    // Decided at click time (memo P2-R10): a Wi-Fi route the gate blocks asks first; anything else,
+    // including a build with no hub binding, starts directly.
+    val startAcquisition = { if (actions.needsLocalNetworkRequest()) requestThenStart() else actions.onStartAcquisition() }
+    val context = LocalContext.current
     Card(modifier = Modifier.fillMaxWidth().testTag("acquisition_controls")) {
         Column(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Instrument reading (dev)", style = MaterialTheme.typography.titleSmall)
@@ -324,6 +332,16 @@ private fun AcquisitionControls(uiState: CompounderUiState, actions: CompounderA
             }
             uiState.acquisitionError?.let { messageRes ->
                 Text(stringResource(messageRes), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                if (acquisitionRejectionOffersOpenSettings(messageRes)) {
+                    OutlinedButton(
+                        onClick = {
+                            context.startActivity(
+                                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)),
+                            )
+                        },
+                        modifier = Modifier.testTag("acquisition_open_settings"),
+                    ) { Text(stringResource(R.string.lnp_open_settings)) }
+                }
             }
         }
     }

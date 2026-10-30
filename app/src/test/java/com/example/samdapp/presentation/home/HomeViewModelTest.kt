@@ -1,5 +1,6 @@
 package com.example.samdapp.presentation.home
 
+import com.example.samdapp.data.sync.MemoryOwnerMismatchHold
 import com.example.samdapp.domain.auth.UserRole
 import com.example.samdapp.domain.auth.UserSession
 import com.example.samdapp.domain.model.CaseRecord
@@ -33,7 +34,7 @@ class HomeViewModelTest {
     fun `roster reflects todays patients and stops loading`() = runTest(mainDispatcherRule.dispatcher) {
         val repo = FakePatientRepository(today = listOf(testPatient("p1"), testPatient("p2")))
         val viewModel = HomeViewModel(
-            GetTodaysPatientsUseCase(repo), FakeSyncStatus(), FakeAuthSession(), FakeCaseRecordRepository(), repo,
+            GetTodaysPatientsUseCase(repo), FakeSyncStatus(), FakeAuthSession(), FakeCaseRecordRepository(), repo, MemoryOwnerMismatchHold(), publicBackendLocalNetwork(),
         )
 
         advanceUntilIdle()
@@ -47,7 +48,7 @@ class HomeViewModelTest {
     fun `onSyncNow triggers a sync round`() = runTest(mainDispatcherRule.dispatcher) {
         val sync = FakeSyncStatus()
         val viewModel = HomeViewModel(
-            GetTodaysPatientsUseCase(FakePatientRepository()), sync, FakeAuthSession(), FakeCaseRecordRepository(), FakePatientRepository(),
+            GetTodaysPatientsUseCase(FakePatientRepository()), sync, FakeAuthSession(), FakeCaseRecordRepository(), FakePatientRepository(), MemoryOwnerMismatchHold(), publicBackendLocalNetwork(),
         )
 
         viewModel.onSyncNow()
@@ -70,7 +71,7 @@ class HomeViewModelTest {
             FakeSyncStatus(),
             FakeAuthSession(initialSession = session),
             FakeCaseRecordRepository(initial = listOf(draft)),
-            patientRepo,
+            patientRepo, MemoryOwnerMismatchHold(), publicBackendLocalNetwork(),
         )
 
         advanceUntilIdle()
@@ -93,7 +94,7 @@ class HomeViewModelTest {
             FakeSyncStatus(),
             FakeAuthSession(initialSession = null),
             FakeCaseRecordRepository(initial = listOf(draft)),
-            FakePatientRepository(),
+            FakePatientRepository(), MemoryOwnerMismatchHold(), publicBackendLocalNetwork(),
         )
 
         advanceUntilIdle()
@@ -110,7 +111,7 @@ class HomeViewModelTest {
             )
         }
         val viewModel = HomeViewModel(
-            GetTodaysPatientsUseCase(FakePatientRepository()), sync, FakeAuthSession(), FakeCaseRecordRepository(), FakePatientRepository(),
+            GetTodaysPatientsUseCase(FakePatientRepository()), sync, FakeAuthSession(), FakeCaseRecordRepository(), FakePatientRepository(), MemoryOwnerMismatchHold(), publicBackendLocalNetwork(),
         )
         val effects = mutableListOf<HomeEffect>()
         val job = launch { viewModel.effects.collect { effects += it } }
@@ -131,7 +132,7 @@ class HomeViewModelTest {
             stateAfterSync = com.example.samdapp.domain.sync.SyncState(failedCount = 3)
         }
         val viewModel = HomeViewModel(
-            GetTodaysPatientsUseCase(FakePatientRepository()), sync, FakeAuthSession(), FakeCaseRecordRepository(), FakePatientRepository(),
+            GetTodaysPatientsUseCase(FakePatientRepository()), sync, FakeAuthSession(), FakeCaseRecordRepository(), FakePatientRepository(), MemoryOwnerMismatchHold(), publicBackendLocalNetwork(),
         )
         val effects = mutableListOf<HomeEffect>()
         val job = launch { viewModel.effects.collect { effects += it } }
@@ -152,7 +153,7 @@ class HomeViewModelTest {
             directState = com.example.samdapp.domain.sync.SyncState(failedCount = 1)
         }
         val viewModel = HomeViewModel(
-            GetTodaysPatientsUseCase(FakePatientRepository()), sync, FakeAuthSession(), FakeCaseRecordRepository(), FakePatientRepository(),
+            GetTodaysPatientsUseCase(FakePatientRepository()), sync, FakeAuthSession(), FakeCaseRecordRepository(), FakePatientRepository(), MemoryOwnerMismatchHold(), publicBackendLocalNetwork(),
         )
         val effects = mutableListOf<HomeEffect>()
         val job = launch { viewModel.effects.collect { effects += it } }

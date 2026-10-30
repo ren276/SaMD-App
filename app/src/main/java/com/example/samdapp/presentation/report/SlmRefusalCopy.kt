@@ -183,6 +183,14 @@ fun slmRefusalCopy(refusal: SlmRefusal): SlmRefusalCopy = when (refusal) {
         SlmRetryOffer.NONE,
     )
 
+    // Connected, but Android blocks this app from the local network. No button: pressing it
+    // changes nothing until Nearby devices is allowed in Settings.
+    SlmRefusal.LOCAL_NETWORK_NOT_ALLOWED -> SlmRefusalCopy(
+        R.string.readback_refusal_local_network_title,
+        R.string.readback_refusal_local_network_body,
+        SlmRetryOffer.NONE,
+    )
+
     /*
      * The one refusal whose copy tells the worker not to try again in those words, and the reason
      * PR-6 added the class at all. A TLS failure can be a captive portal, a clock skew, or an

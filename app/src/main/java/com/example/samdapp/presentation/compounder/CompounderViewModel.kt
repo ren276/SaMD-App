@@ -1,5 +1,7 @@
 package com.example.samdapp.presentation.compounder
 
+import com.example.samdapp.domain.vitalssource.HubLocalNetworkNeed
+import java.util.Optional
 import androidx.annotation.StringRes
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
@@ -237,6 +239,9 @@ interface CompounderActions {
     /** A declined local-network prompt must say so. Without this the Start button would simply
      *  stop responding, with no explanation and no way back. */
     fun onLocalNetworkPermissionDenied()
+    /** Whether the selected instrument's Start must first request ACCESS_LOCAL_NETWORK (memo Q3,
+     *  P2-R10). Asked on every click, never kept. */
+    fun needsLocalNetworkRequest(): Boolean
     /** Pre-fills main concern, vitals and the ailment form from [DemoPatientProfile] — demo only. */
     fun fillDemoData()
 }
@@ -258,6 +263,7 @@ class CompounderViewModel @AssistedInject constructor(
     private val ailmentAudioRecorder: AilmentAudioRecorder,
     private val checkEmergencyThresholdsUseCase: CheckEmergencyThresholdsUseCase,
     private val auditLogger: AuditLogger,
+    private val hubLocalNetworkNeed: Optional<HubLocalNetworkNeed>,
 ) : ViewModel(), CompounderActions {
 
     @AssistedFactory
@@ -565,6 +571,9 @@ class CompounderViewModel @AssistedInject constructor(
             }
         }
     }
+
+    override fun needsLocalNetworkRequest(): Boolean =
+        hubLocalNetworkNeed.map { it.needsRequest(_uiState.value.selectedInstrument) }.orElse(false)
 
     override fun onLocalNetworkPermissionDenied() = _uiState.update {
         it.copy(acquiringInstrument = null, acquisitionError = acquisitionRejectionRes(RejectReason.PERMISSION_DENIED))

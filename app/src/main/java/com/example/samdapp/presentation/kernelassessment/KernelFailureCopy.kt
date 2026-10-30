@@ -42,6 +42,11 @@ fun kernelFailureCopy(failure: KernelFailure?): KernelFailureCopy = when (failur
         R.string.kernel_failure_offline_body,
     )
 
+    KernelFailure.LOCAL_NETWORK_NOT_ALLOWED -> KernelFailureCopy(
+        R.string.kernel_failure_local_network_title,
+        R.string.kernel_failure_local_network_body,
+    )
+
     KernelFailure.TIMEOUT -> KernelFailureCopy(
         R.string.kernel_failure_timeout_title,
         R.string.kernel_failure_timeout_body,

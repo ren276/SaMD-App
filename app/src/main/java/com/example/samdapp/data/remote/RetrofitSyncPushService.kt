@@ -24,7 +24,7 @@ class RetrofitSyncPushService @Inject constructor(
         val response = try {
             syncPushApiService.push(request)
         } catch (e: IOException) {
-            return SyncPushResult.Failure(code = null, message = e.message ?: "Network error.")
+            return SyncPushResult.Failure(code = null, message = e.message ?: "Network error.", cause = e)
         }
         return unwrap(response)
     }

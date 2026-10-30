@@ -8,6 +8,7 @@ import com.example.samdapp.domain.auth.ChangePinResult
 import com.example.samdapp.domain.auth.SignInResult
 import com.example.samdapp.domain.auth.UserRole
 import com.example.samdapp.domain.auth.UserSession
+import com.example.samdapp.domain.auth.signInFailureReasonFor
 import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -64,7 +65,7 @@ class BackendAuthSession @Inject constructor(
                 ownerMismatchHold.release()
                 SignInResult.Success(mustChangePin = login.mustChangePin)
             }
-            is AuthApiResult.Failure -> SignInResult.Failure(result.message)
+            is AuthApiResult.Failure -> SignInResult.Failure(result.message, signInFailureReasonFor(result.cause))
         }
     }
 
@@ -77,7 +78,7 @@ class BackendAuthSession @Inject constructor(
                 tokenStore.clear()
                 ChangePinResult.Success
             }
-            is AuthApiResult.Failure -> ChangePinResult.Failure(result.message)
+            is AuthApiResult.Failure -> ChangePinResult.Failure(result.message, signInFailureReasonFor(result.cause))
         }
     }
 

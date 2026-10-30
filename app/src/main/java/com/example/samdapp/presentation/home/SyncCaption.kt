@@ -27,6 +27,23 @@ sealed interface SyncCaption {
 }
 
 /**
+ * The drain failure Home shows (memo P2-R5, P2-R9, F1-M1). The owner-mismatch hold, or an
+ * OWNER_MISMATCH drain, outranks everything, and then the local-network kind never shows. Otherwise
+ * the gate's live decision for the backend host decides the local-network kind: shown while it
+ * blocks, cleared once it does not, whatever the last drain recorded.
+ */
+fun homeDrainFailure(last: DrainFailure?, localNetworkBlocked: Boolean, ownerMismatchHeld: Boolean): DrainFailure? = when {
+    ownerMismatchHeld || last == DrainFailure.OWNER_MISMATCH -> last.takeUnless { it == DrainFailure.LOCAL_NETWORK_NOT_ALLOWED }
+    localNetworkBlocked -> DrainFailure.LOCAL_NETWORK_NOT_ALLOWED
+    last == DrainFailure.LOCAL_NETWORK_NOT_ALLOWED -> null
+    else -> last
+}
+
+/** The caption Home pairs with an Open settings action (memo Q7, P2-R4). */
+fun SyncCaption.offersLocalNetworkSettings(): Boolean =
+    this is SyncCaption.CouldNotSend && failure == DrainFailure.LOCAL_NETWORK_NOT_ALLOWED
+
+/**
  * Home's caption truth table, evaluated top to bottom; the first row that matches wins.
  *
  * "Up to date" is reachable only when nothing is pending (records, doctor cases, activity log),

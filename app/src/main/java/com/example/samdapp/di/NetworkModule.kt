@@ -1,7 +1,15 @@
 package com.example.samdapp.di
 
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import android.util.Log
+import androidx.core.content.ContextCompat
+import com.example.samdapp.data.connectivity.PackageAppPermissions
 import com.example.samdapp.data.remote.BearerInterceptor
+import com.example.samdapp.data.remote.LocalNetworkGateDns
+import com.example.samdapp.data.remote.LocalNetworkGateInterceptor
+import com.example.samdapp.data.remote.NetworkLoggingInterceptor
 import com.example.samdapp.data.remote.RetrofitAbhaSource
 import com.example.samdapp.data.remote.RetrofitEvaluateSource
 import com.example.samdapp.data.remote.RetrofitKernelSource
@@ -14,6 +22,9 @@ import com.example.samdapp.data.remote.api.ClinicalApiService
 import com.example.samdapp.data.remote.api.KernelApiService
 import com.example.samdapp.data.remote.api.SyncPushApiService
 import com.example.samdapp.domain.abha.AbdmAbhaSource
+import com.example.samdapp.domain.connectivity.ACCESS_LOCAL_NETWORK_PERMISSION
+import com.example.samdapp.domain.connectivity.AppPermissions
+import com.example.samdapp.domain.connectivity.LocalNetworkGate
 import com.example.samdapp.domain.kernel.EvaluateKernelSource
 import com.example.samdapp.domain.kernel.RemoteKernelSource
 import com.google.gson.Gson
@@ -21,7 +32,9 @@ import dagger.Binds
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import okhttp3.Dns
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
@@ -33,7 +46,7 @@ import javax.inject.Singleton
 
 /** Marks the ABHA-only [OkHttpClient]/[Retrofit] pair — see [NetworkModule.provideAbhaOkHttpClient]'s
  *  KDoc for why ABHA traffic cannot share the general-purpose client that
- *  [NetworkModule.provideHttpLoggingInterceptor] can put in `BODY` logging mode. */
+ *  [NetworkModule.provideNetworkLoggingInterceptor] can put in `BODY` logging mode. */
 @Qualifier
 @Retention(AnnotationRetention.BINARY)
 annotation class AbhaHttpStack
@@ -73,31 +86,46 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideHttpLoggingInterceptor(): HttpLoggingInterceptor =
-        HttpLoggingInterceptor { message -> Log.d(TAG, message) }.apply {
-            // Network logging is gated by a local.properties flag to prevent PHI leaks in logcat.
-            // Full request/response tracing is disabled by default. Audit logging handles
-            // secure, timestamped persistence of necessary clinical data.
+    fun provideNetworkLoggingInterceptor(): NetworkLoggingInterceptor =
+        // Network logging is gated by a local.properties flag to prevent PHI leaks in logcat.
+        // Full request/response tracing is disabled by default. Audit logging handles secure,
+        // timestamped persistence of necessary clinical data. Even when on, credentials are
+        // redacted and auth and read-back bodies are never logged (NetworkLoggingInterceptor).
+        NetworkLoggingInterceptor(
+            logger = { message -> Log.d(TAG, message) },
             level = if (com.example.samdapp.BuildConfig.ENABLE_NETWORK_LOGGING) {
                 HttpLoggingInterceptor.Level.BODY
             } else {
                 HttpLoggingInterceptor.Level.NONE
-            }
+            },
+        )
+
+    /** The local-network gate every client in the app is built with (memo 11.1). */
+    @Provides
+    @Singleton
+    fun provideLocalNetworkGate(@ApplicationContext context: Context): LocalNetworkGate =
+        LocalNetworkGate(Build.VERSION.SDK_INT) {
+            ContextCompat.checkSelfPermission(context, ACCESS_LOCAL_NETWORK_PERMISSION) == PackageManager.PERMISSION_GRANTED
         }
 
+    /** The gate interceptor goes after [DevHostInterceptors], which can rewrite the host, so it
+     *  judges the address the call will really use. */
     @Provides
     @Singleton
     fun provideOkHttpClient(
-        loggingInterceptor: HttpLoggingInterceptor,
+        loggingInterceptor: NetworkLoggingInterceptor,
         bearerInterceptor: BearerInterceptor,
         tokenAuthenticator: TokenAuthenticator,
         @DevHostInterceptors devInterceptors: List<@JvmSuppressWildcards Interceptor>,
+        localNetworkGate: LocalNetworkGate,
     ): OkHttpClient =
         OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
+            .dns(LocalNetworkGateDns(Dns.SYSTEM, localNetworkGate))
             .apply { devInterceptors.forEach(::addInterceptor) }
+            .addInterceptor(LocalNetworkGateInterceptor(localNetworkGate))
             .addInterceptor(bearerInterceptor)
             .authenticator(tokenAuthenticator)
             .addInterceptor(loggingInterceptor)
@@ -120,12 +148,15 @@ object NetworkModule {
         bearerInterceptor: BearerInterceptor,
         tokenAuthenticator: TokenAuthenticator,
         @DevHostInterceptors devInterceptors: List<@JvmSuppressWildcards Interceptor>,
+        localNetworkGate: LocalNetworkGate,
     ): OkHttpClient =
         OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
+            .dns(LocalNetworkGateDns(Dns.SYSTEM, localNetworkGate))
             .apply { devInterceptors.forEach(::addInterceptor) }
+            .addInterceptor(LocalNetworkGateInterceptor(localNetworkGate))
             .addInterceptor(bearerInterceptor)
             .authenticator(tokenAuthenticator)
             .build()
@@ -201,5 +232,9 @@ object NetworkModule {
         @Binds
         @Singleton
         abstract fun bindAbdmAbhaSource(impl: RetrofitAbhaSource): AbdmAbhaSource
+
+        /** What login reads to decide whether the memo 5.2 rationale is needed (P2-R2). */
+        @Binds
+        abstract fun bindAppPermissions(impl: PackageAppPermissions): AppPermissions
     }
 }

@@ -1,5 +1,8 @@
 package com.example.samdapp.presentation.home
 
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -18,6 +21,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import com.example.samdapp.presentation.common.SamdLoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -87,6 +92,8 @@ fun HomeScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val resources = LocalContext.current.resources
+    // Memo 5.5: the grant comes back from Settings with no callback; resume is the only signal.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.onResume() }
     LaunchedEffect(viewModel) {
         viewModel.effects.collect { effect ->
             when (effect) {
@@ -189,8 +196,14 @@ private fun HomeContent(
 
             SyncStatusRow(
                 sync = uiState.sync,
+                caption = uiState.caption(isOnline),
                 isOnline = isOnline,
                 onSyncNow = onSyncNow,
+                onOpenSettings = {
+                    context.startActivity(
+                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)),
+                    )
+                },
                 modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
             )
 
@@ -263,8 +276,10 @@ private fun SignedInRow(session: UserSession, onSignOut: () -> Unit, modifier: M
 @Composable
 private fun SyncStatusRow(
     sync: SyncState,
+    caption: SyncCaption,
     isOnline: Boolean,
     onSyncNow: () -> Unit,
+    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val formatter = remember { DateTimeFormatter.ofPattern("d MMM, hh:mm a").withZone(ZoneId.systemDefault()) }
@@ -282,8 +297,8 @@ private fun SyncStatusRow(
             Column(modifier = Modifier.weight(1f)) {
                 Text(text = statusText, style = MaterialTheme.typography.bodyMedium)
                 // The truth table lives in syncCaption (SyncCaption.kt); "Up to date" only when
-                // nothing is pending, failed, conflicted or blocked.
-                val caption = syncCaption(sync, isOnline)
+                // nothing is pending, failed, conflicted or blocked. Home's own inputs (the gate,
+                // the hold) are folded in by HomeUiState.caption.
                 Text(
                     text = caption.text(LocalContext.current.resources),
                     style = MaterialTheme.typography.labelMedium,
@@ -293,6 +308,9 @@ private fun SyncStatusRow(
                         MaterialTheme.colorScheme.error
                     },
                 )
+                if (caption.offersLocalNetworkSettings()) {
+                    TextButton(onClick = onOpenSettings) { Text(stringResource(R.string.lnp_open_settings)) }
+                }
             }
             OutlinedButton(onClick = onSyncNow, enabled = isOnline && !sync.isSyncing) {
                 Text("Sync now")

@@ -95,6 +95,7 @@ class NavBackStackPolicyTest {
             ailmentAudioRecorder = NoopAudioRecorder,
             checkEmergencyThresholdsUseCase = CheckEmergencyThresholdsUseCase(),
             auditLogger = audit,
+            hubLocalNetworkNeed = java.util.Optional.empty(),
         )
     }
 

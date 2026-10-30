@@ -25,4 +25,9 @@ enum class DrainFailure {
      *  the signed-in account (`SAMD-SYNC-6007`, facility-scope memo 3.5). Terminal for that batch
      *  under this session: it is not resent until someone signs in again. */
     OWNER_MISMATCH,
+
+    /** The server is on the local network and this app does not hold the local network
+     *  permission, so the batch was stopped before any socket (memo 5.5, 11.4). Allowing Nearby
+     *  devices in Settings fixes it; the batch stays queued and the worker keeps retrying. */
+    LOCAL_NETWORK_NOT_ALLOWED,
 }

@@ -4,6 +4,7 @@ import com.example.samdapp.data.remote.dto.AllergySyncPayloadDto
 import com.example.samdapp.data.remote.dto.SyncRecordDto
 import com.example.samdapp.domain.model.MAX_SYNC_ATTEMPTS
 import com.example.samdapp.domain.model.RETRY_EXHAUSTED_CODE
+import com.example.samdapp.presentation.home.copyRef
 import com.example.samdapp.testutil.FakeAuthTokenStore
 import com.example.samdapp.testutil.FakeSyncOutboxRepository
 import com.example.samdapp.testutil.FakeSyncPushService
@@ -452,9 +453,9 @@ class DrainOutcomeRecordingTest {
         data = AllergySyncPayloadDto(patientId = "p1", category = "ENVIRONMENTAL", allergen = "pollen", reactionType = null, createdAt = Instant.EPOCH),
     )
 
-    private fun failingPush(code: String?) = object : com.example.samdapp.data.remote.SyncPushService {
+    private fun failingPush(code: String?, cause: Throwable? = null) = object : com.example.samdapp.data.remote.SyncPushService {
         override suspend fun push(request: com.example.samdapp.data.remote.dto.SyncPushRequestDto) =
-            com.example.samdapp.data.remote.SyncPushResult.Failure(code = code, message = "push failed")
+            com.example.samdapp.data.remote.SyncPushResult.Failure(code = code, message = "push failed", cause = cause)
     }
 
     private suspend fun drainWith(
@@ -471,6 +472,67 @@ class DrainOutcomeRecordingTest {
     fun `a push that never reached the server records NO_CONNECTION`() = runTest {
         val outcome = DrainOutcomeStore()
         drainWith(failingPush(code = null), outcome)
+        assertEquals(com.example.samdapp.domain.sync.DrainFailure.NO_CONNECTION, outcome.lastFailure.value)
+    }
+
+    @Test
+    fun `a push stopped by the local network gate records LOCAL_NETWORK_NOT_ALLOWED and fails the drain`() = runTest {
+        val outcome = DrainOutcomeStore()
+        val result = drainWith(
+            failingPush(code = null, cause = com.example.samdapp.domain.connectivity.LocalNetworkNotAllowedException()),
+            outcome,
+        )
+        assertEquals(com.example.samdapp.domain.sync.DrainFailure.LOCAL_NETWORK_NOT_ALLOWED, outcome.lastFailure.value)
+        // A failed drain is what SyncPushWorker turns into Result.retry(): the queue is kept.
+        assertTrue(result.isFailure)
+    }
+
+    /** A held drain with a push that would also hit the local network gate: F1-M1, the hold wins. */
+    private suspend fun heldDrainThatWouldHitTheGate(outcome: DrainOutcomeStore): Pair<Result<Unit>, Int> {
+        var calls = 0
+        val push = object : com.example.samdapp.data.remote.SyncPushService {
+            override suspend fun push(request: com.example.samdapp.data.remote.dto.SyncPushRequestDto) =
+                com.example.samdapp.data.remote.SyncPushResult.Failure(
+                    code = null, message = "push failed",
+                    cause = com.example.samdapp.domain.connectivity.LocalNetworkNotAllowedException(),
+                ).also { calls++ }
+        }
+        val result = SyncOutboxDrainer(
+            FakeSyncOutboxRepository(listOf(record("a-1"))),
+            SyncBatchPacker(com.example.samdapp.data.remote.SyncGson.create()),
+            push, InMemoryInFlightBatchStore(), FakeAuthTokenStore(), TestDataOwner, outcome,
+            MemoryOwnerMismatchHold().apply { hold() },
+        ).drain()
+        return result to calls
+    }
+
+    @Test
+    fun `a held drain reads OWNER_MISMATCH over the local network gate and pushes nothing`() = runTest {
+        val outcome = DrainOutcomeStore()
+        val (result, calls) = heldDrainThatWouldHitTheGate(outcome)
+        assertEquals(com.example.samdapp.domain.sync.DrainFailure.OWNER_MISMATCH, outcome.lastFailure.value)
+        assertEquals("push is never called", 0, calls)
+        assertTrue(result.isFailure)
+    }
+
+    @Test
+    fun `with both causes present Home shows the owner mismatch caption`() = runTest {
+        val outcome = DrainOutcomeStore()
+        heldDrainThatWouldHitTheGate(outcome)
+        val caption = com.example.samdapp.presentation.home.syncCaption(
+            com.example.samdapp.domain.sync.SyncState(outboxPending = 1, lastDrainFailure = outcome.lastFailure.value),
+            isOnline = true,
+        )
+        assertEquals(
+            com.example.samdapp.presentation.home.CopyRef.Str(com.example.samdapp.R.string.sync_caption_owner_mismatch),
+            caption.copyRef(),
+        )
+    }
+
+    @Test
+    fun `a push that dropped for any other transport reason stays NO_CONNECTION`() = runTest {
+        val outcome = DrainOutcomeStore()
+        drainWith(failingPush(code = null, cause = java.net.SocketTimeoutException("x")), outcome)
         assertEquals(com.example.samdapp.domain.sync.DrainFailure.NO_CONNECTION, outcome.lastFailure.value)
     }
 

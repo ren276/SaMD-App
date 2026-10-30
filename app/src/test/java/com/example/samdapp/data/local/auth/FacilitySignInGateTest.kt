@@ -98,7 +98,7 @@ class FacilitySignInGateTest {
         }
     }
 
-    private enum class Revoke { OK, REFUSED, IO_ERROR, CRASH }
+    private enum class Revoke { OK, REFUSED, IO_ERROR, CRASH, LOCAL_NETWORK }
 
     private class FakeAuthApi(private val facilityId: String?, private val facilityName: String?) : AuthApiService {
         var revoke = Revoke.OK
@@ -126,6 +126,7 @@ class FacilitySignInGateTest {
                 Revoke.REFUSED -> Response.error(503, "{}".toResponseBody())
                 Revoke.IO_ERROR -> throw IOException("offline")
                 Revoke.CRASH -> throw IllegalStateException("unexpected")
+                Revoke.LOCAL_NETWORK -> throw com.example.samdapp.domain.connectivity.LocalNetworkNotAllowedException()
             }
         }
 
@@ -242,6 +243,25 @@ class FacilitySignInGateTest {
             assertTrue("$failure: nothing is saved", !h.saved())
             assertEquals("$failure", "failed", fields(h.audit.rows.single().payload)["revoke"])
         }
+    }
+
+    @Test
+    fun `a revoke stopped by the local network gate stays blocked, saves nothing and audits revoke failed without the exception`() = runTest {
+        val h = Harness(holdsData = true)
+        h.owners.owner = alpha
+        h.api.revoke = Revoke.LOCAL_NETWORK
+
+        assertEquals(SignInResult.FacilityBlocked("PHC Alpha"), h.signIn())
+
+        assertTrue("nothing is saved", !h.saved())
+        assertEquals("the revoke was attempted", listOf("refresh-new"), h.api.logouts)
+        val row = h.audit.rows.single()
+        assertEquals(AuditAction.CROSS_FACILITY_SIGN_IN_BLOCKED, row.action)
+        assertEquals(
+            mapOf("decision" to "block", "facility_id" to "fac-b", "owner_facility_id" to "fac-a", "revoke" to "failed") + countFields,
+            fields(row.payload),
+        )
+        assertTrue("no exception text in the audit row", !row.payload.toString().contains("LocalNetwork", ignoreCase = true))
     }
 
     @Test

@@ -28,7 +28,7 @@ class LoginViewModelTest {
     @Test
     fun `submit requests biometric auth instead of signing in directly`() = runTest(mainDispatcherRule.dispatcher) {
         val authSession = FakeAuthSession()
-        val viewModel = LoginViewModel(authSession)
+        val viewModel = LoginViewModel(authSession, publicBackendCheck())
         val effects = mutableListOf<LoginEffect>()
         val collectJob = launch { viewModel.effects.toList(effects) }
 
@@ -48,7 +48,7 @@ class LoginViewModelTest {
     @Test
     fun `biometric success completes the sign-in and resets the form`() = runTest(mainDispatcherRule.dispatcher) {
         val authSession = FakeAuthSession()
-        val viewModel = LoginViewModel(authSession)
+        val viewModel = LoginViewModel(authSession, publicBackendCheck())
 
         viewModel.onNameChange("Asha")
         viewModel.onRoleSelect(UserRole.ASHA_WORKER)
@@ -66,7 +66,7 @@ class LoginViewModelTest {
     fun `biometric failure does not sign in and surfaces an error, keeping the form filled`() =
         runTest(mainDispatcherRule.dispatcher) {
             val authSession = FakeAuthSession()
-            val viewModel = LoginViewModel(authSession)
+            val viewModel = LoginViewModel(authSession, publicBackendCheck())
 
             viewModel.onNameChange("Asha")
             viewModel.onRoleSelect(UserRole.ASHA_WORKER)
@@ -77,7 +77,7 @@ class LoginViewModelTest {
             advanceUntilIdle()
 
             assertNull(authSession.currentUser().first())
-            assertTrue(viewModel.uiState.value.errorMessage!!.contains("fingerprint did not match"))
+            assertTrue((viewModel.uiState.value.error as LoginError.Biometric).message.contains("fingerprint did not match"))
             assertEquals("Asha", viewModel.uiState.value.name)
             assertTrue(!viewModel.uiState.value.isSubmitting)
         }
@@ -87,7 +87,7 @@ class LoginViewModelTest {
     }
 
     private fun TestScope.signInWith(result: SignInResult): LoginViewModel {
-        val viewModel = LoginViewModel(RefusingAuthSession(result))
+        val viewModel = LoginViewModel(RefusingAuthSession(result), publicBackendCheck())
         viewModel.onNameChange("Asha")
         viewModel.onRoleSelect(UserRole.ASHA_WORKER)
         viewModel.onPinChange("482915")
@@ -102,8 +102,8 @@ class LoginViewModelTest {
     fun `a sign-in blocked by the facility check names the owner facility and clears the PIN`() = runTest(mainDispatcherRule.dispatcher) {
         val state = signInWith(SignInResult.FacilityBlocked("PHC Alpha")).uiState.value
 
-        assertEquals(SignInRefusal.FacilityBlocked("PHC Alpha"), state.refusal)
-        assertNull("no raw message alongside the string resource", state.errorMessage)
+        assertEquals(SignInRefusal.FacilityBlocked("PHC Alpha"), (state.error as? LoginError.Refusal)?.refusal)
+        assertNull("no raw message alongside the string resource", (state.error as? LoginError.ServerDetail)?.detail)
         assertEquals("", state.pin)
         assertTrue(!state.isSubmitting)
     }
@@ -112,18 +112,18 @@ class LoginViewModelTest {
     fun `a sign-in with no facility is refused with its own message`() = runTest(mainDispatcherRule.dispatcher) {
         val viewModel = signInWith(SignInResult.NoFacility)
 
-        assertEquals(SignInRefusal.NoFacility, viewModel.uiState.value.refusal)
+        assertEquals(SignInRefusal.NoFacility, (viewModel.uiState.value.error as? LoginError.Refusal)?.refusal)
         assertEquals("", viewModel.uiState.value.pin)
 
         viewModel.onPinChange("1")
-        assertNull("editing the form clears the refusal", viewModel.uiState.value.refusal)
+        assertNull("editing the form clears the refusal", (viewModel.uiState.value.error as? LoginError.Refusal)?.refusal)
     }
 
     @Test
     fun `a sign-in the facility check could not complete is refused with the generic message`() = runTest(mainDispatcherRule.dispatcher) {
         val state = signInWith(SignInResult.Unavailable).uiState.value
 
-        assertEquals(SignInRefusal.Unavailable, state.refusal)
+        assertEquals(SignInRefusal.Unavailable, (state.error as? LoginError.Refusal)?.refusal)
         assertEquals("", state.pin)
         assertTrue(!state.isSubmitting)
     }

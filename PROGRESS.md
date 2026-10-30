@@ -5369,6 +5369,7 @@ stays at v22). Must merge before any pilot use. Design and operator rulings:
 12. Follow-up chains deeper than one level still count as waiting (H-32 residual).
 13. Hardcoded Kotlin user-facing strings: externalize all of them, and add a Hindi locale before
     pilot (only the default `values/` locale exists).
+    Biometric failure copy carries an em dash; fix to 'Can't sign in: $message' with string externalization (copy change needs approval).
 14. Doctor review must surface the derivation flags (`derivation_ok`, SUPERSEDED, MISMATCH). Today
     the doctor's screen does not call `GET /encounters/{id}`; this needs a pull-path design memo.
 15. Test infrastructure: a `samd_test` advisory lock plus a clean-slate guard, and a SHA-256 pin
@@ -5571,6 +5572,62 @@ Filed, not fixed in PR-B2:
 - F5: the consultation wizard's Back dead end (already filed).
 - F6: the kernelhub2 spontaneous reboot; check `journalctl --list-boots` and
   `vcgencmd get_throttled`.
+
+## F1 local network permission, step 2 Phase 1: gate, consumers, refresh, login copy, logging - 2026-10-15
+
+Branch `feat/local-network-permission` from `1ce3b4a`. Design: `docs/design/local-network-permission-memo.md`
+sections 10 (operator rulings Q1 to Q11, E1 to E8) and 11 (design addendum). Hazard row id H-46
+(H-37 to H-45 are reserved for PR-C, `docs/design/samdpi-two-hub-memo.md:1813-1829`); the row is
+written in Phase 3.
+
+- [x] Memo sections 10 and 11 (`3fa494a`).
+- [x] Classifiers and gate: `isLocalNetworkHost`, `isLocalNetworkAddress` (loopback excluded),
+      `isLocalNetworkBlocked`; constants now `Build.VERSION_CODES.CINNAMON_BUN` and
+      `Manifest.permission.ACCESS_LOCAL_NETWORK` (`2186453`).
+- [x] One enforcement point on every OkHttp client: an application interceptor (IP literals and
+      `.local`, which OkHttp 4.12.0 never passes to `Dns`) plus a `Dns` wrapper over the client's
+      own `Dns` (a public name resolving to a private address, Q1). The caller receives
+      `LocalNetworkNotAllowedException` itself with zero sockets, retries on or off. Scan guard
+      `LocalNetworkGateCoverageTest` (`edccea2`).
+- [x] Consumers: drain kind `LOCAL_NETWORK_NOT_ALLOWED` with the memo 5.5 caption and snackbar
+      (queue kept); kernel and SLM read-back get their own failure class and copy; the dev hub maps
+      to `PERMISSION_DENIED`; ABHA and evaluate keep documented true fallbacks. Refresh (Q10): a
+      refresh with no answer is rethrown and the session kept; only a 401 or `invalid_grant` ends it
+      (`198e392`).
+- [x] Login shows a string resource for every transport failure, never exception text (Q4,
+      `67854b8`).
+- [x] Network logging always redacts `Authorization`, `Cookie`, `Set-Cookie`, and logs no body on
+      `/api/v1/auth/` or the SLM read-back (Q9, Q11, closes A-02 for the remote engine, `c6279f9`).
+
+Tests: dev unit suite 1121, 1133, 1146, 1151, 1156 at the five code commits, all green. Mutation
+rows: 30, each RED at an assertion, restored sha256-identical and green again; 3 attempts voided
+and redone (a mutation that did not compile, one that failed the build, one run with the wrong test
+filter). Log: `/media/sandesh/extra-ssd/samd-lnp/mutation.log`.
+
+New strings awaiting wording approval (not in memo 5.2 to 5.5): `kernel_failure_local_network_*`,
+`readback_refusal_local_network_*`, `login_failed_no_connection`, `login_failed_secure_connection`.
+
+- [ ] Phase 2 (login request flow, hub scoping and copy, Home caption): paused; resumes only when
+      the operator says RESUME L2.
+- [ ] Phase 3 (device pass D1 to D10, API 36 AVD, hazard row H-46, PR).
+  Historical snapshot as of 2026-10-15; see the Phase 2 and Phase 3 sections for the current state.
+- [x] FU-1 (2026-10-28): Home caption and Sync now text come from one pure function, `copyRef()` in
+      `SyncCaptionCopy.kt`; `captionRes` and `syncNowFailedRes` removed; every DrainFailure value and
+      caption state asserted on it; mutation rows `FU1-*` in samd-lnp/mutation.log.
+- [x] FU-2 (2026-10-29): testDev `DevLocalNetworkGateOrderTest` builds the client through `NetworkModule.provideOkHttpClient` with the real dev host interceptor and asserts the gate judges the rewritten 10.x address (denied, granted, public host); STEPM-Me and a gate-removed mutant go RED in it (`FU2-*` rows).
+- [x] FU-3 (2026-10-29): tests pin F1-M1 (a held drain reads OWNER_MISMATCH over the local network gate and pushes nothing; Home shows the owner mismatch caption) and the revoke path (a revoke stopped by the gate stays FacilityBlocked, saves nothing, audits revoke=failed without exception text); STEPM-Md and a revoke-to-admit mutant go RED at the new assertions (`FU3-*` rows).
+- [x] FU-1b (2026-10-29): `CopyRef.resolve` takes a two-operation `CopyText`, so it is testable without Android; the 15 count-free strings are back on the plain `getString(res)` overload (FU-1 had sent them through `String.format`), pinned by `CopyRefResolveTest` (`FU1b-*` rows).
+FU-4: ruling R1 recorded in the F1 memo (kernel_failure_local_network_body approved).
+- [x] Phase 2 A1 (2026-10-29): login asks `LocalNetworkGate.blocksHost` (now the interceptor's one host decision) for the backend host after the biometric step; memo 5.2 rationale only when no declared NEARBY_DEVICES member is granted, every denial is `lnp_denied_login` with Open settings, no auto re-submit; `LoginUiState` holds one sealed `LoginError`; `LoginLocalNetworkFlowTest`, mutation rows `P2A-*`.
+- [x] Phase 2 A2 (2026-10-29): Home's local-network caption comes from `BackendLocalNetwork` (`blocksHost` on the live backend host) on every emission, only while something is waiting, never over the observed owner-mismatch hold (P2-R9, new `OwnerMismatchHold.held` over the same key); Open settings is its action; ON_RESUME after the block clears runs one Sync now; LOCAL_NETWORK_NOT_ALLOWED now ends the worker run (P2-R8); `HomeLocalNetworkTest`, rows `P2A2-*`.
+- File: after a cold start a held phone shows a generic waiting caption, not the owner-mismatch caption, until the next drain (pre-existing facility-scope gap, own PR).
+- [x] Phase 2 B-1 (2026-10-29): IPv6 unique local fc00::/7 is local network (Q13), one byte check `(first byte and 0xFE) == 0xFC` shared by `isLocalNetworkHost`, `isLocalNetworkAddress` and the Dns wrapper; `LocalNetworkUlaTest`, rows `P2B-ula-*`. Device check of a ULA stays Phase 3.
+- File LOW: isLocalNetworkHost takes a String; a malformed host containing a colon could reach InetAddress.getByName's name-lookup fallback. Unreachable today (all callers pass HttpUrl.host). Fix by making blocksHost take an HttpUrl so only OkHttp-validated hosts reach the classifier.
+- [x] Phase 2 B-2 (2026-10-29): hub Start asks for ACCESS_LOCAL_NETWORK only when the optional `HubLocalNetworkNeed` says so (Q3, P2-R10): `src/dev` binds Wi-Fi route AND `blocksHost(gateway host)`, staging and prod bind nothing, decided at click time; `acq_reject_permission_denied_wifi` reworded (P2-R10a) and carries Open settings; rows `P2B-*`.
+- [x] Phase 2 B-3 (2026-10-29): the PIN change maps every IOException to `pin_change_failed_*` strings (Q12, P2-R11): `ChangePinResult.Failure` carries a `signInFailureReasonFor` reason, a server refusal keeps its detail, the local-network case has Open settings, no path renders e.message and the session is kept on every failure; `PinChangeFailureCopyTest`, rows `P2B-pin-*`.
+- [x] F1 Phase 3 P3-A to P3-C: install, 22 instrumented classes plus Q13 and PIN-change render tests on the Pixel; D1 login half, D2, D3, D4, D5 pass; observations in samd-lnp/p3/OBSERVATIONS.txt for the end-of-phase memo commit.
+- [x] F1 Phase 3 device checks complete: D1 to D8, AVD-36, Q13-device, staging all PASS; results and findings in the memo's Phase 3 results section.
+- [x] PR #83 fix 1 (2026-10-30, P2-R12): Home catches an `OwnerMismatchHold.held` read `IOException`, emits the last known value or `true` (fail closed, never `false`), and resubscribes with a 1 s doubling backoff capped at 30 s; `OwnerMismatchHold` unchanged; 10 virtual-time tests, 9 mutation rows RED.
 
 ## On-device SLM, dev flavor only: Gemma 4 E2B on LiteRT-LM 0.18.0 - 2026-10-16
 

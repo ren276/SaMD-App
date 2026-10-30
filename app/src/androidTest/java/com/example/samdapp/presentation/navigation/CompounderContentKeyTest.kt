@@ -196,6 +196,7 @@ class CompounderContentKeyTest {
                 ailmentAudioRecorder = NoopAudioRecorder,
                 checkEmergencyThresholdsUseCase = CheckEmergencyThresholdsUseCase(),
                 auditLogger = audit,
+                hubLocalNetworkNeed = java.util.Optional.empty(),
             ) as T
         }
     }
