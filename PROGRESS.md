@@ -5626,6 +5626,7 @@ FU-4: ruling R1 recorded in the F1 memo (kernel_failure_local_network_body appro
 - [x] Phase 2 B-3 (2026-10-29): the PIN change maps every IOException to `pin_change_failed_*` strings (Q12, P2-R11): `ChangePinResult.Failure` carries a `signInFailureReasonFor` reason, a server refusal keeps its detail, the local-network case has Open settings, no path renders e.message and the session is kept on every failure; `PinChangeFailureCopyTest`, rows `P2B-pin-*`.
 - [x] F1 Phase 3 P3-A to P3-C: install, 22 instrumented classes plus Q13 and PIN-change render tests on the Pixel; D1 login half, D2, D3, D4, D5 pass; observations in samd-lnp/p3/OBSERVATIONS.txt for the end-of-phase memo commit.
 - [x] F1 Phase 3 device checks complete: D1 to D8, AVD-36, Q13-device, staging all PASS; results and findings in the memo's Phase 3 results section.
+- [x] PR #83 fix 1 (2026-10-30, P2-R12): Home catches an `OwnerMismatchHold.held` read `IOException`, emits the last known value or `true` (fail closed, never `false`), and resubscribes with a 1 s doubling backoff capped at 30 s; `OwnerMismatchHold` unchanged; 10 virtual-time tests, 9 mutation rows RED.
 
 ## On-device SLM, dev flavor only: Gemma 4 E2B on LiteRT-LM 0.18.0 - 2026-10-16
 

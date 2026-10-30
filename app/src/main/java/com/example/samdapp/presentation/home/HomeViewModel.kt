@@ -1,5 +1,6 @@
 package com.example.samdapp.presentation.home
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.samdapp.data.sync.OwnerMismatchHold
@@ -15,15 +16,22 @@ import com.example.samdapp.domain.sync.SyncStatus
 import com.example.samdapp.domain.usecase.GetTodaysPatientsUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.io.IOException
 import javax.inject.Inject
 
 /** Crash-recovery resume prompt (item 5, privacy/UX hardening pass): a `DRAFT` case this worker
@@ -62,6 +70,40 @@ data class HomeUiState(
     val ownerMismatchHeld: Boolean = false,
 )
 
+internal const val HOLD_RETRY_START_MS = 1_000L
+internal const val HOLD_RETRY_MAX_MS = 30_000L
+
+/**
+ * The hold as Home reads it (memo P2-R12). [OwnerMismatchHold.held] keeps its contract: a read
+ * error propagates. Home catches it here: it emits the last known value, or `true` when none has
+ * been read yet (fail closed: an unknown hold suppresses the local-network caption and its action,
+ * and never invents owner-mismatch copy), then resubscribes after 1 s, doubling to a 30 s cap, for
+ * as long as Home collects. The wait restarts at 1 s after a read succeeds. [log] never gets the
+ * exception text. Emitting `false` on an error is forbidden: it would hide a real hold.
+ */
+internal fun Flow<Boolean>.holdFailingClosed(log: (String) -> Unit): Flow<Boolean> = flow {
+    var last: Boolean? = null
+    var failures = 0
+    emitAll(
+        onEach { last = it; failures = 0 }.retryWhen { cause, _ ->
+            if (cause !is IOException) return@retryWhen false
+            val wait = minOf(HOLD_RETRY_START_MS shl minOf(failures, 5), HOLD_RETRY_MAX_MS)
+            failures++
+            log("owner-mismatch hold read failed; keeping ${last ?: "held (unknown)"}, retry in $wait ms")
+            emit(last ?: true)
+            delay(wait)
+            true
+        },
+    )
+}
+
+private const val TAG = "HomeViewModel"
+
+// The host JVM's android.jar throws from Log; a failed log line must never fail Home.
+private fun logHoldReadFailure(message: String) {
+    runCatching { Log.w(TAG, message) }
+}
+
 /** Home's caption: [syncCaption] over the drain failure Home should show (see [homeDrainFailure]). */
 fun HomeUiState.caption(isOnline: Boolean): SyncCaption =
     syncCaption(sync.copy(lastDrainFailure = homeDrainFailure(sync.lastDrainFailure, localNetworkBlocked, ownerMismatchHeld)), isOnline)
@@ -93,7 +135,7 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             // Every emission re-asks the gate with the host read live (P2-R5); the hold is observed,
             // never read once (P2-R9), so a release while Home is visible shows on the next one.
-            combine(syncStatus.state, ownerMismatchHold.held) { syncState, held -> syncState to held }
+            combine(syncStatus.state, ownerMismatchHold.held.holdFailingClosed(::logHoldReadFailure)) { syncState, held -> syncState to held }
                 .collect { (syncState, held) ->
                     val blocked = evaluateLocalNetwork()
                     _uiState.update { it.copy(sync = syncState, ownerMismatchHeld = held, localNetworkBlocked = blocked) }
