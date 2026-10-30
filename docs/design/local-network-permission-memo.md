@@ -85,6 +85,8 @@ the denial count for the ACCESS_LOCAL_NETWORK permission", including after a use
 allow" the flags became `USER_SET|USER_FIXED` and the next request returned denied with no dialog
 (VERIFIED, device, `c2-perms.txt`, `c3-second-start.txt`). So the design cannot count on a second
 prompt; Settings is the only recovery path that was observed to work.
+Measured in Phase 3 (2026-10-29/30): one "Don't allow" left `USER_SET` only; `USER_FIXED` appeared after the
+second denial, and the next request after the first denial showed the dialog again; see the Phase 3 results section below.
 
 1.7 System-mediated pickers. `NsdManager` with `DiscoveryRequest.FLAG_SHOW_PICKER` shows a system
 dialog to pick one device, and connections to that service's `getHostAddresses()` do not need the
@@ -218,6 +220,8 @@ times out, and after the grant is restored it succeeds, rc=0 (VERIFIED, `raw-soc
   `strings.xml:490`, set by `CompounderViewModel.kt:569-571`). The permission controller logged
   `permission=android.permission.ACCESS_LOCAL_NETWORK ... result=7` (VERIFIED, `c2-logcat.txt`).
 - A second Start shows the same copy at once with no dialog (VERIFIED, `c3-second-start.txt`).
+  Measured in Phase 3 (2026-10-29/30): after one denial (`USER_SET`) a second hub Start showed the system
+  dialog again; the copy at once with no dialog follows the second denial; see the Phase 3 results section below.
 - Name resolution and connect while denied: NOT MEASURED, and not reachable through the app. Start
   always requests first, so a denied worker never reaches `NsdGatewayDns` or a socket; and
   revoking while the app runs kills it (1.10). The only way in would be a code change or a
@@ -228,6 +232,9 @@ times out, and after the grant is restored it succeeds, rc=0 (VERIFIED, `raw-soc
   (`PiGatewayVitalsSource.kt:164-165`), giving "Cannot reach the device gateway. Check it is
   powered on and on the same Wi-Fi." (`strings.xml:489`) (INFERRED). That copy would be wrong
   only if the permission could be lost without a process kill, which 1.10 says it cannot.
+  Measured in Phase 3 (2026-10-29/30): with kernelhub1 off and the gateway address still cached (within
+  60 s of a resolution) the Start shows the TIMEOUT copy after 2.0 s, not UNREACHABLE; after the cache
+  expired it shows UNREACHABLE after 1.5 s; see the Phase 3 results section below.
 
 Grants restored afterwards: `ACCESS_LOCAL_NETWORK granted=true` with the original flags,
 `BLUETOOTH_CONNECT granted=true, USER_SET` as before (VERIFIED, `perms-restored.txt`). The app is
@@ -349,6 +356,9 @@ stopped prompting (VERIFIED, 1.6). So: never rely on the counter reset; treat
 `shouldShowRequestPermissionRationale == false` after a denial as permanent and lead with the
 Settings button. If the platform does grant another chance, the request simply shows a dialog
 again, which is fine.
+Measured in Phase 3 (2026-10-29/30): the 5.4 premise "after one Don't allow ... USER_FIXED" is wrong for
+ACCESS_LOCAL_NETWORK: it needed two denials. The design still holds, because P2-R2 keys on the rationale
+flag and not on a count; see the Phase 3 results section below.
 
 5.5 Background worker. A worker cannot prompt. The drain checks the gate first and, when blocked,
 records `DrainFailure.LOCAL_NETWORK_NOT_ALLOWED` without opening a socket, and returns retry so the
@@ -374,9 +384,15 @@ state, so INFERRED low risk).
 5.7 Ordering with BLUETOOTH_CONNECT. Same group (VERIFIED, 1.5; PR-B2 P14 on this Pixel).
 - Local first, then BLE: granting at login means the later BLE request is granted with no dialog
   (INFERRED from the docs; P14 saw the converse).
+  Measured in Phase 3 (2026-10-29/30): VERIFIED on the Pixel; with ACCESS_LOCAL_NETWORK granted at login, the
+  BLE request for BLUETOOTH_CONNECT was granted with no dialog (USER_SET); see the Phase 3 results section below.
 - BLE first, then local: same, the login request is granted with no dialog (INFERRED).
+  Measured in Phase 3 (2026-10-29/30): VERIFIED on the Pixel; with BLUETOOTH_CONNECT granted first, the login
+  ACCESS_LOCAL_NETWORK request was granted with no rationale and no dialog (D6); see the Phase 3 results section below.
 - A "Don't allow" on one: whether it marks the other `USER_FIXED` is not measured (Q8, device row
   D7 in section 7).
+  Measured in Phase 3 (2026-10-29/30): answered, no. A denial of ACCESS_LOCAL_NETWORK left BLUETOOTH_CONNECT
+  unchanged and a later BLE Start prompted for it; see the Phase 3 results section below.
 Consequence: the rationale screen may precede a request that the system then grants silently.
 Show the rationale only when `checkSelfPermission` is denied and no group member is granted, or
 accept one rationale screen that is followed by no dialog (Q5).
@@ -435,6 +451,8 @@ Device, Pixel 11 Pro (API 37), dev build, mock data:
   shows no dialog.
 - D2 Fresh install, Don't allow at login: denied copy plus Settings button; no backend call in
   logcat; `USER_FIXED` state recorded.
+  Measured in Phase 3 (2026-10-29/30): after one Don't allow the flags are `USER_SET`, not `USER_FIXED`;
+  `USER_FIXED` appears after the second denial; see the Phase 3 results section below.
 - D3 Permanent deny: second Sign in shows no dialog, Settings button opens app details; grant
   there, return, sign in works.
 - D4 Group revoke in Settings while signed in: process killed (expect `am_kill ... permissions
@@ -445,9 +463,13 @@ Device, Pixel 11 Pro (API 37), dev build, mock data:
 - D6 BLE first then local: grant Nearby devices on a BP Start, sign out, sign in: no dialog.
 - D7 Local first then BLE, and the deny cross-effect: deny at login, then BP Start: record whether
   BLUETOOTH_CONNECT prompts or is `USER_FIXED` too.
+  Measured in Phase 3 (2026-10-29/30): run as a deny at the hub Start's system dialog (P3-R7). BLUETOOTH_CONNECT
+  prompted, and was not marked by the local-network denial; see the Phase 3 results section below.
 - D8 Hub path: SpO2 Start with kernelhub1 powered and the permission denied, then granted; and the
   hub-off control (granted, kernelhub1 off) to record the UnknownHost or timeout signature that
   could not be measured today (3.3).
+  Measured in Phase 3 (2026-10-29/30): cached 2.0 s to acq_reject_timeout_wifi, uncached 1.5 s to
+  acq_reject_unreachable_wifi; see the Phase 3 results section below.
 
 Pre-37: one AVD at API 36 (BAKLAVA), image and AVD under `/media/sandesh/extra-ssd/`, dev build:
 no rationale, no dialog at login or Start, sign-in works over the LAN (proves `PermissionAction.kt:63`
@@ -682,9 +704,89 @@ P3-R5 Migration instrumented tests are excluded from Phase 3 runs because they l
 Standing: F1-M1, R1, Q4, Q10a, Q12, and the facility order (local-network check, server accepts the
    PIN, facility gate, saveLogin only on CLAIM, LEGACY_CLAIM or CONTINUE; BLOCK stays BLOCK).
 
+### Phase 3 results, 2026-10-29 to 2026-10-30
+
+Device: Pixel 11 Pro, API 37, dev build, mock data. AVD-36 ran on an API 36.1 emulator (x86_64,
+google_apis_playstore image).
+
+Rulings made during Phase 3, in addition to P3-R1 to P3-R5:
+P3-R6 The PIN-change Open settings render is proven by an instrumented Compose test on the Pixel
+   with fake state, not by a live PIN change. Live PIN change is not reachable (Profile has no entry; PinChangeScreen appears only for
+   must_change_pin), and producing it would need a backend database edit and a real PIN change.
+P3-R7 D7's "deny at login" is run as "deny at the hub Start's system dialog". Same permission, same request API; the cross-effect
+   on BLUETOOTH_CONNECT does not depend on the screen. Reconcile the memo's D7 wording at the end-of-phase docs commit.
+
+Checks:
+- D1 PASS. Login half: rationale, system dialog, Allow, sign-in succeeds. BLE half: with ACCESS_LOCAL_NETWORK
+  granted at login, the BP Start's BLUETOOTH_CONNECT request was granted with no dialog (USER_SET). An in-app
+  Allow granted ACCESS_LOCAL_NETWORK only (BLUETOOTH_CONNECT granted=false until asked).
+- D2 PASS. Rationale shown 0.13 to 0.46 s after the biometric with no login call made; Don't allow gave
+  denied copy plus Open settings; flags USER_SET after one denial (not USER_FIXED).
+- D3 PASS. USER_FIXED after the second denial; the denial reached the screen 0.37 s after the biometric;
+  Open settings opened app details; the Settings Nearby devices toggle granted both members, and sign-in worked.
+- D4 PASS. Revoking in Settings killed the app (am_kill, permissions revoked); the relaunch restored per H-26;
+  Home showed the local-network caption from the gate with no drain.
+- D5 PASS. The blocked periodic run ended in FAILURE with no socket opened and the job returned to its 15 min
+  period (the P2-R8 evidence); after the grant exactly one push ran, with no snackbar.
+- D6 PASS. BLUETOOTH_CONNECT granted first; the login ACCESS_LOCAL_NETWORK request was then granted silently
+  (no rationale, no dialog).
+- D7 PASS, as P3-R7. BLUETOOTH_CONNECT prompted and was not fixed by the local-network denial; the BLE
+  permission controller log shows a request for BLUETOOTH_CONNECT only (group NEARBY_DEVICES), the BLE route
+  never asked for ACCESS_LOCAL_NETWORK; BLUETOOTH_CONNECT became USER_SET|USER_FIXED after one denial.
+- D8 PASS. Deny copy per P2-R10a with Open settings. Hub off within the 60 s cache: 2.0 s to
+  acq_reject_timeout_wifi; uncached: 1.5 s to acq_reject_unreachable_wifi.
+- AVD-36 PASS. On API 36 the permission is unknown to the platform (no grant row for the app; absent from
+  the permission list). No rationale and no dialog at login or at the SpO2 Start (0 permission requests);
+  sign-in over the LAN works and Home shows no local-network caption; the SpO2 Start shows
+  acq_reject_unreachable_or_blocked_wifi (mDNS does not cross the emulator NAT, so this is a negative result
+  and not a hub test). With `am compat enable RESTRICT_LOCAL_NETWORK` login gives login_failed_no_connection
+  after 10.0 s (the connect timeout; the SDK 36 gate does not block); the override was reset afterwards.
+- Q13-device PASS (P3-R1). LocalNetworkClassifierDeviceTest, 6 of 6 on the Pixel.
+- Staging on the Pixel PASS. No rationale, no dialog, no request; login_failed_no_connection complete 0.37 s
+  after the biometric (public placeholder host, fast name-lookup failure).
+- Render checks PASS. The CopyText plain, formatted and plural paths on the device; Open settings on login,
+  Home, the hub rejection and PIN change (PIN change via P3-R6).
+- Instrumented runs PASS. 22 classes plus Q13 and the PIN-change render test; migration tests excluded per P3-R5.
+
+Findings (VERIFIED = observed on the device; INFERRED = cause or generality not observed):
+- F-1 LOW, VERIFIED. 1.6, 5.4 and the D2 row said one denial marks USER_FIXED; ACCESS_LOCAL_NETWORK needs two.
+  The app is correct (P2-R2 keys on the rationale flag).
+- F-2 LOW, VERIFIED. An in-app Allow grants only the requested permission; the Settings Nearby devices
+  toggle grants every declared member. 5.7 treated the group as one grant. Once one member is granted, a later
+  request for another is granted silently.
+- F-3 LOW, VERIFIED. 3.3 said a second hub Start after one denial shows the copy with no dialog; it shows the
+  dialog again until the second denial (same cause as F-1).
+- F-4 LOW, VERIFIED. 3.3 predicted the UNREACHABLE copy for a powered-off hub; within the 60 s gateway cache
+  the TIMEOUT copy shows after 2.0 s, and UNREACHABLE only after the cache expires (1.5 s).
+- F-5 MEDIUM, VERIFIED, pre-existing, not F1. A powered-off hub inside the cache window shows the TIMEOUT
+  copy ("did not answer in time. Try again."); a connect timeout and a read timeout both arrive as
+  SocketTimeoutException. A fix would tell them apart with an OkHttp EventListener (connectFailed against
+  responseFailed), never by message.
+- F-6 MEDIUM, INFERRED. Denials appear to count per permission group: BLUETOOTH_CONNECT became USER_FIXED after
+  one denial that was the second NEARBY_DEVICES denial (local network denied first), while local network alone
+  needed two. Before BLE leaves dev, the BLE permission-denied rejection needs an Open settings path like P2-R10's.
+- F-7 LOW, VERIFIED. An unfinished draft survives sign-out and is offered to the next signed-in user on the
+  device (same facility). Product question, related to the filed resume-dialog item.
+- F-8 MEDIUM, INFERRED cause. With airplane mode on, the Home status bar still read Online 12+ seconds later;
+  after the permission revoke killed and restarted the app it read Offline. Hypothesis: the network monitor's
+  onLost re-reads activeNetwork, which can still return the lost network inside the callback. App finding to
+  triage; not a memo difference.
+- F-9 LOW, VERIFIED. PinChangeScreen's KDoc says it is reachable voluntarily from Profile; Profile has no
+  Change PIN entry, so voluntary PIN change does not exist (filed below).
+
 Filed, not in F1: single refresh coordinator PR (one @Singleton authenticator with a Mutex shared
    by backend and ABHA clients; DataStore read error distinct from missing token); ABHA fallback
    copy to strings.xml.
+   Filed from Phase 3 (additions):
+   - Voluntary PIN change is missing: the PinChangeScreen KDoc claim ("reachable voluntarily from Profile
+     later") is false; Profile has only Open-source licences and Sign out.
+   - Hub timeout copy for a powered-off hub within the 60 s gateway cache window (F-5).
+   - The BLE permission-denied rejection needs an Open settings path before BLE leaves dev (F-6).
+   - A draft that survives sign-out is offered to the next user (F-7).
+   - LOW: blocksHost(HttpUrl) from B-1.
+   - LOW: DevServerReceiver isLocalDevHost rejects IPv6.
+   - Phase 3 vitals_device_reading_failed rows were synced with the stale sessionId (task 6): count pending.
+   - Home status bar stays Online after airplane mode is enabled (F-8, INFERRED); truthfulness item, own PR.
 
 ## 11. Step 2 design addendum
 

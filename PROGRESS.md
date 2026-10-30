@@ -5625,6 +5625,7 @@ FU-4: ruling R1 recorded in the F1 memo (kernel_failure_local_network_body appro
 - [x] Phase 2 B-2 (2026-10-29): hub Start asks for ACCESS_LOCAL_NETWORK only when the optional `HubLocalNetworkNeed` says so (Q3, P2-R10): `src/dev` binds Wi-Fi route AND `blocksHost(gateway host)`, staging and prod bind nothing, decided at click time; `acq_reject_permission_denied_wifi` reworded (P2-R10a) and carries Open settings; rows `P2B-*`.
 - [x] Phase 2 B-3 (2026-10-29): the PIN change maps every IOException to `pin_change_failed_*` strings (Q12, P2-R11): `ChangePinResult.Failure` carries a `signInFailureReasonFor` reason, a server refusal keeps its detail, the local-network case has Open settings, no path renders e.message and the session is kept on every failure; `PinChangeFailureCopyTest`, rows `P2B-pin-*`.
 - [x] F1 Phase 3 P3-A to P3-C: install, 22 instrumented classes plus Q13 and PIN-change render tests on the Pixel; D1 login half, D2, D3, D4, D5 pass; observations in samd-lnp/p3/OBSERVATIONS.txt for the end-of-phase memo commit.
+- [x] F1 Phase 3 device checks complete: D1 to D8, AVD-36, Q13-device, staging all PASS; results and findings in the memo's Phase 3 results section.
 
 ## On-device SLM, dev flavor only: Gemma 4 E2B on LiteRT-LM 0.18.0 - 2026-10-16
 
