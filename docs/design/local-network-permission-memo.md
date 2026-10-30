@@ -682,6 +682,13 @@ P2-R11a Approved copy:
      phone's connection, then try again."
    pin_change_failed_secure_connection = "Cannot change PIN: this phone could not make a safe
      connection to the server. Tell your supervisor."
+P2-R12 Home never lets an OwnerMismatchHold read error crash it or misreport the hold.
+   OwnerMismatchHold.held keeps its contract (a read error propagates, as isHeld() does for the
+   drain). HomeViewModel catches IOException where it collects held: it emits the last known value,
+   or true when no value has been read yet (fail closed: an unknown hold suppresses the
+   local-network caption and Open settings, and never shows owner-mismatch copy), then resubscribes
+   with a backoff starting at 1 s, doubling, capped at 30 s, for as long as Home is collecting.
+   Read errors are logged without exception text. Emitting false on an error is forbidden.
 P3-R1 Q13 device half is met by LocalNetworkClassifierDeviceTest run on the Pixel (API 37): the B-1
    vectors through isLocalNetworkHost, isLocalNetworkAddress and blocksHost on the phone's own
    runtime, including bracketed and IPv4-mapped forms that libcore parses differently from the JVM.
@@ -881,6 +888,9 @@ so an edit to any client file reruns the guard.
   wildcard address are not local (section 1.3). IPv4-mapped IPv6 arrives as IPv4 from
   `InetAddress`, so it is covered. ULA fc00::/7 is not listed by the definition page and is not
   classified local (INFERRED gap, YOUR CALL list).
+  Superseded by Q13 and B-1: ULA fc00::/7 is classified local (the byte check `(b[0] and 0xFE) == 0xFC`,
+  shared by `isLocalNetworkAddress`, `isLocalNetworkHost` and the DNS wrapper), with a test and
+  mutation rows; the gap is closed and ULA destinations are gated.
 - `isLocalNetworkHost(String)`: `*.local` true; an IPv4 or IPv6 literal goes to
   `isLocalNetworkAddress` (parsed without DNS: IPv4 by a strict dotted-quad check, IPv6 only when the
   host contains `:`); every other name false (hook 2 handles names).
@@ -901,6 +911,7 @@ Every place an `IOException` from these clients is classified, and what the type
 | Login | `RetrofitAuthService.kt:45-50` puts `e.message` in `AuthApiResult.Failure`; `BackendAuthSession.kt:50`; `LoginViewModel.kt:98-99` | `SignInResult.Failure` with a reason; `LoginViewModel` picks a string id | `lnp_denied_login` (5.3); any other `IOException`: `login_failed_no_connection`; `SSLException`: `login_failed_secure_connection` (both new, YOUR CALL) |
 | Token refresh | `TokenAuthenticator.kt:66-81`, see 11.5 | rethrown from `authenticate`, so the original call fails with it and its own consumer classifies it; session kept | that consumer's copy |
 | Sync drain | `RetrofitSyncPushService.kt:24-28` (code null), `SyncOutboxDrainer.kt:210-215`, `drainFailureFor` `DrainOutcomeStore.kt:34-36` gives `NO_CONNECTION` | `SyncPushResult.Failure` carries the cause; `drainFailureFor` gives `LOCAL_NETWORK_NOT_ALLOWED`; the worker still returns retry (`SyncPushWorker.kt:32`), queue kept | `sync_caption_could_not_send_local_network`, `sync_now_failed_local_network` (5.5) |
+| Sync drain, superseded | | Superseded by P2-R8: `SyncPushWorker` returns `Result.failure()` for a local-network failure, not retry; the queue is kept and the periodic job waits for its next period | |
 | Kernel assess | `RetrofitKernelSource.kt:89-93` `Unreachable(e)`; `classifyKernelFailure` `KernelApiResult.kt:91-98` (`TIMEOUT` or `OFFLINE`) | new `KernelFailure.LOCAL_NETWORK_NOT_ALLOWED` (RETRY_NOW: Try again works once allowed). Added to `FALLBACK_ELIGIBLE` (`GenerateKernelReportUseCase.kt:77`) because today the same denial lands in `OFFLINE`/`TIMEOUT`, both eligible; behaviour kept. Persisted by name in Room only, never synced (`KernelReportEntity.kt:42-43`) | `kernel_failure_local_network_title`, `_body` (new, YOUR CALL) |
 | Evaluate | `GenerateEvaluateReportUseCase.kt:80-86` saves the exception class name | unchanged; the marker text is cause-agnostic, "EVALUATION FAILED, no AI treatment recommendation was generated" (`ReportCanvasRenderer.kt:61-62`) | documented true fallback |
 | SLM read-back | `RemoteSlmEngine.kt:191-198`, `transportErrorFor` `:287-311` gives `UNREACHABLE` | new `SlmEngineError.LOCAL_NETWORK_NOT_ALLOWED`, mapped first, to new `SlmRefusal.LOCAL_NETWORK_NOT_ALLOWED` (`engineRefusalFor`, `SlmReadbackUseCase.kt:514-524`) | `readback_refusal_local_network_title`, `_body` (new, YOUR CALL). Q6 leaves the existing UNREACHABLE copy alone |
@@ -908,6 +919,7 @@ Every place an `IOException` from these clients is classified, and what the type
 | Wi-Fi hub (dev) | `PiGatewayVitalsSource.kt:161-167` gives `UNREACHABLE` | `RejectReason.PERMISSION_DENIED`, matched before `IOException` | `acq_reject_permission_denied_wifi` (existing; B2 rewords it) |
 | Sign-out | `BackendAuthSession.kt:71` `runCatching` | ignored, local clear proceeds | unchanged, true |
 | PIN change | `RetrofitAuthService` then `PinChangeViewModel.kt:84` shows `result.message` | unchanged (Q4 names login only) | raw text remains here; YOUR CALL |
+| PIN change, superseded | | Superseded by Q12 and P2-R11: `PinChangeViewModel` maps every IOException to string resources (`pin_change_failed_*`), never `result.message`; Open settings only on the local-network case | |
 | Gemini | `GeminiBrandLookupSource.kt:63`, never throws | unchanged; public host | none shown |
 
 ### 11.5 Refresh path, evidence before change (Q10, E3)
@@ -943,6 +955,9 @@ that exception, so a blocked refresh surfaces as the local-network copy of whoev
 a 401, or a problem code `invalid_grant`, clears the session as today; every other answer (403,
 5xx, empty or unreadable body) keeps the session and returns null, so the original 401 reaches its
 caller. Not changed: the mutex, the missing-token branch, the scoping.
+Superseded by Q10a: a refresh ends the session on 401, `invalid_grant`, or a 403 whose app error code is
+1006 (account disabled) or 1007 (device mismatch); every other 403, 5xx, empty body,
+LocalNetworkNotAllowedException or other IOException keeps the session.
 
 ### 11.6 Non-OkHttp egress (E4)
 
