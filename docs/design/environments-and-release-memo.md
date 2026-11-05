@@ -1584,6 +1584,11 @@ Facts for the identity memo, each VERIFIED:
 - No server endpoint to find a patient by identifier: the routes are create, roster, by id and patch (`api/v1/patients.py:60,98,155,175`).
 - Duplicate ABHA: `ix_patients_abha_number` is unique (`models/patient.py:73`), the sqlstate maps to CONFLICT (`services/sync.py:151-155,168`), and a CONFLICT row
   has no "Send again" and leaves only by a local clinical edit (`SyncState.kt:14-22`).
+  - **Superseded by (correction, same day):** the evidence in the line above describes `SyncState.CONFLICT`, which is the base-version conflict (the server
+    acked `conflict`), a different path. A duplicate ABHA is acked `rejected` with `retry_class` CONFLICT and the device maps that to FAILED
+    (`SyncAckMapping.kt:55-57`). Its reason is `DUPLICATE_RECORD` (`SyncFailureReason.kt:27-31,126-131`), whose only action is `TELL_SUPERVISOR`, with no
+    button (`SyncFailureReason.kt:70,80-82`), because "there is no screen on this device that can do it" (`:29-30`). The operator's statement that it dead-ends
+    on the device holds. The cited range `SyncState.kt:14-22` was also two lines wide: that doc comment is lines 16-21.
 - Aadhaar has only a non-unique blind index (`models/patient.py:75`).
 - OPERATOR, not checked: the tasklist item "Patient dedupe and merge". No tasklist file is tracked in this worktree.
 
