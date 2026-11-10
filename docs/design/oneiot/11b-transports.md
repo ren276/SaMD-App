@@ -42,6 +42,8 @@ Standard services stay; one vendor service stays. New rows in bold.
 | | **`f4610004-...` Manifest** | **read** | Current page | **New** |
 | | **`f4610005-...` Status** | **indicate** | Lifecycle state | **New** |
 
+Superseded by (2026-11-10, CodeRabbit on PR #85): `f4610005` Status must be `read` and `indicate`, because section 8.3 maps GET `Status` to a read. ren276/OneIoT `spec/oneiot-protocol-v1.md` section 7.1 lists both.
+
 UUIDs verified against the SIG lists (`09` Appendix B). `f4610004` and `f4610005` are DRAFT.
 
 ### 1.3 Measurement formats (EXTERNAL via the memo, not re-derived)

@@ -116,3 +116,5 @@ Each is for the operator unless noted. "Blocks" says what cannot start or finish
 | OQ-60 | MTU below 513: fail closed with `MTU_TOO_SMALL`, rather than long reads? | Fail closed |
 | OQ-61 | Emulator scenario selection from OneIoT (dev argument), or always default | Default only, scenario stays a SaMD dev control |
 | OQ-62 | Registration host location: laptop service (recommended), kernelhub1, or none | Final ruling at STOP 4 (R4-R) |
+
+Superseded by (2026-11-10, CodeRabbit on PR #85): OQ-62 is no longer pending. Ruled in the Phase C brief (2026-11-08): a minimal Registration host of our own, FastAPI with SQLite in Docker on the demo machine, port 8095 (ren276/OneIoT `spec/oneiot-protocol-v1.md` section 9; resolved OQ-62 in `spec/open-questions.md`).

@@ -170,18 +170,20 @@ Anyone rebuilding from the grammar should know these. All VERIFIED by reading `g
 
 | Line | Defect |
 |---|---|
-| 1, 2 | `V` is written with `|` inside and spells `S | START`; symbols with spaces in this file, underscores in the paper |
+| 1, 2 | `V` is written with `\|` inside and spells `S \| START`; symbols with spaces in this file, underscores in the paper |
 | 3, 6 | `UNIT VAL` listed twice in V; `ACTUATOR` listed twice (line 1 and 7) |
 | 7, 67, 69 vs 75 | `ACTUATOR` is both a top-level section and a boolean player attribute, with conflicting productions |
-| 16 | `D -> ... | |D,D` contains an empty alternative |
+| 16 | `D -> ... \| \|D,D` contains an empty alternative |
 | 16, 22, 30, 32, 46, 55, 59, 76 | `D,D`, `M,M`, `X,X` and similar make the grammar ambiguous; no ordering or uniqueness |
 | 13 | `SENSOR` and `ACTUATOR` must follow all optional sections, so JSON key order would matter under a strict parser |
 | 20 | `SOCKET -> :str:num` cannot be a JSON value |
 | 27 | Terminal `array` has no element type |
-| 34 | `SENSOR TYPE -> ... | {}` has no colon, unlike every sibling |
+| 34 | `SENSOR TYPE -> ... \| {}` has no colon, unlike every sibling |
 | 45 | `RANGE -> :[R,R]` nests arrays, which runtime rejects by length |
 | 67 | `AUTOPLAY` is used but missing from `V` |
-| 68 | `PLAYER TYPE` separated by commas, not `|`, so it reads as a sequence |
+| 68 | `PLAYER TYPE` separated by commas, not `\|`, so it reads as a sequence |
+
+Edited 2026-11-10 (CodeRabbit on PR #85): the literal pipes in this table and in two Appendix B tables below are escaped as `\|` so GitHub keeps every cell. Rendering only; no claim changed.
 
 These also apply to the paper's copy (paper p.13 to 15).
 
@@ -405,7 +407,7 @@ Method: both texts normalised (multi-word names joined by `_`, whitespace remove
 
 | Difference | `grammar.txt` | Paper | Weight |
 |---|---|---|---|
-| V opening | `{S | START,` (line 1) | `{S, START,` | Typo in repo copy |
+| V opening | `{S \| START,` (line 1) | `{S, START,` | Typo in repo copy |
 | Name style | `SW VERSION`, `UNIT VAL` and so on | `SW_VERSION`, `UNIT_VAL` | Paper's underscores match runtime `DisplayThingActivity`; spaces match `Adhoc` and `BluetoothDisplayThingActivity` |
 | Quote mark in T | `’,’` | `′,′` | Typesetting |
 
@@ -418,7 +420,7 @@ Line numbers are in `grammar.txt`. All VERIFIED by reading.
 | Flag | Lines | Issue |
 |---|---|---|
 | Multi-LHS rules | 17, 39, 40, 49, 62, 69 | `NAME, DOMAIN, ... -> :str`, `PIE, BAR`, `CORD1, CORD2`, `MIN,MAX`, `LENGTH, WIDTH`, `LOOP, MUTE, ...`. Shorthand, not valid CFG form. A parser generator needs them expanded |
-| Empty alternative in D | 16 | `HW VERSION | |D,D`: an empty alternative, so `"DEVICE":{}` and `,,` become derivable |
+| Empty alternative in D | 16 | `HW VERSION \| \|D,D`: an empty alternative, so `"DEVICE":{}` and `,,` become derivable |
 | Duplicates in V | 3, 6 and 1, 7 | `UNIT VAL`; `ACTUATOR` |
 | Duplicate production | 28, 51 | `UNIT VAL -> str` twice |
 | `ACTUATOR` reused | 67, 69 vs 75 | Section symbol reused as a player boolean, with conflicting expansions (`bool` vs `:{Y}`), so a media attribute could expand to a whole actuator section |

@@ -119,6 +119,8 @@ BLE code supports it (`E/profile.py:28`, `ble_hub.py:79`). Wi-Fi code supports i
 | Sync | None | `observations` | `A/data/sync/SyncRecordMappers.kt:95-104` | `device_id` null on save (`08` section 6) | Consider setting it. New capture method needs backend enum |
 | Tests | Template only | Mapper, routing, BLE tests | `app/src/testDev/...` | None to reuse | New |
 
+Superseded by (2026-11-10, CodeRabbit on PR #85): the rows proposing `device_serial`, `manifest_id`, `ACTION`, `EVENT` and `STATUS` are not requirements to implement. R4-K withdrew those keys (memo `12` section 11), and ren276/OneIoT `spec/oneiot-protocol-v1.md` adds no manifest keyword (section 2): `Status` and `Measure` are ordinary members (section 3.3), and manifest identity is the SHA-256 of the received bytes (section 3.1). The Thing Key row is corrected too: CDM and NSD provide association and discovery, not authentication. Dropping the Thing Key would leave the hub links unauthenticated and would not establish device trust; the specification keeps the Thing Key for REGISTER (section 5.2) and accepts unauthenticated dev links for synthetic data only (section 10).
+
 ## 3. Thing adapter on the hub (S4, design level, no code)
 
 **Goal:** a hub serves one manifest per instrument and answers reading requests from the existing emulator, so simulation is not forked.

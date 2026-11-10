@@ -147,3 +147,5 @@ Measured for `07`: the build result is in `07` section 10 (success, R2-1).
 `15-handoff-digest.md` status: written in Phase 4 (2026-11-08). Superseded the "pending" row above.
 
 Study closed at STOP 4 (2026-11-08). Paths under /media/sandesh/extra-ssd/oneiot-study/ are untracked scratch evidence. The schemas and reference manifests move to the ren276/OneIoT repo under spec/ (Phase C), which becomes the source for implementation.
+
+Superseded by (2026-11-10, CodeRabbit on PR #85): the R4-R decision point is not pending. The Registration host was ruled in the Phase C brief (2026-11-08) and is specified in ren276/OneIoT `spec/oneiot-protocol-v1.md` section 9 (OQ-62, see `14` and the note there).

@@ -52,6 +52,8 @@ Disclaimer on record: the POC must not be connected to clinical forms or vitals 
 | H-OI-21 | Emergency check skipped on entry (b) | Quick check-up saves SpO2 of 85 with no override | Same check on any save path | `10` section 7; only if entry (b) is built |
 | H-OI-22 | Old OneIoT build used | Old APK with RSA, cloud, fake value | Delete old screens at Stage 2d; do not distribute `app/py311` | Repo excludes it (R3-0) |
 
+Superseded by (2026-11-10, CodeRabbit on PR #85): R4-K withdrew `LABEL` and `EVENT`, so the H-OI-02 and H-OI-08 controls that need them cannot be met. Replacement controls, all in ren276/OneIoT `spec/oneiot-protocol-v1.md`: H-OI-02, the label is the exact member name or a translation keyed by it (section 3.4, REQ-43) on a fixed template, and SaMD-App maps values by exact member name per allowlisted SHA-256 (plan 1b-4); H-OI-08, the vitals profile admits only `NUMERIC` sensors plus `Status` and `Measure` (section 3.2), so an unknown member type fails validation and no screen is shown (REQ-41). Residual risk: a wrong member name in an allowlisted manifest; controlled by the golden SHA-256 tests in both repositories (REQ-03) and review of every allowlist change.
+
 Existing rows these touch: H-01, H-13; PROPOSED H-37 to H-45, especially H-37, H-41, H-42, H-43, H-44.
 
 ## 4. Link security, production residuals (R3-1f)

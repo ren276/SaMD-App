@@ -860,3 +860,5 @@ HTTP mapping (kernelhub1): one `POST /oneiot/v2` taking and returning the JSON a
 | `synthetic` | Always `true` for the emulator | NormalizedMeasurement (`:76`) |
 
 Units are not repeated: `UNIT_VAL` in the MMF is the single source. `received_at` is set by the receiving app, never by the hub (block 5.1 rule). The bridge result OneIoT hands to SaMD adds per value the unit from the MMF, the manifest sha256, and OneIoT's package and version (R4-1).
+
+Superseded by (2026-11-10, CodeRabbit on PR #85): `measurement_id` is a hub UUID on HTTP only. The BLE envelope carries no UUID, so on BLE the user agent derives it as `"ble:" + nonce as 32 hex digits + ":" + sequence` (ren276/OneIoT `spec/oneiot-protocol-v1.md` sections 5.6 and 7.6, following section 4.3 here). Open: the bridge result described above does not match the section 5.2 reading schema (`values` is an object here, an array there; 5.2 requires `manifest_id` and `manifest_version`, which R4-K removed). The specification leaves the bridge out of scope for 1.0; the shape is to be settled before build phase 1b-3 (tracked as OQ-71 in ren276/OneIoT `spec/open-questions.md`).
